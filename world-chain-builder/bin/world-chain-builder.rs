@@ -2,6 +2,7 @@ use clap::Parser;
 use reth_node_optimism::{args::RollupArgs, OptimismNode};
 use reth_optimism_cli::Cli;
 use world_chain_builder::args::ExtArgs;
+use world_chain_builder::node::WorldChainBuilder;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -17,7 +18,7 @@ fn main() {
 
     if let Err(err) = Cli::<ExtArgs>::parse().run(|builder, builder_args| async move {
         let handle = builder
-            .node(OptimismNode::new(builder_args.rollup_args.clone()))
+            .node(WorldChainBuilder::new(builder_args.rollup_args.clone()))
             .launch()
             .await?;
 
