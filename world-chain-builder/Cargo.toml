@@ -15,6 +15,7 @@ reth-evm = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-network = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 
 # reth-optimism
@@ -25,9 +26,13 @@ reth-optimism-cli = { git = "https://github.com/paradigmxyz/reth", version = "1.
     "optimism",
 ] }
 
+# alloy
+op-alloy-consensus = "0.2"
+
 # other
 clap = { version = "4", features = ["derive", "env"] }
 eyre = "0.6"
+serde = { version = "1", features = ["derive"] }
 
 
 [[bin]]

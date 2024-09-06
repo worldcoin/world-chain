@@ -8950,16 +8950,19 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eyre",
+ "op-alloy-consensus",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-cli-util",
  "reth-evm",
+ "reth-network",
  "reth-node-builder",
  "reth-node-optimism",
  "reth-optimism-cli",
  "reth-payload-builder",
  "reth-provider",
  "reth-transaction-pool",
+ "serde",
 ]
 
 [[package]]
