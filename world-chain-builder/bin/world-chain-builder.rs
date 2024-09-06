@@ -1,6 +1,7 @@
 use clap::Parser;
 use reth_node_optimism::{args::RollupArgs, OptimismNode};
 use reth_optimism_cli::Cli;
+use world_chain_builder::args::ExtArgs;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -14,9 +15,9 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
+    if let Err(err) = Cli::<ExtArgs>::parse().run(|builder, builder_args| async move {
         let handle = builder
-            .node(OptimismNode::new(rollup_args.clone()))
+            .node(OptimismNode::new(builder_args.rollup_args.clone()))
             .launch()
             .await?;
 
