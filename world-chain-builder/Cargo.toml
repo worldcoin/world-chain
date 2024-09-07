@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 # reth
+reth-primitives = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
@@ -19,6 +20,9 @@ reth-network = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" 
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 
 # reth-optimism
+reth-evm-optimism = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
+    "optimism",
+] }
 reth-node-optimism = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
     "optimism",
 ] }
@@ -33,7 +37,15 @@ op-alloy-consensus = "0.2"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = "0.6"
 serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+parking_lot = "0.12"
 
+[dev-dependencies]
+reth-provider = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
+    "test-utils",
+] }
+alloy-primitives = "0.8"
+serde_json = "1"
 
 [[bin]]
 name = "world-chain-builder"

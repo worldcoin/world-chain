@@ -9,7 +9,6 @@ use reth_node_optimism::{
     args::RollupArgs,
     node::{
         OptimismAddOns, OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder,
-        OptimismPoolBuilder,
     },
     OptimismEngineTypes, OptimismEvmConfig,
 };
@@ -17,7 +16,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 
-use crate::builder::PBHBuilder;
+use crate::{builder::PBHBuilder, pool::WorldChainPoolBuilder};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
@@ -35,7 +34,7 @@ impl WorldChainBuilder {
         args: RollupArgs,
     ) -> ComponentsBuilder<
         Node,
-        OptimismPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
@@ -54,7 +53,7 @@ impl WorldChainBuilder {
         } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OptimismPoolBuilder::default())
+            .pool(WorldChainPoolBuilder::default())
             .payload(WorldChainPayloadBuilder::new(OptimismEvmConfig::default()))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
@@ -73,7 +72,7 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        OptimismPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
