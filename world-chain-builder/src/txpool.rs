@@ -1,214 +1,37 @@
-//! OP transaction pool types
-use parking_lot::RwLock;
-use reth_chainspec::ChainSpec;
-use reth_evm_optimism::RethL1BlockInfo;
-use reth_primitives::{Block, GotExpected, InvalidTransactionError, SealedBlock};
+//! World Chain transaction pool types
+use reth_node_optimism::txpool::OpTransactionValidator;
+use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, EthTransactionValidator, Pool,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
-};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+    CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, Pool, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
-/// Type alias for default optimism transaction pool
-pub type OpTransactionPool<Client, S> = Pool<
+/// Type alias for World Chain transaction pool
+pub type WorldChainTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<OpTransactionValidator<Client, EthPooledTransaction>>,
     CoinbaseTipOrdering<EthPooledTransaction>,
     S,
 >;
 
-/// Validator for Optimism transactions.
+/// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct OpTransactionValidator<Client, Tx> {
-    /// The type that performs the actual validation.
-    inner: EthTransactionValidator<Client, Tx>,
-    /// Additional block info required for validation.
-    block_info: Arc<OpL1BlockInfo>,
-    /// If true, ensure that the transaction's sender has enough balance to cover the L1 gas fee
-    /// derived from the tracked L1 block info that is extracted from the first transaction in the
-    /// L2 block.
-    require_l1_data_gas_fee: bool,
+pub struct WorldChainTransactionValidator<Client, Tx> {
+    inner: OpTransactionValidator<Client, Tx>,
 }
 
-impl<Client, Tx> OpTransactionValidator<Client, Tx> {
-    /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.inner.chain_spec()
-    }
-
-    /// Returns the current block timestamp.
-    fn block_timestamp(&self) -> u64 {
-        self.block_info.timestamp.load(Ordering::Relaxed)
-    }
-
-    /// Whether to ensure that the transaction's sender has enough balance to also cover the L1 gas
-    /// fee.
-    pub fn require_l1_data_gas_fee(self, require_l1_data_gas_fee: bool) -> Self {
-        Self {
-            require_l1_data_gas_fee,
-            ..self
-        }
-    }
-
-    /// Returns whether this validator also requires the transaction's sender to have enough balance
-    /// to cover the L1 gas fee.
-    pub const fn requires_l1_data_gas_fee(&self) -> bool {
-        self.require_l1_data_gas_fee
-    }
-}
-
-impl<Client, Tx> OpTransactionValidator<Client, Tx>
+impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction,
 {
-    /// Create a new [`OpTransactionValidator`].
-    pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
-        let this = Self::with_block_info(inner, OpL1BlockInfo::default());
-        if let Ok(Some(block)) = this
-            .inner
-            .client()
-            .block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
-        {
-            // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
-            // so that we will accept txs into the pool before the first block
-            if block.number == 0 {
-                this.block_info
-                    .timestamp
-                    .store(block.timestamp, Ordering::Relaxed);
-            } else {
-                this.update_l1_block_info(&block);
-            }
-        }
-
-        this
-    }
-
-    /// Create a new [`OpTransactionValidator`] with the given [`OpL1BlockInfo`].
-    pub fn with_block_info(
-        inner: EthTransactionValidator<Client, Tx>,
-        block_info: OpL1BlockInfo,
-    ) -> Self {
-        Self {
-            inner,
-            block_info: Arc::new(block_info),
-            require_l1_data_gas_fee: true,
-        }
-    }
-
-    /// Update the L1 block info.
-    fn update_l1_block_info(&self, block: &Block) {
-        self.block_info
-            .timestamp
-            .store(block.timestamp, Ordering::Relaxed);
-        if let Ok(cost_addition) = reth_evm_optimism::extract_l1_info(block) {
-            *self.block_info.l1_block_info.write() = cost_addition;
-        }
-    }
-
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
-    pub fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            );
-        }
-
-        let outcome = self.inner.validate_one(origin, transaction);
-
-        if !self.requires_l1_data_gas_fee() {
-            // no need to check L1 gas fee
-            return outcome;
-        }
-
-        // ensure that the account has enough balance to cover the L1 gas cost
-        if let TransactionValidationOutcome::Valid {
-            balance,
-            state_nonce,
-            transaction: valid_tx,
-            propagate,
-        } = outcome
-        {
-            let l1_block_info = self.block_info.l1_block_info.read().clone();
-
-            let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            valid_tx
-                .transaction()
-                .clone()
-                .into_consensus()
-                .encode_enveloped(&mut encoded);
-
-            let cost_addition = match l1_block_info.l1_tx_data_fee(
-                &self.chain_spec(),
-                self.block_timestamp(),
-                &encoded,
-                false,
-            ) {
-                Ok(cost) => cost,
-                Err(err) => {
-                    return TransactionValidationOutcome::Error(*valid_tx.hash(), Box::new(err))
-                }
-            };
-            let cost = valid_tx.transaction().cost().saturating_add(cost_addition);
-
-            // Checks for max cost
-            if cost > balance {
-                return TransactionValidationOutcome::Invalid(
-                    valid_tx.into_transaction(),
-                    InvalidTransactionError::InsufficientFunds(
-                        GotExpected {
-                            got: balance,
-                            expected: cost,
-                        }
-                        .into(),
-                    )
-                    .into(),
-                );
-            }
-
-            return TransactionValidationOutcome::Valid {
-                balance,
-                state_nonce,
-                transaction: valid_tx,
-                propagate,
-            };
-        }
-
-        outcome
-    }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions
-            .into_iter()
-            .map(|(origin, tx)| self.validate_one(origin, tx))
-            .collect()
+    /// Create a new [`WorldChainTransactionValidator`].
+    pub fn new(inner: OpTransactionValidator<Client, Tx>) -> Self {
+        Self { inner }
     }
 }
 
-impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
+impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction,
@@ -220,29 +43,19 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.inner.validate_transaction(origin, transaction).await
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.inner.validate_transactions(transactions).await
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
-        self.inner.on_new_head_block(new_tip_block);
-        self.update_l1_block_info(&new_tip_block.clone().unseal());
+        self.inner.on_new_head_block(new_tip_block)
     }
-}
-
-/// Tracks additional infos for the current block.
-#[derive(Debug, Default)]
-pub struct OpL1BlockInfo {
-    /// The current L1 block info.
-    l1_block_info: RwLock<L1BlockInfo>,
-    /// Current block timestamp.
-    timestamp: AtomicU64,
 }
 
 #[cfg(test)]
