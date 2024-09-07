@@ -1,17 +1,21 @@
 use op_alloy_consensus::OpTxEnvelope;
+use reth_primitives::{
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
+    U256,
+};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-#[non_exhaustive]
-pub enum WorldChainTxEnvelope {
-    Unverified(OpTxEnvelope),
-    Verified(VerifiedTx),
-}
+// #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+// #[serde(untagged)]
+// #[non_exhaustive]
+// pub enum WorldChainTxEnvelope {
+//     Unverified(OpTxEnvelope),
+//     Verified(VerifiedTx),
+// }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiedTx {
-    pub tx: OpTxEnvelope,
+    pub signed_transaction: TransactionSigned,
     pub proof: Vec<u8>,
 }
 

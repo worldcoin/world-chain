@@ -9056,6 +9056,7 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 

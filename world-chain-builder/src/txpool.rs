@@ -9,7 +9,7 @@ use reth_transaction_pool::{
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<OpTransactionValidator<Client, EthPooledTransaction>>,
+    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, EthPooledTransaction>>,
     CoinbaseTipOrdering<EthPooledTransaction>,
     S,
 >;
@@ -60,26 +60,30 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::txpool::OpTransactionValidator;
     use reth_chainspec::MAINNET;
+    use reth_node_optimism::txpool::OpTransactionValidator;
     use reth_primitives::{
         Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
         U256,
     };
     use reth_provider::test_utils::MockEthProvider;
+    use reth_transaction_pool::TransactionValidator as _;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
     };
 
-    #[test]
-    fn validate_optimism_transaction() {
+    use crate::txpool::WorldChainTransactionValidator;
+
+    #[tokio::test]
+    async fn validate_optimism_transaction() {
         let client = MockEthProvider::default();
         let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
             .no_shanghai()
             .no_cancun()
             .build(client, InMemoryBlobStore::default());
-        let validator = OpTransactionValidator::new(validator);
+        let op = OpTransactionValidator::new(validator);
+        let validator = WorldChainTransactionValidator::new(op);
 
         let origin = TransactionOrigin::External;
         let signer = Default::default();
@@ -99,7 +103,9 @@ mod tests {
             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
         let len = signed_recovered.length_without_header();
         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-        let outcome = validator.validate_one(origin, pooled_tx);
+        let outcome = validator
+            .validate_transaction(origin, pooled_tx.clone())
+            .await;
 
         let err = match outcome {
             TransactionValidationOutcome::Invalid(_, err) => err,

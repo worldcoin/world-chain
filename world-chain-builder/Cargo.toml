@@ -41,6 +41,7 @@ tracing = "0.1"
 parking_lot = "0.12"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
     "test-utils",
 ] }
