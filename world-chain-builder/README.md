@@ -42,3 +42,11 @@ sequenceDiagram
 ```
 
 The proposer and builder uses ECDSA secp256k1 signatures to authenticate the proposer and verify the authenticity of the payload from the builder.
+
+
+TODO: Add alternative sequence diagram
+
+- Sequencer EL streams fcu/payload attributes
+- Builders subscribe, build block and send builder payload directly to the sequencer EL for a given payload id
+- Sequencer EL verifies the payload id, verifies the block and evaluates if it is better than the best block
+- Sequencer CL eventually sends `getPayload` request. Sequencer EL returns `executionPayload` response containing best block at time of request. If no blocks have been sent to the sequencer EL, the default block is returned to CL.
