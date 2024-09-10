@@ -2,7 +2,7 @@ use reth_primitives::transaction::TryFromRecoveredTransactionError;
 use reth_primitives::{
     PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, TxKind, U256,
 };
-use reth_transaction_pool::{EthPooledTransaction, PoolTransaction};
+use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldChainPooledTransaction {
@@ -127,6 +127,28 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
     fn chain_id(&self) -> Option<u64> {
         self.inner.chain_id()
+    }
+}
+
+impl EthPoolTransaction for WorldChainPooledTransaction {
+    fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
+        self.inner.take_blob()
+    }
+
+    fn blob_count(&self) -> usize {
+        self.inner.blob_count()
+    }
+
+    fn validate_blob(
+        &self,
+        blob: &reth_primitives::BlobTransactionSidecar,
+        settings: &reth_primitives::kzg::KzgSettings,
+    ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
+        self.inner.validate_blob(blob, settings)
+    }
+
+    fn authorization_count(&self) -> usize {
+        self.inner.authorization_count()
     }
 }
 
