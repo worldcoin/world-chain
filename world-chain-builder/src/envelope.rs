@@ -1,23 +1,150 @@
-use op_alloy_consensus::OpTxEnvelope;
 use reth_primitives::{
-    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
-    U256,
+    PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, TxDeposit, TxKind, U256,
 };
-use serde::{Deserialize, Serialize};
+use reth_transaction_pool::{EthPooledTransaction, PoolTransaction};
 
-// #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-// #[serde(untagged)]
-// #[non_exhaustive]
-// pub enum WorldChainTxEnvelope {
-//     Unverified(OpTxEnvelope),
-//     Verified(VerifiedTx),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldChainPooledTransaction {
+    pub inner: EthPooledTransaction,
+    pub semaphore_proof: Option<Vec<u8>>,
+}
+
+// pub struct WorldChainTransactionSignedEcRecovered {
+//     pub inner: TransactionSignedEcRecovered,
 // }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VerifiedTx {
-    pub signed_transaction: TransactionSigned,
-    pub proof: Vec<u8>,
+impl From<WorldChainPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: WorldChainPooledTransaction) -> Self {
+        tx.inner.into_consensus()
+    }
 }
+
+impl From<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
+    fn from(tx: TransactionSignedEcRecovered) -> Self {
+        todo!()
+        // Self {
+        //     inner: EthPooledTransaction::from_pooled(tx),
+        //     semaphore_proof: None,
+        // }
+    }
+}
+
+impl From<WorldChainPooledTransaction> for PooledTransactionsElementEcRecovered {
+    fn from(tx: WorldChainPooledTransaction) -> Self {
+        // tx.inner.into_consensus()
+        todo!()
+    }
+}
+
+impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
+    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        todo!()
+        // Self {
+        //     inner: EthPooledTransaction::from_pooled(tx),
+        //     semaphore_proof: None,
+        // }
+    }
+}
+
+impl PoolTransaction for WorldChainPooledTransaction {
+    type TryFromConsensusError = <EthPooledTransaction as PoolTransaction>::TryFromConsensusError;
+
+    type Consensus = TransactionSignedEcRecovered;
+
+    type Pooled = <EthPooledTransaction as PoolTransaction>::Pooled;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        EthPooledTransaction::try_from_consensus(tx).map(|inner| Self {
+            inner,
+            semaphore_proof: None,
+        })
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.inner.into_consensus()
+    }
+
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        Self {
+            inner: EthPooledTransaction::from_pooled(pooled),
+            semaphore_proof: None,
+        }
+    }
+
+    fn hash(&self) -> &reth_primitives::TxHash {
+        self.inner.hash()
+    }
+
+    fn sender(&self) -> reth_primitives::Address {
+        self.inner.sender()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.inner.nonce()
+    }
+
+    fn cost(&self) -> U256 {
+        self.inner.cost()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.inner.gas_limit()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.inner.max_fee_per_gas()
+    }
+
+    fn access_list(&self) -> Option<&reth_primitives::AccessList> {
+        self.inner.access_list()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.inner.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.inner.max_fee_per_blob_gas()
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.inner.effective_tip_per_gas(base_fee)
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.inner.priority_fee_or_price()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.inner.kind()
+    }
+
+    fn input(&self) -> &[u8] {
+        self.inner.input()
+    }
+
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+
+    fn tx_type(&self) -> u8 {
+        self.inner.tx_type()
+    }
+
+    fn encoded_length(&self) -> usize {
+        self.inner.encoded_length()
+    }
+
+    fn chain_id(&self) -> Option<u64> {
+        self.inner.chain_id()
+    }
+}
+
+// #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+// pub struct VerifiedTx {
+//     pub signed_transaction: TransactionSigned,
+//     pub proof: Vec<u8>,
+// }
 
 // #[cfg(test)]
 // mod tests {

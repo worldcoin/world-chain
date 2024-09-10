@@ -23,7 +23,7 @@ pub struct WorldChainTransactionValidator<Client, Tx> {
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction,
+    //    Tx: EthPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(inner: OpTransactionValidator<Client, Tx>) -> Self {

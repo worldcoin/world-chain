@@ -7,7 +7,9 @@ use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
 use tracing::{debug, info};
 
-/// A basic optimism transaction pool.
+use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
+
+/// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
@@ -19,7 +21,7 @@ impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
-    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
@@ -35,10 +37,11 @@ where
                 blob_store.clone(),
             )
             .map(|validator| {
-                OpTransactionValidator::new(validator)
+                let op_tx_validator = OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
+                WorldChainTransactionValidator::new(op_tx_validator)
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
