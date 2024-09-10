@@ -1,5 +1,6 @@
+use reth_primitives::transaction::TryFromRecoveredTransactionError;
 use reth_primitives::{
-    PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, TxDeposit, TxKind, U256,
+    PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, TxKind, U256,
 };
 use reth_transaction_pool::{EthPooledTransaction, PoolTransaction};
 
@@ -9,40 +10,29 @@ pub struct WorldChainPooledTransaction {
     pub semaphore_proof: Option<Vec<u8>>,
 }
 
-// pub struct WorldChainTransactionSignedEcRecovered {
-//     pub inner: TransactionSignedEcRecovered,
-// }
-
 impl From<WorldChainPooledTransaction> for TransactionSignedEcRecovered {
     fn from(tx: WorldChainPooledTransaction) -> Self {
         tx.inner.into_consensus()
     }
 }
 
-impl From<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
-    fn from(tx: TransactionSignedEcRecovered) -> Self {
-        todo!()
-        // Self {
-        //     inner: EthPooledTransaction::from_pooled(tx),
-        //     semaphore_proof: None,
-        // }
-    }
-}
+impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
+    type Error = TryFromRecoveredTransactionError;
 
-impl From<WorldChainPooledTransaction> for PooledTransactionsElementEcRecovered {
-    fn from(tx: WorldChainPooledTransaction) -> Self {
-        // tx.inner.into_consensus()
-        todo!()
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+        Ok(Self {
+            inner: EthPooledTransaction::try_from(tx)?,
+            semaphore_proof: None,
+        })
     }
 }
 
 impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        todo!()
-        // Self {
-        //     inner: EthPooledTransaction::from_pooled(tx),
-        //     semaphore_proof: None,
-        // }
+        Self {
+            inner: EthPooledTransaction::from_pooled(tx),
+            semaphore_proof: None,
+        }
     }
 }
 
