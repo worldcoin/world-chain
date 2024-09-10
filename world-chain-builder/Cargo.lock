@@ -9043,6 +9043,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-cli-util",
+ "reth-db",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network",

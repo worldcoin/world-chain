@@ -13,6 +13,7 @@ reth-cli-util = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6"
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-db = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
