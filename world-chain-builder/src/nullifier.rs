@@ -12,7 +12,7 @@ impl Table for NullifierTable {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct NullifierTable {}
+pub struct NullifierTable;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmptyValue;

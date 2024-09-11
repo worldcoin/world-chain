@@ -1,5 +1,4 @@
 use clap::Parser;
-use reth_node_optimism::{args::RollupArgs, OptimismNode};
 use reth_optimism_cli::Cli;
 use world_chain_builder::args::ExtArgs;
 use world_chain_builder::node::WorldChainBuilder;

@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use reth_chainspec::ChainSpec;
+use reth_db::create_db;
+use reth_db::mdbx::DatabaseArguments;
 use reth_node_builder::components::PoolBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
-use reth_node_optimism::txpool::{OpTransactionPool, OpTransactionValidator};
+use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_provider::CanonStateSubscriptions as _;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
@@ -26,6 +30,12 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
+        // TODO: couldn't figure out how to get write access to the database
+        // so creating one here as a workaround. Maybe this is actually the best approach?
+        let db = Arc::new(create_db(
+            data_dir.data_dir().join("semaphore-nullifiers"),
+            DatabaseArguments::default(),
+        )?);
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
@@ -37,11 +47,11 @@ where
                 blob_store.clone(),
             )
             .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator)
+                let op_tx_validator = OpTransactionValidator::new(validator.clone())
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WorldChainTransactionValidator::new(op_tx_validator)
+                WorldChainTransactionValidator::new(op_tx_validator, db.clone(), validator)
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(

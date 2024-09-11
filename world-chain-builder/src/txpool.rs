@@ -1,13 +1,17 @@
 //! World Chain transaction pool types
+use std::sync::Arc;
+
+use reth_db::{Database, DatabaseEnv};
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
+    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use crate::envelope::WorldChainPooledTransaction;
+use crate::nullifier::NullifierTable;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -22,6 +26,8 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
 #[derive(Debug, Clone)]
 pub struct WorldChainTransactionValidator<Client, Tx> {
     inner: OpTransactionValidator<Client, Tx>,
+    database_env: Arc<DatabaseEnv>,
+    tmp_workaround: EthTransactionValidator<Client, Tx>,
 }
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
@@ -30,8 +36,16 @@ where
     //    Tx: EthPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
-    pub fn new(inner: OpTransactionValidator<Client, Tx>) -> Self {
-        Self { inner }
+    pub fn new(
+        inner: OpTransactionValidator<Client, Tx>,
+        database_env: Arc<DatabaseEnv>,
+        tmp_workaround: EthTransactionValidator<Client, Tx>,
+    ) -> Self {
+        Self {
+            inner,
+            database_env,
+            tmp_workaround,
+        }
     }
 }
 
@@ -48,6 +62,8 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        let tx = self.database_env.tx_mut().unwrap();
+        tx.get_dbi::<NullifierTable>().unwrap();
         self.inner.validate_transaction(origin, transaction).await
     }
 
