@@ -16,22 +16,26 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 
-use crate::{builder::PBHBuilder, pool::WorldChainPoolBuilder};
+use crate::{
+    args::{ExtArgs, PbhBuilderArgs},
+    builder::PBHBuilder,
+    pool::WorldChainPoolBuilder,
+};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
     /// Additional Optimism args
-    pub args: RollupArgs,
+    pub args: ExtArgs,
 }
 
 impl WorldChainBuilder {
-    pub const fn new(args: RollupArgs) -> Self {
+    pub const fn new(args: ExtArgs) -> Self {
         Self { args }
     }
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: RollupArgs,
+        args: ExtArgs,
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
@@ -45,15 +49,15 @@ impl WorldChainBuilder {
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
         >,
     {
+        let PbhBuilderArgs { clear_nullifiers } = args.builder_args;
         let RollupArgs {
             disable_txpool_gossip,
-            compute_pending_block,
             discovery_v4,
             ..
-        } = args;
+        } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WorldChainPoolBuilder::default())
+            .pool(WorldChainPoolBuilder { clear_nullifiers })
             .payload(WorldChainPayloadBuilder::new(OptimismEvmConfig::default()))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,

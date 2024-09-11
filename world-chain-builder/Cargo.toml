@@ -10,6 +10,7 @@ edition = "2021"
 reth-primitives = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-revm = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-cli = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
@@ -35,8 +36,11 @@ reth-optimism-cli = { git = "https://github.com/paradigmxyz/reth", version = "1.
 op-alloy-consensus = "0.2"
 
 # other
+semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "5170c42292a4abc9e332742c8c392a480b075609", features = [
+    "depth_30",
+] }
 clap = { version = "4", features = ["derive", "env"] }
-eyre = "0.6"
+eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 parking_lot = "0.12"

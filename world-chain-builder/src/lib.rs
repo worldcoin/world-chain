@@ -6,3 +6,4 @@ pub mod node;
 pub mod nullifier;
 pub mod pool;
 pub mod txpool;
+pub mod verify;

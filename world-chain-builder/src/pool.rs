@@ -19,7 +19,9 @@ use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct WorldChainPoolBuilder;
+pub struct WorldChainPoolBuilder {
+    pub clear_nullifiers: bool,
+}
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
@@ -30,8 +32,17 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        // TODO: couldn't figure out how to get write access to the database
-        // so creating one here as a workaround. Maybe this is actually the best approach?
+
+        // TODO: couldn't figure out how to get write access to the database from ctx (perhaps not
+        // possible) so creating one here as a workaround. Maybe this is actually the best approach?
+        //
+        let path = data_dir.data_dir().join("semaphore-nullifiers");
+        if self.clear_nullifiers {
+            info!(?path, "Clearing semaphore-nullifiers database");
+            // delete the directory
+            std::fs::remove_dir_all(&path)?;
+        }
+        info!(?path, "Opening semaphore-nullifiers database");
         let db = Arc::new(create_db(
             data_dir.data_dir().join("semaphore-nullifiers"),
             DatabaseArguments::default(),

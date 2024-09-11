@@ -15,7 +15,7 @@ pub struct ExtArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
 pub struct PbhBuilderArgs {
-    /// Just a place holder for now
-    #[arg(long = "builder.beacon_endpoints")]
-    pub beacon_endpoints: Vec<String>,
+    /// Clears existing pbh semaphore nullifiers from the database
+    #[arg(long = "builder.clear_nullifiers")]
+    pub clear_nullifiers: bool,
 }
