@@ -20,6 +20,8 @@ reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", version =
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-network = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
+reth-prune-types = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6" }
 
 # reth-optimism
 reth-evm-optimism = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
@@ -31,11 +33,20 @@ reth-node-optimism = { git = "https://github.com/paradigmxyz/reth", version = "1
 reth-optimism-cli = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
     "optimism",
 ] }
+reth-optimism-rpc = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
+    "optimism",
+] }
+reth-optimism-consensus = { git = "https://github.com/paradigmxyz/reth", version = "1.0.6", features = [
+    "optimism",
+] }
 
 # alloy
 op-alloy-consensus = "0.2"
 
 # other
+revm-primitives = { version = "9.0.0", default-features = false, features = [
+    "std",
+] }
 semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "5170c42292a4abc9e332742c8c392a480b075609", features = [
     "depth_30",
 ] }
