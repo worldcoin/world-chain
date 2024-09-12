@@ -64,6 +64,9 @@ impl<EvmConfig> BlockExecutorProvider for WcExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
+    // TODO: I'm kind of confused by trait bound on Executor.
+    // It essentially doesn't let you change the type of BlockWithSenders.
+    // Maybe I'm misunderstanding something...
     type Executor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
         WcBlockExecutor<EvmConfig, DB>;
 
@@ -103,9 +106,7 @@ where
     EvmConfig: ConfigureEvm,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
-    // TODO: I'm kind of confused by trait bound on Input.
-    // It essentially doesn't let you change the type of BlockWithSenders.
-    // Maybe I'm misunderstanding something...
+    // TODO: Why can't we change this BlockWithSenders to WcBlockWithSenders?
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     // TODO: maybe we want some receipts for PBH here.
     type Output = BlockExecutionOutput<Receipt>;

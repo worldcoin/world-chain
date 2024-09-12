@@ -19,7 +19,7 @@ use reth_transaction_pool::TransactionPool;
 use crate::{
     executer::builder::WcExecutorBuilder,
     payload::builder::PBHBuilder,
-    pool::builder::WorldChainPoolBuilder, // payload::PBHBuilder,
+    pool::builder::WcPoolBuilder, // payload::PBHBuilder,
 };
 
 use super::args::{ExtArgs, PbhBuilderArgs};
@@ -40,8 +40,8 @@ impl WorldChainBuilder {
         args: ExtArgs,
     ) -> ComponentsBuilder<
         Node,
-        WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        WcPoolBuilder,
+        WcPayloadBuilder,
         OptimismNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
@@ -59,8 +59,8 @@ impl WorldChainBuilder {
         } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WorldChainPoolBuilder { clear_nullifiers })
-            .payload(WorldChainPayloadBuilder::new(OptimismEvmConfig::default()))
+            .pool(WcPoolBuilder { clear_nullifiers })
+            .payload(WcPayloadBuilder::new(OptimismEvmConfig::default()))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -78,8 +78,8 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        WcPoolBuilder,
+        WcPayloadBuilder,
         OptimismNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
@@ -103,18 +103,18 @@ impl NodeTypesWithEngine for WorldChainBuilder {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadBuilder<EVM = OptimismEvmConfig> {
+pub struct WcPayloadBuilder<EVM = OptimismEvmConfig> {
     /// The EVM configuration to use for the payload builder.
     pub evm_config: EVM,
 }
 
-impl<EVM> WorldChainPayloadBuilder<EVM> {
+impl<EVM> WcPayloadBuilder<EVM> {
     pub const fn new(evm_config: EVM) -> Self {
         Self { evm_config }
     }
 }
 
-impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadBuilder<EVM>
+impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for WcPayloadBuilder<EVM>
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
