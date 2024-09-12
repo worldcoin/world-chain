@@ -1,3 +1,4 @@
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::ChainSpec;
 use reth_evm::{
     execute::{
@@ -11,10 +12,12 @@ use reth_evm_optimism::{OpBatchExecutor, OpBlockExecutor, OpExecutorProvider};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::components::ExecutorBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{Block, BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm_primitives::db::Database;
 use std::sync::Arc;
+
+use super::block::WcBlockWithSenders;
 
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
@@ -66,6 +69,7 @@ where
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
         WcBatchExecutor<EvmConfig, DB>;
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
@@ -99,7 +103,11 @@ where
     EvmConfig: ConfigureEvm,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
+    // TODO: I'm kind of confused by trait bound on Input.
+    // It essentially doesn't let you change the type of BlockWithSenders.
+    // Maybe I'm misunderstanding something...
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    // TODO: maybe we want some receipts for PBH here.
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -111,7 +119,32 @@ where
     ///
     /// State changes are committed to the database.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        // TODO: This clone is probably bad.
+        // let block: BlockWithSenders = input.block.clone().into();
+        // let input = BlockExecutionInput {
+        //     block: &block,
+        //     total_difficulty: input.total_difficulty,
+        // };
+
         self.inner.execute(input)
+
+        // let BlockExecutionInput {
+        //     block,
+        //     total_difficulty,
+        // } = input;
+        // let (receipts, gas_used) = self
+        //     .inner
+        //     .execute_without_verification(block, total_difficulty)?;
+        //
+        // // NOTE: we need to merge keep the reverts for the bundle retention
+        // self.inner.state.merge_transitions(BundleRetention::Reverts);
+        //
+        // Ok(BlockExecutionOutput {
+        //     state: self.state.take_bundle(),
+        //     receipts,
+        //     requests: vec![],
+        //     gas_used,
+        // })
     }
 }
 
@@ -128,11 +161,18 @@ where
     EvmConfig: ConfigureEvm,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
+    // type Input<'a> = BlockExecutionInput<'a, WcBlockWithSenders>;
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+        // // TODO: This clone is probably bad.
+        // let block: BlockWithSenders = input.block.clone().into();
+        // let input = BlockExecutionInput {
+        //     block: &block,
+        //     total_difficulty: input.total_difficulty,
+        // };
         self.inner.execute_and_verify_one(input)
     }
 

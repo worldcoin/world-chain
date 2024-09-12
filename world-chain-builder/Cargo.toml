@@ -42,6 +42,7 @@ reth-optimism-consensus = { git = "https://github.com/paradigmxyz/reth", version
 
 # alloy
 op-alloy-consensus = "0.2"
+alloy-rlp = "0.3"
 
 # other
 revm-primitives = { version = "9.0.0", default-features = false, features = [
@@ -55,6 +56,7 @@ eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 parking_lot = "0.12"
+derive_more = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

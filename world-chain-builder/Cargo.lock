@@ -10671,8 +10671,10 @@ name = "world-chain-builder"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "clap 4.5.17",
  "color-eyre 0.6.3",
+ "derive_more 1.0.0",
  "op-alloy-consensus",
  "parking_lot 0.12.3",
  "reth-basic-payload-builder",
