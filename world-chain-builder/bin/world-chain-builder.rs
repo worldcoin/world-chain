@@ -1,6 +1,6 @@
 use clap::Parser;
 use reth_optimism_cli::Cli;
-use world_chain_builder::args::ExtArgs;
+use world_chain_builder::node::args::ExtArgs;
 use world_chain_builder::node::builder::WorldChainBuilder;
 
 #[cfg(all(feature = "jemalloc", unix))]

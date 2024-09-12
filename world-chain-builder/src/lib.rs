@@ -1,6 +1,6 @@
-pub mod args;
-pub mod envelope;
+pub mod network;
 pub mod node;
 pub mod nullifier;
-pub mod txpool;
+pub mod payload;
+pub mod pool;
 pub mod verify;

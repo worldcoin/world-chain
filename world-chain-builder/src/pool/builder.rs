@@ -11,7 +11,11 @@ use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
 use tracing::{debug, info};
 
-use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
+use crate::pool::validator::WorldChainTransactionValidator;
+
+use super::validator::WorldChainTransactionPool;
+
+// use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
 
 /// A basic World Chain transaction pool.
 ///

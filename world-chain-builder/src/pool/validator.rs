@@ -10,8 +10,9 @@ use reth_transaction_pool::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
-use crate::envelope::WorldChainPooledTransaction;
 use crate::nullifier::NullifierTable;
+
+use super::tx::WorldChainPooledTransaction;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
