@@ -7,9 +7,7 @@ use reth_node_builder::{
 };
 use reth_node_optimism::{
     args::RollupArgs,
-    node::{
-        OptimismAddOns, OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder,
-    },
+    node::{OptimismAddOns, OptimismConsensusBuilder},
     OptimismEngineTypes, OptimismEvmConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -18,6 +16,7 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{
     executer::builder::WcExecutorBuilder,
+    network::builder::WcNetworkBuilder,
     payload::builder::PBHBuilder,
     pool::builder::WcPoolBuilder, // payload::PBHBuilder,
 };
@@ -42,7 +41,7 @@ impl WorldChainBuilder {
         Node,
         WcPoolBuilder,
         WcPayloadBuilder,
-        OptimismNetworkBuilder,
+        WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
     >
@@ -61,7 +60,7 @@ impl WorldChainBuilder {
             .node_types::<Node>()
             .pool(WcPoolBuilder { clear_nullifiers })
             .payload(WcPayloadBuilder::new(OptimismEvmConfig::default()))
-            .network(OptimismNetworkBuilder {
+            .network(WcNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
@@ -80,7 +79,7 @@ where
         N,
         WcPoolBuilder,
         WcPayloadBuilder,
-        OptimismNetworkBuilder,
+        WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
     >;

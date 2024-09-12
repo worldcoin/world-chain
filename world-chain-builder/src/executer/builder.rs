@@ -1,4 +1,3 @@
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::ChainSpec;
 use reth_evm::{
     execute::{
@@ -12,12 +11,10 @@ use reth_evm_optimism::{OpBatchExecutor, OpBlockExecutor, OpExecutorProvider};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::components::ExecutorBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
-use reth_primitives::{Block, BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm_primitives::db::Database;
 use std::sync::Arc;
-
-use super::block::WcBlockWithSenders;
 
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]

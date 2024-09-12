@@ -1,7 +1,6 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 use reth_primitives::{Block, BlockWithSenders, Header, Requests, TransactionSigned, Withdrawals};
-use reth_provider::BlockExecutionInput;
 use revm_primitives::Address;
 use serde::{Deserialize, Serialize};
 
