@@ -1,6 +1,6 @@
-use alloy_rlp::{Bytes, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use eyre::eyre::bail;
-use semaphore::protocol::{verify_proof, G1};
+use semaphore::protocol::verify_proof;
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -69,7 +69,7 @@ pub async fn verify_semaphore_proof(proof: SemaphoreProof) -> eyre::Result<()> {
     );
 
     match checked {
-        Ok(true) => return Ok(()),
+        Ok(true) => Ok(()),
         Ok(false) => bail!("invalid proof"),
         Err(err) => {
             error!(?err, "verify_proof failed with error");
