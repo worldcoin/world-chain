@@ -1,7 +1,7 @@
 use clap::Parser;
 use reth_optimism_cli::Cli;
 use world_chain_builder::args::ExtArgs;
-use world_chain_builder::node::WorldChainBuilder;
+use world_chain_builder::node::builder::WorldChainBuilder;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]

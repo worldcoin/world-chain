@@ -1,3 +1,7 @@
+pub mod network;
+pub mod payload;
+pub mod pool;
+
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
@@ -18,9 +22,10 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{
     args::{ExtArgs, PbhBuilderArgs},
-    builder::PBHBuilder,
-    pool::WorldChainPoolBuilder,
+    // payload::PBHBuilder,
 };
+
+use self::{payload::PBHBuilder, pool::WorldChainPoolBuilder};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
