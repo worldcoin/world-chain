@@ -23,11 +23,11 @@ use super::validator::WorldChainTransactionPool;
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct WorldChainPoolBuilder {
+pub struct WcPoolBuilder {
     pub clear_nullifiers: bool,
 }
 
-impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
+impl<Node> PoolBuilder<Node> for WcPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {

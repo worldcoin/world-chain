@@ -10,7 +10,7 @@ use reth_transaction_pool::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
-use crate::nullifier::NullifierTable;
+use crate::pbh::db::NullifierTable;
 
 use super::tx::WorldChainPooledTransaction;
 

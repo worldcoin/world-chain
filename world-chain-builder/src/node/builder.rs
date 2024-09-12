@@ -22,7 +22,7 @@ use crate::{
     pool::builder::WcPoolBuilder, // payload::PBHBuilder,
 };
 
-use super::args::{ExtArgs, PbhBuilderArgs};
+use super::args::{ExtArgs, WcBuilderArgs};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
@@ -51,7 +51,7 @@ impl WorldChainBuilder {
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
         >,
     {
-        let PbhBuilderArgs { clear_nullifiers } = args.builder_args;
+        let WcBuilderArgs { clear_nullifiers } = args.builder_args;
         let RollupArgs {
             disable_txpool_gossip,
             discovery_v4,
