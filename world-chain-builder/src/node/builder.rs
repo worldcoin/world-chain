@@ -17,6 +17,7 @@ use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{
+    executer::builder::WcExecutorBuilder,
     payload::builder::PBHBuilder,
     pool::builder::WorldChainPoolBuilder, // payload::PBHBuilder,
 };
@@ -42,7 +43,7 @@ impl WorldChainBuilder {
         WorldChainPoolBuilder,
         WorldChainPayloadBuilder,
         OptimismNetworkBuilder,
-        OptimismExecutorBuilder,
+        WcExecutorBuilder,
         OptimismConsensusBuilder,
     >
     where
@@ -64,7 +65,7 @@ impl WorldChainBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(OptimismExecutorBuilder::default())
+            .executor(WcExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
 }
@@ -80,7 +81,7 @@ where
         WorldChainPoolBuilder,
         WorldChainPayloadBuilder,
         OptimismNetworkBuilder,
-        OptimismExecutorBuilder,
+        WcExecutorBuilder,
         OptimismConsensusBuilder,
     >;
 

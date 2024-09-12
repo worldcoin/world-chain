@@ -19,9 +19,9 @@ use std::sync::Arc;
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct OptimismExecutorBuilder;
+pub struct WcExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for OptimismExecutorBuilder
+impl<Node> ExecutorBuilder<Node> for WcExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
