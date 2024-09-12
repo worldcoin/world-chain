@@ -16,22 +16,20 @@ use super::tx::WorldChainPooledTransaction;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<
-        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
-    >,
+    TransactionValidationTaskExecutor<WcTransactionValidator<Client, WorldChainPooledTransaction>>,
     CoinbaseTipOrdering<WorldChainPooledTransaction>,
     S,
 >;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WorldChainTransactionValidator<Client, Tx> {
+pub struct WcTransactionValidator<Client, Tx> {
     inner: OpTransactionValidator<Client, Tx>,
     database_env: Arc<DatabaseEnv>,
     tmp_workaround: EthTransactionValidator<Client, Tx>,
 }
 
-impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
+impl<Client, Tx> WcTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     //    Tx: EthPoolTransaction,
@@ -50,8 +48,7 @@ where
     }
 }
 
-impl<Client> TransactionValidator
-    for WorldChainTransactionValidator<Client, WorldChainPooledTransaction>
+impl<Client> TransactionValidator for WcTransactionValidator<Client, WorldChainPooledTransaction>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     // Tx: EthPoolTransaction,

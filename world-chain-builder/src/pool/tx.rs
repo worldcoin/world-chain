@@ -4,10 +4,12 @@ use reth_primitives::{
 };
 use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
 
+use crate::pbh::semaphore::SemaphoreProof;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldChainPooledTransaction {
     pub inner: EthPooledTransaction,
-    pub semaphore_proof: Option<Vec<u8>>,
+    pub semaphore_proof: Option<SemaphoreProof>,
 }
 
 impl From<WorldChainPooledTransaction> for TransactionSignedEcRecovered {

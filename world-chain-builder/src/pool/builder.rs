@@ -11,7 +11,7 @@ use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
 use tracing::{debug, info};
 
-use crate::pool::validator::WorldChainTransactionValidator;
+use crate::pool::validator::WcTransactionValidator;
 
 use super::validator::WorldChainTransactionPool;
 
@@ -66,7 +66,7 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WorldChainTransactionValidator::new(op_tx_validator, db.clone(), validator)
+                WcTransactionValidator::new(op_tx_validator, db.clone(), validator)
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
