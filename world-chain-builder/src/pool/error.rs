@@ -1,3 +1,4 @@
+use reth_db::DatabaseError;
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 
@@ -19,6 +20,14 @@ pub enum WcTransactionPoolInvalid {
     InvalidSignalHash,
     #[error("invalid semaphore proof")]
     InvalidSemaphoreProof,
+    #[error("duplicate tx hash")]
+    DuplicateTxHash,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WcTransactionPoolError {
+    #[error(transparent)]
+    Database(#[from] DatabaseError),
 }
 
 impl PoolTransactionError for WcTransactionPoolInvalid {
@@ -46,6 +55,12 @@ pub enum TransactionValidationError {
 impl From<WcTransactionPoolInvalid> for TransactionValidationError {
     fn from(e: WcTransactionPoolInvalid) -> Self {
         TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(e.into()))
+    }
+}
+
+impl From<WcTransactionPoolError> for TransactionValidationError {
+    fn from(e: WcTransactionPoolError) -> Self {
+        TransactionValidationError::Error(Box::new(e))
     }
 }
 

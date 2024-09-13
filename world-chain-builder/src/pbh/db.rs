@@ -1,3 +1,4 @@
+// TODO: maybe think about some sort of data retention policy for PBH transactions.
 use reth_db::table::{Compress, Decompress, Table};
 use reth_primitives::{TxHash, B256};
 use serde::{Deserialize, Serialize};

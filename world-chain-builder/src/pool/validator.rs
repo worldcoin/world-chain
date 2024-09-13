@@ -1,12 +1,13 @@
 //! World Chain transaction pool types
 use chrono::Datelike;
-use reth_db::transaction::DbTx;
+use reth_db::cursor::DbCursorRW;
+use reth_db::transaction::{DbTx, DbTxMut};
 use semaphore::hash_to_field;
 use semaphore::protocol::verify_proof;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
-use reth_db::{Database, DatabaseEnv};
+use reth_db::{Database, DatabaseEnv, DatabaseError, DatabaseWriteOperation};
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
@@ -15,11 +16,11 @@ use reth_transaction_pool::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
-use crate::pbh::db::ExecutedPbhNullifierTable;
+use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
-use super::error::{TransactionValidationError, WcTransactionPoolInvalid};
+use super::error::{TransactionValidationError, WcTransactionPoolError, WcTransactionPoolInvalid};
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
 /// Type alias for World Chain transaction pool
@@ -59,6 +60,20 @@ where
             _tmp_workaround: tmp_workaround,
             num_pbh_txs,
         }
+    }
+
+    fn set_validated(
+        &self,
+        tx: &Tx,
+        semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), DatabaseError> {
+        let db_tx = self.database_env.tx_mut()?;
+        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+        cursor.insert(
+            *tx.hash(),
+            semaphore_proof.nullifier_hash.to_be_bytes().into(),
+        )?;
+        Ok(())
     }
 
     /// External nullifiers must be of the form
@@ -183,8 +198,29 @@ where
             {
                 return e.to_outcome(transaction);
             }
+            match self.set_validated(&transaction, semaphore_proof) {
+                Ok(_) => {}
+                Err(DatabaseError::Write(write)) => {
+                    if let DatabaseWriteOperation::CursorInsert = write.operation {
+                        return Into::<TransactionValidationError>::into(
+                            WcTransactionPoolInvalid::DuplicateTxHash,
+                        )
+                        .to_outcome(transaction);
+                    } else {
+                        return Into::<TransactionValidationError>::into(
+                            WcTransactionPoolError::Database(DatabaseError::Write(write)),
+                        )
+                        .to_outcome(transaction);
+                    }
+                }
+                Err(e) => {
+                    return Into::<TransactionValidationError>::into(
+                        WcTransactionPoolError::Database(e),
+                    )
+                    .to_outcome(transaction);
+                }
+            }
         }
-
         self.inner.validate_one(origin, transaction)
     }
 }
@@ -208,14 +244,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        // TODO: I'm slightly afraid of concurrency here.
         let mut res = vec![];
         for (origin, tx) in transactions {
             res.push(self.validate_one(origin, tx).await);
         }
         res
-
-        // .map(|(origin, tx)| self.validate_one(origin, tx).await)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
