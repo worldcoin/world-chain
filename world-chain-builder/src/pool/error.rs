@@ -10,6 +10,8 @@ pub enum WcTransactionPoolError {
     InvalidExternalNullifier,
     #[error("invalid external nullifier prefix")]
     InvalidExternalNullifierPrefix,
+    #[error("invalid external nullifier period")]
+    InvalidExternalNullifierPeriod,
 }
 
 impl PoolTransactionError for WcTransactionPoolError {

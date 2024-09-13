@@ -1,4 +1,5 @@
 //! World Chain transaction pool types
+use chrono::Datelike;
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use std::str::FromStr as _;
@@ -77,10 +78,19 @@ where
             ));
         }
 
+        // TODO: Figure out what we actually want to do with the prefix
         if Prefix::from_str(split[0]).is_err() {
             return Err(TransactionValidationError::Invalid(
                 InvalidPoolTransactionError::Other(
                     WcTransactionPoolError::InvalidExternalNullifierPrefix.into(),
+                ),
+            ));
+        }
+
+        if split[1] != current_period_id() {
+            return Err(TransactionValidationError::Invalid(
+                InvalidPoolTransactionError::Other(
+                    WcTransactionPoolError::InvalidExternalNullifierPeriod.into(),
                 ),
             ));
         }
@@ -157,4 +167,9 @@ where
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         self.inner.on_new_head_block(new_tip_block)
     }
+}
+
+fn current_period_id() -> String {
+    let current_date = chrono::Utc::now();
+    format!("{:0>2}{}", current_date.month(), current_date.year())
 }

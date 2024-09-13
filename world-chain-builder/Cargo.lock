@@ -10673,6 +10673,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "bytemuck",
+ "chrono",
  "clap 4.5.17",
  "color-eyre 0.6.3",
  "derive_more 1.0.0",
