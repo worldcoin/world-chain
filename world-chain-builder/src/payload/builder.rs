@@ -17,13 +17,13 @@ use reth_transaction_pool::TransactionPool;
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PBHBuilder<EvmConfig> {
+pub struct WcPayloadBuilder<EvmConfig> {
     // NOTE: do we need this?
     // compute_pending_block: bool,
     evm_config: EvmConfig,
 }
 
-impl<EvmConfig> PBHBuilder<EvmConfig> {
+impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
     /// `OptimismPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { evm_config }
@@ -31,7 +31,7 @@ impl<EvmConfig> PBHBuilder<EvmConfig> {
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for PBHBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WcPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
@@ -88,7 +88,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let payload_builder = PBHBuilder::new(self.evm_config);
+        let payload_builder = WcPayloadBuilder::new(self.evm_config);
 
         let conf = ctx.payload_builder_config();
 
