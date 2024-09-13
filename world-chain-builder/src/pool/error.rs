@@ -41,6 +41,12 @@ pub enum TransactionValidationError {
     Error(Box<dyn std::error::Error + Send + Sync>),
 }
 
+impl From<WcTransactionPoolError> for TransactionValidationError {
+    fn from(e: WcTransactionPoolError) -> Self {
+        TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(e.into()))
+    }
+}
+
 impl TransactionValidationError {
     pub fn to_outcome<T: PoolTransaction>(self, tx: T) -> TransactionValidationOutcome<T> {
         match self {

@@ -3,7 +3,6 @@ use chrono::Datelike;
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use semaphore::hash_to_field;
-use std::io::Read;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
@@ -76,41 +75,25 @@ where
             .collect::<Vec<&str>>();
 
         if split.len() != 3 {
-            return Err(TransactionValidationError::Invalid(
-                InvalidPoolTransactionError::Other(
-                    WcTransactionPoolError::InvalidExternalNullifier.into(),
-                ),
-            ));
+            return Err(WcTransactionPoolError::InvalidExternalNullifier.into());
         }
 
         // TODO: Figure out what we actually want to do with the prefix
         // For now, we just check that it's a valid prefix
         // Maybe in future use as some sort of versioning?
         if Prefix::from_str(split[0]).is_err() {
-            return Err(TransactionValidationError::Invalid(
-                InvalidPoolTransactionError::Other(
-                    WcTransactionPoolError::InvalidExternalNullifierPrefix.into(),
-                ),
-            ));
+            return Err(WcTransactionPoolError::InvalidExternalNullifierPrefix.into());
         }
 
         // TODO: Handle edge case where we are at the end of the month
         if split[1] != current_period_id() {
-            return Err(TransactionValidationError::Invalid(
-                InvalidPoolTransactionError::Other(
-                    WcTransactionPoolError::InvalidExternalNullifierPeriod.into(),
-                ),
-            ));
+            return Err(WcTransactionPoolError::InvalidExternalNullifierPeriod.into());
         }
 
         match split[2].parse::<u16>() {
             Ok(nonce) if nonce < self.num_pbh_txs => {}
             _ => {
-                return Err(TransactionValidationError::Invalid(
-                    InvalidPoolTransactionError::Other(
-                        WcTransactionPoolError::InvalidExternalNullifierNonce.into(),
-                    ),
-                ));
+                return Err(WcTransactionPoolError::InvalidExternalNullifierNonce.into());
             }
         }
 
@@ -126,11 +109,7 @@ where
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
             Ok(Some(_)) => {
-                return Err(TransactionValidationError::Invalid(
-                    InvalidPoolTransactionError::Other(
-                        WcTransactionPoolError::NullifierAlreadyExists.into(),
-                    ),
-                ));
+                return Err(WcTransactionPoolError::NullifierAlreadyExists.into());
             }
             Ok(None) => {}
             Err(e) => {
@@ -148,29 +127,33 @@ where
     ) -> Result<(), TransactionValidationError> {
         let expected = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
         if semaphore_proof.nullifier_hash != expected {
-            return Err(TransactionValidationError::Invalid(
-                InvalidPoolTransactionError::Other(
-                    WcTransactionPoolError::InvalidNullifierHash.into(),
-                ),
-            ));
+            return Err(WcTransactionPoolError::InvalidNullifierHash.into());
         }
         Ok(())
     }
 
     pub fn validate_signal_hash(
         &self,
-        semaphore_proof: &SemaphoreProof,
         tx_hash: &TxHash,
+        semaphore_proof: &SemaphoreProof,
     ) -> Result<(), TransactionValidationError> {
         // TODO: we probably don't need to hash the hash.
         let expected = hash_to_field(tx_hash.as_slice());
         if semaphore_proof.signal_hash != expected {
-            return Err(TransactionValidationError::Invalid(
-                InvalidPoolTransactionError::Other(
-                    WcTransactionPoolError::InvalidSignalHash.into(),
-                ),
-            ));
+            return Err(WcTransactionPoolError::InvalidSignalHash.into());
         }
+        Ok(())
+    }
+
+    pub fn validate_semaphore_proof(
+        &self,
+        transaction: &Tx,
+        semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), TransactionValidationError> {
+        self.validate_external_nullifier(semaphore_proof)?;
+        self.validate_nullifier(semaphore_proof)?;
+        self.validate_nullifier_hash(semaphore_proof)?;
+        self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
         Ok(())
     }
 
@@ -180,13 +163,7 @@ where
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         if let Some(semaphore_proof) = transaction.semaphore_proof() {
-            if let Err(e) = self.validate_external_nullifier(semaphore_proof) {
-                return e.to_outcome(transaction);
-            }
-            if let Err(e) = self.validate_nullifier(semaphore_proof) {
-                return e.to_outcome(transaction);
-            }
-            if let Err(e) = self.validate_nullifier_hash(semaphore_proof) {
+            if let Err(e) = self.validate_semaphore_proof(&transaction, semaphore_proof) {
                 return e.to_outcome(transaction);
             }
         }
