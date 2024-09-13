@@ -18,4 +18,8 @@ pub struct WcBuilderArgs {
     /// Clears existing pbh semaphore nullifiers from the database
     #[arg(long = "builder.clear_nullifiers")]
     pub clear_nullifiers: bool,
+
+    /// Sets the number of allowed PBH transactions per month
+    #[arg(long = "builder.num_pbh_txs")]
+    pub num_pbh_txs: u16,
 }

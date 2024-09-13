@@ -48,7 +48,10 @@ impl WorldChainBuilder {
             Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
     {
-        let WcBuilderArgs { clear_nullifiers } = args.builder_args;
+        let WcBuilderArgs {
+            clear_nullifiers,
+            num_pbh_txs,
+        } = args.builder_args;
         let RollupArgs {
             disable_txpool_gossip,
             discovery_v4,
@@ -56,7 +59,10 @@ impl WorldChainBuilder {
         } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WcPoolBuilder { clear_nullifiers })
+            .pool(WcPoolBuilder {
+                clear_nullifiers,
+                num_pbh_txs,
+            })
             .payload(WcPayloadServiceBuilder::new(OptimismEvmConfig::default()))
             .network(WcNetworkBuilder {
                 disable_txpool_gossip,

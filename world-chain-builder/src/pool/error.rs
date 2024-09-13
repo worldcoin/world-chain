@@ -1,4 +1,3 @@
-use reth_primitives::TxHash;
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 
@@ -12,6 +11,8 @@ pub enum WcTransactionPoolError {
     InvalidExternalNullifierPrefix,
     #[error("invalid external nullifier period")]
     InvalidExternalNullifierPeriod,
+    #[error("invalid external nullifier nonce")]
+    InvalidExternalNullifierNonce,
 }
 
 impl PoolTransactionError for WcTransactionPoolError {

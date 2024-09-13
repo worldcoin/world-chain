@@ -24,6 +24,7 @@ use super::validator::WorldChainTransactionPool;
 #[non_exhaustive]
 pub struct WcPoolBuilder {
     pub clear_nullifiers: bool,
+    pub num_pbh_txs: u16,
 }
 
 impl<Node> PoolBuilder<Node> for WcPoolBuilder
@@ -62,7 +63,12 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WcTransactionValidator::new(op_tx_validator, db.clone(), validator)
+                WcTransactionValidator::new(
+                    op_tx_validator,
+                    db.clone(),
+                    validator,
+                    self.num_pbh_txs,
+                )
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(

@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use reth_db::{Database, DatabaseEnv};
 use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_primitives::{SealedBlock, TxHash};
+use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin,
+    CoinbaseTipOrdering, EthTransactionValidator, Pool, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
@@ -36,7 +36,8 @@ where
 {
     inner: OpTransactionValidator<Client, Tx>,
     database_env: Arc<DatabaseEnv>,
-    tmp_workaround: EthTransactionValidator<Client, Tx>,
+    _tmp_workaround: EthTransactionValidator<Client, Tx>,
+    num_pbh_txs: u16,
 }
 
 impl<Client, Tx> WcTransactionValidator<Client, Tx>
@@ -49,11 +50,13 @@ where
         inner: OpTransactionValidator<Client, Tx>,
         database_env: Arc<DatabaseEnv>,
         tmp_workaround: EthTransactionValidator<Client, Tx>,
+        num_pbh_txs: u16,
     ) -> Self {
         Self {
             inner,
             database_env,
-            tmp_workaround,
+            _tmp_workaround: tmp_workaround,
+            num_pbh_txs,
         }
     }
 
@@ -93,6 +96,17 @@ where
                     WcTransactionPoolError::InvalidExternalNullifierPeriod.into(),
                 ),
             ));
+        }
+
+        match split[2].parse::<u16>() {
+            Ok(nonce) if nonce < self.num_pbh_txs => {}
+            _ => {
+                return Err(TransactionValidationError::Invalid(
+                    InvalidPoolTransactionError::Other(
+                        WcTransactionPoolError::InvalidExternalNullifierNonce.into(),
+                    ),
+                ));
+            }
         }
 
         Ok(())
