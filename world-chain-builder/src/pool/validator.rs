@@ -1,8 +1,8 @@
 //! World Chain transaction pool types
 use chrono::Datelike;
 use reth_db::transaction::DbTx;
-use reth_transaction_pool::error::InvalidPoolTransactionError;
 use semaphore::hash_to_field;
+use semaphore::protocol::verify_proof;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ use crate::pbh::db::ExecutedPbhNullifierTable;
 use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
-use super::error::{TransactionValidationError, WcTransactionPoolError};
+use super::error::{TransactionValidationError, WcTransactionPoolInvalid};
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
 /// Type alias for World Chain transaction pool
@@ -75,25 +75,25 @@ where
             .collect::<Vec<&str>>();
 
         if split.len() != 3 {
-            return Err(WcTransactionPoolError::InvalidExternalNullifier.into());
+            return Err(WcTransactionPoolInvalid::InvalidExternalNullifier.into());
         }
 
         // TODO: Figure out what we actually want to do with the prefix
         // For now, we just check that it's a valid prefix
         // Maybe in future use as some sort of versioning?
         if Prefix::from_str(split[0]).is_err() {
-            return Err(WcTransactionPoolError::InvalidExternalNullifierPrefix.into());
+            return Err(WcTransactionPoolInvalid::InvalidExternalNullifierPrefix.into());
         }
 
         // TODO: Handle edge case where we are at the end of the month
         if split[1] != current_period_id() {
-            return Err(WcTransactionPoolError::InvalidExternalNullifierPeriod.into());
+            return Err(WcTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
         }
 
         match split[2].parse::<u16>() {
             Ok(nonce) if nonce < self.num_pbh_txs => {}
             _ => {
-                return Err(WcTransactionPoolError::InvalidExternalNullifierNonce.into());
+                return Err(WcTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
             }
         }
 
@@ -109,7 +109,7 @@ where
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
             Ok(Some(_)) => {
-                return Err(WcTransactionPoolError::NullifierAlreadyExists.into());
+                return Err(WcTransactionPoolInvalid::NullifierAlreadyExists.into());
             }
             Ok(None) => {}
             Err(e) => {
@@ -127,7 +127,7 @@ where
     ) -> Result<(), TransactionValidationError> {
         let expected = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
         if semaphore_proof.nullifier_hash != expected {
-            return Err(WcTransactionPoolError::InvalidNullifierHash.into());
+            return Err(WcTransactionPoolInvalid::InvalidNullifierHash.into());
         }
         Ok(())
     }
@@ -140,12 +140,12 @@ where
         // TODO: we probably don't need to hash the hash.
         let expected = hash_to_field(tx_hash.as_slice());
         if semaphore_proof.signal_hash != expected {
-            return Err(WcTransactionPoolError::InvalidSignalHash.into());
+            return Err(WcTransactionPoolInvalid::InvalidSignalHash.into());
         }
         Ok(())
     }
 
-    pub fn validate_semaphore_proof(
+    pub async fn validate_semaphore_proof(
         &self,
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
@@ -154,16 +154,33 @@ where
         self.validate_nullifier(semaphore_proof)?;
         self.validate_nullifier_hash(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
-        Ok(())
+
+        let res = verify_proof(
+            semaphore_proof.root,
+            semaphore_proof.nullifier_hash,
+            semaphore_proof.signal_hash,
+            semaphore_proof.external_nullifier_hash,
+            &semaphore_proof.proof.0,
+            30,
+        );
+
+        match res {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(WcTransactionPoolInvalid::InvalidSemaphoreProof.into()),
+            Err(e) => Err(TransactionValidationError::Error(e.into())),
+        }
     }
 
-    pub fn validate_one(
+    pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         if let Some(semaphore_proof) = transaction.semaphore_proof() {
-            if let Err(e) = self.validate_semaphore_proof(&transaction, semaphore_proof) {
+            if let Err(e) = self
+                .validate_semaphore_proof(&transaction, semaphore_proof)
+                .await
+            {
                 return e.to_outcome(transaction);
             }
         }
@@ -184,18 +201,21 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.validate_one(origin, transaction).await
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        // TODO: do we want multithreading here?
-        transactions
-            .into_iter()
-            .map(|(origin, tx)| self.validate_one(origin, tx))
-            .collect()
+        // TODO: I'm slightly afraid of concurrency here.
+        let mut res = vec![];
+        for (origin, tx) in transactions {
+            res.push(self.validate_one(origin, tx).await);
+        }
+        res
+
+        // .map(|(origin, tx)| self.validate_one(origin, tx).await)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {

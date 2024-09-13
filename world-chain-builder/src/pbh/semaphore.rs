@@ -10,7 +10,7 @@ const LEN: usize = 256;
 pub type ProofBytes = [u8; LEN];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Proof(semaphore::protocol::Proof);
+pub struct Proof(pub semaphore::protocol::Proof);
 
 impl Decodable for Proof {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {

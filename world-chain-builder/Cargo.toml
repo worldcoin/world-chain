@@ -45,6 +45,7 @@ op-alloy-consensus = "0.2"
 alloy-rlp = "0.3"
 
 # other
+futures = "0.3"
 chrono = "0.4"
 thiserror = "1"
 strum = "0.26"

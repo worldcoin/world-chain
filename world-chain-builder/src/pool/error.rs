@@ -2,7 +2,7 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionE
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 
 #[derive(Debug, thiserror::Error)]
-pub enum WcTransactionPoolError {
+pub enum WcTransactionPoolInvalid {
     #[error("nullifier has already been seen")]
     NullifierAlreadyExists,
     #[error("invalid external nullifier")]
@@ -17,16 +17,18 @@ pub enum WcTransactionPoolError {
     InvalidNullifierHash,
     #[error("invalid signal hash")]
     InvalidSignalHash,
+    #[error("invalid semaphore proof")]
+    InvalidSemaphoreProof,
 }
 
-impl PoolTransactionError for WcTransactionPoolError {
+impl PoolTransactionError for WcTransactionPoolInvalid {
     fn is_bad_transaction(&self) -> bool {
         true
     }
 }
 
-impl From<WcTransactionPoolError> for Box<dyn PoolTransactionError> {
-    fn from(e: WcTransactionPoolError) -> Self {
+impl From<WcTransactionPoolInvalid> for Box<dyn PoolTransactionError> {
+    fn from(e: WcTransactionPoolInvalid) -> Self {
         Box::new(e)
     }
 }
@@ -41,8 +43,8 @@ pub enum TransactionValidationError {
     Error(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<WcTransactionPoolError> for TransactionValidationError {
-    fn from(e: WcTransactionPoolError) -> Self {
+impl From<WcTransactionPoolInvalid> for TransactionValidationError {
+    fn from(e: WcTransactionPoolInvalid) -> Self {
         TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(e.into()))
     }
 }
