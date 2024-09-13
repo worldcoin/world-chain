@@ -2,6 +2,7 @@
 use chrono::Datelike;
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
+use semaphore::hash_to_field;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
@@ -115,24 +116,42 @@ where
         Ok(())
     }
 
-    pub fn validate_nullifier(&self, transaction: &Tx) -> Result<(), TransactionValidationError> {
-        if let Some(proof) = transaction.semaphore_proof() {
-            let tx = self.database_env.tx().unwrap();
-            match tx.get::<ExecutedPbhNullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
-                Ok(Some(_)) => {
-                    return Err(TransactionValidationError::Invalid(
-                        InvalidPoolTransactionError::Other(
-                            WcTransactionPoolError::NullifierAlreadyExists.into(),
-                        ),
-                    ));
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    return Err(TransactionValidationError::Error(
-                        format!("Error while fetching nullifier from database: {}", e).into(),
-                    ));
-                }
+    pub fn validate_nullifier(
+        &self,
+        semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), TransactionValidationError> {
+        let tx = self.database_env.tx().unwrap();
+        match tx
+            .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
+        {
+            Ok(Some(_)) => {
+                return Err(TransactionValidationError::Invalid(
+                    InvalidPoolTransactionError::Other(
+                        WcTransactionPoolError::NullifierAlreadyExists.into(),
+                    ),
+                ));
             }
+            Ok(None) => {}
+            Err(e) => {
+                return Err(TransactionValidationError::Error(
+                    format!("Error while fetching nullifier from database: {}", e).into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_nullifier_hash(
+        &self,
+        semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), TransactionValidationError> {
+        let expected = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
+        if semaphore_proof.nullifier_hash != expected {
+            return Err(TransactionValidationError::Invalid(
+                InvalidPoolTransactionError::Other(
+                    WcTransactionPoolError::InvalidNullifierHash.into(),
+                ),
+            ));
         }
         Ok(())
     }
@@ -146,7 +165,10 @@ where
             if let Err(e) = self.validate_external_nullifier(semaphore_proof) {
                 return e.to_outcome(transaction);
             }
-            if let Err(e) = self.validate_nullifier(&transaction) {
+            if let Err(e) = self.validate_nullifier(semaphore_proof) {
+                return e.to_outcome(transaction);
+            }
+            if let Err(e) = self.validate_nullifier_hash(semaphore_proof) {
                 return e.to_outcome(transaction);
             }
         }
