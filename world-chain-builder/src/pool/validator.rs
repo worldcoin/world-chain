@@ -3,12 +3,13 @@ use chrono::Datelike;
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use semaphore::hash_to_field;
+use std::io::Read;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
 use reth_db::{Database, DatabaseEnv};
 use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthTransactionValidator, Pool, TransactionOrigin,
@@ -150,6 +151,23 @@ where
             return Err(TransactionValidationError::Invalid(
                 InvalidPoolTransactionError::Other(
                     WcTransactionPoolError::InvalidNullifierHash.into(),
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_signal_hash(
+        &self,
+        semaphore_proof: &SemaphoreProof,
+        tx_hash: &TxHash,
+    ) -> Result<(), TransactionValidationError> {
+        // TODO: we probably don't need to hash the hash.
+        let expected = hash_to_field(tx_hash.as_slice());
+        if semaphore_proof.signal_hash != expected {
+            return Err(TransactionValidationError::Invalid(
+                InvalidPoolTransactionError::Other(
+                    WcTransactionPoolError::InvalidSignalHash.into(),
                 ),
             ));
         }

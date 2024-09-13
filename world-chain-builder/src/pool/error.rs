@@ -15,6 +15,8 @@ pub enum WcTransactionPoolError {
     InvalidExternalNullifierNonce,
     #[error("invalid nullifier hash")]
     InvalidNullifierHash,
+    #[error("invalid signal hash")]
+    InvalidSignalHash,
 }
 
 impl PoolTransactionError for WcTransactionPoolError {
