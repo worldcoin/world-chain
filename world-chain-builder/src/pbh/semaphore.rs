@@ -1,9 +1,6 @@
 use alloy_rlp::{Decodable, Encodable};
-use eyre::eyre::bail;
-use semaphore::protocol::verify_proof;
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
-use tracing::error;
 
 const LEN: usize = 256;
 
@@ -57,25 +54,4 @@ pub struct SemaphoreProof {
     pub external_nullifier_hash: Field,
     pub proof: Proof,
     pub external_nullifier: String,
-}
-
-pub async fn verify_semaphore_proof(proof: SemaphoreProof) -> eyre::Result<()> {
-    // TODO: think about how we want to verify the roots
-    let checked = verify_proof(
-        proof.root,
-        proof.nullifier_hash,
-        proof.signal_hash,
-        proof.external_nullifier_hash,
-        &proof.proof.0,
-        30,
-    );
-
-    match checked {
-        Ok(true) => Ok(()),
-        Ok(false) => bail!("invalid proof"),
-        Err(err) => {
-            error!(?err, "verify_proof failed with error");
-            bail!("invalid proof")
-        }
-    }
 }
