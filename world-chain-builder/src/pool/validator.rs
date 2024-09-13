@@ -1,11 +1,12 @@
 //! World Chain transaction pool types
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
+use std::str::FromStr as _;
 use std::sync::Arc;
 
 use reth_db::{Database, DatabaseEnv};
 use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin,
@@ -13,8 +14,10 @@ use reth_transaction_pool::{
 };
 
 use crate::pbh::db::NullifierTable;
+use crate::pbh::semaphore::SemaphoreProof;
+use crate::pbh::tx::Prefix;
 
-use super::error::WcTransactionPoolError;
+use super::error::{TransactionValidationError, WcTransactionPoolError};
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
 /// Type alias for World Chain transaction pool
@@ -53,29 +56,71 @@ where
         }
     }
 
+    /// External nullifiers must be of the form
+    /// `<prefix>-<periodId>-<PbhNonce>`.
+    /// example:
+    /// `0-012025-11`
+    pub fn validate_external_nullifier(
+        &self,
+        semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), TransactionValidationError> {
+        let split = semaphore_proof
+            .external_nullifier
+            .split('-')
+            .collect::<Vec<&str>>();
+
+        if split.len() != 3 {
+            return Err(TransactionValidationError::Invalid(
+                InvalidPoolTransactionError::Other(
+                    WcTransactionPoolError::InvalidExternalNullifier.into(),
+                ),
+            ));
+        }
+
+        if Prefix::from_str(split[0]).is_err() {
+            return Err(TransactionValidationError::Invalid(
+                InvalidPoolTransactionError::Other(
+                    WcTransactionPoolError::InvalidExternalNullifierPrefix.into(),
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_nullifier(&self, transaction: &Tx) -> Result<(), TransactionValidationError> {
+        if let Some(proof) = transaction.semaphore_proof() {
+            let tx = self.database_env.tx().unwrap();
+            match tx.get::<NullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
+                Ok(Some(_)) => {
+                    return Err(TransactionValidationError::Invalid(
+                        InvalidPoolTransactionError::Other(
+                            WcTransactionPoolError::NullifierAlreadyExists.into(),
+                        ),
+                    ));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return Err(TransactionValidationError::Error(
+                        format!("Error while fetching nullifier from database: {}", e).into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if let Some(proof) = transaction.semaphore_proof() {
-            let tx = self.database_env.tx().unwrap();
-            match tx.get::<NullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
-                Ok(Some(_)) => {
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidPoolTransactionError::Other(
-                            WcTransactionPoolError::NullifierAlreadyExists.into(),
-                        ),
-                    );
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    return TransactionValidationOutcome::Error(
-                        *transaction.hash(),
-                        format!("Error while fetching nullifier from database: {}", e).into(),
-                    );
-                }
+        if let Some(semaphore_proof) = transaction.semaphore_proof() {
+            if let Err(e) = self.validate_external_nullifier(semaphore_proof) {
+                return e.to_outcome(transaction);
+            }
+            if let Err(e) = self.validate_nullifier(&transaction) {
+                return e.to_outcome(transaction);
             }
         }
 

@@ -56,6 +56,7 @@ pub struct SemaphoreProof {
     pub signal_hash: Field,
     pub external_nullifier_hash: Field,
     pub proof: Proof,
+    pub external_nullifier: String,
 }
 
 pub async fn verify_semaphore_proof(proof: SemaphoreProof) -> eyre::Result<()> {

@@ -46,6 +46,8 @@ alloy-rlp = "0.3"
 
 # other
 thiserror = "1"
+strum = "0.26"
+strum_macros = "0.26"
 bytemuck = "1"
 revm-primitives = { version = "9.0.0", default-features = false, features = [
     "std",

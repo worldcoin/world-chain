@@ -10,7 +10,6 @@ use reth_node_optimism::{
     node::{OptimismAddOns, OptimismConsensusBuilder},
     OptimismEngineTypes, OptimismEvmConfig,
 };
-use reth_provider::DatabaseProviderFactory;
 
 use crate::{
     executer::builder::WcExecutorBuilder,
