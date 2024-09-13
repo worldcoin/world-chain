@@ -2,28 +2,25 @@
 use reth_db::transaction::DbTx;
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use std::sync::Arc;
-use tracing::error;
 
 use reth_db::{Database, DatabaseEnv};
-use reth_node_builder::NodeTypesWithDB;
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::SealedBlock;
-use reth_provider::{BlockReaderIdExt, DatabaseProviderFactory, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, PoolTransaction,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    CoinbaseTipOrdering, EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use crate::pbh::db::NullifierTable;
 
 use super::error::WcTransactionPoolError;
-use super::tx::WorldChainPooledTransaction;
+use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<WcTransactionValidator<Client, WorldChainPooledTransaction>>,
-    CoinbaseTipOrdering<WorldChainPooledTransaction>,
+    TransactionValidationTaskExecutor<WcTransactionValidator<Client, WcPooledTransaction>>,
+    CoinbaseTipOrdering<WcPooledTransaction>,
     S,
 >;
 
@@ -32,23 +29,22 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
 pub struct WcTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    // Client: DatabaseProviderFactory<N::DB> + StateProviderFactory + BlockReaderIdExt,
 {
     inner: OpTransactionValidator<Client, Tx>,
     database_env: Arc<DatabaseEnv>,
     tmp_workaround: EthTransactionValidator<Client, Tx>,
 }
 
-impl<Client> WcTransactionValidator<Client, WorldChainPooledTransaction>
+impl<Client, Tx> WcTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    //    Tx: EthPoolTransaction,
+    Tx: WcPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
-        inner: OpTransactionValidator<Client, WorldChainPooledTransaction>,
+        inner: OpTransactionValidator<Client, Tx>,
         database_env: Arc<DatabaseEnv>,
-        tmp_workaround: EthTransactionValidator<Client, WorldChainPooledTransaction>,
+        tmp_workaround: EthTransactionValidator<Client, Tx>,
     ) -> Self {
         Self {
             inner,
@@ -60,9 +56,9 @@ where
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
-        transaction: WorldChainPooledTransaction,
-    ) -> TransactionValidationOutcome<WorldChainPooledTransaction> {
-        if let Some(ref proof) = transaction.semaphore_proof {
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        if let Some(proof) = transaction.semaphore_proof() {
             let tx = self.database_env.tx().unwrap();
             match tx.get::<NullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
                 Ok(Some(_)) => {
@@ -76,7 +72,7 @@ where
                 Ok(None) => {}
                 Err(e) => {
                     return TransactionValidationOutcome::Error(
-                        *transaction.inner.hash(),
+                        *transaction.hash(),
                         format!("Error while fetching nullifier from database: {}", e).into(),
                     );
                 }
@@ -87,11 +83,12 @@ where
     }
 }
 
-impl<Client> TransactionValidator for WcTransactionValidator<Client, WorldChainPooledTransaction>
+impl<Client, Tx> TransactionValidator for WcTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
+    Tx: WcPoolTransaction,
 {
-    type Transaction = WorldChainPooledTransaction;
+    type Transaction = Tx;
 
     async fn validate_transaction(
         &self,

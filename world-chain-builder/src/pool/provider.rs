@@ -1,10 +1,7 @@
 use reth_db::Database;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDB;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
-use reth_provider::{
-    DatabaseProviderFactory, DatabaseProviderRO, DatabaseProviderRW, ProviderFactory,
-    ProviderResult,
-};
+use reth_provider::{DatabaseProviderFactory, DatabaseProviderRW, ProviderFactory, ProviderResult};
 
 /// Database provider factory read write.
 /// Not sure why this trait is missing from reth. Perhaps we can upstream.

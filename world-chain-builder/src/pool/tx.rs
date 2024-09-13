@@ -6,19 +6,29 @@ use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransa
 
 use crate::pbh::semaphore::SemaphoreProof;
 
+pub trait WcPoolTransaction: EthPoolTransaction {
+    fn semaphore_proof(&self) -> Option<&SemaphoreProof>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorldChainPooledTransaction {
+pub struct WcPooledTransaction {
     pub inner: EthPooledTransaction,
     pub semaphore_proof: Option<SemaphoreProof>,
 }
 
-impl From<WorldChainPooledTransaction> for TransactionSignedEcRecovered {
-    fn from(tx: WorldChainPooledTransaction) -> Self {
+impl WcPoolTransaction for WcPooledTransaction {
+    fn semaphore_proof(&self) -> Option<&SemaphoreProof> {
+        self.semaphore_proof.as_ref()
+    }
+}
+
+impl From<WcPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: WcPooledTransaction) -> Self {
         tx.inner.into_consensus()
     }
 }
 
-impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for WcPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
     fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
@@ -29,7 +39,7 @@ impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
+impl From<PooledTransactionsElementEcRecovered> for WcPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
         Self {
             inner: EthPooledTransaction::from_pooled(tx),
@@ -38,7 +48,7 @@ impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction 
     }
 }
 
-impl PoolTransaction for WorldChainPooledTransaction {
+impl PoolTransaction for WcPooledTransaction {
     type TryFromConsensusError = <EthPooledTransaction as PoolTransaction>::TryFromConsensusError;
 
     type Consensus = TransactionSignedEcRecovered;
@@ -132,7 +142,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl EthPoolTransaction for WorldChainPooledTransaction {
+impl EthPoolTransaction for WcPooledTransaction {
     fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
         self.inner.take_blob()
     }
