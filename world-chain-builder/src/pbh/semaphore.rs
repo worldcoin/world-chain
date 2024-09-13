@@ -48,7 +48,8 @@ impl Encodable for Proof {
     }
 }
 
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+// #[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SemaphoreProof {
     pub root: Field,
     pub nullifier_hash: Field,

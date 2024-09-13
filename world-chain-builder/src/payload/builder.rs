@@ -1,10 +1,18 @@
 use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
+    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
+    MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_node_optimism::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_evm_optimism::OptimismEvmConfig;
+use reth_node_builder::components::PayloadServiceBuilder;
+use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
+use reth_node_optimism::{
+    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilderAttributes,
+};
 use reth_payload_builder::error::PayloadBuilderError;
-use reth_provider::StateProviderFactory;
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::{CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 /// Priority blockspace for humans builder
@@ -52,5 +60,59 @@ where
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
         todo!()
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct WcPayloadServiceBuilder<EVM = OptimismEvmConfig> {
+    /// The EVM configuration to use for the payload builder.
+    pub evm_config: EVM,
+}
+
+impl<EVM> WcPayloadServiceBuilder<EVM> {
+    pub const fn new(evm_config: EVM) -> Self {
+        Self { evm_config }
+    }
+}
+
+impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for WcPayloadServiceBuilder<EVM>
+where
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+    >,
+    Pool: TransactionPool + Unpin + 'static,
+    EVM: ConfigureEvm,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
+        let payload_builder = PBHBuilder::new(self.evm_config);
+
+        let conf = ctx.payload_builder_config();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            // no extradata for OP
+            .extradata(Default::default());
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            pool,
+            ctx.task_executor().clone(),
+            payload_job_config,
+            ctx.chain_spec(),
+            payload_builder,
+        );
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        ctx.task_executor()
+            .spawn_critical("payload builder service", Box::pin(payload_service));
+
+        Ok(payload_builder)
     }
 }

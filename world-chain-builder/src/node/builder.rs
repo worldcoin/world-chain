@@ -1,24 +1,16 @@
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::ChainSpec;
-use reth_evm::ConfigureEvm;
 use reth_node_builder::{
-    components::{ComponentsBuilder, PayloadServiceBuilder},
-    BuilderContext, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine, PayloadBuilderConfig,
+    components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_optimism::{
     args::RollupArgs,
     node::{OptimismAddOns, OptimismConsensusBuilder},
     OptimismEngineTypes, OptimismEvmConfig,
 };
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_provider::CanonStateSubscriptions;
-use reth_transaction_pool::TransactionPool;
 
 use crate::{
-    executer::builder::WcExecutorBuilder,
-    network::builder::WcNetworkBuilder,
-    payload::builder::PBHBuilder,
-    pool::builder::WcPoolBuilder, // payload::PBHBuilder,
+    executer::builder::WcExecutorBuilder, network::builder::WcNetworkBuilder,
+    payload::builder::WcPayloadServiceBuilder, pool::builder::WcPoolBuilder,
 };
 
 use super::args::{ExtArgs, WcBuilderArgs};
@@ -40,7 +32,7 @@ impl WorldChainBuilder {
     ) -> ComponentsBuilder<
         Node,
         WcPoolBuilder,
-        WcPayloadBuilder,
+        WcPayloadServiceBuilder,
         WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
@@ -59,7 +51,7 @@ impl WorldChainBuilder {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WcPoolBuilder { clear_nullifiers })
-            .payload(WcPayloadBuilder::new(OptimismEvmConfig::default()))
+            .payload(WcPayloadServiceBuilder::new(OptimismEvmConfig::default()))
             .network(WcNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -78,7 +70,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WcPoolBuilder,
-        WcPayloadBuilder,
+        WcPayloadServiceBuilder,
         WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
@@ -99,58 +91,4 @@ impl NodeTypes for WorldChainBuilder {
 
 impl NodeTypesWithEngine for WorldChainBuilder {
     type Engine = OptimismEngineTypes;
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct WcPayloadBuilder<EVM = OptimismEvmConfig> {
-    /// The EVM configuration to use for the payload builder.
-    pub evm_config: EVM,
-}
-
-impl<EVM> WcPayloadBuilder<EVM> {
-    pub const fn new(evm_config: EVM) -> Self {
-        Self { evm_config }
-    }
-}
-
-impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for WcPayloadBuilder<EVM>
-where
-    Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
-    >,
-    Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
-{
-    async fn spawn_payload_service(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let payload_builder = PBHBuilder::new(self.evm_config);
-
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            // no extradata for OP
-            .extradata(Default::default());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            pool,
-            ctx.task_executor().clone(),
-            payload_job_config,
-            ctx.chain_spec(),
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor()
-            .spawn_critical("payload builder service", Box::pin(payload_service));
-
-        Ok(payload_builder)
-    }
 }
