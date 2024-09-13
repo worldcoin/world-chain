@@ -1,18 +1,18 @@
-use std::sync::Arc;
-
 use reth_chainspec::ChainSpec;
 use reth_db::mdbx::DatabaseArguments;
 use reth_db::{create_db, DatabaseEnv};
 use reth_node_builder::components::PoolBuilder;
-use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
+use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_provider::{CanonStateSubscriptions as _, DatabaseProviderFactory};
+use reth_provider::{CanonStateSubscriptions as _, DatabaseProviderFactory, ProviderFactory};
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
+use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::pool::validator::WcTransactionValidator;
 
+use super::provider::DatabaseProviderFactoryRW;
 use super::validator::WorldChainTransactionPool;
 
 // use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
@@ -29,9 +29,12 @@ pub struct WcPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for WcPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
-    // TODO: replace Arc<DatabaseEnv> with generic DB type
-    <Node as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<ChainSpec = ChainSpec>,
+        // + NodeTypesWithDB<DB = Arc<DatabaseEnv>>,
+        // Provider = ProviderFactory<NodeTypesWithDB<DB = Arc<DatabaseEnv>>>,
+        // Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>
+    >,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -39,9 +42,6 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
-        // TODO: couldn't figure out how to get write access to the database from ctx (perhaps not
-        // possible) so creating one here as a workaround. Maybe this is actually the best approach?
-        //
         let path = data_dir.data_dir().join("semaphore-nullifiers");
         if self.clear_nullifiers {
             info!(?path, "Clearing semaphore-nullifiers database");

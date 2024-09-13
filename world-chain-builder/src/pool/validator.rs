@@ -1,5 +1,8 @@
 //! World Chain transaction pool types
+use reth_db::transaction::DbTx;
+use reth_transaction_pool::error::InvalidPoolTransactionError;
 use std::sync::Arc;
+use tracing::error;
 
 use reth_db::{Database, DatabaseEnv};
 use reth_node_builder::NodeTypesWithDB;
@@ -7,12 +10,14 @@ use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, DatabaseProviderFactory, StateProviderFactory};
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, TransactionOrigin,
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, PoolTransaction,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
 
 use crate::pbh::db::NullifierTable;
 
+use super::error::WcTransactionPoolError;
 use super::tx::WorldChainPooledTransaction;
 
 /// Type alias for World Chain transaction pool
@@ -26,7 +31,7 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
 #[derive(Debug, Clone)]
 pub struct WcTransactionValidator<Client, Tx>
 where
-    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt,
     // Client: DatabaseProviderFactory<N::DB> + StateProviderFactory + BlockReaderIdExt,
 {
     inner: OpTransactionValidator<Client, Tx>,
@@ -34,16 +39,16 @@ where
     tmp_workaround: EthTransactionValidator<Client, Tx>,
 }
 
-impl<Client, Tx> WcTransactionValidator<Client, Tx>
+impl<Client> WcTransactionValidator<Client, WorldChainPooledTransaction>
 where
-    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt,
     //    Tx: EthPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
-        inner: OpTransactionValidator<Client, Tx>,
+        inner: OpTransactionValidator<Client, WorldChainPooledTransaction>,
         database_env: Arc<DatabaseEnv>,
-        tmp_workaround: EthTransactionValidator<Client, Tx>,
+        tmp_workaround: EthTransactionValidator<Client, WorldChainPooledTransaction>,
     ) -> Self {
         Self {
             inner,
@@ -51,13 +56,40 @@ where
             tmp_workaround,
         }
     }
+
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: WorldChainPooledTransaction,
+    ) -> TransactionValidationOutcome<WorldChainPooledTransaction> {
+        if let Some(ref proof) = transaction.semaphore_proof {
+            let tx = self.database_env.tx().unwrap();
+            match tx.get::<NullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
+                Ok(Some(_)) => {
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidPoolTransactionError::Other(
+                            WcTransactionPoolError::NullifierAlreadyExists.into(),
+                        ),
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return TransactionValidationOutcome::Error(
+                        *transaction.inner.hash(),
+                        format!("Error while fetching nullifier from database: {}", e).into(),
+                    );
+                }
+            }
+        }
+
+        self.inner.validate_one(origin, transaction)
+    }
 }
 
 impl<Client> TransactionValidator for WcTransactionValidator<Client, WorldChainPooledTransaction>
 where
-    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
-    // <Client as DatabaseProviderFactory<N::DB>>::DB: Database,
-    // Tx: EthPoolTransaction,
+    Client: StateProviderFactory + BlockReaderIdExt,
 {
     type Transaction = WorldChainPooledTransaction;
 
@@ -66,79 +98,21 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        let client = self.tmp_workaround.client();
-        let tx = self.database_env.tx_mut().unwrap();
-        let table = tx.get_dbi::<NullifierTable>().unwrap();
-        // table.wrapping_shr
-
-        self.inner.validate_transaction(origin, transaction).await
+        self.validate_one(origin, transaction)
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.inner.validate_transactions(transactions).await
+        // TODO: do we want multithreading here?
+        transactions
+            .into_iter()
+            .map(|(origin, tx)| self.validate_one(origin, tx))
+            .collect()
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
         self.inner.on_new_head_block(new_tip_block)
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use reth_chainspec::MAINNET;
-//     use reth_node_optimism::txpool::OpTransactionValidator;
-//     use reth_primitives::{
-//         Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
-//         U256,
-//     };
-//     use reth_provider::test_utils::MockEthProvider;
-//     use reth_transaction_pool::TransactionValidator as _;
-//     use reth_transaction_pool::{
-//         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-//         EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
-//     };
-//
-//     use crate::txpool::WorldChainTransactionValidator;
-//
-//     #[tokio::test]
-//     async fn validate_optimism_transaction() {
-//         let client = MockEthProvider::default();
-//         let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-//             .no_shanghai()
-//             .no_cancun()
-//             .build(client, InMemoryBlobStore::default());
-//         let op = OpTransactionValidator::new(validator);
-//         let validator = WorldChainTransactionValidator::new(op);
-//
-//         let origin = TransactionOrigin::External;
-//         let signer = Default::default();
-//         let deposit_tx = Transaction::Deposit(TxDeposit {
-//             source_hash: Default::default(),
-//             from: signer,
-//             to: TxKind::Create,
-//             mint: None,
-//             value: U256::ZERO,
-//             gas_limit: 0,
-//             is_system_transaction: false,
-//             input: Default::default(),
-//         });
-//         let signature = Signature::default();
-//         let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
-//         let signed_recovered =
-//             TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-//         let len = signed_recovered.length_without_header();
-//         let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-//         let outcome = validator
-//             .validate_transaction(origin, pooled_tx.clone())
-//             .await;
-//
-//         let err = match outcome {
-//             TransactionValidationOutcome::Invalid(_, err) => err,
-//             _ => panic!("Expected invalid transaction"),
-//         };
-//         assert_eq!(err.to_string(), "transaction type not supported");
-//     }
-// }

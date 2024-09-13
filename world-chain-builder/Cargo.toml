@@ -45,6 +45,7 @@ op-alloy-consensus = "0.2"
 alloy-rlp = "0.3"
 
 # other
+thiserror = "1"
 bytemuck = "1"
 revm-primitives = { version = "9.0.0", default-features = false, features = [
     "std",

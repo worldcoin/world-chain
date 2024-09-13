@@ -13,8 +13,10 @@ use reth_node_optimism::{
 use reth_provider::DatabaseProviderFactory;
 
 use crate::{
-    executer::builder::WcExecutorBuilder, network::builder::WcNetworkBuilder,
-    payload::builder::WcPayloadServiceBuilder, pool::builder::WcPoolBuilder,
+    executer::builder::WcExecutorBuilder,
+    network::builder::WcNetworkBuilder,
+    payload::builder::WcPayloadServiceBuilder,
+    pool::{builder::WcPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
 use super::args::{ExtArgs, WcBuilderArgs};
@@ -44,8 +46,8 @@ impl WorldChainBuilder {
     where
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
-        <Node as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
     {
         let WcBuilderArgs { clear_nullifiers } = args.builder_args;
         let RollupArgs {
@@ -71,7 +73,7 @@ where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
-    <N as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
+    <N as FullNodeTypes>::Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
