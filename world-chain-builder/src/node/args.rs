@@ -20,6 +20,6 @@ pub struct WcBuilderArgs {
     pub clear_nullifiers: bool,
 
     /// Sets the number of allowed PBH transactions per month
-    #[arg(long = "builder.num_pbh_txs")]
+    #[arg(long = "builder.num_pbh_txs", default_value = "30")]
     pub num_pbh_txs: u16,
 }
