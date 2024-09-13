@@ -1,4 +1,4 @@
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable};
 use eyre::eyre::bail;
 use semaphore::protocol::verify_proof;
 use semaphore::Field;

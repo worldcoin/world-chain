@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use reth_chainspec::ChainSpec;
-use reth_db::create_db;
 use reth_db::mdbx::DatabaseArguments;
+use reth_db::{create_db, DatabaseEnv};
 use reth_node_builder::components::PoolBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_provider::CanonStateSubscriptions as _;
+use reth_provider::{CanonStateSubscriptions as _, DatabaseProviderFactory};
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
 use tracing::{debug, info};
@@ -30,6 +30,8 @@ pub struct WcPoolBuilder {
 impl<Node> PoolBuilder<Node> for WcPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    // TODO: replace Arc<DatabaseEnv> with generic DB type
+    <Node as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 

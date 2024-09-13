@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use reth_chainspec::ChainSpec;
+use reth_db::DatabaseEnv;
 use reth_node_builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
 };
@@ -7,6 +10,7 @@ use reth_node_optimism::{
     node::{OptimismAddOns, OptimismConsensusBuilder},
     OptimismEngineTypes, OptimismEvmConfig,
 };
+use reth_provider::DatabaseProviderFactory;
 
 use crate::{
     executer::builder::WcExecutorBuilder, network::builder::WcNetworkBuilder,
@@ -41,6 +45,7 @@ impl WorldChainBuilder {
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
         >,
+        <Node as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
     {
         let WcBuilderArgs { clear_nullifiers } = args.builder_args;
         let RollupArgs {
@@ -66,6 +71,7 @@ where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
+    <N as FullNodeTypes>::Provider: DatabaseProviderFactory<Arc<DatabaseEnv>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

@@ -2,9 +2,10 @@
 use std::sync::Arc;
 
 use reth_db::{Database, DatabaseEnv};
+use reth_node_builder::NodeTypesWithDB;
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::SealedBlock;
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, DatabaseProviderFactory, StateProviderFactory};
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
@@ -23,7 +24,11 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WcTransactionValidator<Client, Tx> {
+pub struct WcTransactionValidator<Client, Tx>
+where
+    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
+    // Client: DatabaseProviderFactory<N::DB> + StateProviderFactory + BlockReaderIdExt,
+{
     inner: OpTransactionValidator<Client, Tx>,
     database_env: Arc<DatabaseEnv>,
     tmp_workaround: EthTransactionValidator<Client, Tx>,
@@ -31,7 +36,7 @@ pub struct WcTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> WcTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
     //    Tx: EthPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
@@ -50,7 +55,8 @@ where
 
 impl<Client> TransactionValidator for WcTransactionValidator<Client, WorldChainPooledTransaction>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: DatabaseProviderFactory<Arc<DatabaseEnv>> + StateProviderFactory + BlockReaderIdExt,
+    // <Client as DatabaseProviderFactory<N::DB>>::DB: Database,
     // Tx: EthPoolTransaction,
 {
     type Transaction = WorldChainPooledTransaction;
@@ -60,8 +66,11 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        let client = self.tmp_workaround.client();
         let tx = self.database_env.tx_mut().unwrap();
-        tx.get_dbi::<NullifierTable>().unwrap();
+        let table = tx.get_dbi::<NullifierTable>().unwrap();
+        // table.wrapping_shr
+
         self.inner.validate_transaction(origin, transaction).await
     }
 
