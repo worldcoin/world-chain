@@ -14,7 +14,7 @@ use reth_transaction_pool::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
-use crate::pbh::db::NullifierTable;
+use crate::pbh::db::ExecutedPbhNullifierTable;
 use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
@@ -82,6 +82,8 @@ where
         }
 
         // TODO: Figure out what we actually want to do with the prefix
+        // For now, we just check that it's a valid prefix
+        // Maybe in future use as some sort of versioning?
         if Prefix::from_str(split[0]).is_err() {
             return Err(TransactionValidationError::Invalid(
                 InvalidPoolTransactionError::Other(
@@ -90,6 +92,7 @@ where
             ));
         }
 
+        // TODO: Handle edge case where we are at the end of the month
         if split[1] != current_period_id() {
             return Err(TransactionValidationError::Invalid(
                 InvalidPoolTransactionError::Other(
@@ -115,7 +118,7 @@ where
     pub fn validate_nullifier(&self, transaction: &Tx) -> Result<(), TransactionValidationError> {
         if let Some(proof) = transaction.semaphore_proof() {
             let tx = self.database_env.tx().unwrap();
-            match tx.get::<NullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
+            match tx.get::<ExecutedPbhNullifierTable>(proof.nullifier_hash.to_be_bytes().into()) {
                 Ok(Some(_)) => {
                     return Err(TransactionValidationError::Invalid(
                         InvalidPoolTransactionError::Other(
