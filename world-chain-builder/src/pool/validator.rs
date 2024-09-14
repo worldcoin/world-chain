@@ -23,8 +23,6 @@ use crate::pbh::tx::Prefix;
 use super::error::{TransactionValidationError, WcTransactionPoolError, WcTransactionPoolInvalid};
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
-/// TODO: Might be nice to create some generics to encapsulate this.
-///
 /// Type alias for World Chain transaction pool
 pub type WcTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<WcTransactionValidator<Client, WcPooledTransaction>>,

@@ -5,7 +5,9 @@ use reth_basic_payload_builder::{
     MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::ChainSpec;
-use reth_db::DatabaseEnv;
+use reth_db::cursor::DbCursorRW;
+use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db::{Database as _, DatabaseEnv, DatabaseError};
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::OptimismEvmConfig;
 use reth_node_builder::components::PayloadServiceBuilder;
@@ -15,10 +17,14 @@ use reth_node_optimism::{
 };
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::TxHash;
 use reth_provider::{CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
+use revm_primitives::FixedBytes;
+use semaphore::Field;
 
 use crate::node::builder::load_world_chain_db;
+use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
@@ -38,35 +44,18 @@ impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
         }
     }
 
-    // fn set_validated(
-    //     &self,
-    //     tx: &Tx,
-    //     semaphore_proof: &SemaphoreProof,
-    // ) -> Result<(), DatabaseError> {
-    //     let db_tx = self.database_env.tx_mut()?;
-    //     let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
-    //     cursor.insert(
-    //         *tx.hash(),
-    //         semaphore_proof.nullifier_hash.to_be_bytes().into(),
-    //     )?;
-    //     db_tx.commit()?;
-    //     Ok(())
-    // }
-    //
-    // fn set_validated(
-    //     &self,
-    //     tx: &Tx,
-    //     semaphore_proof: &SemaphoreProof,
-    // ) -> Result<(), DatabaseError> {
-    //     let db_tx = self.database_env.tx_mut()?;
-    //     let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
-    //     cursor.insert(
-    //         *tx.hash(),
-    //         semaphore_proof.nullifier_hash.to_be_bytes().into(),
-    //     )?;
-    //     db_tx.commit()?;
-    //     Ok(())
-    // }
+    pub fn get_pbh_priority(&self, tx: TxHash) -> Result<Option<FixedBytes<32>>, DatabaseError> {
+        let db_tx = self.database_env.tx()?;
+        db_tx.get::<ValidatedPbhTransactionTable>(tx)
+    }
+
+    fn set_pbh_nullifier(&self, nullifier: FixedBytes<32>) -> Result<(), DatabaseError> {
+        let db_tx = self.database_env.tx_mut()?;
+        let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
+        cursor.insert(nullifier, EmptyValue)?;
+        db_tx.commit()?;
+        Ok(())
+    }
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
