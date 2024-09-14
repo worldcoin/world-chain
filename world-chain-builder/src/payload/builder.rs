@@ -14,6 +14,7 @@ use reth_evm::ConfigureEvm;
 use reth_evm_optimism::OptimismEvmConfig;
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
+use reth_node_optimism::node::OptimismPayloadBuilder;
 use reth_node_optimism::{
     OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilderAttributes,
 };
@@ -30,18 +31,22 @@ use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransact
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
-pub struct WcPayloadBuilder<EvmConfig> {
-    // NOTE: do we need this?
-    // compute_pending_block: bool,
-    evm_config: EvmConfig,
+pub struct WorldChainPayloadBuilder<EvmConfig> {
+    inner: OptimismPayloadBuilder<EvmConfig>,
     database_env: Arc<DatabaseEnv>,
 }
 
-impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
+impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, database_env: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(
+        compute_pending_block: bool,
+        evm_config: EvmConfig,
+        database_env: Arc<DatabaseEnv>,
+    ) -> Self {
+        let inner = OptimismPayloadBuilder::new(compute_pending_block, evm_config);
+
         Self {
-            evm_config,
+            inner,
             database_env,
         }
     }
@@ -71,7 +76,7 @@ impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WcPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
@@ -104,24 +109,25 @@ where
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WcPayloadServiceBuilder<EVM = OptimismEvmConfig> {
+pub struct WorldChainPayloadServiceBuilder<EvmConfig = OptimismEvmConfig> {
     /// The EVM configuration to use for the payload builder.
-    pub evm_config: EVM,
+    pub evm_config: EvmConfig,
 }
 
-impl<EVM> WcPayloadServiceBuilder<EVM> {
-    pub const fn new(evm_config: EVM) -> Self {
+impl<EvmConfig> WorldChainPayloadServiceBuilder<EvmConfig> {
+    pub const fn new(evm_config: EvmConfig) -> Self {
         Self { evm_config }
     }
 }
 
-impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for WcPayloadServiceBuilder<EVM>
+impl<Node, EvmConfig, Pool> PayloadServiceBuilder<Node, Pool>
+    for WorldChainPayloadServiceBuilder<EvmConfig>
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EvmConfig: ConfigureEvm,
 {
     async fn spawn_payload_service(
         self,
@@ -130,7 +136,7 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
         let data_dir = ctx.config().datadir();
         let db = load_world_chain_db(data_dir.data_dir(), false)?;
-        let payload_builder = WcPayloadBuilder::new(self.evm_config, db);
+        let payload_builder = WorldChainPayloadBuilder::new(true, self.evm_config, db);
 
         let conf = ctx.payload_builder_config();
 

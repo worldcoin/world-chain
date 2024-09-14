@@ -13,9 +13,9 @@ use reth_node_optimism::{
 use tracing::info;
 
 use crate::{
-    executer::builder::WcExecutorBuilder,
+    executor::builder::WcExecutorBuilder,
     network::builder::WcNetworkBuilder,
-    payload::builder::WcPayloadServiceBuilder,
+    payload::builder::WorldChainPayloadServiceBuilder,
     pool::{builder::WcPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
@@ -38,7 +38,7 @@ impl WorldChainBuilder {
     ) -> ComponentsBuilder<
         Node,
         WcPoolBuilder,
-        WcPayloadServiceBuilder,
+        WorldChainPayloadServiceBuilder,
         WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
@@ -64,7 +64,9 @@ impl WorldChainBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
-            .payload(WcPayloadServiceBuilder::new(OptimismEvmConfig::default()))
+            .payload(WorldChainPayloadServiceBuilder::new(
+                OptimismEvmConfig::default(),
+            ))
             .network(WcNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -84,7 +86,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WcPoolBuilder,
-        WcPayloadServiceBuilder,
+        WorldChainPayloadServiceBuilder,
         WcNetworkBuilder,
         WcExecutorBuilder,
         OptimismConsensusBuilder,
