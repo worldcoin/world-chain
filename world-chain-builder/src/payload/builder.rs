@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::ChainSpec;
+use reth_db::DatabaseEnv;
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::OptimismEvmConfig;
 use reth_node_builder::components::PayloadServiceBuilder;
@@ -15,19 +18,55 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
+use crate::node::builder::load_world_chain_db;
+
 /// Priority blockspace for humans builder
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct WcPayloadBuilder<EvmConfig> {
     // NOTE: do we need this?
     // compute_pending_block: bool,
     evm_config: EvmConfig,
+    database_env: Arc<DatabaseEnv>,
 }
 
 impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { evm_config }
+    pub const fn new(evm_config: EvmConfig, database_env: Arc<DatabaseEnv>) -> Self {
+        Self {
+            evm_config,
+            database_env,
+        }
     }
+
+    // fn set_validated(
+    //     &self,
+    //     tx: &Tx,
+    //     semaphore_proof: &SemaphoreProof,
+    // ) -> Result<(), DatabaseError> {
+    //     let db_tx = self.database_env.tx_mut()?;
+    //     let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+    //     cursor.insert(
+    //         *tx.hash(),
+    //         semaphore_proof.nullifier_hash.to_be_bytes().into(),
+    //     )?;
+    //     db_tx.commit()?;
+    //     Ok(())
+    // }
+    //
+    // fn set_validated(
+    //     &self,
+    //     tx: &Tx,
+    //     semaphore_proof: &SemaphoreProof,
+    // ) -> Result<(), DatabaseError> {
+    //     let db_tx = self.database_env.tx_mut()?;
+    //     let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+    //     cursor.insert(
+    //         *tx.hash(),
+    //         semaphore_proof.nullifier_hash.to_be_bytes().into(),
+    //     )?;
+    //     db_tx.commit()?;
+    //     Ok(())
+    // }
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
@@ -88,7 +127,9 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let payload_builder = WcPayloadBuilder::new(self.evm_config);
+        let data_dir = ctx.config().datadir();
+        let db = load_world_chain_db(data_dir.data_dir(), false)?;
+        let payload_builder = WcPayloadBuilder::new(self.evm_config, db);
 
         let conf = ctx.payload_builder_config();
 

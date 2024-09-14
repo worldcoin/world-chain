@@ -23,9 +23,12 @@ use crate::pbh::tx::Prefix;
 use super::error::{TransactionValidationError, WcTransactionPoolError, WcTransactionPoolInvalid};
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
+/// TODO: Might be nice to create some generics to encapsulate this.
+///
 /// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S> = Pool<
+pub type WcTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<WcTransactionValidator<Client, WcPooledTransaction>>,
+    // TODO: Modify this ordering
     CoinbaseTipOrdering<WcPooledTransaction>,
     S,
 >;
@@ -73,6 +76,7 @@ where
             *tx.hash(),
             semaphore_proof.nullifier_hash.to_be_bytes().into(),
         )?;
+        db_tx.commit()?;
         Ok(())
     }
 
@@ -170,6 +174,7 @@ where
         self.validate_nullifier_hash(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
 
+        // TODO: Think about DOS mitigation.
         let res = verify_proof(
             semaphore_proof.root,
             semaphore_proof.nullifier_hash,

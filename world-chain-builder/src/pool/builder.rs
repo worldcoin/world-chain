@@ -7,12 +7,14 @@ use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
+use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+use crate::node::builder::load_world_chain_db;
 use crate::pool::validator::WcTransactionValidator;
 
-use super::validator::WorldChainTransactionPool;
+use super::validator::WcTransactionPool;
 
 // use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
 
@@ -31,23 +33,12 @@ impl<Node> PoolBuilder<Node> for WcPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
-    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = WcTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-
-        let path = data_dir.data_dir().join("semaphore-nullifiers");
-        if self.clear_nullifiers {
-            info!(?path, "Clearing semaphore-nullifiers database");
-            // delete the directory
-            std::fs::remove_dir_all(&path)?;
-        }
-        info!(?path, "Opening semaphore-nullifiers database");
-        let db = Arc::new(create_db(
-            data_dir.data_dir().join("semaphore-nullifiers"),
-            DatabaseArguments::default(),
-        )?);
+        let db = load_world_chain_db(data_dir.data_dir(), self.clear_nullifiers)?;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
