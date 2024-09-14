@@ -6,6 +6,8 @@ use reth_basic_payload_builder::{
 };
 use reth_chainspec::ChainSpec;
 use reth_db::cursor::DbCursorRW;
+use reth_db::mdbx::tx::Tx;
+use reth_db::mdbx::{RO, RW};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_db::{Database as _, DatabaseEnv, DatabaseError};
 use reth_evm::ConfigureEvm;
@@ -44,16 +46,26 @@ impl<EvmConfig> WcPayloadBuilder<EvmConfig> {
         }
     }
 
-    pub fn get_pbh_priority(&self, tx: TxHash) -> Result<Option<FixedBytes<32>>, DatabaseError> {
-        let db_tx = self.database_env.tx()?;
+    /// Check the database to see if a tx has been validated for PBH
+    /// If so return the nullifier
+    pub fn get_pbh_validated(
+        &self,
+        db_tx: Tx<RW>,
+        tx: TxHash,
+    ) -> Result<Option<FixedBytes<32>>, DatabaseError> {
         db_tx.get::<ValidatedPbhTransactionTable>(tx)
     }
 
-    fn set_pbh_nullifier(&self, nullifier: FixedBytes<32>) -> Result<(), DatabaseError> {
-        let db_tx = self.database_env.tx_mut()?;
+    /// Set the store the nullifier for a tx after it
+    /// has been included in the block
+    /// don't forget to call db_tx.commit() at the very end
+    fn set_pbh_nullifier(
+        &self,
+        db_tx: Tx<RW>,
+        nullifier: FixedBytes<32>,
+    ) -> Result<(), DatabaseError> {
         let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
         cursor.insert(nullifier, EmptyValue)?;
-        db_tx.commit()?;
         Ok(())
     }
 }
