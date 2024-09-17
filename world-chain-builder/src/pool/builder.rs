@@ -1,17 +1,14 @@
 use reth_chainspec::ChainSpec;
-use reth_db::create_db;
-use reth_db::mdbx::DatabaseArguments;
 use reth_node_builder::components::PoolBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
-use reth_transaction_pool::{CoinbaseTipOrdering, TransactionValidationTaskExecutor};
-use std::path::Path;
-use std::sync::Arc;
+use reth_transaction_pool::TransactionValidationTaskExecutor;
 use tracing::{debug, info};
 
 use crate::node::builder::load_world_chain_db;
+use crate::pool::ordering::WorldCoinOrdering;
 use crate::pool::validator::WcTransactionValidator;
 
 use super::validator::WcTransactionPool;
@@ -62,12 +59,10 @@ where
                 )
             });
 
-        let transaction_pool = reth_transaction_pool::Pool::new(
-            validator,
-            CoinbaseTipOrdering::default(),
-            blob_store,
-            ctx.pool_config(),
-        );
+        let ordering = WorldCoinOrdering::new(db.clone());
+
+        let transaction_pool =
+            reth_transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 

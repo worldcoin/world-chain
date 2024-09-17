@@ -12,8 +12,8 @@ use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthTransactionValidator, Pool, TransactionOrigin,
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+    EthTransactionValidator, Pool, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
@@ -21,13 +21,14 @@ use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
 use super::error::{TransactionValidationError, WcTransactionPoolError, WcTransactionPoolInvalid};
+use super::ordering::WorldCoinOrdering;
 use super::tx::{WcPoolTransaction, WcPooledTransaction};
 
 /// Type alias for World Chain transaction pool
 pub type WcTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<WcTransactionValidator<Client, WcPooledTransaction>>,
     // TODO: Modify this ordering
-    CoinbaseTipOrdering<WcPooledTransaction>,
+    WorldCoinOrdering<WcPooledTransaction>,
     S,
 >;
 
