@@ -13,13 +13,13 @@ use reth_node_optimism::{
 use tracing::info;
 
 use crate::{
-    executor::builder::WcExecutorBuilder,
-    network::builder::WcNetworkBuilder,
+    executor::builder::WorldCoinExecutorBuilder,
+    network::builder::WorldCoinNetworkBuilder,
     payload::builder::WorldChainPayloadServiceBuilder,
-    pool::{builder::WcPoolBuilder, provider::DatabaseProviderFactoryRW},
+    pool::{builder::WorldCoinPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
-use super::args::{ExtArgs, WcBuilderArgs};
+use super::args::{ExtArgs, WorldCoinBuilderArgs};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
@@ -37,10 +37,10 @@ impl WorldChainBuilder {
         args: ExtArgs,
     ) -> ComponentsBuilder<
         Node,
-        WcPoolBuilder,
+        WorldCoinPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WcNetworkBuilder,
-        WcExecutorBuilder,
+        WorldCoinNetworkBuilder,
+        WorldCoinExecutorBuilder,
         OptimismConsensusBuilder,
     >
     where
@@ -49,7 +49,7 @@ impl WorldChainBuilder {
             Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
     {
-        let WcBuilderArgs {
+        let WorldCoinBuilderArgs {
             clear_nullifiers,
             num_pbh_txs,
         } = args.builder_args;
@@ -60,18 +60,18 @@ impl WorldChainBuilder {
         } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WcPoolBuilder {
+            .pool(WorldCoinPoolBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
             .payload(WorldChainPayloadServiceBuilder::new(
                 OptimismEvmConfig::default(),
             ))
-            .network(WcNetworkBuilder {
+            .network(WorldCoinNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(WcExecutorBuilder::default())
+            .executor(WorldCoinExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
 }
@@ -85,10 +85,10 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        WcPoolBuilder,
+        WorldCoinPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WcNetworkBuilder,
-        WcExecutorBuilder,
+        WorldCoinNetworkBuilder,
+        WorldCoinExecutorBuilder,
         OptimismConsensusBuilder,
     >;
 

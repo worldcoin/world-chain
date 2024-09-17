@@ -1,4 +1,4 @@
-use super::tx::WcPoolTransaction;
+use super::tx::WorldCoinPoolTransaction;
 use crate::pbh::db::ValidatedPbhTransactionTable;
 use reth_db::transaction::DbTx;
 use reth_db::{Database as _, DatabaseEnv, DatabaseError};
@@ -27,7 +27,7 @@ pub struct WorldCoinPriority {
 
 impl<T> WorldCoinOrdering<T>
 where
-    T: WcPoolTransaction + 'static,
+    T: WorldCoinPoolTransaction + 'static,
 {
     /// Create a new [`WorldCoinOrdering`].
     pub fn new(database_env: Arc<DatabaseEnv>) -> Self {
@@ -52,7 +52,7 @@ where
 
 impl<T> TransactionOrdering for WorldCoinOrdering<T>
 where
-    T: WcPoolTransaction + 'static,
+    T: WorldCoinPoolTransaction + 'static,
 {
     type PriorityValue = WorldCoinPriority;
     type Transaction = T;

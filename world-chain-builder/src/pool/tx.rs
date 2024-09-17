@@ -6,29 +6,29 @@ use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransa
 
 use crate::pbh::semaphore::SemaphoreProof;
 
-pub trait WcPoolTransaction: EthPoolTransaction {
+pub trait WorldCoinPoolTransaction: EthPoolTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WcPooledTransaction {
+pub struct WorldCoinPooledTransaction {
     pub inner: EthPooledTransaction,
     pub semaphore_proof: Option<SemaphoreProof>,
 }
 
-impl WcPoolTransaction for WcPooledTransaction {
+impl WorldCoinPoolTransaction for WorldCoinPooledTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof> {
         self.semaphore_proof.as_ref()
     }
 }
 
-impl From<WcPooledTransaction> for TransactionSignedEcRecovered {
-    fn from(tx: WcPooledTransaction) -> Self {
+impl From<WorldCoinPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: WorldCoinPooledTransaction) -> Self {
         tx.inner.into_consensus()
     }
 }
 
-impl TryFrom<TransactionSignedEcRecovered> for WcPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for WorldCoinPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
     fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
@@ -39,7 +39,7 @@ impl TryFrom<TransactionSignedEcRecovered> for WcPooledTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for WcPooledTransaction {
+impl From<PooledTransactionsElementEcRecovered> for WorldCoinPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
         Self {
             inner: EthPooledTransaction::from_pooled(tx),
@@ -48,7 +48,7 @@ impl From<PooledTransactionsElementEcRecovered> for WcPooledTransaction {
     }
 }
 
-impl PoolTransaction for WcPooledTransaction {
+impl PoolTransaction for WorldCoinPooledTransaction {
     type TryFromConsensusError = <EthPooledTransaction as PoolTransaction>::TryFromConsensusError;
 
     type Consensus = TransactionSignedEcRecovered;
@@ -142,7 +142,7 @@ impl PoolTransaction for WcPooledTransaction {
     }
 }
 
-impl EthPoolTransaction for WcPooledTransaction {
+impl EthPoolTransaction for WorldCoinPooledTransaction {
     fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
         self.inner.take_blob()
     }

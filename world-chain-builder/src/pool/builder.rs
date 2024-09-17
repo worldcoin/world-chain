@@ -9,9 +9,9 @@ use tracing::{debug, info};
 
 use crate::node::builder::load_world_chain_db;
 use crate::pool::ordering::WorldCoinOrdering;
-use crate::pool::validator::WcTransactionValidator;
+use crate::pool::validator::WorldCoinTransactionValidator;
 
-use super::validator::WcTransactionPool;
+use super::validator::WorldCoinTransactionPool;
 
 // use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
 
@@ -21,16 +21,16 @@ use super::validator::WcTransactionPool;
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct WcPoolBuilder {
+pub struct WorldCoinPoolBuilder {
     pub clear_nullifiers: bool,
     pub num_pbh_txs: u16,
 }
 
-impl<Node> PoolBuilder<Node> for WcPoolBuilder
+impl<Node> PoolBuilder<Node> for WorldCoinPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
-    type Pool = WcTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = WorldCoinTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
@@ -51,7 +51,7 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WcTransactionValidator::new(
+                WorldCoinTransactionValidator::new(
                     op_tx_validator,
                     db.clone(),
                     validator,

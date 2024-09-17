@@ -19,14 +19,14 @@ use std::sync::Arc;
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct WcExecutorBuilder;
+pub struct WorldCoinExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for WcExecutorBuilder
+impl<Node> ExecutorBuilder<Node> for WorldCoinExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = OptimismEvmConfig;
-    type Executor = WcExecutorProvider<Self::EVM>;
+    type Executor = WorldCoinExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
@@ -34,7 +34,7 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
         let evm_config = OptimismEvmConfig::default();
-        let executor = WcExecutorProvider::new(chain_spec, evm_config);
+        let executor = WorldCoinExecutorProvider::new(chain_spec, evm_config);
 
         Ok((evm_config, executor))
     }
@@ -42,22 +42,22 @@ where
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
-pub struct WcExecutorProvider<EvmConfig = OptimismEvmConfig> {
+pub struct WorldCoinExecutorProvider<EvmConfig = OptimismEvmConfig> {
     inner: OpExecutorProvider<EvmConfig>,
 }
 
-impl<EvmConfig> WcExecutorProvider<EvmConfig>
+impl<EvmConfig> WorldCoinExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    /// Create a new [`WcExecutorProvider`].
+    /// Create a new [`WorldCoinExecutorProvider`].
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         let inner = OpExecutorProvider::new(chain_spec, evm_config);
         Self { inner }
     }
 }
 
-impl<EvmConfig> BlockExecutorProvider for WcExecutorProvider<EvmConfig>
+impl<EvmConfig> BlockExecutorProvider for WorldCoinExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
@@ -65,17 +65,17 @@ where
     // It essentially doesn't let you change the type of BlockWithSenders.
     // Maybe I'm misunderstanding something...
     type Executor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
-        WcBlockExecutor<EvmConfig, DB>;
+        WorldCoinBlockExecutor<EvmConfig, DB>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
-        WcBatchExecutor<EvmConfig, DB>;
+        WorldCoinBatchExecutor<EvmConfig, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let inner = self.inner.executor(db);
-        WcBlockExecutor { inner }
+        WorldCoinBlockExecutor { inner }
     }
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
@@ -83,27 +83,21 @@ where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let inner = self.inner.batch_executor(db);
-        WcBatchExecutor { inner }
+        WorldCoinBatchExecutor { inner }
     }
 }
 
-// /// Helper container type for EVM with chain spec.
-// #[derive(Debug, Clone)]
-// struct WcEvmExecutor<EvmConfig> {
-//     inner: OpEvmExecutor<EvmConfig>,
-// }
-
 #[derive(Debug)]
-pub struct WcBlockExecutor<EvmConfig, DB> {
+pub struct WorldCoinBlockExecutor<EvmConfig, DB> {
     inner: OpBlockExecutor<EvmConfig, DB>,
 }
 
-impl<EvmConfig, DB> Executor<DB> for WcBlockExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> Executor<DB> for WorldCoinBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
-    // TODO: Why can't we change this BlockWithSenders to WcBlockWithSenders?
+    // TODO: Why can't we change this BlockWithSenders to WorldCoin BlockWithSenders?
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     // TODO: maybe we want some receipts for PBH here.
     type Output = BlockExecutionOutput<Receipt>;
@@ -150,16 +144,15 @@ where
 ///
 /// State changes are tracked until the executor is finalized.
 #[derive(Debug)]
-pub struct WcBatchExecutor<EvmConfig, DB> {
+pub struct WorldCoinBatchExecutor<EvmConfig, DB> {
     inner: OpBatchExecutor<EvmConfig, DB>,
 }
 
-impl<EvmConfig, DB> BatchExecutor<DB> for WcBatchExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> BatchExecutor<DB> for WorldCoinBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
-    // type Input<'a> = BlockExecutionInput<'a, WcBlockWithSenders>;
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;

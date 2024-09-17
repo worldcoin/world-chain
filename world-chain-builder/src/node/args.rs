@@ -9,12 +9,12 @@ pub struct ExtArgs {
 
     /// builder args
     #[command(flatten)]
-    pub builder_args: WcBuilderArgs,
+    pub builder_args: WorldCoinBuilderArgs,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
-pub struct WcBuilderArgs {
+pub struct WorldCoinBuilderArgs {
     /// Clears existing pbh semaphore nullifiers from the database
     #[arg(long = "builder.clear_nullifiers")]
     pub clear_nullifiers: bool,

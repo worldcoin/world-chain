@@ -5,14 +5,14 @@ use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth_transaction_pool::TransactionPool;
 
 #[derive(Debug, Default, Clone)]
-pub struct WcNetworkBuilder {
+pub struct WorldCoinNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for WcNetworkBuilder
+impl<Node, Pool> NetworkBuilder<Node, Pool> for WorldCoinNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
     Pool: TransactionPool + Unpin + 'static,

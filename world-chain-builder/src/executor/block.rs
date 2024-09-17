@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
-pub struct WcBlock {
+pub struct WorldCoinBlock {
     /// Block header.
     #[deref]
     pub header: Header,
@@ -22,8 +22,8 @@ pub struct WcBlock {
     pub requests: Option<Requests>,
 }
 
-impl From<WcBlock> for Block {
-    fn from(block: WcBlock) -> Self {
+impl From<WorldCoinBlock> for Block {
+    fn from(block: WorldCoinBlock) -> Self {
         Self {
             header: block.header,
             body: block.body,
@@ -36,28 +36,20 @@ impl From<WcBlock> for Block {
 
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
-pub struct WcBlockWithSenders {
+pub struct WorldCoinBlockWithSenders {
     /// Block
     #[deref]
     #[deref_mut]
-    pub block: WcBlock,
+    pub block: WorldCoinBlock,
     /// List of senders that match the transactions in the block
     pub senders: Vec<Address>,
 }
 
-impl From<WcBlockWithSenders> for BlockWithSenders {
-    fn from(block: WcBlockWithSenders) -> Self {
+impl From<WorldCoinBlockWithSenders> for BlockWithSenders {
+    fn from(block: WorldCoinBlockWithSenders) -> Self {
         Self {
             block: block.block.into(),
             senders: block.senders,
         }
     }
 }
-
-// impl<'a> From<BlockExecutionInput<'a, WcBlockWithSenders>>
-//     for BlockExecutionInput<'a, WcBlockWithSenders>
-// {
-//     fn from(value: BlockExecutionInput<'a, WcBlockWithSenders>) -> Self {
-//         todo!()
-//     }
-// }
