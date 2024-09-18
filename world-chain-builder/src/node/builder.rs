@@ -7,7 +7,9 @@ use reth_node_builder::{
 };
 use reth_node_optimism::{
     args::RollupArgs,
-    node::{OptimismAddOns, OptimismConsensusBuilder},
+    node::{
+        OptimismAddOns, OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder,
+    },
     OptimismEngineTypes, OptimismEvmConfig,
 };
 use tracing::info;
@@ -39,8 +41,8 @@ impl WorldChainBuilder {
         Node,
         WorldCoinPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WorldCoinNetworkBuilder,
-        WorldCoinExecutorBuilder,
+        OptimismNetworkBuilder,
+        OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >
     where
@@ -67,11 +69,11 @@ impl WorldChainBuilder {
             .payload(WorldChainPayloadServiceBuilder::new(
                 OptimismEvmConfig::default(),
             ))
-            .network(WorldCoinNetworkBuilder {
+            .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(WorldCoinExecutorBuilder::default())
+            .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
 }
@@ -87,8 +89,8 @@ where
         N,
         WorldCoinPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WorldCoinNetworkBuilder,
-        WorldCoinExecutorBuilder,
+        OptimismNetworkBuilder,
+        OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >;
 

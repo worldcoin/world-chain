@@ -133,14 +133,13 @@ where
             Ok(Some(_)) => {
                 return Err(WorldCoinTransactionPoolInvalid::NullifierAlreadyExists.into());
             }
-            Ok(None) => {}
+            Ok(None) => return Ok(()),
             Err(e) => {
                 return Err(TransactionValidationError::Error(
                     format!("Error while fetching nullifier from database: {}", e).into(),
                 ));
             }
         }
-        Ok(())
     }
 
     pub fn validate_nullifier_hash(

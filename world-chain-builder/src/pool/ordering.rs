@@ -12,6 +12,7 @@ use std::sync::Arc;
 /// The higher the coinbase tip is, the higher the priority of the transaction.
 #[derive(Debug)]
 #[non_exhaustive]
+// TODO: update to WorldChainOrdering
 pub struct WorldCoinOrdering<T> {
     inner: CoinbaseTipOrdering<T>,
     database_env: Arc<DatabaseEnv>,
