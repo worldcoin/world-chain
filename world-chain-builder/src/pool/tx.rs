@@ -6,29 +6,29 @@ use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransa
 
 use crate::pbh::semaphore::SemaphoreProof;
 
-pub trait WorldCoinPoolTransaction: EthPoolTransaction {
+pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorldCoinPooledTransaction {
+pub struct WorldChainPooledTransaction {
     pub inner: EthPooledTransaction,
     pub semaphore_proof: Option<SemaphoreProof>,
 }
 
-impl WorldCoinPoolTransaction for WorldCoinPooledTransaction {
+impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof> {
         self.semaphore_proof.as_ref()
     }
 }
 
-impl From<WorldCoinPooledTransaction> for TransactionSignedEcRecovered {
-    fn from(tx: WorldCoinPooledTransaction) -> Self {
+impl From<WorldChainPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: WorldChainPooledTransaction) -> Self {
         tx.inner.into_consensus()
     }
 }
 
-impl TryFrom<TransactionSignedEcRecovered> for WorldCoinPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
     fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
@@ -39,7 +39,7 @@ impl TryFrom<TransactionSignedEcRecovered> for WorldCoinPooledTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for WorldCoinPooledTransaction {
+impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
         Self {
             inner: EthPooledTransaction::from_pooled(tx),
@@ -48,7 +48,7 @@ impl From<PooledTransactionsElementEcRecovered> for WorldCoinPooledTransaction {
     }
 }
 
-impl PoolTransaction for WorldCoinPooledTransaction {
+impl PoolTransaction for WorldChainPooledTransaction {
     type TryFromConsensusError = <EthPooledTransaction as PoolTransaction>::TryFromConsensusError;
 
     type Consensus = TransactionSignedEcRecovered;
@@ -142,7 +142,7 @@ impl PoolTransaction for WorldCoinPooledTransaction {
     }
 }
 
-impl EthPoolTransaction for WorldCoinPooledTransaction {
+impl EthPoolTransaction for WorldChainPooledTransaction {
     fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
         self.inner.take_blob()
     }

@@ -1,4 +1,4 @@
-use super::tx::WorldCoinPoolTransaction;
+use super::tx::WorldChainPoolTransaction;
 use crate::pbh::db::ValidatedPbhTransactionTable;
 use reth_db::transaction::DbTx;
 use reth_db::{Database as _, DatabaseEnv, DatabaseError};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 #[non_exhaustive]
 // TODO: update to WorldChainOrdering
-pub struct WorldCoinOrdering<T> {
+pub struct WorldChainOrdering<T> {
     inner: CoinbaseTipOrdering<T>,
     database_env: Arc<DatabaseEnv>,
 }
@@ -21,16 +21,16 @@ pub struct WorldCoinOrdering<T> {
 /// Ordering is automatically derived.
 /// The ordering of fields here is important.
 #[derive(Debug, Default, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub struct WorldCoinPriority {
+pub struct WorldChainPriority {
     is_pbh: bool,
     effective_tip_per_gas: Option<U256>,
 }
 
-impl<T> WorldCoinOrdering<T>
+impl<T> WorldChainOrdering<T>
 where
-    T: WorldCoinPoolTransaction + 'static,
+    T: WorldChainPoolTransaction + 'static,
 {
-    /// Create a new [`WorldCoinOrdering`].
+    /// Create a new [`WorldChainOrdering`].
     pub fn new(database_env: Arc<DatabaseEnv>) -> Self {
         Self {
             inner: CoinbaseTipOrdering::default(),
@@ -51,11 +51,11 @@ where
     }
 }
 
-impl<T> TransactionOrdering for WorldCoinOrdering<T>
+impl<T> TransactionOrdering for WorldChainOrdering<T>
 where
-    T: WorldCoinPoolTransaction + 'static,
+    T: WorldChainPoolTransaction + 'static,
 {
-    type PriorityValue = WorldCoinPriority;
+    type PriorityValue = WorldChainPriority;
     type Transaction = T;
 
     fn priority(
@@ -65,7 +65,7 @@ where
     ) -> Priority<Self::PriorityValue> {
         let effective_tip_per_gas = transaction.effective_tip_per_gas(base_fee).map(U256::from);
         let is_pbh = self.is_pbh(transaction);
-        Some(WorldCoinPriority {
+        Some(WorldChainPriority {
             is_pbh,
             effective_tip_per_gas,
         })
@@ -73,7 +73,7 @@ where
     }
 }
 
-impl<T> Clone for WorldCoinOrdering<T> {
+impl<T> Clone for WorldChainOrdering<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),

@@ -21,24 +21,24 @@ use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
 use super::error::{
-    TransactionValidationError, WorldCoinTransactionPoolError, WorldCoinTransactionPoolInvalid,
+    TransactionValidationError, WorldChainTransactionPoolError, WorldChainTransactionPoolInvalid,
 };
-use super::ordering::WorldCoinOrdering;
-use super::tx::{WorldCoinPoolTransaction, WorldCoinPooledTransaction};
+use super::ordering::WorldChainOrdering;
+use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 
 /// Type alias for World Chain transaction pool
-pub type WorldCoinTransactionPool<Client, S> = Pool<
+pub type WorldChainTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<
-        WorldCoinTransactionValidator<Client, WorldCoinPooledTransaction>,
+        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
     >,
     // TODO: Modify this ordering
-    WorldCoinOrdering<WorldCoinPooledTransaction>,
+    WorldChainOrdering<WorldChainPooledTransaction>,
     S,
 >;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WorldCoinTransactionValidator<Client, Tx>
+pub struct WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
@@ -48,10 +48,10 @@ where
     num_pbh_txs: u16,
 }
 
-impl<Client, Tx> WorldCoinTransactionValidator<Client, Tx>
+impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: WorldCoinPoolTransaction,
+    Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
@@ -97,25 +97,25 @@ where
             .collect::<Vec<&str>>();
 
         if split.len() != 3 {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifier.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifier.into());
         }
 
         // TODO: Figure out what we actually want to do with the prefix
         // For now, we just check that it's a valid prefix
         // Maybe in future use as some sort of versioning?
         if Prefix::from_str(split[0]).is_err() {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierPrefix.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPrefix.into());
         }
 
         // TODO: Handle edge case where we are at the end of the month
         if split[1] != current_period_id() {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
         }
 
         match split[2].parse::<u16>() {
             Ok(nonce) if nonce < self.num_pbh_txs => {}
             _ => {
-                return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
+                return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
             }
         }
 
@@ -131,7 +131,7 @@ where
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
             Ok(Some(_)) => {
-                return Err(WorldCoinTransactionPoolInvalid::NullifierAlreadyExists.into());
+                return Err(WorldChainTransactionPoolInvalid::NullifierAlreadyExists.into());
             }
             Ok(None) => return Ok(()),
             Err(e) => {
@@ -148,7 +148,7 @@ where
     ) -> Result<(), TransactionValidationError> {
         let expected = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
         if semaphore_proof.nullifier_hash != expected {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidNullifierHash.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidNullifierHash.into());
         }
         Ok(())
     }
@@ -161,7 +161,7 @@ where
         // TODO: we probably don't need to hash the hash.
         let expected = hash_to_field(tx_hash.as_slice());
         if semaphore_proof.signal_hash != expected {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidSignalHash.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidSignalHash.into());
         }
         Ok(())
     }
@@ -188,7 +188,7 @@ where
 
         match res {
             Ok(true) => Ok(()),
-            Ok(false) => Err(WorldCoinTransactionPoolInvalid::InvalidSemaphoreProof.into()),
+            Ok(false) => Err(WorldChainTransactionPoolInvalid::InvalidSemaphoreProof.into()),
             Err(e) => Err(TransactionValidationError::Error(e.into())),
         }
     }
@@ -210,19 +210,19 @@ where
                 Err(DatabaseError::Write(write)) => {
                     if let DatabaseWriteOperation::CursorInsert = write.operation {
                         return Into::<TransactionValidationError>::into(
-                            WorldCoinTransactionPoolInvalid::DuplicateTxHash,
+                            WorldChainTransactionPoolInvalid::DuplicateTxHash,
                         )
                         .to_outcome(transaction);
                     } else {
                         return Into::<TransactionValidationError>::into(
-                            WorldCoinTransactionPoolError::Database(DatabaseError::Write(write)),
+                            WorldChainTransactionPoolError::Database(DatabaseError::Write(write)),
                         )
                         .to_outcome(transaction);
                     }
                 }
                 Err(e) => {
                     return Into::<TransactionValidationError>::into(
-                        WorldCoinTransactionPoolError::Database(e),
+                        WorldChainTransactionPoolError::Database(e),
                     )
                     .to_outcome(transaction);
                 }
@@ -232,10 +232,10 @@ where
     }
 }
 
-impl<Client, Tx> TransactionValidator for WorldCoinTransactionValidator<Client, Tx>
+impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: WorldCoinPoolTransaction,
+    Tx: WorldChainPoolTransaction,
 {
     type Transaction = Tx;
 

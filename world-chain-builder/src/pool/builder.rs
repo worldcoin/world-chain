@@ -8,10 +8,10 @@ use reth_transaction_pool::TransactionValidationTaskExecutor;
 use tracing::{debug, info};
 
 use crate::node::builder::load_world_chain_db;
-use crate::pool::ordering::WorldCoinOrdering;
-use crate::pool::validator::WorldCoinTransactionValidator;
+use crate::pool::ordering::WorldChainOrdering;
+use crate::pool::validator::WorldChainTransactionValidator;
 
-use super::validator::WorldCoinTransactionPool;
+use super::validator::WorldChainTransactionPool;
 
 // use crate::txpool::{WorldChainTransactionPool, WorldChainTransactionValidator};
 
@@ -30,7 +30,7 @@ impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
-    type Pool = WorldCoinTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
@@ -51,7 +51,7 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WorldCoinTransactionValidator::new(
+                WorldChainTransactionValidator::new(
                     op_tx_validator,
                     db.clone(),
                     validator,
@@ -59,7 +59,7 @@ where
                 )
             });
 
-        let ordering = WorldCoinOrdering::new(db.clone());
+        let ordering = WorldChainOrdering::new(db.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());

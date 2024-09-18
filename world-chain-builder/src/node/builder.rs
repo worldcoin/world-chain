@@ -19,7 +19,7 @@ use crate::{
     pool::{builder::WorldChainPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
-use super::args::{ExtArgs, WorldCoinBuilderArgs};
+use super::args::{ExtArgs, WorldChainBuilderArgs};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
@@ -49,7 +49,7 @@ impl WorldChainBuilder {
             Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
     {
-        let WorldCoinBuilderArgs {
+        let WorldChainBuilderArgs {
             clear_nullifiers,
             num_pbh_txs,
         } = args.builder_args;
