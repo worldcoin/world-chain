@@ -21,24 +21,24 @@ use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
 use super::error::{
-    TransactionValidationError, WorldCoinTransactionPoolError, WorldCoinTransactionPoolInvalid,
+    TransactionValidationError, WorldChainTransactionPoolError, WorldChainTransactionPoolInvalid,
 };
-use super::ordering::WorldCoinOrdering;
-use super::tx::{WorldCoinPoolTransaction, WorldCoinPooledTransaction};
+use super::ordering::WorldChainOrdering;
+use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 
 /// Type alias for World Chain transaction pool
-pub type WorldCoinTransactionPool<Client, S> = Pool<
+pub type WorldChainTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<
-        WorldCoinTransactionValidator<Client, WorldCoinPooledTransaction>,
+        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
     >,
     // TODO: Modify this ordering
-    WorldCoinOrdering<WorldCoinPooledTransaction>,
+    WorldChainOrdering<WorldChainPooledTransaction>,
     S,
 >;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WorldCoinTransactionValidator<Client, Tx>
+pub struct WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
@@ -48,10 +48,10 @@ where
     num_pbh_txs: u16,
 }
 
-impl<Client, Tx> WorldCoinTransactionValidator<Client, Tx>
+impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: WorldCoinPoolTransaction,
+    Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
@@ -97,25 +97,25 @@ where
             .collect::<Vec<&str>>();
 
         if split.len() != 3 {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifier.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifier.into());
         }
 
         // TODO: Figure out what we actually want to do with the prefix
         // For now, we just check that it's a valid prefix
         // Maybe in future use as some sort of versioning?
         if Prefix::from_str(split[0]).is_err() {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierPrefix.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPrefix.into());
         }
 
         // TODO: Handle edge case where we are at the end of the month
         if split[1] != current_period_id() {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
         }
 
         match split[2].parse::<u16>() {
             Ok(nonce) if nonce < self.num_pbh_txs => {}
             _ => {
-                return Err(WorldCoinTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
+                return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
             }
         }
 
@@ -131,16 +131,15 @@ where
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
             Ok(Some(_)) => {
-                return Err(WorldCoinTransactionPoolInvalid::NullifierAlreadyExists.into());
+                return Err(WorldChainTransactionPoolInvalid::NullifierAlreadyExists.into());
             }
-            Ok(None) => {}
+            Ok(None) => return Ok(()),
             Err(e) => {
                 return Err(TransactionValidationError::Error(
                     format!("Error while fetching nullifier from database: {}", e).into(),
                 ));
             }
         }
-        Ok(())
     }
 
     pub fn validate_nullifier_hash(
@@ -149,7 +148,7 @@ where
     ) -> Result<(), TransactionValidationError> {
         let expected = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
         if semaphore_proof.nullifier_hash != expected {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidNullifierHash.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidNullifierHash.into());
         }
         Ok(())
     }
@@ -162,12 +161,12 @@ where
         // TODO: we probably don't need to hash the hash.
         let expected = hash_to_field(tx_hash.as_slice());
         if semaphore_proof.signal_hash != expected {
-            return Err(WorldCoinTransactionPoolInvalid::InvalidSignalHash.into());
+            return Err(WorldChainTransactionPoolInvalid::InvalidSignalHash.into());
         }
         Ok(())
     }
 
-    pub async fn validate_semaphore_proof(
+    pub fn validate_semaphore_proof(
         &self,
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
@@ -189,21 +188,18 @@ where
 
         match res {
             Ok(true) => Ok(()),
-            Ok(false) => Err(WorldCoinTransactionPoolInvalid::InvalidSemaphoreProof.into()),
+            Ok(false) => Err(WorldChainTransactionPoolInvalid::InvalidSemaphoreProof.into()),
             Err(e) => Err(TransactionValidationError::Error(e.into())),
         }
     }
 
-    pub async fn validate_one(
+    pub fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         if let Some(semaphore_proof) = transaction.semaphore_proof() {
-            if let Err(e) = self
-                .validate_semaphore_proof(&transaction, semaphore_proof)
-                .await
-            {
+            if let Err(e) = self.validate_semaphore_proof(&transaction, semaphore_proof) {
                 return e.to_outcome(transaction);
             }
             match self.set_validated(&transaction, semaphore_proof) {
@@ -211,19 +207,19 @@ where
                 Err(DatabaseError::Write(write)) => {
                     if let DatabaseWriteOperation::CursorInsert = write.operation {
                         return Into::<TransactionValidationError>::into(
-                            WorldCoinTransactionPoolInvalid::DuplicateTxHash,
+                            WorldChainTransactionPoolInvalid::DuplicateTxHash,
                         )
                         .to_outcome(transaction);
                     } else {
                         return Into::<TransactionValidationError>::into(
-                            WorldCoinTransactionPoolError::Database(DatabaseError::Write(write)),
+                            WorldChainTransactionPoolError::Database(DatabaseError::Write(write)),
                         )
                         .to_outcome(transaction);
                     }
                 }
                 Err(e) => {
                     return Into::<TransactionValidationError>::into(
-                        WorldCoinTransactionPoolError::Database(e),
+                        WorldChainTransactionPoolError::Database(e),
                     )
                     .to_outcome(transaction);
                 }
@@ -231,12 +227,27 @@ where
         }
         self.inner.validate_one(origin, transaction)
     }
+
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_one`]
+    pub fn validate_all(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        transactions
+            .into_iter()
+            .map(|(origin, tx)| self.validate_one(origin, tx))
+            .collect()
+    }
 }
 
-impl<Client, Tx> TransactionValidator for WorldCoinTransactionValidator<Client, Tx>
+impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: WorldCoinPoolTransaction,
+    Tx: WorldChainPoolTransaction,
 {
     type Transaction = Tx;
 
@@ -245,18 +256,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction).await
+        self.validate_one(origin, transaction)
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut res = vec![];
-        for (origin, tx) in transactions {
-            res.push(self.validate_one(origin, tx).await);
-        }
-        res
+        self.validate_all(transactions)
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {

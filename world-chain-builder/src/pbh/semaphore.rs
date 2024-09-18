@@ -49,8 +49,8 @@ impl Encodable for Proof {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SemaphoreProof {
     pub root: Field,
-    pub nullifier_hash: Field,
     pub signal_hash: Field,
+    pub nullifier_hash: Field,
     pub external_nullifier_hash: Field,
     pub proof: Proof,
     pub external_nullifier: String,

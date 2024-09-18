@@ -7,19 +7,19 @@ use reth_node_builder::{
 };
 use reth_node_optimism::{
     args::RollupArgs,
-    node::{OptimismAddOns, OptimismConsensusBuilder},
+    node::{
+        OptimismAddOns, OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder,
+    },
     OptimismEngineTypes, OptimismEvmConfig,
 };
 use tracing::info;
 
 use crate::{
-    executor::builder::WorldCoinExecutorBuilder,
-    network::builder::WorldCoinNetworkBuilder,
     payload::builder::WorldChainPayloadServiceBuilder,
-    pool::{builder::WorldCoinPoolBuilder, provider::DatabaseProviderFactoryRW},
+    pool::{builder::WorldChainPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
-use super::args::{ExtArgs, WorldCoinBuilderArgs};
+use super::args::{ExtArgs, WorldChainBuilderArgs};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainBuilder {
@@ -37,10 +37,10 @@ impl WorldChainBuilder {
         args: ExtArgs,
     ) -> ComponentsBuilder<
         Node,
-        WorldCoinPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WorldCoinNetworkBuilder,
-        WorldCoinExecutorBuilder,
+        OptimismNetworkBuilder,
+        OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >
     where
@@ -49,7 +49,7 @@ impl WorldChainBuilder {
             Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
     {
-        let WorldCoinBuilderArgs {
+        let WorldChainBuilderArgs {
             clear_nullifiers,
             num_pbh_txs,
         } = args.builder_args;
@@ -60,18 +60,18 @@ impl WorldChainBuilder {
         } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WorldCoinPoolBuilder {
+            .pool(WorldChainPoolBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
             .payload(WorldChainPayloadServiceBuilder::new(
                 OptimismEvmConfig::default(),
             ))
-            .network(WorldCoinNetworkBuilder {
+            .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(WorldCoinExecutorBuilder::default())
+            .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
 }
@@ -85,10 +85,10 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        WorldCoinPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadServiceBuilder,
-        WorldCoinNetworkBuilder,
-        WorldCoinExecutorBuilder,
+        OptimismNetworkBuilder,
+        OptimismExecutorBuilder,
         OptimismConsensusBuilder,
     >;
 

@@ -3,7 +3,7 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionE
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 
 #[derive(Debug, thiserror::Error)]
-pub enum WorldCoinTransactionPoolInvalid {
+pub enum WorldChainTransactionPoolInvalid {
     #[error("nullifier has already been seen")]
     NullifierAlreadyExists,
     #[error("invalid external nullifier")]
@@ -25,19 +25,19 @@ pub enum WorldCoinTransactionPoolInvalid {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum WorldCoinTransactionPoolError {
+pub enum WorldChainTransactionPoolError {
     #[error(transparent)]
     Database(#[from] DatabaseError),
 }
 
-impl PoolTransactionError for WorldCoinTransactionPoolInvalid {
+impl PoolTransactionError for WorldChainTransactionPoolInvalid {
     fn is_bad_transaction(&self) -> bool {
         true
     }
 }
 
-impl From<WorldCoinTransactionPoolInvalid> for Box<dyn PoolTransactionError> {
-    fn from(e: WorldCoinTransactionPoolInvalid) -> Self {
+impl From<WorldChainTransactionPoolInvalid> for Box<dyn PoolTransactionError> {
+    fn from(e: WorldChainTransactionPoolInvalid) -> Self {
         Box::new(e)
     }
 }
@@ -52,14 +52,14 @@ pub enum TransactionValidationError {
     Error(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<WorldCoinTransactionPoolInvalid> for TransactionValidationError {
-    fn from(e: WorldCoinTransactionPoolInvalid) -> Self {
+impl From<WorldChainTransactionPoolInvalid> for TransactionValidationError {
+    fn from(e: WorldChainTransactionPoolInvalid) -> Self {
         TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(e.into()))
     }
 }
 
-impl From<WorldCoinTransactionPoolError> for TransactionValidationError {
-    fn from(e: WorldCoinTransactionPoolError) -> Self {
+impl From<WorldChainTransactionPoolError> for TransactionValidationError {
+    fn from(e: WorldChainTransactionPoolError) -> Self {
         TransactionValidationError::Error(Box::new(e))
     }
 }
