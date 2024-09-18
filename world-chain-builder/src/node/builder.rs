@@ -16,7 +16,7 @@ use tracing::info;
 
 use crate::{
     payload::builder::WorldChainPayloadServiceBuilder,
-    pool::{builder::WorldCoinPoolBuilder, provider::DatabaseProviderFactoryRW},
+    pool::{builder::WorldChainPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
 
 use super::args::{ExtArgs, WorldCoinBuilderArgs};
@@ -37,7 +37,7 @@ impl WorldChainBuilder {
         args: ExtArgs,
     ) -> ComponentsBuilder<
         Node,
-        WorldCoinPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadServiceBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
@@ -60,7 +60,7 @@ impl WorldChainBuilder {
         } = args.rollup_args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WorldCoinPoolBuilder {
+            .pool(WorldChainPoolBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
@@ -85,7 +85,7 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        WorldCoinPoolBuilder,
+        WorldChainPoolBuilder,
         WorldChainPayloadServiceBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,

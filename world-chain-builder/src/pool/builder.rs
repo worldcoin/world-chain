@@ -21,12 +21,12 @@ use super::validator::WorldCoinTransactionPool;
 /// config.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct WorldCoinPoolBuilder {
+pub struct WorldChainPoolBuilder {
     pub clear_nullifiers: bool,
     pub num_pbh_txs: u16,
 }
 
-impl<Node> PoolBuilder<Node> for WorldCoinPoolBuilder
+impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
