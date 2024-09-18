@@ -15,8 +15,6 @@ use reth_node_optimism::{
 use tracing::info;
 
 use crate::{
-    executor::builder::WorldCoinExecutorBuilder,
-    network::builder::WorldCoinNetworkBuilder,
     payload::builder::WorldChainPayloadServiceBuilder,
     pool::{builder::WorldCoinPoolBuilder, provider::DatabaseProviderFactoryRW},
 };
