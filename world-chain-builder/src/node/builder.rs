@@ -2,20 +2,20 @@ use std::{path::Path, sync::Arc};
 
 use reth_chainspec::ChainSpec;
 use reth_db::{create_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_optimism::{
     args::RollupArgs,
-    node::{
-        OptimismAddOns, OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder,
-    },
+    node::{OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder},
     OptimismEngineTypes, OptimismEvmConfig,
 };
 use tracing::info;
 
 use crate::{
     payload::builder::WorldChainPayloadServiceBuilder, pool::builder::WorldChainPoolBuilder,
+    rpc::WorldChainEthApi,
 };
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
@@ -87,7 +87,7 @@ where
         OptimismConsensusBuilder,
     >;
 
-    type AddOns = OptimismAddOns;
+    type AddOns = WorldChainAddOns;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
@@ -102,6 +102,14 @@ impl NodeTypes for WorldChainBuilder {
 
 impl NodeTypesWithEngine for WorldChainBuilder {
     type Engine = OptimismEngineTypes;
+}
+
+/// Add-ons w.r.t. optimism.
+#[derive(Debug, Clone)]
+pub struct WorldChainAddOns;
+
+impl<N: FullNodeComponents> NodeAddOns<N> for WorldChainAddOns {
+    type EthApi = WorldChainEthApi<N>;
 }
 
 pub fn load_world_chain_db(

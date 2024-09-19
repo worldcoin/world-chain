@@ -11,7 +11,7 @@ use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
 use reth_db::mdbx::{RO, RW};
 use reth_db::transaction::{DbTx, DbTxMut};
-use reth_db::{Database as _, DatabaseEnv, DatabaseError};
+use reth_db::{DatabaseEnv, DatabaseError};
 use reth_evm::system_calls::pre_block_beacon_root_contract_call;
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::OptimismEvmConfig;
@@ -27,18 +27,13 @@ use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::constants::BEACON_NONCE;
 use reth_primitives::eip4844::calculate_excess_blob_gas;
-use reth_primitives::transaction::WithEncoded;
 use reth_primitives::{proofs, IntoRecoveredTransaction};
-use reth_primitives::{
-    Block, Header, Receipt, TransactionSigned, TxHash, TxType, EMPTY_OMMER_ROOT_HASH,
-};
-use reth_provider::{
-    CanonStateSubscriptions, ExecutionOutcome, ProviderError, StateProviderFactory,
-};
+use reth_primitives::{Block, Header, Receipt, TxHash, TxType, EMPTY_OMMER_ROOT_HASH};
+use reth_provider::{CanonStateSubscriptions, ExecutionOutcome, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
 use reth_revm::DatabaseCommit;
-use reth_revm::{Database, State};
+use reth_revm::State;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
@@ -46,9 +41,7 @@ use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, FixedBytes, InvalidTransaction,
     ResultAndState, U256,
 };
-use semaphore::Field;
-use tracing::warn;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::node::builder::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};

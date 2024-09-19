@@ -18,6 +18,13 @@ reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-network-api = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-rpc = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-rpc-types = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-network = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-execution-types = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
@@ -46,9 +53,18 @@ reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", r
 
 # alloy
 op-alloy-consensus = "0.2"
+op-alloy-rpc-types = "0.2"
+op-alloy-network = "0.2"
+alloy-consensus = "0.3"
+alloy-network = "0.3"
+alloy-primitives = "0.8"
+alloy-rpc-types-eth = "0.3"
+alloy-rpc-types = "0.3"
 alloy-rlp = "0.3"
 
 # other
+revm = "14"
+tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 chrono = "0.4"
 thiserror = "1"
@@ -69,7 +85,6 @@ parking_lot = "0.12"
 derive_more = "1"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3", features = [
     "test-utils",
 ] }
