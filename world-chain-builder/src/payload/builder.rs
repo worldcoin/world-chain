@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{
-    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
-    Cancelled, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
+    is_better_payload, BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments,
+    BuildOutcome, Cancelled, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::ChainSpec;
 use reth_db::cursor::DbCursorRW;
@@ -14,20 +14,22 @@ use reth_evm::ConfigureEvm;
 use reth_evm_optimism::OptimismEvmConfig;
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
-use reth_node_optimism::node::OptimismPayloadBuilder;
+
 use reth_node_optimism::{
-    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilderAttributes,
+    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
+    OptimismPayloadBuilderAttributes, OptimismBlockAttributes,
 };
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::transaction::WithEncoded;
-use reth_primitives::{TransactionSigned, TxHash};
+use reth_primitives::{Header, TransactionSigned, TxHash};
 use reth_provider::{CanonStateSubscriptions, ProviderError, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::{Database, State};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::FixedBytes;
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, FixedBytes};
 use semaphore::Field;
+use tracing::warn;
 
 use crate::node::builder::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
@@ -39,14 +41,13 @@ pub struct WorldChainPayloadBuilder<EvmConfig> {
     database_env: Arc<DatabaseEnv>,
 }
 
-impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
+impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvm<Header = Header>,
+{
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(
-        compute_pending_block: bool,
-        evm_config: EvmConfig,
-        database_env: Arc<DatabaseEnv>,
-    ) -> Self {
-        let inner = OptimismPayloadBuilder::new(compute_pending_block, evm_config);
+    pub const fn new(evm_config: EvmConfig, database_env: Arc<DatabaseEnv>) -> Self {
+        let inner = OptimismPayloadBuilder::new(evm_config);
 
         Self {
             inner,
@@ -89,52 +90,70 @@ impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
             .with_bundle_update()
             .build();
 
-        // self.inner
-        //  .init_pre_block_state(&config, evm_config, &mut db)?;
+        let (initialized_cfg, initialized_block_env) = self.inner.cfg_and_block_env(&config);
 
-        // let world_chain_block_attributes = match self
-        //     .construct_block_attributes(pool, &config, &mut db, &cancel)
-        // {
-        //     Ok(outcome) => Ok(outcome),
-        //     Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
-        //     Err(err) => Err(err),
-        // }?;
+        self.inner.init_pre_block_state(
+            &config,
+            evm_config,
+            &initialized_cfg,
+            &initialized_block_env,
+            &mut db,
+        )?;
 
-        // // check if we have a better block
-        // if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
-        //     // can skip building the block
-        //     return Ok(BuildOutcome::Aborted { fees: op_block_attributes.total_fees, cached_reads });
-        // }
+        let world_chain_block_attributes = match self
+            .construct_block_attributes(pool, &config, &mut db, &cancel)
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
+            Err(err) => Err(err),
+        }?;
 
-        // let (withdrawals_outcome, execution_outcome) =
-        //     self.inner.construct_outcome(&op_block_attributes, &mut db)?;
+        // check if we have a better block
+        if !is_better_payload(
+            best_payload.as_ref(),
+            world_chain_block_attributes.inner.total_fees,
+        ) {
+            // can skip building the block
+            return Ok(BuildOutcome::Aborted {
+                fees: world_chain_block_attributes.inner.total_fees,
+                cached_reads,
+            });
+        }
 
-        // // calculate the state root
-        // let parent_block = config.parent_block;
-        // let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
-        // let (state_root, trie_output) = {
-        //     let state_provider = db.database.0.inner.borrow_mut();
-        //     state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-        //         warn!(target: "payload_builder",
-        //             parent_hash=%parent_block.hash(),
-        //             %err,
-        //             "failed to calculate state root for empty payload"
-        //         );
-        //     })?
-        // };
+        let (withdrawals_outcome, execution_outcome) = self
+            .inner
+            .construct_outcome(&world_chain_block_attributes.inner, &mut db)?;
 
-        // let payload = self.inner.construct_built_payload(
-        //     world_chain_block_attributes.inner,
-        //     execution_outcome,
-        //     state_root,
-        //     withdrawals_outcome,
-        //     hashed_state,
-        //     trie_output,
-        // );
+        // calculate the state root
+        let parent_block = config.parent_block;
+        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let (state_root, trie_output) = {
+            let state_provider = db.database.0.inner.borrow_mut();
+            state_provider
+                .db
+                .state_root_with_updates(hashed_state.clone())
+                .inspect_err(|err| {
+                    warn!(target: "payload_builder",
+                        parent_hash=%parent_block.hash(),
+                        %err,
+                        "failed to calculate state root for empty payload"
+                    );
+                })?
+        };
 
-        // Ok(BuildOutcome::Better { payload, cached_reads })
+        let payload = self.inner.construct_built_payload(
+            world_chain_block_attributes.inner,
+            execution_outcome,
+            state_root,
+            withdrawals_outcome,
+            hashed_state,
+            trie_output,
+        );
 
-        todo!()
+        Ok(BuildOutcome::Better {
+            payload,
+            cached_reads,
+        })
     }
 
     /// Constructs new block attributes with a populated list of transactions
@@ -149,35 +168,38 @@ impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
     /// * `Err(PayloadBuilderError::TransactionEcRecoverFailed)` if EC recovery fails for a
     ///   transaction
     /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
-    // pub fn construct_block_attributes<Pool, DB>(
-    //     &self,
-    //     pool: Pool,
-    //     payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
-    //     db: &mut State<DB>,
-    //     cancel: &Cancelled,
-    // ) -> Result<OptimismBlockAttributes<EvmConfig>, PayloadBuilderError>
-    // where
-    //     Pool: TransactionPool,
-    //     DB: Database<Error = ProviderError>,
-    //     EvmConfig: ConfigureEvm,
-    // {
-    //     let mut world_chain_block_attributes =
-    //         WorldChainBlockAttributes::new(payload_config, self.evm_config.clone());
+    pub fn construct_block_attributes<Pool, DB>(
+        &self,
+        pool: Pool,
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        initialized_cfg: CfgEnvWithHandlerCfg,
+        initialized_block_env: BlockEnv,
+        db: &mut State<DB>,
+        cancel: &Cancelled,
+    ) -> Result<WorldChainBlockAttributes<EvmConfig>, PayloadBuilderError>
+    where
+        Pool: TransactionPool,
+        DB: Database<Error = ProviderError>,
+        EvmConfig: ConfigureEvm,
+    {
+        let mut world_chain_block_attributes =
+            WorldChainBlockAttributes::new(payload_config, self.evm_config.clone());
 
-    //     // add sequencer transactions to block
-    //     world_chain_block_attributes.add_sequencer_transactions(
-    //         &payload_config.attributes.transactions,
-    //         db,
-    //         cancel,
-    //     )?;
+        // add sequencer transactions to block
+        world_chain_block_attributes
+            .inner
+            .add_sequencer_transactions(&payload_config.attributes.transactions, db, cancel)?;
 
-    //     world_chain_block_attributes.add_pbh_transactions();
+        todo!("add pbh transactions");
+        // world_chain_block_attributes.add_pbh_transactions();
 
-    //     // add pooled transactions to block
-    //     world_chain_block_attributes.add_pooled_transactions(&pool, db, cancel)?;
+        // add pooled transactions to block
+        world_chain_block_attributes
+            .inner
+            .add_pooled_transactions(&pool, db, cancel)?;
 
-    //     Ok(op_block_attributes)
-    // }
+        Ok(world_chain_block_attributes)
+    }
 
     /// Check the database to see if a tx has been validated for PBH
     /// If so return the nullifier
@@ -208,82 +230,49 @@ impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
 /// This struct holds all necessary data for constructing a block on World Chain
 /// including executed transactions, receipts, gas usage, and EVM-specific
 /// configuration parameters
-// #[derive(Debug)]
-// pub struct WorldChainBlockAttributes<EvmConfig: ConfigureEvm> {
-//     inner: OptimismBlockAttributes<EvmConfig>,
-// }
+#[derive(Debug)]
+pub struct WorldChainBlockAttributes<EvmConfig: ConfigureEvm> {
+    inner: OptimismBlockAttributes<EvmConfig>,
+}
 
-// impl<EvmConfig> WorldChainBlockAttributes<EvmConfig>
-// where
-//     EvmConfig: ConfigureEvm,
-// {
-//     // /// Creates a new `OptimismBlockAttributes` instance.
-//     // /// Initializes the block attributes based on the provided payload configuration
-//     // /// and EVM configuration.
-//     // pub fn new(
-//     //     payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
-//     //     evm_config: EvmConfig,
-//     // ) -> Self {
-//     //     let inner = OptimismBlockAttributes::new(payload_config, evm_config);
-//     //     Self { inner }
-//     // }
+impl<EvmConfig> WorldChainBlockAttributes<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+{
+    /// Creates a new `OptimismBlockAttributes` instance.
+    /// Initializes the block attributes based on the provided payload configuration
+    /// and EVM configuration.
+    pub fn new(
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        initialized_cfg: CfgEnvWithHandlerCfg,
+        initialized_block_env: BlockEnv,
+        evm_config: EvmConfig,
+    ) -> Self {
 
-//     /// Adds sequencer transactions to the block
-//     ///
-//     /// # Returns
-//     ///
-//     /// * `Ok(())` on successful addition of all valid sequencer transactions
-//     /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
-//     /// * `Err(PayloadBuilderError::BlobTransactionRejected)` if a blob transaction is encountered
-//     /// * `Err(PayloadBuilderError::TransactionEcRecoverFailed)` if EC recovery fails for a
-//     ///   transaction
-//     /// * `Err(PayloadBuilderError::EvmExecutionError(EVMError::Transaction(_)))` if an EVM
-//     ///   execution error occurs
-//     pub fn add_sequencer_transactions<DB>(
-//         &mut self,
-//         transactions: &[WithEncoded<TransactionSigned>],
-//         db: &mut State<DB>,
-//         cancel: &Cancelled,
-//     ) -> Result<(), PayloadBuilderError>
-//     where
-//         DB: Database<Error = ProviderError>,
-//     {
-//         self.inner
-//             .add_sequencer_transactions(transactions, db, cancel)
-//     }
 
-//     pub fn add_pbh_transactions<DB>(
-//         &mut self,
-//         transactions: &[WithEncoded<TransactionSigned>],
-//         db: &mut State<DB>,
-//         cancel: &Cancelled,
-//     ) -> Result<(), PayloadBuilderError>
-//     where
-//         DB: Database<Error = ProviderError>,
-//     {
-//         todo!()
-//     }
+        OptimismPayloadBuilder
 
-//     /// Adds transactions to the block from the transaction pool
-//     ///
-//     /// # Returns
-//     ///
-//     /// * `Ok(())` on successful addition of all valid pooled transactions
-//     /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
-//     /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
-//     pub fn add_pooled_transactions<DB, Pool>(
-//         &mut self,
-//         pool: &Pool,
-//         db: &mut State<DB>,
-//         cancel: &Cancelled,
-//     ) -> Result<(), PayloadBuilderError>
-//     where
-//         DB: Database<Error = ProviderError>,
-//         Pool: TransactionPool,
-//     {
-//         self.inner.add_pooled_transactions(pool, db, cancel)
-//     }
-// }
+        let inner = OptimismBlockAttributes::new(
+            payload_config,
+            initialized_cfg,
+            initialized_block_env,
+            evm_config,
+        );
+        Self { inner }
+    }
+
+    pub fn add_pbh_transactions<DB>(
+        &mut self,
+        transactions: &[WithEncoded<TransactionSigned>],
+        db: &mut State<DB>,
+        cancel: &Cancelled,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: Database<Error = ProviderError>,
+    {
+        todo!()
+    }
+}
 
 /// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
@@ -337,7 +326,7 @@ where
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
     Pool: TransactionPool + Unpin + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     async fn spawn_payload_service(
         self,
@@ -346,7 +335,11 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
         let data_dir = ctx.config().datadir();
         let db = load_world_chain_db(data_dir.data_dir(), false)?;
-        let payload_builder = WorldChainPayloadBuilder::new(true, self.evm_config, db);
+
+        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+            inner: (*ctx.chain_spec()).clone(),
+        }));
+        let payload_builder = WorldChainPayloadBuilder::new(evm_config, db);
 
         let conf = ctx.payload_builder_config();
 
