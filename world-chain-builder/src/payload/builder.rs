@@ -161,12 +161,6 @@ where
 #[derive(Debug, Default, Clone)]
 pub struct WorldChainPayloadServiceBuilder {}
 
-impl WorldChainPayloadServiceBuilder {
-    pub const fn new() -> Self {
-        Self {}
-    }
-}
-
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
     Node: FullNodeTypes<
