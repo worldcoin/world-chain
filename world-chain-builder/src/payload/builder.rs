@@ -16,8 +16,8 @@ use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
 
 use reth_node_optimism::{
-    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
-    OptimismPayloadBuilderAttributes, OptimismBlockAttributes,
+    OptimismBlockAttributes, OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
+    OptimismPayloadBuilderAttributes,
 };
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -248,10 +248,6 @@ where
         initialized_block_env: BlockEnv,
         evm_config: EvmConfig,
     ) -> Self {
-
-
-        OptimismPayloadBuilder
-
         let inner = OptimismBlockAttributes::new(
             payload_config,
             initialized_cfg,
