@@ -1,3 +1,4 @@
+use reth_cli::chainspec::ChainSpecParser;
 use reth_node_optimism::args::RollupArgs;
 
 /// Parameters for rollup configuration

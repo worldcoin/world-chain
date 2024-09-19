@@ -1,4 +1,5 @@
 use clap::Parser;
+use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
 use world_chain_builder::node::args::ExtArgs;
 use world_chain_builder::node::builder::WorldChainBuilder;
@@ -21,14 +22,16 @@ fn main() {
         std::env::set_var("RUST_LOG", "trace,reth=debug");
     }
 
-    if let Err(err) = Cli::<ExtArgs>::parse().run(|builder, builder_args| async move {
-        let handle = builder
-            .node(WorldChainBuilder::new(builder_args.clone()))
-            .launch()
-            .await?;
+    if let Err(err) =
+        Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
+            let handle = builder
+                .node(WorldChainBuilder::new(builder_args.clone()))
+                .launch()
+                .await?;
 
-        handle.node_exit_future.await
-    }) {
+            handle.node_exit_future.await
+        })
+    {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }

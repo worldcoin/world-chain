@@ -15,8 +15,7 @@ use reth_node_optimism::{
 use tracing::info;
 
 use crate::{
-    payload::builder::WorldChainPayloadServiceBuilder,
-    pool::{builder::WorldChainPoolBuilder, provider::DatabaseProviderFactoryRW},
+    payload::builder::WorldChainPayloadServiceBuilder, pool::builder::WorldChainPoolBuilder,
 };
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
@@ -46,7 +45,6 @@ impl WorldChainBuilder {
     where
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
-            Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
         >,
     {
         let WorldChainBuilderArgs {
@@ -79,7 +77,6 @@ where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
-    <N as FullNodeTypes>::Provider: DatabaseProviderFactoryRW<Arc<DatabaseEnv>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
