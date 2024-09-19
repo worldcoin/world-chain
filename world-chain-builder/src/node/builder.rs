@@ -64,9 +64,7 @@ impl WorldChainBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
-            .payload(WorldChainPayloadServiceBuilder::new(
-                OptimismEvmConfig::default(),
-            ))
+            .payload(WorldChainPayloadServiceBuilder::new())
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,

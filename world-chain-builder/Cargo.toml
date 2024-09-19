@@ -23,6 +23,7 @@ reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev 
 reth-execution-types = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 
 # reth-optimism
 reth-evm-optimism = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3", features = [
@@ -41,6 +42,7 @@ reth-optimism-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "
     "optimism",
 ] }
 reth-optimism-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
+reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "0349d7b28917025f8e93a687a34ed83028d863a3" }
 
 # alloy
 op-alloy-consensus = "0.2"

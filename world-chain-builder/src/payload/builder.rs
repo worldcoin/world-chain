@@ -5,6 +5,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, Cancelled,
     MissingPayloadBehaviour, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
@@ -20,6 +21,8 @@ use reth_node_optimism::{
     OptimismBlockAttributes, OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
     OptimismPayloadBuilderAttributes,
 };
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_payload_builder::error::OptimismPayloadBuilderError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::constants::BEACON_NONCE;
@@ -34,6 +37,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
+use reth_revm::DatabaseCommit;
 use reth_revm::{Database, State};
 use reth_transaction_pool::noop::NoopTransactionPool;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
@@ -155,25 +159,20 @@ where
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadServiceBuilder<EvmConfig = OptimismEvmConfig> {
-    /// The EVM configuration to use for the payload builder.
-    pub evm_config: EvmConfig,
-}
+pub struct WorldChainPayloadServiceBuilder {}
 
-impl<EvmConfig> WorldChainPayloadServiceBuilder<EvmConfig> {
-    pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { evm_config }
+impl WorldChainPayloadServiceBuilder {
+    pub const fn new() -> Self {
+        Self {}
     }
 }
 
-impl<Node, EvmConfig, Pool> PayloadServiceBuilder<Node, Pool>
-    for WorldChainPayloadServiceBuilder<EvmConfig>
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
     Pool: TransactionPool + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Header = Header>,
 {
     async fn spawn_payload_service(
         self,
