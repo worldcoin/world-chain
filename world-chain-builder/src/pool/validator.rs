@@ -6,14 +6,15 @@ use semaphore::hash_to_field;
 use semaphore::protocol::verify_proof;
 use std::str::FromStr as _;
 use std::sync::Arc;
+use tracing::warn;
 
 use reth_db::{Database, DatabaseEnv, DatabaseError, DatabaseWriteOperation};
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    EthTransactionValidator, Pool, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidationTaskExecutor, TransactionValidator,
+    Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
 
 use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
@@ -44,7 +45,6 @@ where
 {
     inner: OpTransactionValidator<Client, Tx>,
     database_env: Arc<DatabaseEnv>,
-    _tmp_workaround: EthTransactionValidator<Client, Tx>,
     num_pbh_txs: u16,
 }
 
@@ -57,13 +57,11 @@ where
     pub fn new(
         inner: OpTransactionValidator<Client, Tx>,
         database_env: Arc<DatabaseEnv>,
-        tmp_workaround: EthTransactionValidator<Client, Tx>,
         num_pbh_txs: u16,
     ) -> Self {
         Self {
             inner,
             database_env,
-            _tmp_workaround: tmp_workaround,
             num_pbh_txs,
         }
     }
@@ -80,6 +78,15 @@ where
             semaphore_proof.nullifier_hash.to_be_bytes().into(),
         )?;
         db_tx.commit()?;
+        Ok(())
+    }
+
+    /// Ensure the provided root is on chain and valid
+    pub fn validate_root(
+        &self,
+        _semaphore_proof: &SemaphoreProof,
+    ) -> Result<(), TransactionValidationError> {
+        warn!("Root validation is not implemented yet");
         Ok(())
     }
 
@@ -130,15 +137,11 @@ where
         match tx
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
-            Ok(Some(_)) => {
-                return Err(WorldChainTransactionPoolInvalid::NullifierAlreadyExists.into());
-            }
-            Ok(None) => return Ok(()),
-            Err(e) => {
-                return Err(TransactionValidationError::Error(
-                    format!("Error while fetching nullifier from database: {}", e).into(),
-                ));
-            }
+            Ok(Some(_)) => Err(WorldChainTransactionPoolInvalid::NullifierAlreadyExists.into()),
+            Ok(None) => Ok(()),
+            Err(e) => Err(TransactionValidationError::Error(
+                format!("Error while fetching nullifier from database: {}", e).into(),
+            )),
         }
     }
 
@@ -171,6 +174,7 @@ where
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
     ) -> Result<(), TransactionValidationError> {
+        self.validate_root(semaphore_proof)?;
         self.validate_external_nullifier(semaphore_proof)?;
         self.validate_nullifier(semaphore_proof)?;
         self.validate_nullifier_hash(semaphore_proof)?;

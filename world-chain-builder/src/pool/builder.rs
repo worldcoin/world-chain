@@ -51,12 +51,7 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WorldChainTransactionValidator::new(
-                    op_tx_validator,
-                    db.clone(),
-                    validator,
-                    self.num_pbh_txs,
-                )
+                WorldChainTransactionValidator::new(op_tx_validator, db.clone(), self.num_pbh_txs)
             });
 
         let ordering = WorldChainOrdering::new(db.clone());

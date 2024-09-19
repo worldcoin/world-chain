@@ -1,15 +1,16 @@
 //! Loads and formats OP transaction RPC response.
 
-use crate::rpc::WorldChainEthApi;
+use crate::{primitives::recover_raw_transaction, rpc::WorldChainEthApi};
 use alloy_primitives::{Bytes, B256};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_rpc::SequencerClient;
+use reth_primitives::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_rpc_eth_types::{EthApiError, EthResult, EthStateCache};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<N> EthTransactions for WorldChainEthApi<N>
