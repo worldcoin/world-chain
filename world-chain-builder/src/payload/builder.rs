@@ -420,6 +420,8 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
+    // TODO: insert verified transactions here
+
     if !attributes.no_tx_pool {
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
