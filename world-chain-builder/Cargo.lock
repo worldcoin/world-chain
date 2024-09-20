@@ -10873,6 +10873,7 @@ dependencies = [
  "color-eyre 0.6.3",
  "derive_more 1.0.0",
  "dotenvy",
+ "ethers-core",
  "futures",
  "op-alloy-consensus",
  "op-alloy-network",
