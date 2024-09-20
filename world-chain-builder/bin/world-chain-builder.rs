@@ -9,6 +9,8 @@ use world_chain_builder::node::builder::WorldChainBuilder;
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 fn main() {
+    dotenvy::dotenv().ok();
+
     reth_cli_util::sigsegv_handler::install();
     eyre::install().unwrap();
 
