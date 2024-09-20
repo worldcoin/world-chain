@@ -62,8 +62,8 @@ impl TryFrom<TransactionSigned> for WorldChainPooledTransactionsElement {
 }
 
 pub struct WorldChainPooledTransactionsElementEcRecovered {
-    inner: PooledTransactionsElementEcRecovered,
-    semaphore_proof: Option<SemaphoreProof>,
+    pub inner: PooledTransactionsElementEcRecovered,
+    pub semaphore_proof: Option<SemaphoreProof>,
 }
 
 impl TryFrom<WorldChainTransactionSignedEcRecovered>

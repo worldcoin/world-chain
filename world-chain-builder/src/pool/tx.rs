@@ -1,13 +1,33 @@
+use alloy_consensus::BlobTransactionValidationError;
 use reth_primitives::transaction::TryFromRecoveredTransactionError;
-use reth_primitives::{
-    PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered, TxKind, U256,
+use reth_primitives::{TransactionSignedEcRecovered, TxKind, U256};
+use reth_rpc_types::BlobTransactionSidecar;
+use reth_transaction_pool::{
+    EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
 };
-use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
+use revm_primitives::KzgSettings;
 
 use crate::pbh::semaphore::SemaphoreProof;
+use crate::primitives::WorldChainPooledTransactionsElementEcRecovered;
 
-pub trait WorldChainPoolTransaction: EthPoolTransaction {
+pub trait WorldChainPoolTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof>;
+
+    /// Extracts the blob sidecar from the transaction.
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar;
+
+    /// Returns the number of blobs this transaction has.
+    fn blob_count(&self) -> usize;
+
+    /// Validates the blob sidecar of the transaction with the given settings.
+    fn validate_blob(
+        &self,
+        blob: &BlobTransactionSidecar,
+        settings: &KzgSettings,
+    ) -> Result<(), BlobTransactionValidationError>;
+
+    /// Returns the number of authorizations this transaction has.
+    fn authorization_count(&self) -> usize;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +39,26 @@ pub struct WorldChainPooledTransaction {
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn semaphore_proof(&self) -> Option<&SemaphoreProof> {
         self.semaphore_proof.as_ref()
+    }
+
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar {
+        todo!()
+    }
+
+    fn blob_count(&self) -> usize {
+        todo!()
+    }
+
+    fn validate_blob(
+        &self,
+        blob: &BlobTransactionSidecar,
+        settings: &KzgSettings,
+    ) -> Result<(), BlobTransactionValidationError> {
+        todo!()
+    }
+
+    fn authorization_count(&self) -> usize {
+        todo!()
     }
 }
 
@@ -39,11 +79,11 @@ impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
-    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+impl From<WorldChainPooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
+    fn from(tx: WorldChainPooledTransactionsElementEcRecovered) -> Self {
         Self {
-            inner: EthPooledTransaction::from_pooled(tx),
-            semaphore_proof: None,
+            inner: EthPooledTransaction::from_pooled(tx.inner),
+            semaphore_proof: tx.semaphore_proof,
         }
     }
 }
@@ -53,7 +93,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
     type Consensus = TransactionSignedEcRecovered;
 
-    type Pooled = <EthPooledTransaction as PoolTransaction>::Pooled;
+    type Pooled = WorldChainPooledTransactionsElementEcRecovered;
 
     fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
         EthPooledTransaction::try_from_consensus(tx).map(|inner| Self {
@@ -67,10 +107,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
     }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
-        Self {
-            inner: EthPooledTransaction::from_pooled(pooled),
-            semaphore_proof: None,
-        }
+        Self::from(pooled)
     }
 
     fn hash(&self) -> &reth_primitives::TxHash {
@@ -142,24 +179,24 @@ impl PoolTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl EthPoolTransaction for WorldChainPooledTransaction {
-    fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
-        self.inner.take_blob()
-    }
-
-    fn blob_count(&self) -> usize {
-        self.inner.blob_count()
-    }
-
-    fn validate_blob(
-        &self,
-        blob: &reth_primitives::BlobTransactionSidecar,
-        settings: &reth_primitives::kzg::KzgSettings,
-    ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
-        self.inner.validate_blob(blob, settings)
-    }
-
-    fn authorization_count(&self) -> usize {
-        self.inner.authorization_count()
-    }
-}
+// impl EthPoolTransaction for WorldChainPooledTransaction {
+//     fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
+//         self.inner.take_blob()
+//     }
+//
+//     fn blob_count(&self) -> usize {
+//         self.inner.blob_count()
+//     }
+//
+//     fn validate_blob(
+//         &self,
+//         blob: &reth_primitives::BlobTransactionSidecar,
+//         settings: &reth_primitives::kzg::KzgSettings,
+//     ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
+//         self.inner.validate_blob(blob, settings)
+//     }
+//
+//     fn authorization_count(&self) -> usize {
+//         self.inner.authorization_count()
+//     }
+// }
