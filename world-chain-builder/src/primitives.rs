@@ -19,6 +19,28 @@ pub struct WorldChainPooledTransactionsElement {
     semaphore_proof: Option<SemaphoreProof>,
 }
 
+impl WorldChainPooledTransactionsElement {
+    /// FIXME: We need to implement the proper decoding
+    /// At the end the buffer must point to the start of the inner transaction
+    pub fn decode_enveloped(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let inner = PooledTransactionsElement::decode(buf)?;
+        Ok(Self {
+            inner,
+            semaphore_proof: None,
+        })
+    }
+
+    pub fn try_into_ecrecovered(
+        self,
+    ) -> Result<WorldChainPooledTransactionsElementEcRecovered, PooledTransactionsElement> {
+        let inner = self.inner.try_into_ecrecovered()?;
+        Ok(WorldChainPooledTransactionsElementEcRecovered {
+            inner,
+            semaphore_proof: self.semaphore_proof,
+        })
+    }
+}
+
 impl Encodable for WorldChainPooledTransactionsElement {
     /// Encodes an enveloped post EIP-4844 [`PooledTransactionsElement`].
     ///
@@ -80,21 +102,22 @@ impl TryFrom<WorldChainTransactionSignedEcRecovered>
     }
 }
 
-/// Recovers a [`PooledTransactionsElementEcRecovered`] from an enveloped encoded byte stream.
-///
-/// See [`PooledTransactionsElement::decode_enveloped`]
+/// Recovers the raw transaction by parsing the enveloped transaction data.
+/// Returns the recovered World Chain transaction along with data corresponding
+/// to the inner transaction.
 pub fn recover_raw_transaction(
     data: Bytes,
-) -> EthResult<WorldChainPooledTransactionsElementEcRecovered> {
+) -> EthResult<(WorldChainPooledTransactionsElementEcRecovered, Bytes)> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData);
     }
 
-    let transaction = PooledTransactionsElement::decode_enveloped(&mut data.as_ref())
+    let transaction = WorldChainPooledTransactionsElement::decode_enveloped(&mut data.as_ref())
         .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
-    // transaction
-    //     .try_into_ecrecovered()
-    //     .or(Err(EthApiError::InvalidTransactionSignature))
-    todo!()
+    let ecrecovered = transaction
+        .try_into_ecrecovered()
+        .or(Err(EthApiError::InvalidTransactionSignature))?;
+
+    Ok((ecrecovered, data))
 }
