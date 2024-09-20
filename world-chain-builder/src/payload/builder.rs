@@ -18,7 +18,7 @@ use reth_evm_optimism::OptimismEvmConfig;
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
 use reth_node_optimism::{
-    OptimismBlockAttributes, OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
+    OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
     OptimismPayloadBuilderAttributes,
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -105,7 +105,9 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self.inner.cfg_and_block_env(&args.config);
+        let (cfg_env, block_env) = self
+            .inner
+            .cfg_and_block_env(&args.config, &args.config.parent_block);
 
         worldchain_payload(
             self.inner.evm_config.clone(),
@@ -137,7 +139,9 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        let (cfg_env, block_env) = self.inner.cfg_and_block_env(&args.config);
+        let (cfg_env, block_env) = self
+            .inner
+            .cfg_and_block_env(&args.config, &args.config.parent_block);
 
         worldchain_payload(
             self.inner.evm_config.clone(),
