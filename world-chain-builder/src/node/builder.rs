@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use reth_chainspec::ChainSpec;
-use reth_db::{create_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{create_db, mdbx::DatabaseArguments};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
@@ -9,7 +9,7 @@ use reth_node_builder::{
 use reth_node_optimism::{
     args::RollupArgs,
     node::{OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder},
-    OptimismEngineTypes, OptimismEvmConfig,
+    OptimismEngineTypes,
 };
 use tracing::info;
 

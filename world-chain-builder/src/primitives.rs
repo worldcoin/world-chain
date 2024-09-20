@@ -1,4 +1,4 @@
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable};
 use reth_primitives::transaction::TransactionConversionError;
 use reth_primitives::{
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, TransactionSigned,
@@ -10,6 +10,7 @@ use tracing::warn;
 
 use crate::pbh::semaphore::SemaphoreProof;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainTransactionSignedEcRecovered {
     inner: TransactionSignedEcRecovered,
     semaphore_proof: Option<SemaphoreProof>,
@@ -136,7 +137,6 @@ pub fn recover_raw_transaction(
 mod tests {
     use super::*;
     use alloy_primitives::{address, hex};
-    // use assert_matches::assert_matches;
 
     #[test]
     fn invalid_legacy_pooled_decoding_input_too_short() {

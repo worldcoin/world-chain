@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
-    BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, Cancelled,
-    MissingPayloadBehaviour, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
+    PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
-use reth_db::mdbx::{RO, RW};
+use reth_db::mdbx::RW;
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_db::{DatabaseEnv, DatabaseError};
 use reth_evm::system_calls::pre_block_beacon_root_contract_call;
@@ -50,7 +50,7 @@ use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransact
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
-    database_env: Arc<DatabaseEnv>,
+    _database_env: Arc<DatabaseEnv>,
 }
 
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
@@ -58,12 +58,12 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, database_env: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(evm_config: EvmConfig, _database_env: Arc<DatabaseEnv>) -> Self {
         let inner = OptimismPayloadBuilder::new(evm_config);
 
         Self {
             inner,
-            database_env,
+            _database_env,
         }
     }
 
@@ -80,7 +80,7 @@ where
     /// Set the store the nullifier for a tx after it
     /// has been included in the block
     /// don't forget to call db_tx.commit() at the very end
-    fn set_pbh_nullifier(
+    pub fn set_pbh_nullifier(
         &self,
         db_tx: Tx<RW>,
         nullifier: FixedBytes<32>,
