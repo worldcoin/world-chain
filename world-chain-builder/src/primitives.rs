@@ -11,15 +11,9 @@ use tracing::warn;
 use crate::pbh::semaphore::SemaphoreProof;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorldChainTransactionSignedEcRecovered {
-    inner: TransactionSignedEcRecovered,
-    semaphore_proof: Option<SemaphoreProof>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainPooledTransactionsElement {
-    inner: PooledTransactionsElement,
-    semaphore_proof: Option<SemaphoreProof>,
+    pub inner: PooledTransactionsElement,
+    pub semaphore_proof: Option<SemaphoreProof>,
 }
 
 impl Encodable for WorldChainPooledTransactionsElement {
@@ -92,6 +86,12 @@ impl TryFrom<TransactionSigned> for WorldChainPooledTransactionsElement {
             semaphore_proof: None,
         })
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldChainTransactionSignedEcRecovered {
+    pub inner: TransactionSignedEcRecovered,
+    pub semaphore_proof: Option<SemaphoreProof>,
 }
 
 pub struct WorldChainPooledTransactionsElementEcRecovered {
