@@ -1,4 +1,4 @@
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
 
@@ -43,10 +43,13 @@ impl Encodable for Proof {
         let bytes: ProofBytes = bytemuck::cast(fields);
         bytes.encode(out)
     }
+
+    fn length(&self) -> usize {
+        LEN
+    }
 }
 
-// #[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct SemaphoreProof {
     pub root: Field,
     pub signal_hash: Field,

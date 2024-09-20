@@ -1,4 +1,4 @@
-use alloy_rlp::{bytes, Decodable, Encodable};
+use alloy_rlp::Decodable;
 use reth_primitives::transaction::TransactionConversionError;
 use reth_primitives::{
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, TransactionSigned,
@@ -6,6 +6,7 @@ use reth_primitives::{
 };
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use revm_primitives::Bytes;
+use tracing::warn;
 
 use crate::pbh::semaphore::SemaphoreProof;
 
@@ -20,13 +21,19 @@ pub struct WorldChainPooledTransactionsElement {
 }
 
 impl WorldChainPooledTransactionsElement {
-    /// FIXME: We need to implement the proper decoding
-    /// At the end the buffer must point to the start of the inner transaction
     pub fn decode_enveloped(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let inner = PooledTransactionsElement::decode(buf)?;
+        let inner = PooledTransactionsElement::decode_enveloped(buf)?;
+        let semaphore_proof = match SemaphoreProof::decode(buf) {
+            Ok(res) => Some(res),
+            Err(e) => {
+                warn!("Failed to decode semaphore proof: {:?}", e);
+                None
+            }
+        };
+
         Ok(Self {
             inner,
-            semaphore_proof: None,
+            semaphore_proof,
         })
     }
 
@@ -37,35 +44,6 @@ impl WorldChainPooledTransactionsElement {
         Ok(WorldChainPooledTransactionsElementEcRecovered {
             inner,
             semaphore_proof: self.semaphore_proof,
-        })
-    }
-}
-
-impl Encodable for WorldChainPooledTransactionsElement {
-    /// Encodes an enveloped post EIP-4844 [`PooledTransactionsElement`].
-    ///
-    /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
-    ///
-    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`,
-    /// ___including__ the RLP-header for the entire transaction.
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.inner.encode(out)
-    }
-
-    fn length(&self) -> usize {
-        self.inner.length()
-    }
-}
-
-impl Decodable for WorldChainPooledTransactionsElement {
-    /// Decodes an enveloped post EIP-4844 [`PooledTransactionsElement`].
-    ///
-    /// CAUTION: this expects that `buf` is `rlp(tx_type || rlp(tx-data))`
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let inner = PooledTransactionsElement::decode(buf)?;
-        Ok(Self {
-            inner,
-            semaphore_proof: None,
         })
     }
 }
