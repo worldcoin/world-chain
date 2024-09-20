@@ -83,6 +83,7 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 parking_lot = "0.12"
 derive_more = "1"
+dotenvy = "0.15.7"
 
 [dev-dependencies]
 reth-provider = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", features = [
