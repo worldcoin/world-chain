@@ -80,13 +80,18 @@ impl From<WorldChainPooledTransactionsElementEcRecovered> for WorldChainPooledTr
 
 impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransactionsElementEcRecovered {
     fn from(value: PooledTransactionsElementEcRecovered) -> Self {
-        todo!()
+        Self {
+            inner: value,
+            // Incoming consensus transactions do not have a semaphore proof
+            // Is this problematic?
+            semaphore_proof: None,
+        }
     }
 }
 
 impl From<WorldChainPooledTransactionsElementEcRecovered> for PooledTransactionsElementEcRecovered {
     fn from(value: WorldChainPooledTransactionsElementEcRecovered) -> Self {
-        todo!()
+        value.inner
     }
 }
 
