@@ -50,6 +50,8 @@ use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransact
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
+    // TODO: docs describing that this is a percent, ex: 50 is 50/100
+    verified_blockspace_cap: u64,
     _database_env: Arc<DatabaseEnv>,
 }
 
@@ -58,11 +60,16 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, _database_env: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(
+        evm_config: EvmConfig,
+        verified_blockspace_cap: u64,
+        _database_env: Arc<DatabaseEnv>,
+    ) -> Self {
         let inner = OptimismPayloadBuilder::new(evm_config);
 
         Self {
             inner,
+            verified_blockspace_cap,
             _database_env,
         }
     }
@@ -114,6 +121,7 @@ where
             args,
             cfg_env,
             block_env,
+            self.verified_blockspace_cap,
             self.inner.compute_pending_block,
         )
     }
@@ -148,6 +156,7 @@ where
             args,
             cfg_env,
             block_env,
+            self.verified_blockspace_cap,
             false,
         )?
         .into_payload()
@@ -176,7 +185,10 @@ where
         let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
             inner: (*ctx.chain_spec()).clone(),
         }));
-        let payload_builder = WorldChainPayloadBuilder::new(evm_config, db);
+
+        // TODO: use ctx for verified gas limit
+        let verfied_gas_limit = 50;
+        let payload_builder = WorldChainPayloadBuilder::new(evm_config, verfied_gas_limit, db);
 
         let conf = ctx.payload_builder_config();
 
@@ -219,6 +231,7 @@ pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
+    verified_blockspace_cap: u64,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
@@ -410,10 +423,17 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
-    // TODO: insert verified transactions here
-
     if !attributes.no_tx_pool {
+        let verified_gas_limit = (verified_blockspace_cap * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
+            // If the transaction is verified, check if it can be added within the verified gas limit
+            // TODO: check if the transaction is verified
+            let verified_tx = false;
+            if verified_tx && cumulative_gas_used + pool_tx.gas_limit() > verified_gas_limit {
+                best_txs.mark_invalid(&pool_tx);
+                continue;
+            }
+
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
