@@ -10862,6 +10862,7 @@ name = "world-chain-builder"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
@@ -10885,6 +10886,7 @@ dependencies = [
  "reth-cli",
  "reth-cli-util",
  "reth-db",
+ "reth-eth-wire-types",
  "reth-evm",
  "reth-evm-optimism",
  "reth-execution-types",

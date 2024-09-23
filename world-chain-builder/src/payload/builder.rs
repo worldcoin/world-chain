@@ -45,6 +45,7 @@ use tracing::{debug, trace, warn};
 
 use crate::node::builder::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
+use crate::pool::noop::NoopWorldChainTransactionPool;
 use crate::pool::tx::WorldChainPoolTransaction;
 
 /// Priority blockspace for humans builder
@@ -143,7 +144,7 @@ where
             client,
             config,
             // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
+            pool: NoopWorldChainTransactionPool::default(),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
