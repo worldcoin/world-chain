@@ -45,6 +45,7 @@ use tracing::{debug, trace, warn};
 
 use crate::node::builder::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
+use crate::pool::tx::WorldChainPoolTransaction;
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
@@ -98,11 +99,11 @@ where
     }
 }
 
-/// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
+/// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
@@ -172,7 +173,7 @@ where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction> + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
@@ -237,7 +238,7 @@ pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
 {
     let BuildArguments {
         client,
@@ -427,9 +428,9 @@ where
         let verified_gas_limit = (verified_blockspace_cap * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
             // If the transaction is verified, check if it can be added within the verified gas limit
-            // TODO: check if the transaction is verified
-            let verified_tx = false;
-            if verified_tx && cumulative_gas_used + pool_tx.gas_limit() > verified_gas_limit {
+            if pool_tx.transaction.semaphore_proof().is_some()
+                && cumulative_gas_used + pool_tx.gas_limit() > verified_gas_limit
+            {
                 best_txs.mark_invalid(&pool_tx);
                 continue;
             }
