@@ -34,7 +34,6 @@ use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
 use reth_revm::DatabaseCommit;
 use reth_revm::State;
-use reth_transaction_pool::noop::NoopTransactionPool;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm_primitives::{
@@ -167,7 +166,17 @@ where
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadServiceBuilder {}
+pub struct WorldChainPayloadServiceBuilder {
+    pub verified_blockspace_cap: u64,
+}
+
+impl WorldChainPayloadServiceBuilder {
+    pub const fn new(verified_blockspace_cap: u64) -> Self {
+        Self {
+            verified_blockspace_cap,
+        }
+    }
+}
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
@@ -188,9 +197,8 @@ where
             inner: (*ctx.chain_spec()).clone(),
         }));
 
-        // TODO: use ctx for verified gas limit
-        let verfied_gas_limit = 50;
-        let payload_builder = WorldChainPayloadBuilder::new(evm_config, verfied_gas_limit, db);
+        let payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_cap, db);
 
         let conf = ctx.payload_builder_config();
 
