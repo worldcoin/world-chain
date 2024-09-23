@@ -50,6 +50,7 @@ impl WorldChainBuilder {
         let WorldChainBuilderArgs {
             clear_nullifiers,
             num_pbh_txs,
+            verified_blockspace_capacity,
         } = args.builder_args;
         let RollupArgs {
             disable_txpool_gossip,
@@ -62,7 +63,9 @@ impl WorldChainBuilder {
                 clear_nullifiers,
                 num_pbh_txs,
             })
-            .payload(WorldChainPayloadServiceBuilder::default())
+            .payload(WorldChainPayloadServiceBuilder::new(
+                verified_blockspace_capacity,
+            ))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,

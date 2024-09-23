@@ -34,7 +34,6 @@ use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
 use reth_revm::DatabaseCommit;
 use reth_revm::State;
-use reth_transaction_pool::noop::NoopTransactionPool;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm_primitives::{
@@ -45,11 +44,15 @@ use tracing::{debug, trace, warn};
 
 use crate::node::builder::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
+use crate::pool::noop::NoopWorldChainTransactionPool;
+use crate::pool::tx::WorldChainPoolTransaction;
 
 /// Priority blockspace for humans builder
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
+    // TODO: docs describing that this is a percent, ex: 50 is 50/100
+    verified_blockspace_capacity: u64,
     _database_env: Arc<DatabaseEnv>,
 }
 
@@ -58,11 +61,16 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, _database_env: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(
+        evm_config: EvmConfig,
+        verified_blockspace_capacity: u64,
+        _database_env: Arc<DatabaseEnv>,
+    ) -> Self {
         let inner = OptimismPayloadBuilder::new(evm_config);
 
         Self {
             inner,
+            verified_blockspace_capacity,
             _database_env,
         }
     }
@@ -91,11 +99,11 @@ where
     }
 }
 
-/// Implementation of the [`PayloadBuilder`] trait for [`PBHBuilder`].
+/// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
@@ -114,6 +122,7 @@ where
             args,
             cfg_env,
             block_env,
+            self.verified_blockspace_capacity,
             self.inner.compute_pending_block,
         )
     }
@@ -134,7 +143,7 @@ where
             client,
             config,
             // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
+            pool: NoopWorldChainTransactionPool::default(),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
@@ -148,6 +157,7 @@ where
             args,
             cfg_env,
             block_env,
+            self.verified_blockspace_capacity,
             false,
         )?
         .into_payload()
@@ -156,14 +166,24 @@ where
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadServiceBuilder {}
+pub struct WorldChainPayloadServiceBuilder {
+    pub verified_blockspace_capacity: u64,
+}
+
+impl WorldChainPayloadServiceBuilder {
+    pub const fn new(verified_blockspace_capacity: u64) -> Self {
+        Self {
+            verified_blockspace_capacity,
+        }
+    }
+}
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     >,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction> + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
@@ -176,7 +196,9 @@ where
         let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
             inner: (*ctx.chain_spec()).clone(),
         }));
-        let payload_builder = WorldChainPayloadBuilder::new(evm_config, db);
+
+        let payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity, db);
 
         let conf = ctx.payload_builder_config();
 
@@ -219,12 +241,13 @@ pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
+    verified_blockspace_capacity: u64,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
 {
     let BuildArguments {
         client,
@@ -410,10 +433,17 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
-    // TODO: insert verified transactions here
-
     if !attributes.no_tx_pool {
+        let verified_gas_limit = (verified_blockspace_capacity * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
+            // If the transaction is verified, check if it can be added within the verified gas limit
+            if pool_tx.transaction.semaphore_proof().is_some()
+                && cumulative_gas_used + pool_tx.gas_limit() > verified_gas_limit
+            {
+                best_txs.mark_invalid(&pool_tx);
+                continue;
+            }
+
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as

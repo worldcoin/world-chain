@@ -22,4 +22,11 @@ pub struct WorldChainBuilderArgs {
     /// Sets the number of allowed PBH transactions per month
     #[arg(long = "builder.num_pbh_txs", default_value = "30")]
     pub num_pbh_txs: u16,
+
+    /// Sets the max blockspace reserved for verified transactions. If there are not enough
+    /// verified transactions to fill the capacity, the remaining blockspace will be filled with
+    /// unverified transactions.
+    /// This arg is a percentage of the total blockspace with the default set to 70 (ie 70%).
+    #[arg(long = "builder.verified_blockspace_capacity", default_value = "70")]
+    pub verified_blockspace_capacity: u64,
 }
