@@ -8,9 +8,9 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_optimism_rpc::{OpEthApiError, SequencerClient};
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use alloy_primitives::U256;
 use op_alloy_network::AnyNetwork;
@@ -38,7 +38,6 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use tokio::sync::OnceCell;
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -60,11 +59,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
 pub struct WorldChainEthApi<N: FullNodeComponents> {
-    /// Gateway to node's core components.
-    inner: Arc<EthApiNodeBackend<N>>,
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_client: OnceCell<SequencerClient>,
+    inner: OpEthApi<N>,
 }
 
 impl<N> WorldChainEthApi<N>
@@ -76,29 +71,8 @@ where
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
     pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            ctx.executor.clone(),
-            ctx.config.proof_permits,
-        );
-
-        Self {
-            inner: Arc::new(inner),
-            sequencer_client: OnceCell::new(),
-        }
+        let inner = OpEthApi::with_spawner(ctx);
+        Self { inner }
     }
 }
 
@@ -121,7 +95,7 @@ where
         &self,
     ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
     {
-        self.inner.provider()
+        EthApiSpec::provider(&self.inner)
     }
 
     #[inline]
@@ -147,17 +121,17 @@ where
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.task_spawner()
+        self.inner.io_task_spawner()
     }
 
     #[inline]
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.blocking_task_pool()
+        self.inner.tracing_task_pool()
     }
 
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
-        self.inner.blocking_task_guard()
+        self.inner.tracing_task_guard()
     }
 }
 
@@ -170,12 +144,12 @@ where
     fn provider(
         &self,
     ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec> {
-        self.inner.provider()
+        LoadFee::provider(&self.inner)
     }
 
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        LoadFee::cache(&self.inner)
     }
 
     #[inline]
@@ -196,12 +170,12 @@ where
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
-        self.inner.provider()
+        LoadState::provider(&self.inner)
     }
 
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        LoadState::cache(&self.inner)
     }
 
     #[inline]
@@ -212,12 +186,13 @@ where
 
 impl<N> EthState for WorldChainEthApi<N>
 where
-    Self: LoadState + SpawnBlocking,
+    Self: LoadState,
+    OpEthApi<N>: LoadState,
     N: FullNodeComponents,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
-        self.inner.eth_proof_window()
+        self.inner.max_proof_window()
     }
 }
 
@@ -231,6 +206,7 @@ where
 impl<N> Trace for WorldChainEthApi<N>
 where
     Self: LoadState,
+    OpEthApi<N>: LoadState,
     N: FullNodeComponents,
 {
     #[inline]

@@ -21,7 +21,7 @@ where
     N: FullNodeComponents,
 {
     fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
+        EthTransactions::provider(&self.inner)
     }
 
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
@@ -63,7 +63,7 @@ where
     type Pool = N::Pool;
 
     fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
+        LoadTransaction::provider(&self.inner)
     }
 
     fn cache(&self) -> &EthStateCache {
@@ -84,11 +84,11 @@ where
         &self,
         sequencer_client: SequencerClient,
     ) -> Result<(), tokio::sync::SetError<SequencerClient>> {
-        self.sequencer_client.set(sequencer_client)
+        self.inner.set_sequencer_client(sequencer_client)
     }
 
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.get().cloned()
+        self.inner.raw_tx_forwarder()
     }
 }

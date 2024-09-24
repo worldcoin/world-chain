@@ -3,14 +3,11 @@
 use crate::rpc::WorldChainEthApi;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_optimism_rpc::OpEthApiError;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
-    helpers::{
-        EthApiSpec, EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, LoadTransaction,
-        SpawnBlocking,
-    },
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt},
     FromEthApiError,
 };
 use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
@@ -18,12 +15,12 @@ use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
 impl<N> EthBlocks for WorldChainEthApi<N>
 where
-    Self: EthApiSpec + LoadBlock<Error = OpEthApiError> + LoadTransaction,
+    Self: LoadBlock<Error = OpEthApiError>,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
-        self.inner.provider()
+        EthBlocks::provider(&self.inner)
     }
 
     async fn block_receipts(
@@ -78,16 +75,17 @@ where
 
 impl<N> LoadBlock for WorldChainEthApi<N>
 where
-    Self: LoadPendingBlock + SpawnBlocking,
+    Self: LoadPendingBlock,
+    OpEthApi<N>: LoadPendingBlock,
     N: FullNodeComponents,
 {
     #[inline]
     fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
+        LoadBlock::provider(&self.inner)
     }
 
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        LoadBlock::cache(&self.inner)
     }
 }

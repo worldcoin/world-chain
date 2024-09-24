@@ -25,7 +25,7 @@ where
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
+        LoadReceipt::cache(&self.inner)
     }
 
     async fn build_transaction_receipt(
@@ -71,7 +71,11 @@ where
         receipt: &Receipt,
     ) -> Result<OptimismTransactionReceiptFields, OpEthApiError> {
         Ok(OpReceiptFieldsBuilder::default()
-            .l1_block_info(&self.inner.provider().chain_spec(), tx, l1_block_info)?
+            .l1_block_info(
+                &EthApiSpec::provider(&self.inner).chain_spec(),
+                tx,
+                l1_block_info,
+            )?
             .deposit_nonce(receipt.deposit_nonce)
             .deposit_version(receipt.deposit_receipt_version)
             .build())

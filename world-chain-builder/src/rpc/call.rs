@@ -3,7 +3,7 @@ use alloy_primitives::{Bytes, TxKind, U256};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_optimism_rpc::OpEthApiError;
+use reth_optimism_rpc::OpEthApi;
 use reth_primitives::{
     revm_primitives::{BlockEnv, OptimismFields, TxEnv},
     Header,
@@ -25,12 +25,12 @@ where
 impl<N> Call for WorldChainEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
-    Self::Error: From<OpEthApiError>,
     N: FullNodeComponents,
+    OpEthApi<N>: Call,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
-        self.inner.gas_cap()
+        self.inner.call_gas_limit()
     }
 
     #[inline]

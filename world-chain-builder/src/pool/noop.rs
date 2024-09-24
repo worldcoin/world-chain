@@ -7,11 +7,9 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{PooledTransactionsElement, TxHash};
 use reth_rpc_types::BlobTransactionSidecar;
 use reth_transaction_pool::{
-    error::PoolError,
-    noop::{NoopInsertError, NoopTransactionPool},
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BestTransactionsAttributes,
-    BlobStoreError, BlockInfo, EthPooledTransaction, GetPooledTransactionLimit, NewBlobSidecar,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
+    BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
+    NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PropagatedTransactions,
     TransactionEvents, TransactionListenerKind, TransactionOrigin, TransactionPool,
     ValidPoolTransaction,
 };
