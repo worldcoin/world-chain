@@ -676,3 +676,72 @@ where
         cached_reads,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::pool::{
+        ordering::WorldChainOrdering,
+        tx::WorldChainPooledTransaction,
+        validator::{WorldChainTransactionPool, WorldChainTransactionValidator},
+    };
+
+    use super::*;
+    use reth_db::test_utils::tempdir_path;
+    use reth_evm_optimism::OptimismEvmConfig;
+    use reth_node_optimism::txpool::OpTransactionValidator;
+    use reth_optimism_chainspec::OpChainSpec;
+    use reth_provider::test_utils::NoopProvider;
+    use reth_tasks::TokioTaskExecutor;
+    use reth_transaction_pool::{
+        blobstore::DiskFileBlobStore, PoolConfig, TransactionValidationTaskExecutor,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn test_world_chain_payload() -> eyre::Result<()> {
+        let data_dir = tempdir_path();
+        let db = load_world_chain_db(data_dir.as_path(), false)?;
+
+        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+            inner: ChainSpec::default(),
+        }));
+
+        let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
+
+        let world_chain_tx_pool = init_world_chain_tx_pool(db.clone(), blob_store, 30);
+
+        let verified_blockspace_cap = 50;
+        let world_chain_payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
+
+        // TODO: insert transactions into the pool
+
+        // TODO: build payload
+
+        Ok(())
+    }
+
+    fn init_world_chain_tx_pool(
+        db: Arc<DatabaseEnv>,
+        blob_store: DiskFileBlobStore,
+        num_pbh_txs: u16,
+    ) -> WorldChainTransactionPool<NoopProvider, DiskFileBlobStore> {
+        let client = NoopProvider::default();
+
+        let task_executor = TokioTaskExecutor::default();
+        let validator: TransactionValidationTaskExecutor<
+            WorldChainTransactionValidator<NoopProvider, WorldChainPooledTransaction>,
+        > = TransactionValidationTaskExecutor::eth_builder(Arc::new(ChainSpec::default()))
+            .build_with_tasks(client.clone(), task_executor.clone(), blob_store.clone())
+            .map(|validator| {
+                let op_tx_validator =
+                    OpTransactionValidator::new(validator).require_l1_data_gas_fee(false); // Disable L1 gas fee check for development mode
+
+                WorldChainTransactionValidator::new(op_tx_validator, db.clone(), num_pbh_txs)
+            });
+
+        let ordering = WorldChainOrdering::new(db.clone());
+
+        reth_transaction_pool::Pool::new(validator, ordering, blob_store, PoolConfig::default())
+    }
+}

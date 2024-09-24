@@ -28,8 +28,6 @@ fn main() {
         Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
             let handle = builder
                 .node(WorldChainBuilder::new(builder_args.clone()))
-                // .with_add_ons()
-                // .extend_rpc_modules(hook)
                 .launch()
                 .await?;
 
