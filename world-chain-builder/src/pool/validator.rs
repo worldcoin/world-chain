@@ -66,7 +66,7 @@ where
         }
     }
 
-    fn set_validated(
+    pub fn set_validated(
         &self,
         tx: &Tx,
         semaphore_proof: &SemaphoreProof,

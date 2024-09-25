@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 # reth
-reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", features = [
+    "reth-codec",
+] }
 reth-revm = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
 reth-cli-util = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
 reth-cli = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
