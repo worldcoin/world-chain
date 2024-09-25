@@ -890,8 +890,6 @@ mod tests {
             ..Default::default()
         });
 
-        dbg!(&tx);
-
         let signature = Signature {
             r: U256::from(rng.gen::<u128>()),
             s: U256::from(rng.gen::<u128>()),
