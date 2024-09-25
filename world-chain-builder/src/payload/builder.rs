@@ -690,7 +690,7 @@ mod tests {
 
     use super::*;
     use alloy_consensus::TxLegacy;
-    use ethers_core::k256::ecdsa::{signature::SignerMut, SigningKey};
+    use alloy_rlp::Encodable;
     use futures::future::join_all;
     use rand::Rng;
     use reth_db::test_utils::tempdir_path;
@@ -699,7 +699,8 @@ mod tests {
     use reth_optimism_chainspec::OpChainSpec;
     use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
     use reth_primitives::{
-        SealedBlock, Signature, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
+        transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
+        TransactionSignedEcRecovered, TxDeposit, Withdrawals,
     };
     use reth_provider::{test_utils::NoopProvider, BlockReaderIdExt};
     use reth_transaction_pool::{
@@ -748,7 +749,7 @@ mod tests {
             WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
 
         // Insert transactions into the pool
-        let unverified_transactions = generate_mock_world_chain_transactions(50, 100000, false);
+        let unverified_transactions = generate_mock_pooled_transactions(50, 100000, false);
         for transaction in unverified_transactions.iter() {
             world_chain_tx_pool
                 .add_transaction(TransactionOrigin::Local, transaction.clone())
@@ -756,16 +757,14 @@ mod tests {
         }
 
         // Insert verifiedtransactions into the pool
-        let verified_transactions = generate_mock_world_chain_transactions(50, 100000, true);
+        let verified_transactions = generate_mock_pooled_transactions(50, 100000, true);
         for transaction in verified_transactions.iter() {
             world_chain_tx_pool
                 .add_transaction(TransactionOrigin::Local, transaction.clone())
                 .await?;
         }
 
-        let sequencer_transactions = (0..50)
-            .map(|_| generate_mock_signed_transaction(10000))
-            .collect::<Vec<_>>();
+        let sequencer_transactions = generate_mock_deposit_transactions(50, 100000);
 
         let eth_payload_attributes = EthPayloadBuilderAttributes {
             id: PayloadId::new([0; 8]),
@@ -779,8 +778,7 @@ mod tests {
 
         let payload_attributes = OptimismPayloadBuilderAttributes {
             gas_limit: Some(gas_limit),
-            // TODO: add sequencer txs
-            transactions: vec![],
+            transactions: sequencer_transactions.clone(),
             payload_attributes: eth_payload_attributes,
             no_tx_pool: false,
         };
@@ -807,7 +805,7 @@ mod tests {
         // Collect the transaction hashes in the expected order
         let mut expected_order = sequencer_transactions
             .iter()
-            .map(|tx| tx.hash())
+            .map(|tx| tx.1.hash())
             .collect::<Vec<_>>();
         expected_order.extend(verified_transactions.iter().map(|tx| tx.hash()));
         expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
@@ -877,45 +875,70 @@ mod tests {
         }
     }
 
-    fn generate_mock_signed_transaction(gas_limit: u64) -> TransactionSigned {
+    fn generate_mock_deposit_transactions(
+        count: usize,
+        gas_limit: u64,
+    ) -> Vec<WithEncoded<TransactionSigned>> {
         let mut rng = rand::thread_rng();
 
-        let tx = reth_primitives::Transaction::Legacy(TxLegacy {
-            gas_price: 10,
-            gas_limit: gas_limit.into(),
-            to: TxKind::Call(Address::random()),
-            value: U256::from(100),
-            input: rng.gen::<[u8; 32]>().into(),
-            nonce: rng.gen(),
-            ..Default::default()
-        });
+        (0..count)
+            .map(|_| {
+                let tx = reth_primitives::Transaction::Deposit(TxDeposit {
+                    source_hash: B256::random(),
+                    from: Address::random(),
+                    to: TxKind::Call(Address::random()),
+                    mint: Some(100), // Example value for mint
+                    value: U256::from(100),
+                    gas_limit: gas_limit.into(),
+                    is_system_transaction: true,
+                    input: rng.gen::<[u8; 32]>().into(),
+                });
 
-        let signature = Signature {
-            r: U256::from(rng.gen::<u128>()),
-            s: U256::from(rng.gen::<u128>()),
-            odd_y_parity: false,
-        };
+                let signature = Signature {
+                    r: U256::from(rng.gen::<u128>()),
+                    s: U256::from(rng.gen::<u128>()),
+                    odd_y_parity: false,
+                };
 
-        TransactionSigned::from_transaction_and_signature(tx, signature)
+                let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+                let mut buf = Vec::new();
+                tx.encode(&mut buf);
+                WithEncoded::new(buf.into(), tx)
+            })
+            .collect::<Vec<_>>()
     }
 
-    fn generate_mock_world_chain_transactions(
+    fn generate_mock_pooled_transactions(
         count: usize,
         gas_limit: u64,
         pbh: bool,
     ) -> Vec<WorldChainPooledTransaction> {
-        let signed_txs = (0..count)
-            .map(|_| generate_mock_signed_transaction(gas_limit))
-            .collect::<Vec<_>>();
+        let mut rng = rand::thread_rng();
 
-        signed_txs
-            .iter()
-            .map(|tx| {
-                let transaction = TransactionSignedEcRecovered::from_signed_transaction(
+        (0..count)
+            .map(|_| {
+                let tx = reth_primitives::Transaction::Legacy(TxLegacy {
+                    gas_price: 10,
+                    gas_limit: gas_limit.into(),
+                    to: TxKind::Call(Address::random()),
+                    value: U256::from(100),
+                    input: rng.gen::<[u8; 32]>().into(),
+                    nonce: rng.gen(),
+                    ..Default::default()
+                });
+
+                let signature = Signature {
+                    r: U256::from(rng.gen::<u128>()),
+                    s: U256::from(rng.gen::<u128>()),
+                    odd_y_parity: false,
+                };
+
+                let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+                let tx_recovered = TransactionSignedEcRecovered::from_signed_transaction(
                     tx.clone(),
                     Default::default(),
                 );
-                let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+                let pooled_tx = EthPooledTransaction::new(tx_recovered.clone(), 200);
 
                 let semaphore_proof = if pbh {
                     Some(SemaphoreProof::default())
@@ -928,6 +951,6 @@ mod tests {
                     semaphore_proof,
                 }
             })
-            .collect()
+            .collect::<Vec<_>>()
     }
 }
