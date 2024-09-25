@@ -1,5 +1,5 @@
 //! World Chain transaction pool types
-use chrono::Datelike;
+use chrono::{DateTime, Datelike};
 use reth_db::cursor::DbCursorRW;
 use reth_db::transaction::{DbTx, DbTxMut};
 use semaphore::hash_to_field;
@@ -95,12 +95,10 @@ where
     /// `0-012025-11`
     pub fn validate_external_nullifier(
         &self,
-        semaphore_proof: &SemaphoreProof,
+        date: chrono::DateTime<chrono::Utc>,
+        external_nullifier: &str,
     ) -> Result<(), TransactionValidationError> {
-        let split = semaphore_proof
-            .external_nullifier
-            .split('-')
-            .collect::<Vec<&str>>();
+        let split = external_nullifier.split('-').collect::<Vec<&str>>();
 
         if split.len() != 3 {
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifier.into());
@@ -114,7 +112,7 @@ where
         }
 
         // TODO: Handle edge case where we are at the end of the month
-        if split[1] != current_period_id() {
+        if split[1] != format_date(date) {
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
         }
 
@@ -173,8 +171,9 @@ where
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
     ) -> Result<(), TransactionValidationError> {
+        let date = chrono::Utc::now();
         self.validate_root(semaphore_proof)?;
-        self.validate_external_nullifier(semaphore_proof)?;
+        self.validate_external_nullifier(date, &semaphore_proof.external_nullifier)?;
         self.validate_nullifier(semaphore_proof)?;
         self.validate_nullifier_hash(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
@@ -274,30 +273,16 @@ where
     }
 }
 
-fn current_period_id() -> String {
-    let current_date = chrono::Utc::now();
-    format_date(current_date)
-}
-
-fn format_date(date: chrono::DateTime<chrono::Utc>) -> String {
+fn format_date(date: DateTime<chrono::Utc>) -> String {
     format!("{:0>2}{}", date.month(), date.year())
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-    use reth_node_optimism::txpool::OpTransactionValidator;
-
-    #[test]
-    fn test_format_date() {
-        let date = chrono::Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap();
-        let formated = super::format_date(date);
-        let expected = "012021".to_string();
-        assert_eq!(formated, expected);
-    }
-
     use alloy_primitives::{TxKind, U256};
+    use chrono::TimeZone;
     use reth_chainspec::MAINNET;
+    use reth_node_optimism::txpool::OpTransactionValidator;
     use reth_primitives::{
         Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
     };
@@ -324,6 +309,37 @@ mod tests {
         let path = temp_dir.path().join("db");
         let db = load_world_chain_db(&path, false).unwrap();
         WorldChainTransactionValidator::new(validator, db, 30)
+    }
+
+    #[test]
+    fn test_format_date() {
+        let date = chrono::Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap();
+        let formated = super::format_date(date);
+        let expected = "012021".to_string();
+        assert_eq!(formated, expected);
+    }
+
+    #[test]
+    fn test_validate_external_nullifier() {
+        let validator = world_chain_validator();
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let valid_external_nullifiers = ["v1-012025-0", "v1-012025-1", "v1-012025-29"];
+        let invalid_external_nullifiers = [
+            "v0-012025-0",
+            "v1-022025-0",
+            "v1-002025-0",
+            "v1-012025-30",
+            "v1-012025",
+            "12025-0",
+            "v1-012025-0-0",
+        ];
+        for valid in valid_external_nullifiers.iter() {
+            validator.validate_external_nullifier(date, valid).unwrap();
+        }
+        for invalid in invalid_external_nullifiers.iter() {
+            let res = validator.validate_external_nullifier(date, invalid);
+            assert!(res.is_err());
+        }
     }
 
     #[test]
