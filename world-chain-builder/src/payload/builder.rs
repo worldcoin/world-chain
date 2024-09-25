@@ -690,7 +690,9 @@ mod tests {
 
     use super::*;
     use alloy_consensus::TxLegacy;
+    use ethers_core::k256::ecdsa::{signature::SignerMut, SigningKey};
     use futures::future::join_all;
+    use rand::Rng;
     use reth_db::test_utils::tempdir_path;
     use reth_evm_optimism::OptimismEvmConfig;
     use reth_node_optimism::txpool::OpTransactionValidator;
@@ -706,7 +708,7 @@ mod tests {
         EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
         TransactionValidationOutcome, TransactionValidator,
     };
-    use revm_primitives::{Address, Bytes, B256};
+    use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -876,13 +878,26 @@ mod tests {
     }
 
     fn generate_mock_signed_transaction(gas_limit: u64) -> TransactionSigned {
+        let mut rng = rand::thread_rng();
+
         let tx = reth_primitives::Transaction::Legacy(TxLegacy {
             gas_price: 10,
             gas_limit: gas_limit.into(),
+            to: TxKind::Call(Address::random()),
             value: U256::from(100),
+            input: rng.gen::<[u8; 32]>().into(),
+            nonce: rng.gen(),
             ..Default::default()
         });
-        let signature = Signature::default();
+
+        dbg!(&tx);
+
+        let signature = Signature {
+            r: U256::from(rng.gen::<u128>()),
+            s: U256::from(rng.gen::<u128>()),
+            odd_y_parity: false,
+        };
+
         TransactionSigned::from_transaction_and_signature(tx, signature)
     }
 

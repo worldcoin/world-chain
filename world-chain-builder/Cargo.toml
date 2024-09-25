@@ -97,6 +97,8 @@ reth-provider = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", feat
 ] }
 alloy-primitives = "0.8"
 serde_json = "1"
+rand = "0.8"
+
 
 [features]
 jemalloc = ["tikv-jemallocator"]
