@@ -7,7 +7,7 @@ use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::TransactionValidationTaskExecutor;
 use tracing::{debug, info};
 
-use crate::node::builder::load_world_chain_db;
+use crate::pbh::db::load_world_chain_db;
 use crate::pool::ordering::WorldChainOrdering;
 use crate::pool::validator::WorldChainTransactionValidator;
 

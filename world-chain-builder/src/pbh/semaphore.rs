@@ -24,11 +24,7 @@ impl Default for Proof {
 impl Decodable for Proof {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let bytes = ProofBytes::decode(buf)?;
-        // if bytes.len() != LEN {
-        //     return Err(alloy_rlp::Error::UnexpectedLength);
-        // }
         let fields: [[u8; 32]; 8] = bytemuck::cast(bytes);
-        // panic!("here");
         let a = (fields[0].into(), fields[1].into());
         let b = (
             [fields[2].into(), fields[3].into()],

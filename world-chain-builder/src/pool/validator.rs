@@ -1,5 +1,5 @@
 //! World Chain transaction pool types
-use chrono::Datelike;
+use chrono::{DateTime, Datelike};
 use reth_db::cursor::DbCursorRW;
 use reth_db::transaction::{DbTx, DbTxMut};
 use semaphore::hash_to_field;
@@ -32,7 +32,6 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<
         WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
     >,
-    // TODO: Modify this ordering
     WorldChainOrdering<WorldChainPooledTransaction>,
     S,
 >;
@@ -96,12 +95,10 @@ where
     /// `0-012025-11`
     pub fn validate_external_nullifier(
         &self,
-        semaphore_proof: &SemaphoreProof,
+        date: chrono::DateTime<chrono::Utc>,
+        external_nullifier: &str,
     ) -> Result<(), TransactionValidationError> {
-        let split = semaphore_proof
-            .external_nullifier
-            .split('-')
-            .collect::<Vec<&str>>();
+        let split = external_nullifier.split('-').collect::<Vec<&str>>();
 
         if split.len() != 3 {
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifier.into());
@@ -115,7 +112,7 @@ where
         }
 
         // TODO: Handle edge case where we are at the end of the month
-        if split[1] != current_period_id() {
+        if split[1] != format_date(date) {
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
         }
 
@@ -174,8 +171,9 @@ where
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
     ) -> Result<(), TransactionValidationError> {
+        let date = chrono::Utc::now();
         self.validate_root(semaphore_proof)?;
-        self.validate_external_nullifier(semaphore_proof)?;
+        self.validate_external_nullifier(date, &semaphore_proof.external_nullifier)?;
         self.validate_nullifier(semaphore_proof)?;
         self.validate_nullifier_hash(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
@@ -275,7 +273,139 @@ where
     }
 }
 
-fn current_period_id() -> String {
-    let current_date = chrono::Utc::now();
-    format!("{:0>2}{}", current_date.month(), current_date.year())
+fn format_date(date: DateTime<chrono::Utc>) -> String {
+    format!("{:0>2}{}", date.month(), date.year())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::TxKind;
+    use chrono::TimeZone;
+    use ethers_core::types::U256;
+    use reth_chainspec::MAINNET;
+    use reth_node_optimism::txpool::OpTransactionValidator;
+    use reth_primitives::{
+        Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
+    };
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+        EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
+    };
+    use semaphore::Field;
+    use tempfile::tempdir;
+
+    use crate::pbh::db::load_world_chain_db;
+    use crate::pbh::semaphore::{Proof, SemaphoreProof};
+    use crate::pool::tx::WorldChainPooledTransaction;
+    use crate::pool::validator::WorldChainTransactionValidator;
+
+    fn world_chain_validator(
+    ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+        let client = MockEthProvider::default();
+        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+            .no_shanghai()
+            .no_cancun()
+            .build(client, InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+        let temp_dir = tempdir().unwrap();
+        let path = temp_dir.path().join("db");
+        let db = load_world_chain_db(&path, false).unwrap();
+        WorldChainTransactionValidator::new(validator, db, 30)
+    }
+
+    #[test]
+    fn test_format_date() {
+        let date = chrono::Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap();
+        let formated = super::format_date(date);
+        let expected = "012021".to_string();
+        assert_eq!(formated, expected);
+    }
+
+    #[test]
+    fn test_validate_external_nullifier() {
+        let validator = world_chain_validator();
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let valid_external_nullifiers = ["v1-012025-0", "v1-012025-1", "v1-012025-29"];
+        let invalid_external_nullifiers = [
+            "v0-012025-0",
+            "v1-022025-0",
+            "v1-002025-0",
+            "v1-012025-30",
+            "v1-012025",
+            "12025-0",
+            "v1-012025-0-0",
+        ];
+        for valid in valid_external_nullifiers.iter() {
+            validator.validate_external_nullifier(date, valid).unwrap();
+        }
+        for invalid in invalid_external_nullifiers.iter() {
+            let res = validator.validate_external_nullifier(date, invalid);
+            assert!(res.is_err());
+        }
+    }
+
+    #[test]
+    fn test_set_validated() {
+        let validator = world_chain_validator();
+
+        let proof = Proof(semaphore::protocol::Proof(
+            (U256::from(1u64), U256::from(2u64)),
+            (
+                [U256::from(3u64), U256::from(4u64)],
+                [U256::from(5u64), U256::from(6u64)],
+            ),
+            (U256::from(7u64), U256::from(8u64)),
+        ));
+        let semaphore_proof = SemaphoreProof {
+            external_nullifier: "0-012025-11".to_string(),
+            external_nullifier_hash: Field::from(9u64),
+            nullifier_hash: Field::from(10u64),
+            signal_hash: Field::from(11u64),
+            root: Field::from(12u64),
+            proof,
+        };
+        let tx = TransactionSignedEcRecovered::default();
+        let inner = EthPooledTransaction::new(tx, 0);
+        let tx = WorldChainPooledTransaction {
+            inner,
+            semaphore_proof: Some(semaphore_proof.clone()),
+        };
+
+        validator.set_validated(&tx, &semaphore_proof).unwrap();
+    }
+
+    #[test]
+    fn validate_optimism_transaction() {
+        let validator = world_chain_validator();
+        let origin = TransactionOrigin::External;
+        let signer = Default::default();
+        let deposit_tx = Transaction::Deposit(TxDeposit {
+            source_hash: Default::default(),
+            from: signer,
+            to: TxKind::Create,
+            mint: None,
+            value: revm_primitives::ruint::aliases::U256::ZERO,
+            gas_limit: 0,
+            is_system_transaction: false,
+            input: Default::default(),
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
+        let signed_recovered =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
+        let len = signed_recovered.length_without_header();
+        let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
+        let world_chain_pooled_tx = WorldChainPooledTransaction {
+            inner: pooled_tx,
+            semaphore_proof: None,
+        };
+        let outcome = validator.validate_one(origin, world_chain_pooled_tx);
+
+        let err = match outcome {
+            TransactionValidationOutcome::Invalid(_, err) => err,
+            _ => panic!("Expected invalid transaction"),
+        };
+        assert_eq!(err.to_string(), "transaction type not supported");
+    }
 }
