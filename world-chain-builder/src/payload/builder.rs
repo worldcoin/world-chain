@@ -53,6 +53,7 @@ pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
     // TODO: docs describing that this is a percent, ex: 50 is 50/100
     verified_blockspace_capacity: u64,
+    // TODO: NOTE: we need to insert the verified txs into the table after they are inserted into the block
     _database_env: Arc<DatabaseEnv>,
 }
 
@@ -675,4 +676,386 @@ where
         payload,
         cached_reads,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        pbh::semaphore::SemaphoreProof,
+        pool::{
+            ordering::WorldChainOrdering, tx::WorldChainPooledTransaction,
+            validator::WorldChainTransactionValidator,
+        },
+    };
+
+    use super::*;
+    use alloy_consensus::TxLegacy;
+    use alloy_rlp::Encodable;
+    use futures::future::join_all;
+    use rand::Rng;
+    use reth_db::test_utils::tempdir_path;
+    use reth_evm_optimism::OptimismEvmConfig;
+    use reth_node_optimism::txpool::OpTransactionValidator;
+    use reth_optimism_chainspec::OpChainSpec;
+    use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
+    use reth_primitives::{
+        transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
+        TransactionSignedEcRecovered, TxDeposit, Withdrawals,
+    };
+    use reth_provider::{test_utils::NoopProvider, BlockReaderIdExt};
+    use reth_transaction_pool::{
+        blobstore::DiskFileBlobStore,
+        validate::{EthTransactionValidatorBuilder, ValidTransaction},
+        EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
+        TransactionValidationOutcome, TransactionValidator,
+    };
+    use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_try_build() -> eyre::Result<()> {
+        let data_dir = tempdir_path();
+        let db = load_world_chain_db(data_dir.as_path(), false)?;
+
+        let gas_limit = 30_000_000;
+        let chain_spec = Arc::new(ChainSpec::default());
+        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+            inner: (*chain_spec).clone(),
+        }));
+        let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
+
+        // Init the transaction pool
+        let client = NoopProvider::default();
+        let eth_tx_validator = EthTransactionValidatorBuilder::new(chain_spec.clone())
+            .build(client, blob_store.clone());
+        let op_tx_validator =
+            OpTransactionValidator::new(eth_tx_validator).require_l1_data_gas_fee(false);
+
+        let wc_validator = WorldChainTransactionValidator::new(op_tx_validator, db.clone(), 30);
+
+        let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
+        let ordering = WorldChainOrdering::new(db.clone());
+
+        let world_chain_tx_pool = reth_transaction_pool::Pool::new(
+            wc_noop_validator,
+            ordering,
+            blob_store,
+            PoolConfig::default(),
+        );
+
+        // Init the payload builder
+        let verified_blockspace_cap = 50;
+        let world_chain_payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
+
+        // Insert transactions into the pool
+        let unverified_transactions = generate_mock_pooled_transactions(50, 100000, false);
+        for transaction in unverified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        // Insert verifiedtransactions into the pool
+        let verified_transactions = generate_mock_pooled_transactions(50, 100000, true);
+        for transaction in verified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        let sequencer_transactions = generate_mock_deposit_transactions(50, 100000);
+
+        let eth_payload_attributes = EthPayloadBuilderAttributes {
+            id: PayloadId::new([0; 8]),
+            parent: B256::ZERO,
+            timestamp: 0,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            withdrawals: Withdrawals::default(),
+            parent_beacon_block_root: None,
+        };
+
+        let payload_attributes = OptimismPayloadBuilderAttributes {
+            gas_limit: Some(gas_limit),
+            transactions: sequencer_transactions.clone(),
+            payload_attributes: eth_payload_attributes,
+            no_tx_pool: false,
+        };
+
+        let build_args = BuildArguments {
+            client: NoopProvider::default(),
+            config: PayloadConfig {
+                parent_block: Arc::new(SealedBlock::default()),
+                attributes: payload_attributes,
+                chain_spec: chain_spec,
+                extra_data: Bytes::default(),
+            },
+            pool: world_chain_tx_pool,
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+
+        let built_payload = world_chain_payload_builder
+            .try_build(build_args)?
+            .into_payload()
+            .expect("Could not build payload");
+
+        // Collect the transaction hashes in the expected order
+        let mut expected_order = sequencer_transactions
+            .iter()
+            .map(|tx| tx.1.hash())
+            .collect::<Vec<_>>();
+        expected_order.extend(verified_transactions.iter().map(|tx| tx.hash()));
+        expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
+
+        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+            assert_eq!(tx.hash, *expected_hash);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_try_build_max_verified_blockspace() -> eyre::Result<()> {
+        let data_dir = tempdir_path();
+        let db = load_world_chain_db(data_dir.as_path(), false)?;
+
+        let gas_limit = 30_000_000;
+        let chain_spec = Arc::new(ChainSpec::default());
+        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+            inner: (*chain_spec).clone(),
+        }));
+        let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
+
+        // Init the transaction pool
+        let client = NoopProvider::default();
+        let eth_tx_validator = EthTransactionValidatorBuilder::new(chain_spec.clone())
+            .build(client, blob_store.clone());
+        let op_tx_validator =
+            OpTransactionValidator::new(eth_tx_validator).require_l1_data_gas_fee(false);
+
+        let wc_validator = WorldChainTransactionValidator::new(op_tx_validator, db.clone(), 30);
+
+        let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
+        let ordering = WorldChainOrdering::new(db.clone());
+
+        let world_chain_tx_pool = reth_transaction_pool::Pool::new(
+            wc_noop_validator,
+            ordering,
+            blob_store,
+            PoolConfig::default(),
+        );
+
+        // Init the payload builder
+        let verified_blockspace_cap = 10;
+        let world_chain_payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
+
+        // Insert transactions into the pool
+        let unverified_transactions = generate_mock_pooled_transactions(50, 100000, false);
+        for transaction in unverified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        // Insert verifiedtransactions into the pool
+        let verified_transactions = generate_mock_pooled_transactions(50, 3000000, true);
+        for transaction in verified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        let sequencer_transactions = generate_mock_deposit_transactions(50, 100000);
+
+        let eth_payload_attributes = EthPayloadBuilderAttributes {
+            id: PayloadId::new([0; 8]),
+            parent: B256::ZERO,
+            timestamp: 0,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            withdrawals: Withdrawals::default(),
+            parent_beacon_block_root: None,
+        };
+
+        let payload_attributes = OptimismPayloadBuilderAttributes {
+            gas_limit: Some(gas_limit),
+            transactions: sequencer_transactions.clone(),
+            payload_attributes: eth_payload_attributes,
+            no_tx_pool: false,
+        };
+
+        let build_args = BuildArguments {
+            client: NoopProvider::default(),
+            config: PayloadConfig {
+                parent_block: Arc::new(SealedBlock::default()),
+                attributes: payload_attributes,
+                chain_spec: chain_spec,
+                extra_data: Bytes::default(),
+            },
+            pool: world_chain_tx_pool,
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+
+        let built_payload = world_chain_payload_builder
+            .try_build(build_args)?
+            .into_payload()
+            .expect("Could not build payload");
+
+        // Collect the transaction hashes in the expected order
+        let mut expected_order = sequencer_transactions
+            .iter()
+            .map(|tx| tx.1.hash())
+            .collect::<Vec<_>>();
+        expected_order.push(*verified_transactions.first().unwrap().hash());
+        expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
+
+        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+            assert_eq!(tx.hash, *expected_hash);
+        }
+
+        Ok(())
+    }
+
+    pub struct WorldChainNoopValidator<Client, Tx>
+    where
+        Client: StateProviderFactory + BlockReaderIdExt,
+    {
+        inner: WorldChainTransactionValidator<Client, Tx>,
+    }
+
+    impl WorldChainNoopValidator<NoopProvider, WorldChainPooledTransaction> {
+        pub fn new(
+            inner: WorldChainTransactionValidator<NoopProvider, WorldChainPooledTransaction>,
+        ) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<Client, Tx> TransactionValidator for WorldChainNoopValidator<Client, Tx>
+    where
+        Client: StateProviderFactory + BlockReaderIdExt,
+        Tx: WorldChainPoolTransaction,
+    {
+        type Transaction = Tx;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            if let Some(semaphore_proof) = transaction.semaphore_proof() {
+                self.inner
+                    .set_validated(&transaction, semaphore_proof)
+                    .expect("Error when writing to the db");
+            }
+
+            TransactionValidationOutcome::Valid {
+                balance: U256::ZERO,
+                state_nonce: 0,
+                transaction: ValidTransaction::Valid(transaction),
+                propagate: false,
+            }
+        }
+
+        async fn validate_transactions(
+            &self,
+            transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+            let futures = transactions
+                .into_iter()
+                .map(|(origin, tx)| self.validate_transaction(origin, tx))
+                .collect::<Vec<_>>();
+
+            join_all(futures).await
+        }
+
+        fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {
+            unreachable!("NoopValidator does not implement on_new_head_block");
+        }
+    }
+
+    fn generate_mock_deposit_transactions(
+        count: usize,
+        gas_limit: u64,
+    ) -> Vec<WithEncoded<TransactionSigned>> {
+        let mut rng = rand::thread_rng();
+
+        (0..count)
+            .map(|_| {
+                let tx = reth_primitives::Transaction::Deposit(TxDeposit {
+                    source_hash: B256::random(),
+                    from: Address::random(),
+                    to: TxKind::Call(Address::random()),
+                    mint: Some(100), // Example value for mint
+                    value: U256::from(100),
+                    gas_limit: gas_limit.into(),
+                    is_system_transaction: true,
+                    input: rng.gen::<[u8; 32]>().into(),
+                });
+
+                let signature = Signature {
+                    r: U256::from(rng.gen::<u128>()),
+                    s: U256::from(rng.gen::<u128>()),
+                    odd_y_parity: false,
+                };
+
+                let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+                let mut buf = Vec::new();
+                tx.encode(&mut buf);
+                WithEncoded::new(buf.into(), tx)
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn generate_mock_pooled_transactions(
+        count: usize,
+        gas_limit: u64,
+        pbh: bool,
+    ) -> Vec<WorldChainPooledTransaction> {
+        let mut rng = rand::thread_rng();
+
+        (0..count)
+            .map(|_| {
+                let tx = reth_primitives::Transaction::Legacy(TxLegacy {
+                    gas_price: 10,
+                    gas_limit: gas_limit.into(),
+                    to: TxKind::Call(Address::random()),
+                    value: U256::from(100),
+                    input: rng.gen::<[u8; 32]>().into(),
+                    nonce: rng.gen(),
+                    ..Default::default()
+                });
+
+                let signature = Signature {
+                    r: U256::from(rng.gen::<u128>()),
+                    s: U256::from(rng.gen::<u128>()),
+                    odd_y_parity: false,
+                };
+
+                let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+                let tx_recovered = TransactionSignedEcRecovered::from_signed_transaction(
+                    tx.clone(),
+                    Default::default(),
+                );
+                let pooled_tx = EthPooledTransaction::new(tx_recovered.clone(), 200);
+
+                let semaphore_proof = if pbh {
+                    Some(SemaphoreProof::default())
+                } else {
+                    None
+                };
+
+                WorldChainPooledTransaction {
+                    inner: pooled_tx,
+                    semaphore_proof,
+                }
+            })
+            .collect::<Vec<_>>()
+    }
 }

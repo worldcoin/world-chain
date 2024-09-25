@@ -9,6 +9,18 @@ pub type ProofBytes = [u8; LEN];
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Proof(pub semaphore::protocol::Proof);
 
+impl Default for Proof {
+    fn default() -> Self {
+        let proof = semaphore::protocol::Proof(
+            (0u64.into(), 0u64.into()),
+            ([0u64.into(), 0u64.into()], [0u64.into(), 0u64.into()]),
+            (0u64.into(), 0u64.into()),
+        );
+
+        Proof(proof)
+    }
+}
+
 impl Decodable for Proof {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let bytes = ProofBytes::decode(buf)?;
@@ -46,7 +58,7 @@ impl Encodable for Proof {
     }
 }
 
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq, Default)]
 pub struct SemaphoreProof {
     pub external_nullifier: String,
     pub external_nullifier_hash: Field,

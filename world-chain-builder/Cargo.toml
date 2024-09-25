@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 # reth
-reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", features = [
+    "reth-codec",
+] }
 reth-revm = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
 reth-cli-util = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
 reth-cli = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
@@ -96,6 +98,8 @@ reth-provider = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", feat
 ] }
 alloy-primitives = "0.8"
 serde_json = "1"
+rand = "0.8"
+
 
 [features]
 jemalloc = ["tikv-jemallocator"]

@@ -10880,6 +10880,7 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "parking_lot 0.12.3",
+ "rand",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
