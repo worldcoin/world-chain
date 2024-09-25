@@ -42,7 +42,7 @@ use revm_primitives::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::node::builder::load_world_chain_db;
+use crate::pbh::db::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 use crate::pool::noop::NoopWorldChainTransactionPool;
 use crate::pool::tx::WorldChainPoolTransaction;

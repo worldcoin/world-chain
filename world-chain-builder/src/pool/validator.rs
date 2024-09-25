@@ -279,8 +279,9 @@ fn format_date(date: DateTime<chrono::Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{TxKind, U256};
+    use alloy_primitives::TxKind;
     use chrono::TimeZone;
+    use ethers_core::types::U256;
     use reth_chainspec::MAINNET;
     use reth_node_optimism::txpool::OpTransactionValidator;
     use reth_primitives::{
@@ -291,9 +292,11 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
     };
+    use semaphore::Field;
     use tempfile::tempdir;
 
-    use crate::node::builder::load_world_chain_db;
+    use crate::pbh::db::load_world_chain_db;
+    use crate::pbh::semaphore::{Proof, SemaphoreProof};
     use crate::pool::tx::WorldChainPooledTransaction;
     use crate::pool::validator::WorldChainTransactionValidator;
 
@@ -343,6 +346,36 @@ mod tests {
     }
 
     #[test]
+    fn test_set_validated() {
+        let validator = world_chain_validator();
+
+        let proof = Proof(semaphore::protocol::Proof(
+            (U256::from(1u64), U256::from(2u64)),
+            (
+                [U256::from(3u64), U256::from(4u64)],
+                [U256::from(5u64), U256::from(6u64)],
+            ),
+            (U256::from(7u64), U256::from(8u64)),
+        ));
+        let semaphore_proof = SemaphoreProof {
+            external_nullifier: "0-012025-11".to_string(),
+            external_nullifier_hash: Field::from(9u64),
+            nullifier_hash: Field::from(10u64),
+            signal_hash: Field::from(11u64),
+            root: Field::from(12u64),
+            proof,
+        };
+        let tx = TransactionSignedEcRecovered::default();
+        let inner = EthPooledTransaction::new(tx, 0);
+        let tx = WorldChainPooledTransaction {
+            inner,
+            semaphore_proof: Some(semaphore_proof.clone()),
+        };
+
+        validator.set_validated(&tx, &semaphore_proof).unwrap();
+    }
+
+    #[test]
     fn validate_optimism_transaction() {
         let validator = world_chain_validator();
         let origin = TransactionOrigin::External;
@@ -352,7 +385,7 @@ mod tests {
             from: signer,
             to: TxKind::Create,
             mint: None,
-            value: U256::ZERO,
+            value: revm_primitives::ruint::aliases::U256::ZERO,
             gas_limit: 0,
             is_system_transaction: false,
             input: Default::default(),
