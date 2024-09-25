@@ -817,6 +817,111 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_try_build_max_verified_blockspace() -> eyre::Result<()> {
+        let data_dir = tempdir_path();
+        let db = load_world_chain_db(data_dir.as_path(), false)?;
+
+        let gas_limit = 30_000_000;
+        let chain_spec = Arc::new(ChainSpec::default());
+        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
+            inner: (*chain_spec).clone(),
+        }));
+        let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
+
+        // Init the transaction pool
+        let client = NoopProvider::default();
+        let eth_tx_validator = EthTransactionValidatorBuilder::new(chain_spec.clone())
+            .build(client, blob_store.clone());
+        let op_tx_validator =
+            OpTransactionValidator::new(eth_tx_validator).require_l1_data_gas_fee(false);
+
+        let wc_validator = WorldChainTransactionValidator::new(op_tx_validator, db.clone(), 30);
+
+        let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
+        let ordering = WorldChainOrdering::new(db.clone());
+
+        let world_chain_tx_pool = reth_transaction_pool::Pool::new(
+            wc_noop_validator,
+            ordering,
+            blob_store,
+            PoolConfig::default(),
+        );
+
+        // Init the payload builder
+        let verified_blockspace_cap = 10;
+        let world_chain_payload_builder =
+            WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
+
+        // Insert transactions into the pool
+        let unverified_transactions = generate_mock_pooled_transactions(50, 100000, false);
+        for transaction in unverified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        // Insert verifiedtransactions into the pool
+        let verified_transactions = generate_mock_pooled_transactions(50, 3000000, true);
+        for transaction in verified_transactions.iter() {
+            world_chain_tx_pool
+                .add_transaction(TransactionOrigin::Local, transaction.clone())
+                .await?;
+        }
+
+        let sequencer_transactions = generate_mock_deposit_transactions(50, 100000);
+
+        let eth_payload_attributes = EthPayloadBuilderAttributes {
+            id: PayloadId::new([0; 8]),
+            parent: B256::ZERO,
+            timestamp: 0,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            withdrawals: Withdrawals::default(),
+            parent_beacon_block_root: None,
+        };
+
+        let payload_attributes = OptimismPayloadBuilderAttributes {
+            gas_limit: Some(gas_limit),
+            transactions: sequencer_transactions.clone(),
+            payload_attributes: eth_payload_attributes,
+            no_tx_pool: false,
+        };
+
+        let build_args = BuildArguments {
+            client: NoopProvider::default(),
+            config: PayloadConfig {
+                parent_block: Arc::new(SealedBlock::default()),
+                attributes: payload_attributes,
+                chain_spec: chain_spec,
+                extra_data: Bytes::default(),
+            },
+            pool: world_chain_tx_pool,
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+
+        let built_payload = world_chain_payload_builder
+            .try_build(build_args)?
+            .into_payload()
+            .expect("Could not build payload");
+
+        // Collect the transaction hashes in the expected order
+        let mut expected_order = sequencer_transactions
+            .iter()
+            .map(|tx| tx.1.hash())
+            .collect::<Vec<_>>();
+        expected_order.push(*verified_transactions.first().unwrap().hash());
+        expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
+
+        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+            assert_eq!(tx.hash, *expected_hash);
+        }
+
+        Ok(())
+    }
+
     pub struct WorldChainNoopValidator<Client, Tx>
     where
         Client: StateProviderFactory + BlockReaderIdExt,
