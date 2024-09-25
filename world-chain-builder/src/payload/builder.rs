@@ -683,19 +683,13 @@ mod tests {
     use crate::{
         pbh::semaphore::SemaphoreProof,
         pool::{
-            ordering::WorldChainOrdering,
-            tx::{self, WorldChainPooledTransaction},
-            validator::{WorldChainTransactionPool, WorldChainTransactionValidator},
+            ordering::WorldChainOrdering, tx::WorldChainPooledTransaction,
+            validator::WorldChainTransactionValidator,
         },
     };
 
     use super::*;
     use alloy_consensus::TxLegacy;
-    use alloy_rlp::Encodable;
-    use ethers_core::{
-        k256::{ecdsa::signature::SignerMut, schnorr::SigningKey},
-        rand::random,
-    };
     use futures::future::join_all;
     use reth_db::test_utils::tempdir_path;
     use reth_evm_optimism::OptimismEvmConfig;
@@ -703,20 +697,17 @@ mod tests {
     use reth_optimism_chainspec::OpChainSpec;
     use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
     use reth_primitives::{
-        transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals, U128,
+        SealedBlock, Signature, TransactionSigned, TransactionSignedEcRecovered, Withdrawals,
     };
     use reth_provider::{test_utils::NoopProvider, BlockReaderIdExt};
-    use reth_rpc_types::TransactionRequest;
-    use reth_tasks::TokioTaskExecutor;
     use reth_transaction_pool::{
         blobstore::DiskFileBlobStore,
         validate::{EthTransactionValidatorBuilder, ValidTransaction},
-        EthPooledTransaction, PoolConfig, TransactionOrigin, TransactionValidationOutcome,
-        TransactionValidationTaskExecutor, TransactionValidator,
+        EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
+        TransactionValidationOutcome, TransactionValidator,
     };
-    use revm_primitives::{keccak256, Address, Bytes, TxKind, B256};
-    use std::{io::Read, sync::Arc};
+    use revm_primitives::{Address, Bytes, B256};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_try_build() -> eyre::Result<()> {
@@ -786,7 +777,8 @@ mod tests {
 
         let payload_attributes = OptimismPayloadBuilderAttributes {
             gas_limit: Some(gas_limit),
-            transactions: sequencer_transactions,
+            // TODO: add sequencer txs
+            transactions: vec![],
             payload_attributes: eth_payload_attributes,
             no_tx_pool: false,
         };
@@ -805,9 +797,22 @@ mod tests {
             best_payload: None,
         };
 
-        let built_payload = world_chain_payload_builder.try_build(build_args)?;
+        let built_payload = world_chain_payload_builder
+            .try_build(build_args)?
+            .into_payload()
+            .expect("Could not build payload");
 
-        // TODO: assert outcome
+        // Collect the transaction hashes in the expected order
+        let mut expected_order = sequencer_transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>();
+        expected_order.extend(verified_transactions.iter().map(|tx| tx.hash()));
+        expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
+
+        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+            assert_eq!(tx.hash, *expected_hash);
+        }
 
         Ok(())
     }
