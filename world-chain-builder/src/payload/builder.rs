@@ -53,6 +53,7 @@ pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
     // TODO: docs describing that this is a percent, ex: 50 is 50/100
     verified_blockspace_capacity: u64,
+    // TODO: NOTE: we need to insert the verified txs into the table after they are inserted into the block
     _database_env: Arc<DatabaseEnv>,
 }
 
@@ -686,37 +687,83 @@ mod tests {
     };
 
     use super::*;
-    use reth_db::test_utils::tempdir_path;
+    use futures::future::join_all;
+    use reth_db::{mdbx::tx, test_utils::tempdir_path};
     use reth_evm_optimism::OptimismEvmConfig;
     use reth_node_optimism::txpool::OpTransactionValidator;
     use reth_optimism_chainspec::OpChainSpec;
+    use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
+    use reth_primitives::{SealedBlock, Withdrawals, U128};
     use reth_provider::test_utils::NoopProvider;
     use reth_tasks::TokioTaskExecutor;
     use reth_transaction_pool::{
-        blobstore::DiskFileBlobStore, PoolConfig, TransactionValidationTaskExecutor,
+        blobstore::DiskFileBlobStore, validate::ValidTransaction, PoolConfig, TransactionOrigin,
+        TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
     };
+    use revm_primitives::{Address, Bytes, B256};
     use std::sync::Arc;
 
-    #[test]
-    fn test_world_chain_payload() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_try_build() -> eyre::Result<()> {
         let data_dir = tempdir_path();
         let db = load_world_chain_db(data_dir.as_path(), false)?;
 
+        let gas_limit = 30_000_000;
+        let chain_spec = Arc::new(ChainSpec::default());
         let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
-            inner: ChainSpec::default(),
+            inner: (*chain_spec).clone(),
         }));
-
         let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
 
-        let world_chain_tx_pool = init_world_chain_tx_pool(db.clone(), blob_store, 30);
+        let world_chain_tx_pool =
+            init_world_chain_tx_pool(db.clone(), blob_store, 30, chain_spec.clone());
 
         let verified_blockspace_cap = 50;
         let world_chain_payload_builder =
             WorldChainPayloadBuilder::new(evm_config, verified_blockspace_cap, db.clone());
 
         // TODO: insert transactions into the pool
+        // world_chain_tx_pool.add_transaction(origin, transaction)
 
-        // TODO: build payload
+        // TODO: insert verified transactions into the pool
+
+        // TODO: insert sequencer transactions
+
+        let eth_payload_attributes = EthPayloadBuilderAttributes {
+            id: PayloadId::new([0; 8]),
+            parent: B256::ZERO,
+            timestamp: 0,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            withdrawals: Withdrawals::default(),
+            parent_beacon_block_root: None,
+        };
+
+        let payload_attributes = OptimismPayloadBuilderAttributes {
+            gas_limit: Some(gas_limit),
+            // TODO: add sequencer transactions
+            transactions: vec![],
+            payload_attributes: eth_payload_attributes,
+            no_tx_pool: false,
+        };
+
+        let build_args = BuildArguments {
+            client: NoopProvider::default(),
+            config: PayloadConfig {
+                parent_block: Arc::new(SealedBlock::default()),
+                attributes: payload_attributes,
+                chain_spec: chain_spec,
+                extra_data: Bytes::default(),
+            },
+            pool: world_chain_tx_pool,
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+
+        let built_payload = world_chain_payload_builder.try_build(build_args)?;
+
+        // TODO: assert outcome
 
         Ok(())
     }
@@ -725,13 +772,14 @@ mod tests {
         db: Arc<DatabaseEnv>,
         blob_store: DiskFileBlobStore,
         num_pbh_txs: u16,
+        chain_spec: Arc<ChainSpec>,
     ) -> WorldChainTransactionPool<NoopProvider, DiskFileBlobStore> {
         let client = NoopProvider::default();
 
         let task_executor = TokioTaskExecutor::default();
         let validator: TransactionValidationTaskExecutor<
             WorldChainTransactionValidator<NoopProvider, WorldChainPooledTransaction>,
-        > = TransactionValidationTaskExecutor::eth_builder(Arc::new(ChainSpec::default()))
+        > = TransactionValidationTaskExecutor::eth_builder(chain_spec)
             .build_with_tasks(client.clone(), task_executor.clone(), blob_store.clone())
             .map(|validator| {
                 let op_tx_validator =
@@ -743,5 +791,40 @@ mod tests {
         let ordering = WorldChainOrdering::new(db.clone());
 
         reth_transaction_pool::Pool::new(validator, ordering, blob_store, PoolConfig::default())
+    }
+
+    pub struct NoopValidator;
+
+    impl TransactionValidator for NoopValidator {
+        type Transaction = WorldChainPooledTransaction;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            TransactionValidationOutcome::Valid {
+                balance: U256::ZERO,
+                state_nonce: 0,
+                transaction: ValidTransaction::Valid(transaction),
+                propagate: false,
+            }
+        }
+
+        async fn validate_transactions(
+            &self,
+            transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+            let futures = transactions
+                .into_iter()
+                .map(|(origin, tx)| self.validate_transaction(origin, tx))
+                .collect::<Vec<_>>();
+
+            join_all(futures).await
+        }
+
+        fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {
+            unreachable!("NoopValidator does not implement on_new_head_block");
+        }
     }
 }
