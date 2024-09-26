@@ -26,8 +26,12 @@ fn main() {
 
     if let Err(err) =
         Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
+            let data_dir = builder.config().datadir();
             let handle = builder
-                .node(WorldChainBuilder::new(builder_args.clone()))
+                .node(WorldChainBuilder::new(
+                    builder_args.clone(),
+                    data_dir.data_dir(),
+                )?)
                 .launch()
                 .await?;
 

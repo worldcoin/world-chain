@@ -1,4 +1,8 @@
+use std::{path::Path, sync::Arc};
+
+use eyre::eyre::Result;
 use reth_chainspec::ChainSpec;
+use reth_db::DatabaseEnv;
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
@@ -10,8 +14,8 @@ use reth_node_optimism::{
 };
 
 use crate::{
-    payload::builder::WorldChainPayloadServiceBuilder, pool::builder::WorldChainPoolBuilder,
-    rpc::WorldChainEthApi,
+    payload::builder::WorldChainPayloadServiceBuilder, pbh::db::load_world_chain_db,
+    pool::builder::WorldChainPoolBuilder, rpc::WorldChainEthApi,
 };
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
@@ -20,16 +24,20 @@ use super::args::{ExtArgs, WorldChainBuilderArgs};
 pub struct WorldChainBuilder {
     /// Additional Optimism args
     pub args: ExtArgs,
+    /// The World Chain database
+    pub db: Arc<DatabaseEnv>,
 }
 
 impl WorldChainBuilder {
-    pub const fn new(args: ExtArgs) -> Self {
-        Self { args }
+    pub fn new(args: ExtArgs, data_dir: &Path) -> Result<Self> {
+        let db = load_world_chain_db(data_dir, args.builder_args.clear_nullifiers)?;
+        Ok(Self { args, db })
     }
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
         args: ExtArgs,
+        db: Arc<DatabaseEnv>,
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
@@ -56,11 +64,13 @@ impl WorldChainBuilder {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder {
-                clear_nullifiers,
                 num_pbh_txs,
+                clear_nullifiers,
+                db: db.clone(),
             })
             .payload(WorldChainPayloadServiceBuilder::new(
                 verified_blockspace_capacity,
+                db.clone(),
             ))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
@@ -89,8 +99,8 @@ where
     type AddOns = WorldChainAddOns;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        let Self { args } = self;
-        Self::components(args.clone())
+        let Self { args, db } = self;
+        Self::components(args.clone(), db.clone())
     }
 }
 
