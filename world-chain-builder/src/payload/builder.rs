@@ -42,7 +42,6 @@ use revm_primitives::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::pbh::db::load_world_chain_db;
 use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 use crate::pool::noop::NoopWorldChainTransactionPool;
 use crate::pool::tx::WorldChainPoolTransaction;
@@ -166,15 +165,17 @@ where
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug)]
 pub struct WorldChainPayloadServiceBuilder {
     pub verified_blockspace_capacity: u64,
+    pub db: Arc<DatabaseEnv>,
 }
 
 impl WorldChainPayloadServiceBuilder {
-    pub const fn new(verified_blockspace_capacity: u64) -> Self {
+    pub const fn new(verified_blockspace_capacity: u64, db: Arc<DatabaseEnv>) -> Self {
         Self {
             verified_blockspace_capacity,
+            db,
         }
     }
 }
@@ -191,15 +192,12 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let data_dir = ctx.config().datadir();
-        let db = load_world_chain_db(data_dir.data_dir(), false)?;
-
         let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
             inner: (*ctx.chain_spec()).clone(),
         }));
 
         let payload_builder =
-            WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity, db);
+            WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity, self.db);
 
         let conf = ctx.payload_builder_config();
 
@@ -689,6 +687,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::pbh::db::load_world_chain_db;
     use alloy_consensus::TxLegacy;
     use alloy_rlp::Encodable;
     use futures::future::join_all;

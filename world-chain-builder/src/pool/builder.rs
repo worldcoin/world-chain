@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use reth_chainspec::ChainSpec;
+use reth_db::DatabaseEnv;
 use reth_node_builder::components::PoolBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth_node_optimism::txpool::OpTransactionValidator;
@@ -7,7 +10,6 @@ use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::TransactionValidationTaskExecutor;
 use tracing::{debug, info};
 
-use crate::pbh::db::load_world_chain_db;
 use crate::pool::ordering::WorldChainOrdering;
 use crate::pool::validator::WorldChainTransactionValidator;
 
@@ -19,11 +21,12 @@ use super::validator::WorldChainTransactionPool;
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WorldChainPoolBuilder {
     pub clear_nullifiers: bool,
     pub num_pbh_txs: u16,
+    pub db: Arc<DatabaseEnv>,
 }
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
@@ -35,8 +38,6 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        let db = load_world_chain_db(data_dir.data_dir(), self.clear_nullifiers)?;
-
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -51,10 +52,14 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                WorldChainTransactionValidator::new(op_tx_validator, db.clone(), self.num_pbh_txs)
+                WorldChainTransactionValidator::new(
+                    op_tx_validator,
+                    self.db.clone(),
+                    self.num_pbh_txs,
+                )
             });
 
-        let ordering = WorldChainOrdering::new(db.clone());
+        let ordering = WorldChainOrdering::new(self.db.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());
