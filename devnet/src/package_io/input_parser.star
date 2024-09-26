@@ -5,6 +5,7 @@ ethereum_package_input_parser = import_module(
 sanity_check = import_module("./sanity_check.star")
 
 DEFAULT_EL_IMAGES = {
+    "world-chain": "world-chain-builder:latest",
     "op-geth-builder": "docker.io/flashbots/op-geth:0.11014080.2",
     "op-geth": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-geth:latest",
     "op-reth": "ghcr.io/paradigmxyz/op-reth:latest",

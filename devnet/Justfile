@@ -1,0 +1,19 @@
+set positional-arguments
+
+# default recipe to display help information
+default:
+  @just --list
+
+# Spawns the devnet
+devnet-up: build
+    ./clean.sh
+    kurtosis run . --args-file network_params.yaml --enclave world-chain
+
+# Stops the devnet **This will prune all docker containers**
+devnet-down:
+    ./clean.sh
+
+# Builds and tags the world-chain-builder image
+build:
+    docker build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
+  
