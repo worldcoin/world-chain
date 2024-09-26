@@ -1,4 +1,5 @@
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use semaphore::packed_proof::PackedProof;
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
 
@@ -24,32 +25,13 @@ impl Default for Proof {
 impl Decodable for Proof {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let bytes = ProofBytes::decode(buf)?;
-        let fields: [[u8; 32]; 8] = bytemuck::cast(bytes);
-        let a = (fields[0].into(), fields[1].into());
-        let b = (
-            [fields[2].into(), fields[3].into()],
-            [fields[4].into(), fields[5].into()],
-        );
-        let c = (fields[6].into(), fields[7].into());
-        let proof = semaphore::protocol::Proof(a, b, c);
-        Ok(Proof(proof))
+        Ok(Proof(PackedProof(bytes).into()))
     }
 }
 
 impl Encodable for Proof {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        let fields: [[u8; 32]; 8] = [
-            self.0 .0 .0.into(),
-            self.0 .0 .1.into(),
-            self.0 .1 .0[0].into(),
-            self.0 .1 .0[1].into(),
-            self.0 .1 .1[0].into(),
-            self.0 .1 .1[1].into(),
-            self.0 .2 .0.into(),
-            self.0 .2 .1.into(),
-        ];
-
-        let bytes: ProofBytes = bytemuck::cast(fields);
+        let PackedProof(bytes) = self.0.into();
         bytes.encode(out)
     }
 
