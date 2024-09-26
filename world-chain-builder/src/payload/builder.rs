@@ -788,7 +788,7 @@ mod tests {
             config: PayloadConfig {
                 parent_block: Arc::new(SealedBlock::default()),
                 attributes: payload_attributes,
-                chain_spec: chain_spec,
+                chain_spec,
                 extra_data: Bytes::default(),
             },
             pool: world_chain_tx_pool,
@@ -893,7 +893,7 @@ mod tests {
             config: PayloadConfig {
                 parent_block: Arc::new(SealedBlock::default()),
                 attributes: payload_attributes,
-                chain_spec: chain_spec,
+                chain_spec,
                 extra_data: Bytes::default(),
             },
             pool: world_chain_tx_pool,
