@@ -2,7 +2,7 @@ set positional-arguments
 
 # default recipe to display help information
 default:
-  @just --list
+    @just --list
 
 # Spawns the devnet
 devnet-up: build
