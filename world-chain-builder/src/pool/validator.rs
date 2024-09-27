@@ -281,7 +281,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
     };
-    use reth_transaction_pool::{Pool, PoolTransaction as _, TransactionPool as _};
+    use reth_transaction_pool::{Pool, PoolTransaction as _, TransactionPool};
     use revm_primitives::hex;
     use semaphore::identity::Identity;
     use semaphore::poseidon_tree::LazyPoseidonTree;
@@ -305,6 +305,14 @@ mod tests {
         let tx = PooledTransactionsElement::decode_enveloped(&mut data.as_ref()).unwrap();
 
         tx.try_into_ecrecovered().unwrap().into()
+    }
+
+    fn get_non_pbh_transaction() -> WorldChainPooledTransaction {
+        let eth_tx = get_eth_transaction();
+        WorldChainPooledTransaction {
+            inner: eth_tx,
+            semaphore_proof: None,
+        }
     }
 
     fn get_pbh_transaction() -> WorldChainPooledTransaction {
@@ -384,18 +392,14 @@ mod tests {
     #[tokio::test]
     async fn validate_non_pbh_transaction() {
         let validator = world_chain_validator();
-        let transaction = get_eth_transaction();
+        let transaction = get_non_pbh_transaction();
+
         validator.inner.client().add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::MAX),
         );
-        let transaction = WorldChainPooledTransaction {
-            inner: transaction,
-            semaphore_proof: None,
-        };
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
-
         assert!(outcome.is_valid());
 
         let ordering = WorldChainOrdering::new(validator.database_env.clone());
@@ -436,6 +440,58 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
+    }
+
+    #[tokio::test]
+    async fn invalid_external_nullifier_hash() {
+        let validator = world_chain_validator();
+        let mut transaction = get_pbh_transaction();
+        transaction
+            .semaphore_proof
+            .as_mut()
+            .unwrap()
+            .external_nullifier_hash = Field::from(0);
+
+        validator.inner.client().add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::MAX),
+        );
+
+        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+
+        let pool = Pool::new(
+            validator,
+            ordering,
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_signal_hash() {
+        let validator = world_chain_validator();
+        let mut transaction = get_pbh_transaction();
+        transaction.semaphore_proof.as_mut().unwrap().signal_hash = Field::from(0);
+
+        validator.inner.client().add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::MAX),
+        );
+
+        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+
+        let pool = Pool::new(
+            validator,
+            ordering,
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
     }
 
     #[test]
