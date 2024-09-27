@@ -1,6 +1,7 @@
 optimism_package:
   participants:
-    - el_type: op-geth-builder
+    - el_type: world-chain
+    # - el_type: op-geth-builder
     # - el_type: op-geth
     # - el_type: op-reth
     # - el_type: op-erigon
