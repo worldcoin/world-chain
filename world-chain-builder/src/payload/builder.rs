@@ -51,7 +51,7 @@ use crate::pool::tx::WorldChainPoolTransaction;
 pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
     // TODO: docs describing that this is a percent, ex: 50 is 50/100
-    verified_blockspace_capacity: u64,
+    verified_blockspace_capacity: u8,
     // TODO: NOTE: we need to insert the verified txs into the table after they are inserted into the block
     _database_env: Arc<DatabaseEnv>,
 }
@@ -63,7 +63,7 @@ where
     /// `OptimismPayloadBuilder` constructor.
     pub const fn new(
         evm_config: EvmConfig,
-        verified_blockspace_capacity: u64,
+        verified_blockspace_capacity: u8,
         _database_env: Arc<DatabaseEnv>,
     ) -> Self {
         let inner = OptimismPayloadBuilder::new(evm_config);
@@ -167,12 +167,12 @@ where
 
 #[derive(Debug)]
 pub struct WorldChainPayloadServiceBuilder {
-    pub verified_blockspace_capacity: u64,
+    pub verified_blockspace_capacity: u8,
     pub db: Arc<DatabaseEnv>,
 }
 
 impl WorldChainPayloadServiceBuilder {
-    pub const fn new(verified_blockspace_capacity: u64, db: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(verified_blockspace_capacity: u8, db: Arc<DatabaseEnv>) -> Self {
         Self {
             verified_blockspace_capacity,
             db,
@@ -240,7 +240,7 @@ pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
-    verified_blockspace_capacity: u64,
+    verified_blockspace_capacity: u8,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
@@ -433,7 +433,7 @@ where
     }
 
     if !attributes.no_tx_pool {
-        let verified_gas_limit = (verified_blockspace_capacity * block_gas_limit) / 100;
+        let verified_gas_limit = (verified_blockspace_capacity as u64 * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
             // If the transaction is verified, check if it can be added within the verified gas limit
             if pool_tx.transaction.semaphore_proof().is_some()
