@@ -15,5 +15,4 @@ devnet-down:
 
 # Builds and tags the world-chain-builder image
 build:
-    docker build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
-  
+    docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
