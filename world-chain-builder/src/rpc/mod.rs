@@ -6,25 +6,20 @@ pub mod transaction;
 mod block;
 mod call;
 mod pending_block;
-
-pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
-
-use std::fmt;
-
 use alloy_primitives::U256;
 use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::Header;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     HeaderProvider, StageCheckpointReader, StateProviderFactory,
 };
-use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
@@ -38,14 +33,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-
-/// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
-pub type EthApiNodeBackend<N> = EthApiInner<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Network,
-    <N as FullNodeComponents>::Evm,
->;
+use std::fmt;
 
 /// OP-Reth `Eth` API implementation.
 ///

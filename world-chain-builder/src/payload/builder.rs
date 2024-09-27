@@ -479,7 +479,7 @@ where
                 Err(err) => {
                     match err {
                         EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                            if let InvalidTransaction::NonceTooLow { .. } = err {
                                 // if the nonce is too low, we can skip this transaction
                                 trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
                             } else {

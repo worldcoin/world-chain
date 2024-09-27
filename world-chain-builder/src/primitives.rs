@@ -30,8 +30,8 @@ impl Decodable for WorldChainPooledTransactionsElement {
         let inner = PooledTransactionsElement::decode(buf)?;
         let semaphore_proof = match SemaphoreProof::decode(buf) {
             Ok(res) => Some(res),
-            Err(e) => {
-                warn!("Failed to decode semaphore proof: {:?}", e);
+            Err(error) => {
+                warn!(?error, "Failed to decode semaphore proof");
                 None
             }
         };
@@ -48,8 +48,8 @@ impl WorldChainPooledTransactionsElement {
         let inner = PooledTransactionsElement::decode_enveloped(buf)?;
         let semaphore_proof = match SemaphoreProof::decode(buf) {
             Ok(res) => Some(res),
-            Err(e) => {
-                warn!("Failed to decode semaphore proof: {:?}", e);
+            Err(error) => {
+                warn!(?error, "Failed to decode semaphore proof");
                 None
             }
         };
