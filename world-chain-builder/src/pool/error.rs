@@ -1,4 +1,4 @@
-use reth_db::DatabaseError;
+use reth_db::{DatabaseError, DatabaseWriteOperation};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 
@@ -61,6 +61,21 @@ impl From<WorldChainTransactionPoolInvalid> for TransactionValidationError {
 impl From<WorldChainTransactionPoolError> for TransactionValidationError {
     fn from(e: WorldChainTransactionPoolError) -> Self {
         TransactionValidationError::Error(Box::new(e))
+    }
+}
+
+impl From<DatabaseError> for TransactionValidationError {
+    fn from(e: DatabaseError) -> Self {
+        match e {
+            DatabaseError::Write(write) => {
+                if let DatabaseWriteOperation::CursorInsert = write.operation {
+                    WorldChainTransactionPoolInvalid::DuplicateTxHash.into()
+                } else {
+                    WorldChainTransactionPoolError::Database(DatabaseError::Write(write)).into()
+                }
+            }
+            e => WorldChainTransactionPoolError::Database(e).into(),
+        }
     }
 }
 

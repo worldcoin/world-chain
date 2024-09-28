@@ -8,7 +8,7 @@ use std::str::FromStr as _;
 use std::sync::Arc;
 use tracing::warn;
 
-use reth_db::{Database, DatabaseEnv, DatabaseError, DatabaseWriteOperation};
+use reth_db::{Database, DatabaseEnv, DatabaseError};
 use reth_node_optimism::txpool::OpTransactionValidator;
 use reth_primitives::{SealedBlock, TxHash};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
@@ -21,9 +21,7 @@ use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 use crate::pbh::semaphore::SemaphoreProof;
 use crate::pbh::tx::Prefix;
 
-use super::error::{
-    TransactionValidationError, WorldChainTransactionPoolError, WorldChainTransactionPoolInvalid,
-};
+use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
 use super::ordering::WorldChainOrdering;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 
@@ -92,7 +90,7 @@ where
     /// External nullifiers must be of the form
     /// `<prefix>-<periodId>-<PbhNonce>`.
     /// example:
-    /// `0-012025-11`
+    /// `v1-012025-11`
     pub fn validate_external_nullifier(
         &self,
         date: chrono::DateTime<chrono::Utc>,
@@ -160,13 +158,24 @@ where
         transaction: &Tx,
         semaphore_proof: &SemaphoreProof,
     ) -> Result<(), TransactionValidationError> {
+        // Create db transaction and insert the nullifier hash
+        // We do this first to prevent repeatedly validating the same transaction
+        //
+        // This should prevent DOS attacks for tranasctions with the same hash
+        // However i'm not sure there's anything we can do for transactions with different hashes
+        let db_tx = self.database_env.tx_mut()?;
+        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+        cursor.insert(
+            *transaction.hash(),
+            semaphore_proof.nullifier_hash.to_be_bytes().into(),
+        )?;
+
         let date = chrono::Utc::now();
         self.validate_root(semaphore_proof)?;
         self.validate_external_nullifier(date, &semaphore_proof.external_nullifier)?;
         self.validate_nullifier(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
 
-        // TODO: Think about DOS mitigation.
         let res = verify_proof(
             semaphore_proof.root,
             semaphore_proof.nullifier_hash,
@@ -177,7 +186,11 @@ where
         );
 
         match res {
-            Ok(true) => Ok(()),
+            Ok(true) => {
+                // Only commit if the proof is valid
+                db_tx.commit()?;
+                Ok(())
+            }
             Ok(false) => Err(WorldChainTransactionPoolInvalid::InvalidSemaphoreProof.into()),
             Err(e) => Err(TransactionValidationError::Error(e.into())),
         }
@@ -192,30 +205,9 @@ where
             if let Err(e) = self.validate_semaphore_proof(&transaction, semaphore_proof) {
                 return e.to_outcome(transaction);
             }
-            match self.set_validated(&transaction, semaphore_proof) {
-                Ok(_) => {}
-                Err(DatabaseError::Write(write)) => {
-                    if let DatabaseWriteOperation::CursorInsert = write.operation {
-                        return Into::<TransactionValidationError>::into(
-                            WorldChainTransactionPoolInvalid::DuplicateTxHash,
-                        )
-                        .to_outcome(transaction);
-                    } else {
-                        return Into::<TransactionValidationError>::into(
-                            WorldChainTransactionPoolError::Database(DatabaseError::Write(write)),
-                        )
-                        .to_outcome(transaction);
-                    }
-                }
-                Err(e) => {
-                    return Into::<TransactionValidationError>::into(
-                        WorldChainTransactionPoolError::Database(e),
-                    )
-                    .to_outcome(transaction);
-                }
-            }
-        }
-        self.inner.validate_one(origin, transaction)
+        };
+
+        self.inner.validate_one(origin, transaction.clone())
     }
 
     /// Validates all given transactions.
@@ -435,11 +427,23 @@ mod tests {
             Default::default(),
         );
 
+        let start = chrono::Utc::now();
         let res = pool.add_external_transaction(transaction.clone()).await;
-        println!("{:?}", res);
+        let first_insert = chrono::Utc::now() - start;
+        println!("first_insert: {first_insert:?}");
+
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
+
+        let start = chrono::Utc::now();
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        let second_insert = chrono::Utc::now() - start;
+        println!("second_insert: {second_insert:?}");
+
+        // Check here that we're properly caching the transaction
+        assert!(first_insert > second_insert * 100);
+        assert!(res.is_err());
     }
 
     #[tokio::test]
