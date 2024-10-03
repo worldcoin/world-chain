@@ -1,0 +1,7 @@
+#!/bin/bash
+
+if [ -n "$RELEASE" ]; then
+    cargo run --release --bin toolkit "$@"
+else
+    cargo run --bin toolkit "$@"
+fi
