@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use clap::Args;
 use semaphore::identity::Identity;
 
-use super::utils::bytes_parse_hex;
+use super::utils::bytes_mut_parse_hex;
 
 #[derive(Debug, Clone, Args)]
 pub struct IdentitySource {
@@ -13,7 +13,7 @@ pub struct IdentitySource {
         long,
         conflicts_with = "identity_file",
         required_unless_present = "identity_file",
-        value_parser = bytes_parse_hex
+        value_parser = bytes_mut_parse_hex
     )]
     pub identity: Option<BytesMut>,
 

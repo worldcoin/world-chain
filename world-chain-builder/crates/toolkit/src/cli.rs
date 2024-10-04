@@ -1,6 +1,8 @@
 use bytes::{Bytes, BytesMut};
+use chrono::NaiveDate;
 use clap::Parser;
 use identity_source::IdentitySource;
+use inclusion_proof_source::InclusionProofSource;
 
 pub mod identity_source;
 pub mod inclusion_proof_source;
@@ -22,15 +24,25 @@ pub enum Cmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ProveArgs {
     #[clap(short, long)]
-    #[clap(value_parser = parse_hex)]
+    #[clap(value_parser = utils::bytes_parse_hex)]
     pub tx: Bytes,
 
-    #[clap(short, long)]
+    #[clap(short = 'N', long)]
     #[clap(alias = "nonce")]
-    pub pbh_nonce: usize,
+    pub pbh_nonce: u16,
+
+    /// Overrides the current date for PBH proof generation
+    /// Format: "YYYY-MM-DD"
+    ///
+    /// Dates are always assumed to be in UTC
+    #[clap(short = 'D', long)]
+    pub custom_date: Option<NaiveDate>,
 
     #[command(flatten)]
     pub identity_source: IdentitySource,
+
+    #[command(flatten)]
+    pub inclusion_proof_source: InclusionProofSource,
 }
 
 #[derive(Debug, Clone, Parser)]

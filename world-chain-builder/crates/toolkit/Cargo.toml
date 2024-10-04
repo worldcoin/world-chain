@@ -7,6 +7,7 @@ edition = "2021"
 semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "d0d1f899add7116ccc1228f5e5e5ee2e2e233768", features = [
     "depth_30",
 ] }
+world-chain-builder = { path = "../.." }
 
 # Alloy
 alloy-consensus = "0.3"
@@ -23,3 +24,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 dotenvy = "0.15.7"
+chrono = "0.4"

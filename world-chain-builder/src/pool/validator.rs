@@ -18,8 +18,10 @@ use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid}
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use crate::date_marker::DateMarker;
+use crate::external_nullifier::ExternalNullifier;
 use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
-use crate::pbh::semaphore::{DateMarker, ExternalNullifier, SemaphoreProof, TREE_DEPTH};
+use crate::pbh::semaphore::{SemaphoreProof, TREE_DEPTH};
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -291,8 +293,11 @@ mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
+    use super::*;
+    use crate::date_marker::DateMarker;
+    use crate::external_nullifier::ExternalNullifier;
     use crate::pbh::db::load_world_chain_db;
-    use crate::pbh::semaphore::{DateMarker, ExternalNullifier, Proof, SemaphoreProof, TREE_DEPTH};
+    use crate::pbh::semaphore::{Proof, SemaphoreProof, TREE_DEPTH};
     use crate::pool::ordering::WorldChainOrdering;
     use crate::pool::root::{WorldChainRootValidator, LATEST_ROOT_SLOT, OP_WORLD_ID};
     use crate::pool::tx::WorldChainPooledTransaction;

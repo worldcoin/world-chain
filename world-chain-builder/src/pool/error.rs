@@ -4,7 +4,7 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionE
 use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 use semaphore::Field;
 
-use crate::pbh::semaphore::ExternalNullifierParsingError;
+use crate::external_nullifier::ExternalNullifierParsingError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldChainTransactionPoolInvalid {

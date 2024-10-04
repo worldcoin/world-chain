@@ -10460,6 +10460,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "bytes",
+ "chrono",
  "clap 4.5.19",
  "color-eyre",
  "dotenvy",
@@ -10468,6 +10469,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "world-chain-builder",
 ]
 
 [[package]]
