@@ -7,6 +7,7 @@ use super::utils::parse_from_json;
 
 #[derive(Debug, Clone, Args)]
 pub struct InclusionProofSource {
+    /// Inclusion proof in JSON format
     #[clap(
         short = 'P',
         long,

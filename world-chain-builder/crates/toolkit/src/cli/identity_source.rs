@@ -8,6 +8,7 @@ use super::utils::bytes_mut_parse_hex;
 
 #[derive(Debug, Clone, Args)]
 pub struct IdentitySource {
+    /// Hex encoded identity secret
     #[clap(
         short = 'I',
         long,
@@ -17,6 +18,7 @@ pub struct IdentitySource {
     )]
     pub identity: Option<BytesMut>,
 
+    /// Path to a file containing the identity secret
     #[clap(
         long,
         conflicts_with = "identity",
