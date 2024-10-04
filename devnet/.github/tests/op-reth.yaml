@@ -1,4 +1,0 @@
-optimism_package:
-  participants:
-    - el_type: op-reth
-      cl_type: op-node

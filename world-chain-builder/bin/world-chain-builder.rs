@@ -21,7 +21,7 @@ fn main() {
 
     // Set default log level
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "trace,reth=debug");
+        std::env::set_var("RUST_LOG", "info,reth=info");
     }
 
     if let Err(err) =

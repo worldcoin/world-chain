@@ -1,0 +1,20 @@
+# Use the official Rust image for building
+FROM rust:1.81 AS builder
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Update package lists and install git
+RUN apt-get update && \
+    apt-get install -y git clang libclang-dev pkg-config && \
+    git clone --depth=1 https://github.com/flashbots/rollup-boost.git . && \
+    cargo build --release
+
+# Create a minimal image to run the binary
+FROM debian:bookworm-slim
+
+# Copy the binary from the builder stage
+COPY --from=builder /app/target/release/rollup-boost /app/
+
+# Set the working directory
+WORKDIR /app

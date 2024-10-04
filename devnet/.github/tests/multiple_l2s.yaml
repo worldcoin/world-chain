@@ -1,7 +1,0 @@
-optimism_package:
-  - network_params:
-      name: op-rollup-one
-      network_id: '3151909'
-  - network_params:
-      name: op-rollup-two
-      network_id: '3151910'
