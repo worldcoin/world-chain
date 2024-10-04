@@ -108,7 +108,7 @@ services:
       context: .
       dockerfile: l2-op-geth.Dockerfile
     ports:
-      - "9545:8545"
+      - "8544:8544"
       - "8060:6060"
       - "8551:8551"
     volumes:
@@ -193,7 +193,7 @@ services:
       OP_PROPOSER_L2_OUTPUT_HD_PATH: "m/44'/60'/0'/0/1"
       OP_PROPOSER_L2OO_ADDRESS: "0x4aff918D1Af8873b5c0f41deCaFd3b838E1E1A6A"
       OP_PROPOSER_GAME_FACTORY_ADDRESS: "0x5e8176772863842cd9d692c9E793dc4958626E69"
-      OP_PROPOSER_GAME_TYPE: "${DG_TYPE}"
+      OP_PROPOSER_GAME_TYPE:
       OP_PROPOSER_PROPOSAL_INTERVAL: "10m"
       OP_PROPOSER_PPROF_ENABLED: "true"
       OP_PROPOSER_METRICS_ENABLED: "true"
@@ -225,9 +225,7 @@ services:
       OP_BATCHER_RPC_ENABLE_ADMIN: "true"
       OP_BATCHER_BATCH_TYPE: 1
       OP_BATCHER_ALTDA_ENABLED: "false"
-      OP_BATCHER_ALTDA_DA_SERVICE: "true"
-      OP_BATCHER_ALTDA_DA_SERVER: "http://da-server:3100"
-      OP_BATCHER_DATA_AVAILABILITY_TYPE: "${DA_TYPE}"
+      OP_BATCHER_ALTDA_DA_SERVICE: "false"
 
   op-challenger:
     depends_on:
@@ -260,6 +258,8 @@ services:
       OP_CHALLENGER_NUM_CONFIRMATIONS: 1
 
   da-server:
+    depends_on:
+      - genesis
     image: us-docker.pkg.dev/oplabs-tools-artifacts/images/da-server:latest
     command: >
       da-server --file.path=/data --addr=0.0.0.0 --port=3100 --log.level=debug
@@ -367,9 +367,7 @@ services:
 
   load-test:
     depends_on:
-      - l2
       - world-chain-builder
-      - genesis
     build:
       context: .
       dockerfile: Dockerfile.tx-fuzz

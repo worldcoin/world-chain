@@ -1,5 +1,5 @@
-/world-chain-builder/target
-/devnet/.static/beacon/data/*
-/devnet/genesis/target
+world-chain-builder/target
+devnet/.static/beacon/data/*
+devnet/genesis/target
 .env
 
