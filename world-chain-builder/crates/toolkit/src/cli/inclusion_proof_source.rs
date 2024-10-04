@@ -22,6 +22,7 @@ pub struct InclusionProofSource {
         required_unless_present = "inclusion_proof"
     )]
     pub inclusion_proof_file: Option<PathBuf>,
+
     // TODO: Add fetching from signup-sequencer/world-tree
     // TODO: Add fetching from smart contract via RPC
 }
