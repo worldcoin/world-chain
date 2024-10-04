@@ -5,6 +5,9 @@ edition = "2021"
 
 default-run = "world-chain-builder"
 
+[workspace]
+members = ["crates/*"]
+
 [dependencies]
 # reth
 reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", features = [
@@ -67,8 +70,16 @@ alloy-rpc-types = "0.3"
 alloy-rlp = "0.3"
 alloy-eips = "0.3"
 
-# other
-revm = "14"
+# revm
+revm = "=14.0.2"
+revm-interpreter = "=10.0.2"
+revm-inspectors = "=0.7.4"
+revm-precompile = "=11.0.2"
+revm-primitives = { version = "=9.0.2", default-features = false, features = [
+    "std",
+] }
+
+# 3rd party
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 chrono = "0.4"
@@ -76,10 +87,7 @@ thiserror = "1"
 strum = "0.26"
 strum_macros = "0.26"
 bytemuck = "1"
-revm-primitives = { version = "9.0.0", default-features = false, features = [
-    "std",
-] }
-semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "f44b7934", features = [
+semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "d0d1f899add7116ccc1228f5e5e5ee2e2e233768", features = [
     "depth_30",
 ] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -111,7 +119,3 @@ jemalloc = ["tikv-jemallocator"]
 [[bin]]
 name = "world-chain-builder"
 path = "bin/world-chain-builder.rs"
-
-[[bin]]
-name = "toolkit"
-path = "bin/toolkit.rs"
