@@ -731,8 +731,12 @@ mod tests {
             OpTransactionValidator::new(eth_tx_validator).require_l1_data_gas_fee(false);
         let root_validator = WorldChainRootValidator::new(client);
 
-        let wc_validator =
-            WorldChainTransactionValidator::new(op_tx_validator, root_validator, db.clone(), 30);
+        let wc_validator = WorldChainTransactionValidator::new(
+            op_tx_validator,
+            root_validator.unwrap(),
+            db.clone(),
+            30,
+        );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
         let ordering = WorldChainOrdering::new(db.clone());
@@ -837,8 +841,12 @@ mod tests {
         let op_tx_validator =
             OpTransactionValidator::new(eth_tx_validator).require_l1_data_gas_fee(false);
         let root_validator = WorldChainRootValidator::new(client);
-        let wc_validator =
-            WorldChainTransactionValidator::new(op_tx_validator, root_validator, db.clone(), 30);
+        let wc_validator = WorldChainTransactionValidator::new(
+            op_tx_validator,
+            root_validator.unwrap(),
+            db.clone(),
+            30,
+        );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
         let ordering = WorldChainOrdering::new(db.clone());

@@ -60,6 +60,13 @@ impl WorldChainPooledTransactionsElement {
         })
     }
 
+    pub fn encode_enveloped(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.inner.encode_enveloped(out);
+        if let Some(semaphore_proof) = &self.semaphore_proof {
+            semaphore_proof.encode(out);
+        }
+    }
+
     pub fn try_into_ecrecovered(
         self,
     ) -> Result<WorldChainPooledTransactionsElementEcRecovered, PooledTransactionsElement> {

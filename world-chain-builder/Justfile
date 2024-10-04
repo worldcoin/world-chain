@@ -2,8 +2,8 @@ set positional-arguments
 
 # Tests the world-chain-builder
 test:
-    cargo test
+    cargo test -- --test-threads=1
 
-# Builds the world-chain-builder
+# Formats the world-chain-builder
 fmt:
     cargo fmt

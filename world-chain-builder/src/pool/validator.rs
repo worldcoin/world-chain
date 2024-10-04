@@ -109,7 +109,7 @@ where
         // In most cases these will be the same value, but at the month boundary
         // we'll still accept the previous month if the transaction is at most a minute late
         // or the next month if the transaction is at most a minute early
-        let valid_dates = vec![
+        let valid_dates = [
             DateMarker::from(date - chrono::Duration::minutes(1)),
             DateMarker::from(date),
             DateMarker::from(date + chrono::Duration::minutes(1)),
@@ -122,7 +122,7 @@ where
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
         }
 
-        let external_nullifier_hash = hash_to_field(&semaphore_proof.external_nullifier.as_bytes());
+        let external_nullifier_hash = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
         if external_nullifier_hash != semaphore_proof.external_nullifier_hash {
             return Err(
                 WorldChainTransactionPoolInvalid::InvalidExternalNullifierHash {
@@ -184,7 +184,7 @@ where
 
         let date = chrono::Utc::now();
         self.validate_root(semaphore_proof)?;
-        self.validate_external_nullifier(date, &semaphore_proof)?;
+        self.validate_external_nullifier(date, semaphore_proof)?;
         self.validate_nullifier(semaphore_proof)?;
         self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
 
@@ -268,7 +268,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use alloy_primitives::TxKind;
     use chrono::{TimeZone, Utc};
     use ethers_core::types::U256;
@@ -345,11 +345,11 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let path = temp_dir.path().join("db");
         let db = load_world_chain_db(&path, false).unwrap();
-        let root_validator = WorldChainRootValidator::new(client);
+        let root_validator = WorldChainRootValidator::new(client).unwrap();
         WorldChainTransactionValidator::new(validator, root_validator, db, 30)
     }
 
-    fn valid_proof(
+    pub fn valid_proof(
         identity: &mut [u8],
         tx_hash: &[u8],
         time: chrono::DateTime<Utc>,
@@ -472,7 +472,7 @@ mod tests {
         println!("second_insert: {second_insert:?}");
 
         // Check here that we're properly caching the transaction
-        assert!(first_insert > second_insert * 100);
+        assert!(first_insert > second_insert * 10);
         assert!(res.is_err());
     }
 

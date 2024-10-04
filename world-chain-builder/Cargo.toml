@@ -111,7 +111,12 @@ reth-provider = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", feat
 alloy-primitives = "0.8"
 serde_json = "1"
 rand = "0.8"
-
+reth-e2e-test-utils = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+reth-consensus = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+reth-node-core = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+reth-tracing = { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+alloy-signer = "0.3"
+alloy-signer-local = "0.3"
 
 [features]
 jemalloc = ["tikv-jemallocator"]

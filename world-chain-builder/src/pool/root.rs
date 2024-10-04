@@ -41,13 +41,27 @@ where
     /// # Arguments
     ///
     /// * `client` - The client used to aquire account state from the database.
-    pub fn new(client: Client) -> Self {
-        Self {
+    pub fn new(client: Client) -> Result<Self, WorldChainTransactionPoolError> {
+        let mut this = Self {
             client,
             valid_roots: BTreeMap::new(),
             latest_valid_timestamp: 0,
             latest_root: Field::ZERO,
+        };
+
+        // If we have a state provider, we can try to load the latest root from the state.
+        if let Ok(latest) = this.client.last_block_number() {
+            let block = this.client.block(latest.into())?;
+            if let Some(block) = block {
+                let state = this.client.state_by_block_hash(block.hash_slow())?;
+                let latest_root = state.storage(OP_WORLD_ID, LATEST_ROOT_SLOT.into())?;
+                if let Some(latest) = latest_root {
+                    this.latest_root = latest;
+                    this.valid_roots.insert(block.timestamp, latest);
+                };
+            }
         }
+        Ok(this)
     }
 
     /// Commits any changes to the state.
@@ -112,12 +126,12 @@ where
     /// # Arguments
     ///
     /// * `client` - The client used for state and block operations.
-    pub fn new(client: Client) -> Self {
-        let cache = RootProvider::new(client);
+    pub fn new(client: Client) -> Result<Self, WorldChainTransactionPoolError> {
+        let cache = RootProvider::new(client)?;
 
-        Self {
+        Ok(Self {
             cache: Arc::new(RwLock::new(cache)),
-        }
+        })
     }
 
     /// Validates a given root.
@@ -152,10 +166,10 @@ mod tests {
 
     use super::*;
     use reth_primitives::Block;
-    fn world_chain_root_validator() -> WorldChainRootValidator<MockEthProvider> {
+    fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
-        let root_validator = WorldChainRootValidator::new(client);
-        root_validator
+        let root_validator = WorldChainRootValidator::new(client)?;
+        Ok(root_validator)
     }
 
     fn add_block_with_root_with_timestamp(
@@ -163,8 +177,10 @@ mod tests {
         timestamp: u64,
         root: Field,
     ) {
-        let mut header = Header::default();
-        header.timestamp = timestamp;
+        let header = Header {
+            timestamp,
+            ..Default::default()
+        };
         let block = Block {
             header,
             ..Default::default()
@@ -185,8 +201,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_root() {
-        let validator = world_chain_root_validator();
+    fn test_validate_root() -> eyre::Result<()> {
+        let validator = world_chain_root_validator()?;
         let root_1 = Field::from(1u64);
         let timestamp = 1000000000;
         add_block_with_root_with_timestamp(&validator, timestamp, root_1);
@@ -200,6 +216,7 @@ mod tests {
         assert!(validator.validate_root(root_3));
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));
+        Ok(())
     }
 
     impl<Client> WorldChainRootValidator<Client>
