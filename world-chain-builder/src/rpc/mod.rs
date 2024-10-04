@@ -7,19 +7,19 @@ mod block;
 mod call;
 mod pending_block;
 use alloy_primitives::U256;
-use op_alloy_network::AnyNetwork;
-use reth_chainspec::ChainSpec;
+use derive_more::derive::Deref;
+use op_alloy_network::Optimism;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpTxBuilder};
 use reth_primitives::Header;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
+    StageCheckpointReader, StateProviderFactory,
 };
-use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
@@ -45,21 +45,29 @@ use std::fmt;
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone)]
+#[derive(Clone, Deref)]
 pub struct WorldChainEthApi<N: FullNodeComponents> {
+    #[deref]
     inner: OpEthApi<N>,
 }
 
-impl<N> WorldChainEthApi<N>
-where
-    N: FullNodeComponents<
-        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
-    >,
-{
+impl<N: FullNodeComponents> WorldChainEthApi<N> {
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
-    pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
-        let inner = OpEthApi::with_spawner(ctx);
+    pub fn with_spawner(ctx: &EthApiBuilderCtx<N, Self>) -> Self {
+        let op_builder_ctx = EthApiBuilderCtx::<N, OpEthApi<N>> {
+            provider: ctx.provider.clone(),
+            pool: ctx.pool.clone(),
+            network: ctx.network.clone(),
+            evm_config: ctx.evm_config.clone(),
+            config: ctx.config.clone(),
+            executor: ctx.executor.clone(),
+            events: ctx.events.clone(),
+            cache: ctx.cache.clone(),
+            _rpc_ty_builders: std::marker::PhantomData,
+        };
+
+        let inner = OpEthApi::with_spawner(&op_builder_ctx);
         Self { inner }
     }
 }
@@ -70,18 +78,19 @@ where
     N: FullNodeComponents,
 {
     type Error = OpEthApiError;
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Optimism;
+    type TransactionCompat = OpTxBuilder;
 }
 
 impl<N> EthApiSpec for WorldChainEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
     fn provider(
         &self,
-    ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
+    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader
     {
         EthApiSpec::provider(&self.inner)
     }
@@ -126,12 +135,12 @@ where
 impl<N> LoadFee for WorldChainEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
     fn provider(
         &self,
-    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec> {
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> {
         LoadFee::provider(&self.inner)
     }
 
@@ -154,10 +163,12 @@ where
 impl<N> LoadState for WorldChainEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
+    fn provider(
+        &self,
+    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
         LoadState::provider(&self.inner)
     }
 
@@ -203,11 +214,12 @@ where
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>> AddDevSigners
-    for WorldChainEthApi<N>
+impl<N> AddDevSigners for WorldChainEthApi<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
 {
     fn with_dev_accounts(&self) {
-        *self.signers().write() = DevSigner::random_signers(20)
+        self.inner.with_dev_accounts()
     }
 }
 
@@ -216,10 +228,10 @@ where
     Self: Send,
     N: FullNodeComponents,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 

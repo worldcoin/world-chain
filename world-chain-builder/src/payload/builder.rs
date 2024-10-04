@@ -1,41 +1,47 @@
 use std::sync::Arc;
 
+use alloy_primitives::TxHash;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
     PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
+use reth_chainspec::EthereumHardforks;
 use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
 use reth_db::mdbx::RW;
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_db::{DatabaseEnv, DatabaseError};
-use reth_evm::system_calls::pre_block_beacon_root_contract_call;
+use reth_evm::system_calls::SystemCaller;
 use reth_evm::ConfigureEvm;
-use reth_evm_optimism::OptimismEvmConfig;
+use reth_node_api::PayloadBuilderError;
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
-use reth_node_optimism::{
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
+use reth_optimism_evm::OptimismEvmConfig;
+use reth_optimism_forks::OptimismHardfork;
+use reth_optimism_node::{
     OptimismBuiltPayload, OptimismEngineTypes, OptimismPayloadBuilder,
     OptimismPayloadBuilderAttributes,
 };
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::error::OptimismPayloadBuilderError;
-use reth_payload_builder::error::PayloadBuilderError;
+// use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::constants::BEACON_NONCE;
-use reth_primitives::eip4844::calculate_excess_blob_gas;
-use reth_primitives::{proofs, IntoRecoveredTransaction};
-use reth_primitives::{Block, Header, Receipt, TxHash, TxType, EMPTY_OMMER_ROOT_HASH};
-use reth_provider::{CanonStateSubscriptions, ExecutionOutcome, StateProviderFactory};
+use reth_primitives::{proofs, BlockBody};
+use reth_primitives::{Block, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH};
+use reth_provider::{
+    CanonStateSubscriptions, ChainSpecProvider, ExecutionOutcome, StateProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
 use reth_revm::DatabaseCommit;
 use reth_revm::State;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
+use revm_primitives::calc_excess_blob_gas;
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, FixedBytes, InvalidTransaction,
     ResultAndState, U256,
@@ -102,7 +108,7 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for WorldChainPayloadBuilder<EvmConfig>
 where
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -167,13 +173,20 @@ where
 
 #[derive(Debug)]
 pub struct WorldChainPayloadServiceBuilder {
+    // TODO: handle this field
+    pub compute_pending_block: bool,
     pub verified_blockspace_capacity: u8,
     pub db: Arc<DatabaseEnv>,
 }
 
 impl WorldChainPayloadServiceBuilder {
-    pub const fn new(verified_blockspace_capacity: u8, db: Arc<DatabaseEnv>) -> Self {
+    pub const fn new(
+        compute_pending_block: bool,
+        verified_blockspace_capacity: u8,
+        db: Arc<DatabaseEnv>,
+    ) -> Self {
         Self {
+            compute_pending_block,
             verified_blockspace_capacity,
             db,
         }
@@ -183,7 +196,7 @@ impl WorldChainPayloadServiceBuilder {
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadServiceBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction> + Unpin + 'static,
 {
@@ -192,9 +205,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
-        let evm_config = OptimismEvmConfig::new(Arc::new(OpChainSpec {
-            inner: (*ctx.chain_spec()).clone(),
-        }));
+        let evm_config = OptimismEvmConfig::new(Arc::new((*ctx.chain_spec()).clone()));
 
         let payload_builder =
             WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity, self.db);
@@ -213,7 +224,6 @@ where
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            ctx.chain_spec(),
             payload_builder,
         );
         let (payload_service, payload_builder) =
@@ -245,7 +255,7 @@ pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    Client: StateProviderFactory,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
 {
     let BuildArguments {
@@ -257,6 +267,8 @@ where
         best_payload,
     } = args;
 
+    let chain_spec = client.chain_spec();
+
     let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db = State::builder()
@@ -266,7 +278,6 @@ where
     let PayloadConfig {
         parent_block,
         attributes,
-        chain_spec,
         extra_data,
     } = config;
 
@@ -301,28 +312,27 @@ where
     );
 
     // apply eip-4788 pre block contract call
-    pre_block_beacon_root_contract_call(
-        &mut db,
-        &evm_config,
-        &chain_spec,
-        &initialized_cfg,
-        &initialized_block_env,
-        attributes.payload_attributes.parent_beacon_block_root,
-    )
-    .map_err(|err| {
-        warn!(target: "payload_builder",
-            parent_hash=%parent_block.hash(),
-            %err,
-            "failed to apply beacon root contract call for empty payload"
-        );
-        PayloadBuilderError::Internal(err.into())
-    })?;
+    SystemCaller::new(&evm_config, chain_spec.clone())
+        .pre_block_beacon_root_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+            attributes.payload_attributes.parent_beacon_block_root,
+        )
+        .map_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to apply beacon root contract call for empty payload"
+            );
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),
     // so we can safely assume that this will always be triggered upon the transition and that
     // the above check for empty blocks will never be hit on OP chains.
-    reth_evm_optimism::ensure_create2_deployer(
+    reth_optimism_evm::ensure_create2_deployer(
         chain_spec.clone(),
         attributes.payload_attributes.timestamp,
         &mut db,
@@ -561,11 +571,13 @@ where
         Vec::new(),
     );
     let receipts_root = execution_outcome
-        .optimism_receipts_root_slow(
-            block_number,
-            chain_spec.as_ref(),
-            attributes.payload_attributes.timestamp,
-        )
+        .generic_receipts_root_slow(block_number, |receipts| {
+            calculate_receipt_root_no_memo_optimism(
+                receipts,
+                &chain_spec,
+                attributes.payload_attributes.timestamp,
+            )
+        })
         .expect("Number is in range");
     let logs_bloom = execution_outcome
         .block_logs_bloom(block_number)
@@ -600,14 +612,14 @@ where
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
             let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
             let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-            Some(calculate_excess_blob_gas(
+            Some(calc_excess_blob_gas(
                 parent_excess_blob_gas,
                 parent_blob_gas_used,
             ))
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(calculate_excess_blob_gas(0, 0))
+            Some(calc_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(0);
@@ -624,7 +636,7 @@ where
         logs_bloom,
         timestamp: attributes.payload_attributes.timestamp,
         mix_hash: attributes.payload_attributes.prev_randao,
-        nonce: BEACON_NONCE,
+        nonce: BEACON_NONCE.into(),
         base_fee_per_gas: Some(base_fee),
         number: parent_block.number + 1,
         gas_limit: block_gas_limit,
@@ -637,14 +649,15 @@ where
         requests_root: None,
     };
 
-    // seal the block
-    let block = Block {
-        header,
-        body: executed_txs,
+    let body = BlockBody {
+        transactions: executed_txs,
         ommers: vec![],
         withdrawals,
         requests: None,
     };
+
+    // seal the block
+    let block = Block { header, body };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
@@ -679,6 +692,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
+        node::test_utils::{WorldChainNoopProvider, WorldChainNoopValidator},
         pbh::semaphore::SemaphoreProof,
         pool::{
             ordering::WorldChainOrdering, root::WorldChainRootValidator,
@@ -689,24 +703,23 @@ mod tests {
     use super::*;
     use crate::pbh::db::load_world_chain_db;
     use alloy_consensus::TxLegacy;
+    use alloy_primitives::Parity;
     use alloy_rlp::Encodable;
-    use futures::future::join_all;
+    use op_alloy_consensus::TxDeposit;
     use rand::Rng;
+    use reth_chainspec::ChainSpec;
     use reth_db::test_utils::tempdir_path;
-    use reth_evm_optimism::OptimismEvmConfig;
-    use reth_node_optimism::txpool::OpTransactionValidator;
     use reth_optimism_chainspec::OpChainSpec;
+    use reth_optimism_evm::OptimismEvmConfig;
+    use reth_optimism_node::txpool::OpTransactionValidator;
     use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
     use reth_primitives::{
         transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
-        TransactionSignedEcRecovered, TxDeposit, Withdrawals,
+        TransactionSignedEcRecovered, Withdrawals,
     };
-    use reth_provider::{test_utils::NoopProvider, BlockReaderIdExt};
     use reth_transaction_pool::{
-        blobstore::DiskFileBlobStore,
-        validate::{EthTransactionValidatorBuilder, ValidTransaction},
+        blobstore::DiskFileBlobStore, validate::EthTransactionValidatorBuilder,
         EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
-        TransactionValidationOutcome, TransactionValidator,
     };
     use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
     use std::sync::Arc;
@@ -724,7 +737,7 @@ mod tests {
         let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
 
         // Init the transaction pool
-        let client = NoopProvider::default();
+        let client = WorldChainNoopProvider::default();
         let eth_tx_validator = EthTransactionValidatorBuilder::new(chain_spec.clone())
             .build(client, blob_store.clone());
         let op_tx_validator =
@@ -789,11 +802,11 @@ mod tests {
         };
 
         let build_args = BuildArguments {
-            client: NoopProvider::default(),
+            client: WorldChainNoopProvider::default(),
             config: PayloadConfig {
                 parent_block: Arc::new(SealedBlock::default()),
                 attributes: payload_attributes,
-                chain_spec,
+                // chain_spec,
                 extra_data: Bytes::default(),
             },
             pool: world_chain_tx_pool,
@@ -815,7 +828,13 @@ mod tests {
         expected_order.extend(verified_transactions.iter().map(|tx| tx.hash()));
         expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
 
-        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+        for (tx, expected_hash) in built_payload
+            .block()
+            .body
+            .transactions
+            .iter()
+            .zip(expected_order.iter())
+        {
             assert_eq!(tx.hash, *expected_hash);
         }
 
@@ -835,7 +854,7 @@ mod tests {
         let blob_store = DiskFileBlobStore::open(data_dir.as_path(), Default::default())?;
 
         // Init the transaction pool
-        let client = NoopProvider::default();
+        let client = WorldChainNoopProvider::default();
         let eth_tx_validator = EthTransactionValidatorBuilder::new(chain_spec.clone())
             .build(client, blob_store.clone());
         let op_tx_validator =
@@ -899,11 +918,11 @@ mod tests {
         };
 
         let build_args = BuildArguments {
-            client: NoopProvider::default(),
+            client: WorldChainNoopProvider::default(),
             config: PayloadConfig {
                 parent_block: Arc::new(SealedBlock::default()),
                 attributes: payload_attributes,
-                chain_spec,
+                // chain_spec,
                 extra_data: Bytes::default(),
             },
             pool: world_chain_tx_pool,
@@ -925,69 +944,17 @@ mod tests {
         expected_order.push(*verified_transactions.first().unwrap().hash());
         expected_order.extend(unverified_transactions.iter().map(|tx| tx.hash()));
 
-        for (tx, expected_hash) in built_payload.block().body.iter().zip(expected_order.iter()) {
+        for (tx, expected_hash) in built_payload
+            .block()
+            .body
+            .transactions
+            .iter()
+            .zip(expected_order.iter())
+        {
             assert_eq!(tx.hash, *expected_hash);
         }
 
         Ok(())
-    }
-
-    pub struct WorldChainNoopValidator<Client, Tx>
-    where
-        Client: StateProviderFactory + BlockReaderIdExt,
-    {
-        inner: WorldChainTransactionValidator<Client, Tx>,
-    }
-
-    impl WorldChainNoopValidator<NoopProvider, WorldChainPooledTransaction> {
-        pub fn new(
-            inner: WorldChainTransactionValidator<NoopProvider, WorldChainPooledTransaction>,
-        ) -> Self {
-            Self { inner }
-        }
-    }
-
-    impl<Client, Tx> TransactionValidator for WorldChainNoopValidator<Client, Tx>
-    where
-        Client: StateProviderFactory + BlockReaderIdExt,
-        Tx: WorldChainPoolTransaction,
-    {
-        type Transaction = Tx;
-
-        async fn validate_transaction(
-            &self,
-            _origin: TransactionOrigin,
-            transaction: Self::Transaction,
-        ) -> TransactionValidationOutcome<Self::Transaction> {
-            if let Some(semaphore_proof) = transaction.semaphore_proof() {
-                self.inner
-                    .set_validated(&transaction, semaphore_proof)
-                    .expect("Error when writing to the db");
-            }
-
-            TransactionValidationOutcome::Valid {
-                balance: U256::ZERO,
-                state_nonce: 0,
-                transaction: ValidTransaction::Valid(transaction),
-                propagate: false,
-            }
-        }
-
-        async fn validate_transactions(
-            &self,
-            transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-            let futures = transactions
-                .into_iter()
-                .map(|(origin, tx)| self.validate_transaction(origin, tx))
-                .collect::<Vec<_>>();
-
-            join_all(futures).await
-        }
-
-        fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {
-            unreachable!("NoopValidator does not implement on_new_head_block");
-        }
     }
 
     fn generate_mock_deposit_transactions(
@@ -1004,16 +971,16 @@ mod tests {
                     to: TxKind::Call(Address::random()),
                     mint: Some(100), // Example value for mint
                     value: U256::from(100),
-                    gas_limit: gas_limit.into(),
+                    gas_limit,
                     is_system_transaction: true,
                     input: rng.gen::<[u8; 32]>().into(),
                 });
 
-                let signature = Signature {
-                    r: U256::from(rng.gen::<u128>()),
-                    s: U256::from(rng.gen::<u128>()),
-                    odd_y_parity: false,
-                };
+                let signature = Signature::new(
+                    U256::from(rng.gen::<u128>()),
+                    U256::from(rng.gen::<u128>()),
+                    Parity::Parity(false),
+                );
 
                 let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
                 let mut buf = Vec::new();
@@ -1034,7 +1001,7 @@ mod tests {
             .map(|_| {
                 let tx = reth_primitives::Transaction::Legacy(TxLegacy {
                     gas_price: 10,
-                    gas_limit: gas_limit.into(),
+                    gas_limit,
                     to: TxKind::Call(Address::random()),
                     value: U256::from(100),
                     input: rng.gen::<[u8; 32]>().into(),
@@ -1042,11 +1009,11 @@ mod tests {
                     ..Default::default()
                 });
 
-                let signature = Signature {
-                    r: U256::from(rng.gen::<u128>()),
-                    s: U256::from(rng.gen::<u128>()),
-                    odd_y_parity: false,
-                };
+                let signature = Signature::new(
+                    U256::from(rng.gen::<u128>()),
+                    U256::from(rng.gen::<u128>()),
+                    Parity::Parity(false),
+                );
 
                 let tx = TransactionSigned::from_transaction_and_signature(tx, signature);
                 let tx_recovered = TransactionSignedEcRecovered::from_signed_transaction(

@@ -1,5 +1,5 @@
 use clap::value_parser;
-use reth_node_optimism::args::RollupArgs;
+use reth_optimism_node::args::RollupArgs;
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]

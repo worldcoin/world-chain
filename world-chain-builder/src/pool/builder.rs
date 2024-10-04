@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use reth_chainspec::ChainSpec;
 use reth_db::DatabaseEnv;
 use reth_node_builder::components::PoolBuilder;
 use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
-use reth_node_optimism::txpool::OpTransactionValidator;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::TransactionValidationTaskExecutor;
@@ -32,36 +32,38 @@ pub struct WorldChainPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.provider().clone(),
-                ctx.task_executor().clone(),
-                blob_store.clone(),
+        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
+            ctx.chain_spec().inner.clone(),
+        ))
+        .with_head_timestamp(ctx.head().timestamp)
+        .kzg_settings(ctx.kzg_settings()?)
+        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+        .build_with_tasks(
+            ctx.provider().clone(),
+            ctx.task_executor().clone(),
+            blob_store.clone(),
+        )
+        .map(|validator| {
+            let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                // In --dev mode we can't require gas fees because we're unable to decode the L1
+                // block info
+                .require_l1_data_gas_fee(!ctx.config().dev.dev);
+            let root_validator = WorldChainRootValidator::new(validator.client().clone())
+                .expect("failed to initialize root validator");
+            WorldChainTransactionValidator::new(
+                op_tx_validator,
+                root_validator,
+                self.db.clone(),
+                self.num_pbh_txs,
             )
-            .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator.clone())
-                    // In --dev mode we can't require gas fees because we're unable to decode the L1
-                    // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator = WorldChainRootValidator::new(validator.client().clone())
-                    .expect("failed to initialize root validator");
-                WorldChainTransactionValidator::new(
-                    op_tx_validator,
-                    root_validator,
-                    self.db.clone(),
-                    self.num_pbh_txs,
-                )
-            });
+        });
 
         let ordering = WorldChainOrdering::new(self.db.clone());
 

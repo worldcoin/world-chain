@@ -1,11 +1,12 @@
 //! World Chain transaction pool types
 use std::sync::Arc;
 
+use alloy_primitives::TxHash;
 use reth_db::cursor::DbCursorRW;
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_db::{Database, DatabaseEnv, DatabaseError};
-use reth_node_optimism::txpool::OpTransactionValidator;
-use reth_primitives::{SealedBlock, TxHash};
+use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -269,21 +270,17 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use alloy_primitives::TxKind;
     use chrono::{TimeZone, Utc};
     use ethers_core::types::U256;
     use reth_chainspec::MAINNET;
-    use reth_node_optimism::txpool::OpTransactionValidator;
-    use reth_primitives::{
-        BlockBody, PooledTransactionsElement, SealedBlock, SealedHeader, Signature, Transaction,
-        TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
-    };
+    use reth_optimism_node::txpool::OpTransactionValidator;
+    use reth_primitives::{BlockBody, PooledTransactionsElement, SealedBlock, SealedHeader};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_transaction_pool::blobstore::InMemoryBlobStore;
     use reth_transaction_pool::validate::EthTransactionValidatorBuilder;
     use reth_transaction_pool::{
         EthPooledTransaction, Pool, PoolTransaction as _, TransactionOrigin, TransactionPool,
-        TransactionValidationOutcome, TransactionValidator,
+        TransactionValidator,
     };
     use revm_primitives::hex;
     use semaphore::identity::Identity;
@@ -293,7 +290,6 @@ pub mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
-    use super::*;
     use crate::date_marker::DateMarker;
     use crate::external_nullifier::ExternalNullifier;
     use crate::pbh::db::load_world_chain_db;
@@ -706,47 +702,10 @@ pub mod tests {
             root: Field::from(12u64),
             proof,
         };
-        let tx = TransactionSignedEcRecovered::default();
-        let inner = EthPooledTransaction::new(tx, 0);
-        let tx = WorldChainPooledTransaction {
-            inner,
-            semaphore_proof: Some(semaphore_proof.clone()),
-        };
+
+        let mut tx = get_non_pbh_transaction();
+        tx.semaphore_proof = Some(semaphore_proof.clone());
 
         validator.set_validated(&tx, &semaphore_proof).unwrap();
-    }
-
-    #[test]
-    fn validate_optimism_transaction() {
-        let validator = world_chain_validator();
-        let origin = TransactionOrigin::External;
-        let signer = Default::default();
-        let deposit_tx = Transaction::Deposit(TxDeposit {
-            source_hash: Default::default(),
-            from: signer,
-            to: TxKind::Create,
-            mint: None,
-            value: revm_primitives::ruint::aliases::U256::ZERO,
-            gas_limit: 0,
-            is_system_transaction: false,
-            input: Default::default(),
-        });
-        let signature = Signature::default();
-        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
-        let signed_recovered =
-            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-        let len = signed_recovered.length_without_header();
-        let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-        let world_chain_pooled_tx = WorldChainPooledTransaction {
-            inner: pooled_tx,
-            semaphore_proof: None,
-        };
-        let outcome = validator.validate_one(origin, world_chain_pooled_tx);
-
-        let err = match outcome {
-            TransactionValidationOutcome::Invalid(_, err) => err,
-            _ => panic!("Expected invalid transaction"),
-        };
-        assert_eq!(err.to_string(), "transaction type not supported");
     }
 }

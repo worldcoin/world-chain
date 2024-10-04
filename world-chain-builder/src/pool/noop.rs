@@ -1,11 +1,11 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::tx::WorldChainPooledTransaction;
+use alloy_consensus::BlobTransactionSidecar;
 use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, TxHash};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{PooledTransactionsElement, TxHash};
-use reth_rpc_types::BlobTransactionSidecar;
+use reth_primitives::PooledTransactionsElement;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,

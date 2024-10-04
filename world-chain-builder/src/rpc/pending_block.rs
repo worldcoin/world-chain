@@ -2,9 +2,10 @@
 
 use crate::rpc::WorldChainEthApi;
 use alloy_primitives::{BlockNumber, B256};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{EthApiTypes, FullNodeComponents, NodeTypes};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::OpEthApi;
 use reth_primitives::{revm_primitives::BlockEnv, Header, Receipt, SealedBlockWithSenders};
 use reth_provider::{
@@ -17,7 +18,7 @@ use reth_transaction_pool::TransactionPool;
 impl<N> LoadPendingBlock for WorldChainEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     Self::Error: From<<OpEthApi<N> as EthApiTypes>::Error>,
 {
     #[inline]
@@ -25,7 +26,7 @@ where
         &self,
     ) -> impl BlockReaderIdExt
            + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + ChainSpecProvider<ChainSpec: EthereumHardforks>
            + StateProviderFactory {
         self.inner.provider()
     }

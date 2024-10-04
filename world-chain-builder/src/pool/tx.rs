@@ -1,9 +1,8 @@
+use alloy_primitives::TxHash;
 use reth_primitives::transaction::TryFromRecoveredTransactionError;
-use reth_primitives::{
-    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered,
-    TxKind, U256,
-};
+use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
+use revm_primitives::{AccessList, Address, TxKind, U256};
 
 use crate::pbh::semaphore::SemaphoreProof;
 use crate::primitives::WorldChainPooledTransactionsElementEcRecovered;
@@ -37,12 +36,6 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 
     fn authorization_count(&self) -> usize {
         self.inner.authorization_count()
-    }
-}
-
-impl IntoRecoveredTransaction for WorldChainPooledTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.inner.to_recovered_transaction()
     }
 }
 
@@ -117,11 +110,11 @@ impl PoolTransaction for WorldChainPooledTransaction {
         Self::from(pooled)
     }
 
-    fn hash(&self) -> &reth_primitives::TxHash {
+    fn hash(&self) -> &TxHash {
         self.inner.hash()
     }
 
-    fn sender(&self) -> reth_primitives::Address {
+    fn sender(&self) -> Address {
         self.inner.sender()
     }
 
@@ -141,7 +134,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
         self.inner.max_fee_per_gas()
     }
 
-    fn access_list(&self) -> Option<&reth_primitives::AccessList> {
+    fn access_list(&self) -> Option<&AccessList> {
         self.inner.access_list()
     }
 
@@ -185,25 +178,3 @@ impl PoolTransaction for WorldChainPooledTransaction {
         self.inner.chain_id()
     }
 }
-
-// impl EthPoolTransaction for WorldChainPooledTransaction {
-//     fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
-//         self.inner.take_blob()
-//     }
-//
-//     fn blob_count(&self) -> usize {
-//         self.inner.blob_count()
-//     }
-//
-//     fn validate_blob(
-//         &self,
-//         blob: &reth_primitives::BlobTransactionSidecar,
-//         settings: &reth_primitives::kzg::KzgSettings,
-//     ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
-//         self.inner.validate_blob(blob, settings)
-//     }
-//
-//     fn authorization_count(&self) -> usize {
-//         self.inner.authorization_count()
-//     }
-// }

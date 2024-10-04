@@ -85,7 +85,6 @@ impl FromStr for ExternalNullifier {
 
 #[cfg(test)]
 mod tests {
-    use semaphore::hash_to_field;
     use test_case::test_case;
 
     use super::*;

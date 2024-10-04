@@ -1,11 +1,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use alloy_primitives::TxHash;
+use bytes::BufMut;
 use reth_db::mdbx::{DatabaseArguments, DatabaseFlags};
 use reth_db::{create_db, DatabaseError};
 // TODO: maybe think about some sort of data retention policy for PBH transactions.
 use reth_db::table::{Compress, Decompress, Table};
-use reth_primitives::{TxHash, B256};
+use revm_primitives::B256;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -37,7 +39,7 @@ impl Table for ValidatedPbhTransactionTable {
 pub struct EmptyValue;
 
 impl Decompress for EmptyValue {
-    fn decompress<B: AsRef<[u8]>>(_: B) -> Result<Self, reth_db::DatabaseError> {
+    fn decompress(_: &[u8]) -> Result<Self, reth_db::DatabaseError> {
         Ok(Self)
     }
 }
@@ -45,7 +47,7 @@ impl Decompress for EmptyValue {
 impl Compress for EmptyValue {
     type Compressed = Vec<u8>;
 
-    fn compress_to_buf<B: reth_primitives::bytes::BufMut + AsMut<[u8]>>(self, _buf: &mut B) {}
+    fn compress_to_buf<B: BufMut + AsMut<[u8]>>(self, _buf: &mut B) {}
 }
 
 pub fn load_world_chain_db(

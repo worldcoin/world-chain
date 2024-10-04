@@ -1,15 +1,18 @@
 use std::{path::Path, sync::Arc};
 
 use eyre::eyre::Result;
-use reth_chainspec::ChainSpec;
 use reth_db::DatabaseEnv;
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
 };
-use reth_node_optimism::{
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::{
     args::RollupArgs,
-    node::{OptimismConsensusBuilder, OptimismExecutorBuilder, OptimismNetworkBuilder},
+    node::{
+        OptimismAddOns, OptimismConsensusBuilder, OptimismEngineValidatorBuilder,
+        OptimismExecutorBuilder, OptimismNetworkBuilder,
+    },
     OptimismEngineTypes,
 };
 
@@ -45,10 +48,11 @@ impl WorldChainBuilder {
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
+        OptimismEngineValidatorBuilder,
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
         >,
     {
         let WorldChainBuilderArgs {
@@ -56,11 +60,14 @@ impl WorldChainBuilder {
             num_pbh_txs,
             verified_blockspace_capacity,
         } = args.builder_args;
+
         let RollupArgs {
             disable_txpool_gossip,
+            compute_pending_block,
             discovery_v4,
             ..
         } = args.rollup_args;
+
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder {
@@ -69,6 +76,7 @@ impl WorldChainBuilder {
                 db: db.clone(),
             })
             .payload(WorldChainPayloadServiceBuilder::new(
+                compute_pending_block,
                 verified_blockspace_capacity,
                 db.clone(),
             ))
@@ -78,13 +86,14 @@ impl WorldChainBuilder {
             })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
+            .engine_validator(OptimismEngineValidatorBuilder::default())
     }
 }
 
 impl<N> Node<N> for WorldChainBuilder
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = OpChainSpec>,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -94,6 +103,7 @@ where
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
         OptimismConsensusBuilder,
+        OptimismEngineValidatorBuilder,
     >;
 
     type AddOns = WorldChainAddOns;
@@ -102,20 +112,27 @@ where
         let Self { args, db } = self;
         Self::components(args.clone(), db.clone())
     }
+
+    fn add_ons(&self) -> Self::AddOns {
+        Self::AddOns {
+            inner: OptimismAddOns::new(self.args.rollup_args.sequencer_http.clone()),
+        }
+    }
 }
 
 impl NodeTypes for WorldChainBuilder {
     type Primitives = ();
-    type ChainSpec = ChainSpec;
+    type ChainSpec = OpChainSpec;
 }
 
 impl NodeTypesWithEngine for WorldChainBuilder {
     type Engine = OptimismEngineTypes;
 }
 
-/// Add-ons w.r.t. optimism.
 #[derive(Debug, Clone)]
-pub struct WorldChainAddOns;
+pub struct WorldChainAddOns {
+    pub inner: OptimismAddOns,
+}
 
 impl<N: FullNodeComponents> NodeAddOns<N> for WorldChainAddOns {
     type EthApi = WorldChainEthApi<N>;

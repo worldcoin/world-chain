@@ -10,7 +10,7 @@ use reth_optimism_rpc::SequencerClient;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError,
+    FromEthApiError, FullEthApiTypes,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -57,7 +57,7 @@ where
 
 impl<N> LoadTransaction for WorldChainEthApi<N>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     N: FullNodeComponents,
 {
     type Pool = N::Pool;
