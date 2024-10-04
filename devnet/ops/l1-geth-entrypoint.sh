@@ -31,7 +31,6 @@ exec geth \
 	--ws.api=debug,eth,txpool,net,engine \
 	--syncmode=full \
 	--maxpeers=1 \
-	--nodiscover \
 	--rpc.allow-unprotected-txs \
 	--authrpc.addr="0.0.0.0" \
 	--authrpc.port="8551" \

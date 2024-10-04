@@ -137,7 +137,7 @@ services:
       --l1.beacon=http://l1-bn:5052
       --l1.epoch-poll-interval=12s
       --l1.http-poll-interval=6s
-      --l2=http://rollup-boost:8081
+      --l2=http://l2:8551
       --l2.jwt-secret=/config/jwt.txt
       --sequencer.enabled
       --sequencer.l1-confs=0
@@ -150,12 +150,12 @@ services:
       --p2p.listen.tcp=9003
       --p2p.listen.udp=9003
       --p2p.scoring.peers=light
+      --l1.rpckind=standard
       --p2p.ban.peers=true
       --p2p.priv.path=/config/p2p-node-key.txt
       --metrics.enabled
       --metrics.addr=0.0.0.0
       --metrics.port=7300
-      --pprof.enabled
       --rpc.enable-admin
       --safedb.path=/db
       --altda.enabled=false
@@ -206,26 +206,25 @@ services:
       - l2
       - op-node
     image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:develop
+    command: >
+     op-batcher 
+      --l2-eth-rpc=http://l2:8544
+      --rollup-rpc=http://op-node:8545 
+      --num-confirmations=1
+      --resubmission-timeout=30s 
+      --rpc.addr=0.0.0.0 
+      --rpc.port=8549 
+      --rpc.enable-admin 
+      --l1-eth-rpc=http://l1:8545 
+      --safe-abort-nonce-too-low-count=3 
+      --private-key=bf7604d9d3a1c7748642b1b7b05c2bd219c9faa91458b370f85e5a40f3b03af7 
+      --metrics.enabled 
+      --metrics.addr=0.0.0.0 
+      --metrics.port=7300
     ports:
       - "6061:6060"
       - "7301:7300"
       - "6545:8545"
-    environment:
-      OP_BATCHER_L1_ETH_RPC: http://l1:8545
-      OP_BATCHER_L2_ETH_RPC: http://l2:8544
-      OP_BATCHER_ROLLUP_RPC: http://op-node:8545
-      OP_BATCHER_MAX_CHANNEL_DURATION: 2
-      OP_BATCHER_SUB_SAFETY_MARGIN: 4 # SWS is 15, ChannelTimeout is 40
-      OP_BATCHER_POLL_INTERVAL: 1s
-      OP_BATCHER_NUM_CONFIRMATIONS: 1
-      OP_BATCHER_MNEMONIC: test test test test test test test test test test test junk
-      OP_BATCHER_SEQUENCER_HD_PATH: "m/44'/60'/0'/0/2"
-      OP_BATCHER_PPROF_ENABLED: "true"
-      OP_BATCHER_METRICS_ENABLED: "true"
-      OP_BATCHER_RPC_ENABLE_ADMIN: "true"
-      OP_BATCHER_BATCH_TYPE: 1
-      OP_BATCHER_ALTDA_ENABLED: "false"
-      OP_BATCHER_ALTDA_DA_SERVICE: "false"
 
   op-challenger:
     depends_on:
