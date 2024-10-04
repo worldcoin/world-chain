@@ -15,10 +15,37 @@ volumes:
   static:
 
 services:
-  l1:
+  setup:
     build:
+      dockerfile: setup.Dockerfile
       context: .
+      platforms:
+       - "linux/amd64"
+    volumes:
+      - "static:/static"
+      - "${PWD}/../.static/:/static/"
+      - "safedb_data:/db"
+      - "l1_data:/db"
+      - op_log:/op_log
+
+  genesis:
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    image: genesis:latest
+    command: >
+      genesis
+    volumes:
+      - "${PWD}/../.static/:/static/"
+  l1:
+    depends_on:
+      genesis:
+        condition: service_completed_successfully
+    build:
       dockerfile: l1-geth.Dockerfile
+      context: .
+      platforms:
+      - "linux/amd64"
     ports:
       - "8545:8545"
       - "8546:8546"
@@ -29,13 +56,13 @@ services:
       - "safedb_data:/db"
       - "l1_data:/db"
       - op_log:/op_log
-
     environment:
       GETH_MINER_RECOMMIT: 100ms
-
+  
   l1-bn:
     depends_on:
-      - l1
+      genesis:
+        condition: service_completed_successfully
     build:
       context: .
       dockerfile: l1-lighthouse.Dockerfile
@@ -56,8 +83,8 @@ services:
 
   l1-vc:
     depends_on:
-      - l1
       - l1-bn
+      - genesis
     build:
       context: .
       dockerfile: l1-lighthouse.Dockerfile
@@ -75,6 +102,8 @@ services:
       - "/entrypoint-vc.sh"
 
   l2:
+    depends_on:
+      - genesis
     build:
       context: .
       dockerfile: l2-op-geth.Dockerfile
@@ -100,6 +129,7 @@ services:
       - l1-vc
       - l2
       - rollup-boost
+      - genesis
     image: "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop"
     command: >
       op-node 
@@ -182,7 +212,7 @@ services:
       - "6545:8545"
     environment:
       OP_BATCHER_L1_ETH_RPC: http://l1:8545
-      OP_BATCHER_L2_ETH_RPC: http://l2:8545
+      OP_BATCHER_L2_ETH_RPC: http://l2:8544
       OP_BATCHER_ROLLUP_RPC: http://op-node:8545
       OP_BATCHER_MAX_CHANNEL_DURATION: 2
       OP_BATCHER_SUB_SAFETY_MARGIN: 4 # SWS is 15, ChannelTimeout is 40
@@ -255,6 +285,7 @@ services:
   artifact-server:
     depends_on:
       - l1
+      - genesis
     image: nginx:1.25-alpine
     ports:
       - "8080:80"
@@ -270,6 +301,7 @@ services:
       - l2
       - op-node
       - world-chain-builder
+      - genesis
     command: >
       op-node 
       --l1.beacon=http://l1-bn:5052
@@ -305,6 +337,7 @@ services:
   world-chain-builder:
     depends_on:
       - rollup-boost
+      - genesis
     image: world-chain-builder:latest
     command: >
       node
@@ -336,6 +369,7 @@ services:
     depends_on:
       - l2
       - world-chain-builder
+      - genesis
     build:
       context: .
       dockerfile: Dockerfile.tx-fuzz
@@ -346,10 +380,12 @@ services:
       - "--seed=31337"
       - "--slot-time=1"
       - "--sk=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-      - "--rpc=http://l2:8545"
+      - "--rpc=http://l2:8544"
       - "--rpc2=http://world-chain-builder:8545"
 
   rollup-boost:
+    depends_on:
+      - genesis
     build:
       context: .
       dockerfile: Dockerfile.rollup-boost

@@ -6,7 +6,7 @@ GETH_DATA_DIR=/db
 GETH_CHAINDATA_DIR="$GETH_DATA_DIR/geth/chaindata"
 GENESIS_FILE_PATH="${GENESIS_FILE_PATH:-/genesis.json}"
 CHAIN_ID=$(cat "$GENESIS_FILE_PATH" | jq -r .config.chainId)
-RPC_PORT="${RPC_PORT:-8545}"
+RPC_PORT="${RPC_PORT:-8544}"
 WS_PORT="${WS_PORT:-8546}"
 
 if [ ! -d "$GETH_CHAINDATA_DIR" ]; then
@@ -43,7 +43,7 @@ exec geth \
 	--networkid="$CHAIN_ID" \
 	--rpc.allow-unprotected-txs \
 	--authrpc.addr="0.0.0.0" \
-	--authrpc.port="8545" \
+	--authrpc.port="8551" \
 	--authrpc.vhosts="*" \
 	--authrpc.jwtsecret=/config/jwt-secret.txt \
 	--gcmode=archive \
@@ -52,3 +52,4 @@ exec geth \
 	--metrics.addr=0.0.0.0 \
 	--metrics.port=6060 \
 	"$@"
+

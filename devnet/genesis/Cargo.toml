@@ -1,0 +1,13 @@
+[package]
+name = "genesis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reth-primitives = { git = "https://github.com/ewoolsey/reth", rev = "b2848f", features = [
+    "reth-codec",
+] }
+reth-chainspec= { git = "https://github.com/ewoolsey/reth", rev = "b2848f" }
+serde = { version = "1.0" }
+serde_json = { version = "1.0" }
+clap = { version = "4.5.1", features = ["derive"] }
