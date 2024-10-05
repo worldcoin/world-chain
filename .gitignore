@@ -1,5 +1,6 @@
 world-chain-builder/target
 devnet/.static/beacon/data
 devnet/genesis/target
+devnet/.DS_Store
 .env
 
