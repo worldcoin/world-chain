@@ -1,0 +1,16 @@
+set positional-arguments
+
+# Tests the world-chain-builder
+devnet-up:build
+    cd ops/ && docker compose up
+
+clean:
+    rm -rf ./.static/beacon/data/
+
+build:clean
+    docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
+    docker buildx build -t genesis:latest -f genesis/Dockerfile ./genesis
+
+# Formats the world-chain-builder
+fmt:
+    cargo fmt

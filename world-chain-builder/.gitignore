@@ -1,0 +1,6 @@
+/target
+
+../devnet/.static/beacon/*/** */
+devnet/genesis/target
+.env
+

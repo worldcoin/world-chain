@@ -38,13 +38,14 @@ exec geth \
 	--ws.origins="*" \
 	--ws.api=debug,eth,txpool,net,engine \
 	--syncmode=full \
-	--maxpeers=0 \
+	--maxpeers=2 \
 	--networkid="$CHAIN_ID" \
 	--rpc.allow-unprotected-txs \
 	--authrpc.addr="0.0.0.0" \
 	--authrpc.port="8551" \
 	--authrpc.vhosts="*" \
 	--authrpc.jwtsecret=/config/jwt-secret.txt \
+	--sequencer-http="http://world-chain-builder:8545" \
 	--gcmode=archive \
   	--state.scheme=hash \
 	--metrics \

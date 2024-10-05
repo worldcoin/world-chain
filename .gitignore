@@ -1,7 +1,0 @@
-world-chain-builder/target
-
-./devnet/.static/beacon/data
-./devnet/.static/beacon/data/secrets/*
-devnet/genesis/target
-.env
-

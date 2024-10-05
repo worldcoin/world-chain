@@ -22,8 +22,9 @@ services:
       platforms:
        - "linux/amd64"
     volumes:
-      - "static:/static"
-      - "${PWD}/../.static/:/static/"
+      - type: bind
+        source: ${PWD}/../.static/
+        target: /static
       - "safedb_data:/db"
       - "l1_data:/db"
       - op_log:/op_log
@@ -36,7 +37,11 @@ services:
     command: >
       genesis
     volumes:
-      - "${PWD}/../.static/:/static/"
+      - type: bind
+        source: ${PWD}/../.static/genesis/
+        target: /static/genesis/
+
+
   l1:
     depends_on:
       genesis:
@@ -58,7 +63,6 @@ services:
       - op_log:/op_log
     environment:
       GETH_MINER_RECOMMIT: 100ms
-  
   l1-bn:
     depends_on:
       genesis:
@@ -137,8 +141,9 @@ services:
       --l1.beacon=http://l1-bn:5052
       --l1.epoch-poll-interval=12s
       --l1.http-poll-interval=6s
-      --l2=http://l2:8551
+      --l2=http://rollup-boost:8081
       --l2.jwt-secret=/config/jwt.txt
+      --sequencer.enabled
       --sequencer.enabled
       --sequencer.l1-confs=0
       --verifier.l1-confs=0
@@ -226,35 +231,35 @@ services:
       - "7301:7300"
       - "6545:8545"
 
-  op-challenger:
-    depends_on:
-      - l1
-      - l1-bn
-      - l2
-      - op-node
-    image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-challenger:develop
-    volumes:
-      - "challenger_data:/db"
-      - "../op-program/bin:/op-program"
-    environment:
-      OP_CHALLENGER_L1_ETH_RPC: http://l1:8545
-      OP_CHALLENGER_L1_BEACON: http://l1-bn:5052
-      OP_CHALLENGER_ROLLUP_RPC: http://op-node:8545
-      OP_CHALLENGER_TRACE_TYPE: cannon,fast
-      OP_CHALLENGER_GAME_FACTORY_ADDRESS: ${DGF_ADDRESS}
-      # The devnet can't set the absolute prestate output root because the contracts are deployed in L1 genesis
-      # before the L2 genesis is known.
-      OP_CHALLENGER_UNSAFE_ALLOW_INVALID_PRESTATE: "true"
-      OP_CHALLENGER_DATADIR: /db
-      OP_CHALLENGER_CANNON_ROLLUP_CONFIG: ${PWD}/../.static/genesis/rollup.json
-      OP_CHALLENGER_CANNON_L2_GENESIS: ${PWD}/../.static/genesis/genesis-l2.json
-      OP_CHALLENGER_CANNON_BIN: ./cannon/bin/cannon
-      OP_CHALLENGER_CANNON_SERVER: /op-program/op-program
-      OP_CHALLENGER_CANNON_PRESTATE: /op-program/prestate.json
-      OP_CHALLENGER_L2_ETH_RPC: http://l2:8545
-      OP_CHALLENGER_MNEMONIC: test test test test test test test test test test test junk
-      OP_CHALLENGER_HD_PATH: "m/44'/60'/0'/0/4"
-      OP_CHALLENGER_NUM_CONFIRMATIONS: 1
+  # op-challenger:
+  #   depends_on:
+  #     - l1
+  #     - l1-bn
+  #     - l2
+  #     - op-node
+  #   image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-challenger:develop
+  #   volumes:
+  #     - "challenger_data:/db"
+  #     - "../op-program/bin:/op-program"
+  #   environment:
+  #     OP_CHALLENGER_L1_ETH_RPC: http://l1:8545
+  #     OP_CHALLENGER_L1_BEACON: http://l1-bn:5052
+  #     OP_CHALLENGER_ROLLUP_RPC: http://op-node:8545
+  #     OP_CHALLENGER_TRACE_TYPE: cannon,fast
+  #     OP_CHALLENGER_GAME_FACTORY_ADDRESS: ${DGF_ADDRESS}
+  #     # The devnet can't set the absolute prestate output root because the contracts are deployed in L1 genesis
+  #     # before the L2 genesis is known.
+  #     OP_CHALLENGER_UNSAFE_ALLOW_INVALID_PRESTATE: "true"
+  #     OP_CHALLENGER_DATADIR: /db
+  #     OP_CHALLENGER_CANNON_ROLLUP_CONFIG: ${PWD}/../.static/genesis/rollup.json
+  #     OP_CHALLENGER_CANNON_L2_GENESIS: ${PWD}/../.static/genesis/genesis-l2.json
+  #     OP_CHALLENGER_CANNON_BIN: ./cannon/bin/cannon
+  #     OP_CHALLENGER_CANNON_SERVER: /op-program/op-program
+  #     OP_CHALLENGER_CANNON_PRESTATE: /op-program/prestate.json
+  #     OP_CHALLENGER_L2_ETH_RPC: http://l2:8545
+  #     OP_CHALLENGER_MNEMONIC: test test test test test test test test test test test junk
+  #     OP_CHALLENGER_HD_PATH: "m/44'/60'/0'/0/4"
+  #     OP_CHALLENGER_NUM_CONFIRMATIONS: 1
 
   da-server:
     depends_on:
@@ -325,7 +330,6 @@ services:
       --altda.enabled=false 
       --altda.da-service=false 
       --altda.da-server=http://da-server:3100 
-      --p2p.static=/dns/op-node/tcp/9003/p2p/16Uiu2HAmHqrXGts25TtKMBRHtvhWZLNypsobKoggpZye1XQtJpbZ
       --l1=ws://l1:8546
     volumes:
       - "${PWD}/../.static/auth/jwt.txt:/config/jwt-secret.txt"
@@ -354,6 +358,7 @@ services:
        --ws.api=all
        --authrpc.addr=0.0.0.0
        --authrpc.port=8551
+       --rollup.discovery.v4
        --authrpc.jwtsecret=/config/jwt-secret.txt
     ports:
       - "5545:8545"
@@ -367,6 +372,7 @@ services:
   load-test:
     depends_on:
       - world-chain-builder
+      - l2
     build:
       context: .
       dockerfile: Dockerfile.tx-fuzz
