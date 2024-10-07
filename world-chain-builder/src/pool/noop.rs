@@ -239,4 +239,11 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
     }
+
+    fn get_highest_transaction_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
+    }
 }
