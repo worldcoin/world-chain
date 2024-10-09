@@ -12,6 +12,7 @@ pub struct IdentitySource {
     #[clap(
         short = 'I',
         long,
+        env,
         conflicts_with = "identity_file",
         required_unless_present = "identity_file",
         value_parser = bytes_mut_parse_hex

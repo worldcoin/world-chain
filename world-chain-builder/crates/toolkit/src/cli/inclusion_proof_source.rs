@@ -4,6 +4,7 @@ use clap::Args;
 use semaphore::poseidon_tree::Proof;
 
 use super::utils::parse_from_json;
+use crate::InclusionProof;
 
 #[derive(Debug, Clone, Args)]
 pub struct InclusionProofSource {
@@ -13,32 +14,54 @@ pub struct InclusionProofSource {
         long,
         value_parser = parse_from_json::<Proof>,
         conflicts_with = "inclusion_proof_file",
-        required_unless_present = "inclusion_proof_file"
+        conflicts_with = "inclusion_proof_url",
+        required_unless_present = "inclusion_proof_file",
+        required_unless_present = "inclusion_proof_url"
     )]
-    pub inclusion_proof: Option<Proof>,
+    pub inclusion_proof: Option<InclusionProof>,
 
     #[clap(
         long,
         conflicts_with = "inclusion_proof",
-        required_unless_present = "inclusion_proof"
+        conflicts_with = "inclusion_proof_url",
+        required_unless_present = "inclusion_proof",
+        required_unless_present = "inclusion_proof_url"
     )]
     pub inclusion_proof_file: Option<PathBuf>,
 
-    // TODO: Add fetching from signup-sequencer/world-tree
-    // TODO: Add fetching from smart contract via RPC
+    /// Endpoint to fetch the inclusion proof from
+    ///
+    /// i.e. https://world-tree.crypto.worldcoin.dev/inclusionProof
+    #[clap(
+        long,
+        conflicts_with = "inclusion_proof",
+        conflicts_with = "inclusion_proof_file",
+        required_unless_present = "inclusion_proof",
+        required_unless_present = "inclusion_proof_file"
+    )]
+    pub inclusion_proof_url: Option<String>,
 }
 
 impl InclusionProofSource {
-    pub fn load(&self) -> Proof {
-        if let Some(inclusion_proof) = self.inclusion_proof.clone() {
-            return inclusion_proof;
+    pub fn into_variant(self) -> InclusionProofSourceVariant {
+        if let Some(inclusion_proof) = self.inclusion_proof {
+            return InclusionProofSourceVariant::Proof(inclusion_proof);
         }
 
-        if let Some(inclusion_proof_file) = &self.inclusion_proof_file {
-            let inclusion_proof = std::fs::read(inclusion_proof_file).unwrap();
-            return serde_json::from_slice(&inclusion_proof).unwrap();
+        if let Some(inclusion_proof_file) = self.inclusion_proof_file {
+            return InclusionProofSourceVariant::File(inclusion_proof_file);
+        }
+
+        if let Some(inclusion_proof_url) = self.inclusion_proof_url {
+            return InclusionProofSourceVariant::Url(inclusion_proof_url);
         }
 
         unreachable!()
     }
+}
+
+pub enum InclusionProofSourceVariant {
+    Proof(InclusionProof),
+    File(PathBuf),
+    Url(String),
 }

@@ -20,8 +20,10 @@ bytes = "1.7.2"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 hex = "0.4.3"
+reqwest = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 dotenvy = "0.15.7"
 chrono = "0.4"
+rand = "0.8.5"
