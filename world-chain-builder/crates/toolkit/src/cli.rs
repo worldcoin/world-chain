@@ -8,7 +8,9 @@ pub mod identity_source;
 pub mod inclusion_proof_source;
 mod utils;
 
+/// A CLI utility for proving raw Ethereum transactions
 #[derive(Debug, Clone, Parser)]
+#[clap(version, about)]
 pub struct Opt {
     #[clap(subcommand)]
     pub cmd: Cmd,
@@ -16,9 +18,16 @@ pub struct Opt {
 
 #[derive(Debug, Clone, Parser)]
 pub enum Cmd {
+    /// Proves a transaction and returns a hex encoded payload ready to be sent to a World Chain Builder
+    ///
+    /// Note that it's necessary to provide the identity and inclusion proof
+    /// and there exist multiple ways to provide them
+    ///
+    /// For the identity in testing the simplest way is to use a predefined identity secret via `-I 11ff11` flag or `export IDENTITY=11ff11` env var
+    ///
+    /// For the inclusion proof you can fetch it dynamically from the (staging) sequencer API via `--inclusion-proof-url https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof`
+    /// or `export INCLUSION_PROOF_URL=https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof` env var
     Prove(ProveArgs),
-
-    Send(SendArgs),
 }
 
 #[derive(Debug, Clone, Parser)]

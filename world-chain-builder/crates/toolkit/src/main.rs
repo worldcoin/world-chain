@@ -81,7 +81,6 @@ async fn main() -> eyre::Result<()> {
 
             println!("{}", encoded_hex);
         }
-        _ => unimplemented!(),
     }
 
     Ok(())

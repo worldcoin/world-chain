@@ -34,6 +34,7 @@ pub struct InclusionProofSource {
     /// i.e. https://world-tree.crypto.worldcoin.dev/inclusionProof
     #[clap(
         long,
+        env,
         conflicts_with = "inclusion_proof",
         conflicts_with = "inclusion_proof_file",
         required_unless_present = "inclusion_proof",

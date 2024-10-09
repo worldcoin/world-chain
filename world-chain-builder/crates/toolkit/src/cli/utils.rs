@@ -8,9 +8,7 @@ pub fn bytes_mut_parse_hex(s: &str) -> eyre::Result<BytesMut> {
 }
 
 pub fn bytes_parse_hex(s: &str) -> eyre::Result<Bytes> {
-    Ok(Bytes::from(
-        hex::decode(s.trim_start_matches("0x"))?,
-    ))
+    Ok(Bytes::from(hex::decode(s.trim_start_matches("0x"))?))
 }
 
 pub fn parse_from_json<'a, T>(s: &'a str) -> eyre::Result<T>
