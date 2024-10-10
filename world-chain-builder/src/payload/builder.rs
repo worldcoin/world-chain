@@ -490,6 +490,27 @@ where
                     }
                 }
             };
+
+            // add the nullifier to the db
+            if let Some(pbh_payload) = pool_tx.transaction.pbh_payload() {
+                match set_pbh_nullifier(&db_tx, pbh_payload.nullifier_hash) {
+                    Err(DatabaseError::Write(write))
+                        if write.operation == DatabaseWriteOperation::CursorInsert =>
+                    {
+                        // If the nullifier has already been seen then we can skip this transaction
+                        best_txs.mark_invalid(&pool_tx);
+                        warn!(target: "payload_builder",
+                            parent_hash=%parent_block.hash(),
+                            nullifier=%pbh_payload.nullifier_hash,
+                            "nullifier already seen, skipping transaction"
+                        );
+                        continue;
+                    }
+                    Err(e) => return Err(PayloadBuilderError::Internal(e.into())),
+                    _ => (),
+                }
+            }
+
             // drop evm so db is released.
             drop(evm);
             // commit changes
@@ -520,25 +541,6 @@ where
             // append sender and transaction to the respective lists
             executed_senders.push(tx.signer());
             executed_txs.push(tx.into_signed());
-
-            // add the nullifier to the db
-            if let Some(pbh_payload) = pool_tx.transaction.pbh_payload() {
-                match set_pbh_nullifier(&db_tx, pbh_payload.nullifier_hash) {
-                    Err(DatabaseError::Write(write))
-                        if write.operation == DatabaseWriteOperation::CursorInsert =>
-                    {
-                        // If the nullifier has already been seen then we can skip this transaction
-                        best_txs.mark_invalid(&pool_tx);
-                        warn!(target: "payload_builder",
-                            parent_hash=%parent_block.hash(),
-                            nullifier=%pbh_payload.nullifier_hash,
-                            "nullifier already seen, skipping transaction"
-                        );
-                    }
-                    Err(e) => return Err(PayloadBuilderError::Internal(e.into())),
-                    _ => (),
-                }
-            }
         }
     }
 

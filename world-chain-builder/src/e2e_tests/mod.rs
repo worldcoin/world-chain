@@ -156,10 +156,16 @@ impl WorldChainBuilderTestContext {
         })
     }
 
-    pub async fn raw_pbh_tx_bytes(&self, signer: PrivateKeySigner, pbh_nonce: u16) -> Bytes {
+    pub async fn raw_pbh_tx_bytes(
+        &self,
+        signer: PrivateKeySigner,
+        pbh_nonce: u16,
+        tx_nonce: u64,
+    ) -> Bytes {
         let raw_tx = TransactionTestContext::transfer_tx_bytes(
             self.node.inner.chain_spec().chain.id(),
             signer.clone(),
+            tx_nonce,
         )
         .await;
 
@@ -231,7 +237,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let mut pbh_tx_hashes = vec![];
     for signer in ctx.pbh_wallets.iter() {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0).await;
+        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -266,7 +272,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let non_pbh_hash = ctx.node.rpc.inject_tx(signed.encoded_2718().into()).await?;
     let mut pbh_tx_hashes = vec![];
     for signer in ctx.pbh_wallets.iter().skip(1) {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0).await;
+        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -301,10 +307,40 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     tokio::time::sleep(Duration::from_secs(1)).await;
     let ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = ctx.pbh_wallets[0].clone();
-    let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0).await;
+    let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
     assert!(dup_pbh_hash_res.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let mut ctx = WorldChainBuilderTestContext::setup().await?;
+    let signer = ctx.pbh_wallets[0].clone();
+
+    let raw_tx_0 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+    ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
+
+    let raw_tx_1 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 1).await;
+    ctx.node.rpc.inject_tx(raw_tx_1.clone()).await?;
+
+    let (payload, _) = ctx
+        .node
+        .advance_block(vec![], optimism_payload_attributes)
+        .await?;
+
+    // Both transactions should be successfully validated
+    // but only one should be included in the block
+    assert_eq!(payload.block().body.transactions.len(), 1);
+
+    // Now that the nullifier has successfully been stored in
+    // the `ExecutedPbhNullifierTable`, inserting a new tx with the
+    // same pbh_nonce should fail to validate.
+    let raw_tx_2 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 2).await;
+    assert!(ctx.node.rpc.inject_tx(raw_tx_2.clone()).await.is_err());
+
     Ok(())
 }
 
