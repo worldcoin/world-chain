@@ -67,7 +67,7 @@ pub fn get_pbh_validated(
 /// Set the store the nullifier for a tx after it
 /// has been included in the block
 /// don't forget to call db_tx.commit() at the very end
-pub fn set_pbh_nullifier(db_tx: Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
+pub fn set_pbh_nullifier(db_tx: &Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
     let bytes: FixedBytes<32> = nullifier.into();
     let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
     cursor.insert(bytes, EmptyValue)?;

@@ -1,3 +1,4 @@
+use reth_db::transaction::DbTx;
 use std::sync::Arc;
 
 use reth::api::PayloadBuilderError;
@@ -12,7 +13,7 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_db::DatabaseEnv;
+use reth_db::{Database, DatabaseEnv, DatabaseError, DatabaseWriteOperation};
 use reth_evm::system_calls::SystemCaller;
 use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
@@ -42,6 +43,7 @@ use revm_primitives::{
 };
 use tracing::{debug, trace, warn};
 
+use crate::pbh::db::set_pbh_nullifier;
 use crate::pool::noop::NoopWorldChainTransactionPool;
 use crate::pool::tx::WorldChainPoolTransaction;
 
@@ -418,6 +420,10 @@ where
         executed_txs.push(sequencer_tx.into_signed());
     }
 
+    let db_tx = pbh_db
+        .tx_mut()
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+
     if !attributes.no_tx_pool {
         let verified_gas_limit = (verified_blockspace_capacity as u64 * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
@@ -514,6 +520,25 @@ where
             // append sender and transaction to the respective lists
             executed_senders.push(tx.signer());
             executed_txs.push(tx.into_signed());
+
+            // add the nullifier to the db
+            if let Some(pbh_payload) = pool_tx.transaction.pbh_payload() {
+                match set_pbh_nullifier(&db_tx, pbh_payload.nullifier_hash) {
+                    Err(DatabaseError::Write(write))
+                        if write.operation == DatabaseWriteOperation::CursorInsert =>
+                    {
+                        // If the nullifier has already been seen then we can skip this transaction
+                        best_txs.mark_invalid(&pool_tx);
+                        warn!(target: "payload_builder",
+                            parent_hash=%parent_block.hash(),
+                            nullifier=%pbh_payload.nullifier_hash,
+                            "nullifier already seen, skipping transaction"
+                        );
+                    }
+                    Err(e) => return Err(PayloadBuilderError::Internal(e.into())),
+                    _ => (),
+                }
+            }
         }
     }
 
@@ -637,6 +662,11 @@ where
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+
+    // commit the pbh nullifiers to the db
+    db_tx
+        .commit()
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
     // create the executed block data
     let executed = ExecutedBlock {

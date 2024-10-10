@@ -144,7 +144,7 @@ where
         &self,
         semaphore_proof: &PbhPayload,
     ) -> Result<(), TransactionValidationError> {
-        let tx = self.database_env.tx().unwrap();
+        let tx = self.database_env.tx()?;
         match tx
             .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
         {
