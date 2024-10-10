@@ -49,8 +49,8 @@ pub enum ExternalNullifierParsingError {
     #[error("error parsing prefix - {0}")]
     InvalidPrefix(strum::ParseError),
 
-    #[error("error parsing month - {0}")]
-    InvalidMonth(DateMarkerParsingError),
+    #[error("error parsing date marker - {0}")]
+    InvalidDateMarker(#[from] DateMarkerParsingError),
 
     #[error("error parsing nonce - {0}")]
     InvalidNonce(std::num::ParseIntError),
@@ -70,14 +70,11 @@ impl FromStr for ExternalNullifier {
             });
         }
 
-        // no need to check the exact value since there's only one variant
         let prefix: Prefix = parts[0]
             .parse()
             .map_err(ExternalNullifierParsingError::InvalidPrefix)?;
 
-        let date_marker = parts[1]
-            .parse()
-            .map_err(ExternalNullifierParsingError::InvalidMonth)?;
+        let date_marker = parts[1].parse()?;
 
         let nonce_str = parts[2];
         let nonce_str_trimmed = nonce_str.trim_start_matches('0');
