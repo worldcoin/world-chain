@@ -218,7 +218,6 @@ impl WorldChainBuilderTestContext {
         PbhPayload {
             root: self.tree.root(),
             nullifier_hash,
-            signal_hash,
             external_nullifier,
             proof,
             external_nullifier_hash,

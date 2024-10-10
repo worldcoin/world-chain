@@ -1,7 +1,6 @@
 //! World Chain transaction pool types
 use std::sync::Arc;
 
-use alloy_primitives::TxHash;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -156,19 +155,6 @@ where
         }
     }
 
-    pub fn validate_signal_hash(
-        &self,
-        tx_hash: &TxHash,
-        semaphore_proof: &PbhPayload,
-    ) -> Result<(), TransactionValidationError> {
-        // TODO: we probably don't need to hash the hash.
-        let expected = hash_to_field(tx_hash.as_slice());
-        if semaphore_proof.signal_hash != expected {
-            return Err(WorldChainTransactionPoolInvalid::InvalidSignalHash.into());
-        }
-        Ok(())
-    }
-
     pub fn validate_semaphore_proof(
         &self,
         transaction: &Tx,
@@ -190,12 +176,11 @@ where
         self.validate_root(semaphore_proof)?;
         self.validate_external_nullifier(date, semaphore_proof)?;
         self.validate_nullifier(semaphore_proof)?;
-        self.validate_signal_hash(transaction.hash(), semaphore_proof)?;
 
         let res = verify_proof(
             semaphore_proof.root,
             semaphore_proof.nullifier_hash,
-            semaphore_proof.signal_hash,
+            hash_to_field(transaction.hash().as_ref()),
             semaphore_proof.external_nullifier_hash,
             &semaphore_proof.proof.0,
             TREE_DEPTH,
@@ -388,7 +373,6 @@ pub mod tests {
         PbhPayload {
             root: tree.root(),
             nullifier_hash,
-            signal_hash,
             external_nullifier,
             proof,
             external_nullifier_hash,
@@ -506,8 +490,7 @@ pub mod tests {
     #[tokio::test]
     async fn invalid_signal_hash() {
         let validator = world_chain_validator();
-        let mut transaction = get_pbh_transaction();
-        transaction.semaphore_proof.as_mut().unwrap().signal_hash = Field::from(0);
+        let transaction = get_pbh_transaction();
 
         validator.inner.client().add_account(
             transaction.sender(),
@@ -543,7 +526,6 @@ pub mod tests {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
-            signal_hash: Field::from(11u64),
             root,
             proof,
         };
@@ -579,7 +561,6 @@ pub mod tests {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
-            signal_hash: Field::from(11u64),
             root,
             proof,
         };
@@ -610,7 +591,6 @@ pub mod tests {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: Field::ZERO,
             nullifier_hash: Field::ZERO,
-            signal_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
         };
@@ -630,7 +610,6 @@ pub mod tests {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
-            signal_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
         };
@@ -650,7 +629,6 @@ pub mod tests {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
-            signal_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
         };
@@ -676,7 +654,6 @@ pub mod tests {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
-            signal_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
         };
@@ -701,7 +678,6 @@ pub mod tests {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
-            signal_hash: Field::from(11u64),
             root: Field::from(12u64),
             proof,
         };

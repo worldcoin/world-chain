@@ -55,9 +55,6 @@ pub struct PbhPayload {
     /// A nullifier hash used to keep track of
     /// previously used pbh transactions
     pub nullifier_hash: Field,
-    /// This is the transaction hash
-    /// which associates this proof with a specific transaction
-    pub signal_hash: Field,
     /// The root of the merkle tree for which this proof
     /// was generated
     pub root: Field,
@@ -86,7 +83,6 @@ mod test {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
-            signal_hash: Field::from(11u64),
             root: Field::from(12u64),
             proof,
         };

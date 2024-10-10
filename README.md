@@ -19,8 +19,6 @@ The PBH payload contains the following fields:
 
 `nullifier_hash` - A nullifier hash used to keep track of previously used pbh transactions
 
-`signal_hash` - This is the transaction hash which associates this proof with a specific transaction
-
 `root` - The root of the merkle tree for which this proof was generated
 
 `proof` - The actual semaphore proof verifying that the sender is included in the set of orb verified users

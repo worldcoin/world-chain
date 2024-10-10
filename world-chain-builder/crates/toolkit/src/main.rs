@@ -69,7 +69,6 @@ async fn main() -> eyre::Result<()> {
                 external_nullifier: external_nullifier.to_string(),
                 external_nullifier_hash,
                 nullifier_hash,
-                signal_hash,
                 root: inclusion_proof.root,
                 proof: world_chain_builder::pbh::semaphore::Proof(semaphore_proof),
             };
