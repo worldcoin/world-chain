@@ -18,10 +18,10 @@ use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid}
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use crate::date_marker::DateMarker;
-use crate::external_nullifier::ExternalNullifier;
+use crate::pbh::date_marker::DateMarker;
 use crate::pbh::db::{ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
-use crate::pbh::semaphore::{PbhPayload, TREE_DEPTH};
+use crate::pbh::external_nullifier::ExternalNullifier;
+use crate::pbh::payload::{PbhPayload, TREE_DEPTH};
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -278,10 +278,10 @@ pub mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
-    use crate::date_marker::DateMarker;
-    use crate::external_nullifier::{ExternalNullifier, Prefix};
+    use crate::pbh::date_marker::DateMarker;
     use crate::pbh::db::load_world_chain_db;
-    use crate::pbh::semaphore::{PbhPayload, Proof, TREE_DEPTH};
+    use crate::pbh::external_nullifier::{ExternalNullifier, Prefix};
+    use crate::pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
     use crate::pool::ordering::WorldChainOrdering;
     use crate::pool::root::{WorldChainRootValidator, LATEST_ROOT_SLOT, OP_WORLD_ID};
     use crate::pool::tx::WorldChainPooledTransaction;
@@ -306,7 +306,7 @@ pub mod tests {
 
     fn get_pbh_transaction() -> WorldChainPooledTransaction {
         let eth_tx = get_eth_transaction();
-        let semaphore_proof = valid_proof(
+        let semaphore_proof = valid_pbh_payload(
             &mut [0; 32],
             eth_tx.hash().as_slice(),
             chrono::Utc::now(),
@@ -333,7 +333,7 @@ pub mod tests {
         WorldChainTransactionValidator::new(validator, root_validator, db, 30)
     }
 
-    pub fn valid_proof(
+    pub fn valid_pbh_payload(
         identity: &mut [u8],
         tx_hash: &[u8],
         time: chrono::DateTime<Utc>,
@@ -342,10 +342,10 @@ pub mod tests {
         let external_nullifier =
             ExternalNullifier::new(Prefix::V1, DateMarker::from(time), pbh_nonce).to_string();
 
-        create_proof(identity, external_nullifier, tx_hash, TREE_DEPTH)
+        create_pbh_paylaod(identity, external_nullifier, tx_hash, TREE_DEPTH)
     }
 
-    fn create_proof(
+    fn create_pbh_paylaod(
         identity: &mut [u8],
         external_nullifier: String,
         signal: &[u8],
@@ -522,7 +522,7 @@ pub mod tests {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
@@ -541,7 +541,7 @@ pub mod tests {
         );
         validator.root_validator.set_client(client);
         validator.on_new_head_block(&block);
-        let res = validator.validate_root(&semaphore_proof);
+        let res = validator.validate_root(&payload);
         assert!(res.is_ok());
     }
 
@@ -557,7 +557,7 @@ pub mod tests {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
@@ -576,7 +576,7 @@ pub mod tests {
         );
         validator.root_validator.set_client(client);
         validator.on_new_head_block(&block);
-        let res = validator.validate_root(&semaphore_proof);
+        let res = validator.validate_root(&payload);
         assert!(res.is_err());
     }
 
@@ -587,7 +587,7 @@ pub mod tests {
         let validator = world_chain_validator();
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: Field::ZERO,
             nullifier_hash: Field::ZERO,
@@ -595,7 +595,7 @@ pub mod tests {
             proof: Default::default(),
         };
 
-        let res = validator.validate_external_nullifier(date, &semaphore_proof);
+        let res = validator.validate_external_nullifier(date, &payload);
         assert!(res.is_err());
     }
 
@@ -606,7 +606,7 @@ pub mod tests {
         let validator = world_chain_validator();
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
@@ -615,7 +615,7 @@ pub mod tests {
         };
 
         validator
-            .validate_external_nullifier(date, &semaphore_proof)
+            .validate_external_nullifier(date, &payload)
             .unwrap();
     }
 
@@ -625,7 +625,7 @@ pub mod tests {
         let validator = world_chain_validator();
         let date: chrono::DateTime<Utc> = time.parse().unwrap();
 
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
@@ -634,7 +634,7 @@ pub mod tests {
         };
 
         validator
-            .validate_external_nullifier(date, &semaphore_proof)
+            .validate_external_nullifier(date, &payload)
             .unwrap();
     }
 
@@ -650,7 +650,7 @@ pub mod tests {
         let validator = world_chain_validator();
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap();
 
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
             external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
@@ -658,7 +658,7 @@ pub mod tests {
             proof: Default::default(),
         };
 
-        let res = validator.validate_external_nullifier(date, &semaphore_proof);
+        let res = validator.validate_external_nullifier(date, &payload);
         assert!(res.is_err());
     }
 
@@ -674,7 +674,7 @@ pub mod tests {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let semaphore_proof = PbhPayload {
+        let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
@@ -683,8 +683,8 @@ pub mod tests {
         };
 
         let mut tx = get_non_pbh_transaction();
-        tx.semaphore_proof = Some(semaphore_proof.clone());
+        tx.semaphore_proof = Some(payload.clone());
 
-        validator.set_validated(&tx, &semaphore_proof).unwrap();
+        validator.set_validated(&tx, &payload).unwrap();
     }
 }

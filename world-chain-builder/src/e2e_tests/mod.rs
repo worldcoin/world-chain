@@ -1,12 +1,12 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::{
-    date_marker::DateMarker,
-    external_nullifier::{ExternalNullifier, Prefix},
     node::{
         args::{ExtArgs, WorldChainBuilderArgs},
         builder::{WorldChainAddOns, WorldChainBuilder},
     },
-    pbh::semaphore::{PbhPayload, Proof},
+    pbh::date_marker::DateMarker,
+    pbh::external_nullifier::{ExternalNullifier, Prefix},
+    pbh::payload::{PbhPayload, Proof},
     pool::{
         ordering::WorldChainOrdering,
         root::{LATEST_ROOT_SLOT, OP_WORLD_ID},

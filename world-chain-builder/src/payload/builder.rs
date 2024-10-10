@@ -699,7 +699,7 @@ where
 mod tests {
     use crate::{
         node::test_utils::{WorldChainNoopProvider, WorldChainNoopValidator},
-        pbh::semaphore::PbhPayload,
+        pbh::payload::PbhPayload,
         pool::{
             ordering::WorldChainOrdering, root::WorldChainRootValidator,
             tx::WorldChainPooledTransaction, validator::WorldChainTransactionValidator,

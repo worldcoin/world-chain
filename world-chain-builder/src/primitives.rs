@@ -8,7 +8,7 @@ use reth_primitives::{
 use revm_primitives::Bytes;
 use tracing::warn;
 
-use crate::pbh::semaphore::PbhPayload;
+use crate::pbh::payload::PbhPayload;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainPooledTransactionsElement {

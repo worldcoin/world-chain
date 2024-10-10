@@ -1,10 +1,10 @@
-use reth_db::{DatabaseError, DatabaseWriteOperation};
-use reth_provider::ProviderError;
 use reth::transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
 use reth::transaction_pool::{PoolTransaction, TransactionValidationOutcome};
+use reth_db::{DatabaseError, DatabaseWriteOperation};
+use reth_provider::ProviderError;
 use semaphore::Field;
 
-use crate::external_nullifier::ExternalNullifierParsingError;
+use crate::pbh::external_nullifier::ExternalNullifierParsingError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldChainTransactionPoolInvalid {

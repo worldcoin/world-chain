@@ -4,7 +4,7 @@ use reth_primitives::transaction::TryFromRecoveredTransactionError;
 use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 use revm_primitives::{AccessList, Address, TxKind, U256};
 
-use crate::pbh::semaphore::PbhPayload;
+use crate::pbh::payload::PbhPayload;
 use crate::primitives::WorldChainPooledTransactionsElementEcRecovered;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
