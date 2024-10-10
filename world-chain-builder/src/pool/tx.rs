@@ -1,24 +1,24 @@
 use alloy_primitives::TxHash;
+use reth::transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
 use reth_primitives::transaction::TryFromRecoveredTransactionError;
 use reth_primitives::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
-use reth_transaction_pool::{EthPoolTransaction, EthPooledTransaction, PoolTransaction};
 use revm_primitives::{AccessList, Address, TxKind, U256};
 
-use crate::pbh::semaphore::SemaphoreProof;
+use crate::pbh::semaphore::PbhPayload;
 use crate::primitives::WorldChainPooledTransactionsElementEcRecovered;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn semaphore_proof(&self) -> Option<&SemaphoreProof>;
+    fn pbh_payload(&self) -> Option<&PbhPayload>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldChainPooledTransaction {
     pub inner: EthPooledTransaction,
-    pub semaphore_proof: Option<SemaphoreProof>,
+    pub semaphore_proof: Option<PbhPayload>,
 }
 
 impl EthPoolTransaction for WorldChainPooledTransaction {
-    fn take_blob(&mut self) -> reth_transaction_pool::EthBlobTransactionSidecar {
+    fn take_blob(&mut self) -> reth::transaction_pool::EthBlobTransactionSidecar {
         self.inner.take_blob()
     }
 
@@ -40,7 +40,7 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn semaphore_proof(&self) -> Option<&SemaphoreProof> {
+    fn pbh_payload(&self) -> Option<&PbhPayload> {
         self.semaphore_proof.as_ref()
     }
 }

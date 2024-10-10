@@ -3,13 +3,18 @@ use std::sync::Arc;
 
 use alloy_primitives::TxHash;
 use bytes::BufMut;
-use reth_db::mdbx::{DatabaseArguments, DatabaseFlags};
+use reth_db::mdbx::tx::Tx;
+use reth_db::mdbx::{DatabaseArguments, DatabaseFlags, RW};
 use reth_db::{create_db, DatabaseError};
 // TODO: maybe think about some sort of data retention policy for PBH transactions.
 use reth_db::table::{Compress, Decompress, Table};
-use revm_primitives::B256;
+use revm_primitives::{FixedBytes, B256};
+use semaphore::Field;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+
+use reth_db::cursor::DbCursorRW;
+use reth_db::transaction::{DbTx, DbTxMut};
 
 /// Table for executed nullifiers.
 #[derive(Debug, Clone, Default)]
@@ -48,6 +53,25 @@ impl Compress for EmptyValue {
     type Compressed = Vec<u8>;
 
     fn compress_to_buf<B: BufMut + AsMut<[u8]>>(self, _buf: &mut B) {}
+}
+
+/// Check the database to see if a tx has been validated for PBH
+/// If so return the nullifier
+pub fn get_pbh_validated(
+    db_tx: Tx<RW>,
+    tx: TxHash,
+) -> Result<Option<FixedBytes<32>>, DatabaseError> {
+    db_tx.get::<ValidatedPbhTransactionTable>(tx)
+}
+
+/// Set the store the nullifier for a tx after it
+/// has been included in the block
+/// don't forget to call db_tx.commit() at the very end
+pub fn set_pbh_nullifier(db_tx: Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
+    let bytes: FixedBytes<32> = nullifier.into();
+    let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
+    cursor.insert(bytes, EmptyValue)?;
+    Ok(())
 }
 
 pub fn load_world_chain_db(

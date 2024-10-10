@@ -1,12 +1,12 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::{
     date_marker::DateMarker,
-    external_nullifier::ExternalNullifier,
+    external_nullifier::{ExternalNullifier, Prefix},
     node::{
         args::{ExtArgs, WorldChainBuilderArgs},
         builder::{WorldChainAddOns, WorldChainBuilder},
     },
-    pbh::semaphore::{Proof, SemaphoreProof},
+    pbh::semaphore::{PbhPayload, Proof},
     pool::{
         ordering::WorldChainOrdering,
         root::{LATEST_ROOT_SLOT, OP_WORLD_ID},
@@ -21,7 +21,14 @@ use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
 use chrono::Utc;
-use reth_chainspec::ChainSpec;
+use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth::builder::{components::Components, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth::chainspec::ChainSpec;
+use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
+use reth::tasks::TaskManager;
+use reth::transaction_pool::{
+    blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor,
+};
 use reth_consensus::Consensus;
 use reth_db::{
     test_utils::{tempdir_path, TempDatabase},
@@ -30,19 +37,12 @@ use reth_db::{
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
-use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
-use reth_node_builder::{components::Components, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET};
 use reth_optimism_evm::{OpExecutorProvider, OptimismEvmConfig};
 use reth_optimism_node::{engine::OptimismEngineValidator, OptimismPayloadBuilderAttributes};
-use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
 use reth_primitives::{PooledTransactionsElement, Withdrawals};
 use reth_provider::providers::BlockchainProvider;
-use reth_tasks::TaskManager;
-use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor,
-};
 use revm_primitives::{Address, Bytes, FixedBytes, TxKind, B256, U256};
 use semaphore::{
     hash_to_field,
@@ -188,9 +188,9 @@ impl WorldChainBuilderTestContext {
         tx_hash: &[u8],
         time: chrono::DateTime<Utc>,
         pbh_nonce: u16,
-    ) -> SemaphoreProof {
+    ) -> PbhPayload {
         let external_nullifier =
-            ExternalNullifier::new(DateMarker::from(time), pbh_nonce).to_string();
+            ExternalNullifier::new(Prefix::V1, DateMarker::from(time), pbh_nonce).to_string();
 
         self.create_proof(identity, external_nullifier, tx_hash)
     }
@@ -200,7 +200,7 @@ impl WorldChainBuilderTestContext {
         mut identity: Address,
         external_nullifier: String,
         signal: &[u8],
-    ) -> SemaphoreProof {
+    ) -> PbhPayload {
         let idx = self.identities.get(&identity).unwrap();
         let secret = identity.as_mut_slice();
         // generate identity
@@ -215,7 +215,7 @@ impl WorldChainBuilderTestContext {
             generate_proof(&id, &merkle_proof, external_nullifier_hash, signal_hash).unwrap(),
         );
 
-        SemaphoreProof {
+        PbhPayload {
             root: self.tree.root(),
             nullifier_hash,
             signal_hash,

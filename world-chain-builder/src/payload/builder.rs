@@ -1,23 +1,20 @@
 use std::sync::Arc;
 
-use alloy_primitives::TxHash;
+use reth::api::PayloadBuilderError;
+use reth::builder::components::PayloadServiceBuilder;
+use reth::builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
+use reth::chainspec::EthereumHardforks;
+use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
+use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
     PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::EthereumHardforks;
-use reth_db::cursor::DbCursorRW;
-use reth_db::mdbx::tx::Tx;
-use reth_db::mdbx::RW;
-use reth_db::transaction::{DbTx, DbTxMut};
-use reth_db::{DatabaseEnv, DatabaseError};
+use reth_db::DatabaseEnv;
 use reth_evm::system_calls::SystemCaller;
 use reth_evm::ConfigureEvm;
-use reth_node_api::PayloadBuilderError;
-use reth_node_builder::components::PayloadServiceBuilder;
-use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::OptimismEvmConfig;
@@ -27,8 +24,6 @@ use reth_optimism_node::{
     OptimismPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::error::OptimismPayloadBuilderError;
-// use reth_payload_builder::error::PayloadBuilderError;
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::constants::BEACON_NONCE;
 use reth_primitives::{proofs, BlockBody};
 use reth_primitives::{Block, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH};
@@ -39,16 +34,14 @@ use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::states::bundle_state::BundleRetention;
 use reth_revm::DatabaseCommit;
 use reth_revm::State;
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm_primitives::calc_excess_blob_gas;
 use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, FixedBytes, InvalidTransaction,
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
     ResultAndState, U256,
 };
 use tracing::{debug, trace, warn};
 
-use crate::pbh::db::{EmptyValue, ExecutedPbhNullifierTable, ValidatedPbhTransactionTable};
 use crate::pool::noop::NoopWorldChainTransactionPool;
 use crate::pool::tx::WorldChainPoolTransaction;
 
@@ -56,10 +49,10 @@ use crate::pool::tx::WorldChainPoolTransaction;
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig> {
     inner: OptimismPayloadBuilder<EvmConfig>,
-    // TODO: docs describing that this is a percent, ex: 50 is 50/100
+    /// The percentage of the blockspace that should be reserved for verified transactions
     verified_blockspace_capacity: u8,
     // TODO: NOTE: we need to insert the verified txs into the table after they are inserted into the block
-    _database_env: Arc<DatabaseEnv>,
+    pbh_db: Arc<DatabaseEnv>,
 }
 
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
@@ -70,38 +63,15 @@ where
     pub const fn new(
         evm_config: EvmConfig,
         verified_blockspace_capacity: u8,
-        _database_env: Arc<DatabaseEnv>,
+        pbh_db: Arc<DatabaseEnv>,
     ) -> Self {
         let inner = OptimismPayloadBuilder::new(evm_config);
 
         Self {
             inner,
             verified_blockspace_capacity,
-            _database_env,
+            pbh_db,
         }
-    }
-
-    /// Check the database to see if a tx has been validated for PBH
-    /// If so return the nullifier
-    pub fn get_pbh_validated(
-        &self,
-        db_tx: Tx<RW>,
-        tx: TxHash,
-    ) -> Result<Option<FixedBytes<32>>, DatabaseError> {
-        db_tx.get::<ValidatedPbhTransactionTable>(tx)
-    }
-
-    /// Set the store the nullifier for a tx after it
-    /// has been included in the block
-    /// don't forget to call db_tx.commit() at the very end
-    pub fn set_pbh_nullifier(
-        &self,
-        db_tx: Tx<RW>,
-        nullifier: FixedBytes<32>,
-    ) -> Result<(), DatabaseError> {
-        let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
-        cursor.insert(nullifier, EmptyValue)?;
-        Ok(())
     }
 }
 
@@ -125,6 +95,7 @@ where
 
         worldchain_payload(
             self.inner.evm_config.clone(),
+            self.pbh_db.clone(),
             args,
             cfg_env,
             block_env,
@@ -160,6 +131,7 @@ where
 
         worldchain_payload(
             self.inner.evm_config.clone(),
+            self.pbh_db.clone(),
             args,
             cfg_env,
             block_env,
@@ -176,19 +148,19 @@ pub struct WorldChainPayloadServiceBuilder {
     // TODO: handle this field
     pub compute_pending_block: bool,
     pub verified_blockspace_capacity: u8,
-    pub db: Arc<DatabaseEnv>,
+    pub pbh_db: Arc<DatabaseEnv>,
 }
 
 impl WorldChainPayloadServiceBuilder {
     pub const fn new(
         compute_pending_block: bool,
         verified_blockspace_capacity: u8,
-        db: Arc<DatabaseEnv>,
+        pbh_db: Arc<DatabaseEnv>,
     ) -> Self {
         Self {
             compute_pending_block,
             verified_blockspace_capacity,
-            db,
+            pbh_db,
         }
     }
 }
@@ -207,8 +179,11 @@ where
     ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
         let evm_config = OptimismEvmConfig::new(Arc::new((*ctx.chain_spec()).clone()));
 
-        let payload_builder =
-            WorldChainPayloadBuilder::new(evm_config, self.verified_blockspace_capacity, self.db);
+        let payload_builder = WorldChainPayloadBuilder::new(
+            evm_config,
+            self.verified_blockspace_capacity,
+            self.pbh_db,
+        );
 
         let conf = ctx.payload_builder_config();
 
@@ -247,6 +222,7 @@ where
 #[inline]
 pub(crate) fn worldchain_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
+    pbh_db: Arc<DatabaseEnv>,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
@@ -446,7 +422,7 @@ where
         let verified_gas_limit = (verified_blockspace_capacity as u64 * block_gas_limit) / 100;
         while let Some(pool_tx) = best_txs.next() {
             // If the transaction is verified, check if it can be added within the verified gas limit
-            if pool_tx.transaction.semaphore_proof().is_some()
+            if pool_tx.transaction.pbh_payload().is_some()
                 && cumulative_gas_used + pool_tx.gas_limit() > verified_gas_limit
             {
                 best_txs.mark_invalid(&pool_tx);
@@ -693,7 +669,7 @@ where
 mod tests {
     use crate::{
         node::test_utils::{WorldChainNoopProvider, WorldChainNoopValidator},
-        pbh::semaphore::SemaphoreProof,
+        pbh::semaphore::PbhPayload,
         pool::{
             ordering::WorldChainOrdering, root::WorldChainRootValidator,
             tx::WorldChainPooledTransaction, validator::WorldChainTransactionValidator,
@@ -707,19 +683,19 @@ mod tests {
     use alloy_rlp::Encodable;
     use op_alloy_consensus::TxDeposit;
     use rand::Rng;
-    use reth_chainspec::ChainSpec;
+    use reth::chainspec::ChainSpec;
+    use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
+    use reth::transaction_pool::{
+        blobstore::DiskFileBlobStore, validate::EthTransactionValidatorBuilder,
+        EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
+    };
     use reth_db::test_utils::tempdir_path;
     use reth_optimism_chainspec::OpChainSpec;
     use reth_optimism_evm::OptimismEvmConfig;
     use reth_optimism_node::txpool::OpTransactionValidator;
-    use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadId};
     use reth_primitives::{
         transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
         TransactionSignedEcRecovered, Withdrawals,
-    };
-    use reth_transaction_pool::{
-        blobstore::DiskFileBlobStore, validate::EthTransactionValidatorBuilder,
-        EthPooledTransaction, PoolConfig, PoolTransaction, TransactionOrigin,
     };
     use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
     use std::sync::Arc;
@@ -754,7 +730,7 @@ mod tests {
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
         let ordering = WorldChainOrdering::new(db.clone());
 
-        let world_chain_tx_pool = reth_transaction_pool::Pool::new(
+        let world_chain_tx_pool = reth::transaction_pool::Pool::new(
             wc_noop_validator,
             ordering,
             blob_store,
@@ -870,7 +846,7 @@ mod tests {
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
         let ordering = WorldChainOrdering::new(db.clone());
 
-        let world_chain_tx_pool = reth_transaction_pool::Pool::new(
+        let world_chain_tx_pool = reth::transaction_pool::Pool::new(
             wc_noop_validator,
             ordering,
             blob_store,
@@ -1023,7 +999,7 @@ mod tests {
                 let pooled_tx = EthPooledTransaction::new(tx_recovered.clone(), 200);
 
                 let semaphore_proof = if pbh {
-                    Some(SemaphoreProof::default())
+                    Some(PbhPayload::default())
                 } else {
                     None
                 };

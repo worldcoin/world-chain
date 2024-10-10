@@ -9,11 +9,11 @@ mod pending_block;
 use alloy_primitives::U256;
 use derive_more::derive::Deref;
 use op_alloy_network::Optimism;
-use reth_chainspec::EthereumHardforks;
+use reth::chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypes};
-use reth_node_builder::EthApiBuilderCtx;
+use reth::api::{BuilderProvider, FullNodeComponents, NodeTypes};
+use reth::builder::EthApiBuilderCtx;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpTxBuilder};
 use reth_primitives::Header;
 use reth_provider::{
@@ -28,11 +28,11 @@ use reth_rpc_eth_api::{
     EthApiTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_tasks::{
+use reth::tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use reth_transaction_pool::TransactionPool;
+use reth::transaction_pool::TransactionPool;
 use std::fmt;
 
 /// OP-Reth `Eth` API implementation.

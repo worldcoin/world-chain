@@ -9,7 +9,7 @@ use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
 use world_chain_builder::date_marker::DateMarker;
 use world_chain_builder::external_nullifier::ExternalNullifier;
-use world_chain_builder::pbh::semaphore::SemaphoreProof;
+use world_chain_builder::pbh::semaphore::PbhPayload;
 
 mod cli;
 
@@ -49,9 +49,10 @@ async fn main() -> eyre::Result<()> {
                 .custom_date
                 .unwrap_or_else(|| chrono::Utc::now().naive_utc().date());
 
-            let month = DateMarker::from(date);
+            let date_marker = DateMarker::from(date);
 
-            let external_nullifier = ExternalNullifier::new(month, prove_args.pbh_nonce);
+            let external_nullifier =
+                ExternalNullifier::new(prove_args.prefix, date_marker, prove_args.pbh_nonce);
             let external_nullifier_hash = external_nullifier.hash();
 
             let semaphore_proof = semaphore::protocol::generate_proof(
@@ -64,7 +65,7 @@ async fn main() -> eyre::Result<()> {
             let nullifier_hash =
                 semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
 
-            let proof = SemaphoreProof {
+            let proof = PbhPayload {
                 external_nullifier: external_nullifier.to_string(),
                 external_nullifier_hash,
                 nullifier_hash,

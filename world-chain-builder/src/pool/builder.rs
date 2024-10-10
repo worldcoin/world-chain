@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use reth_db::DatabaseEnv;
-use reth_node_builder::components::PoolBuilder;
-use reth_node_builder::{BuilderContext, FullNodeTypes, NodeTypes};
+use reth::builder::components::PoolBuilder;
+use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_provider::CanonStateSubscriptions;
-use reth_transaction_pool::blobstore::DiskFileBlobStore;
-use reth_transaction_pool::TransactionValidationTaskExecutor;
+use reth::transaction_pool::blobstore::DiskFileBlobStore;
+use reth::transaction_pool::TransactionValidationTaskExecutor;
 use tracing::{debug, info};
 
 use crate::pool::ordering::WorldChainOrdering;
@@ -68,7 +68,7 @@ where
         let ordering = WorldChainOrdering::new(self.db.clone());
 
         let transaction_pool =
-            reth_transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());
+            reth::transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
@@ -78,13 +78,13 @@ where
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
             let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+                reth::transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
             ctx.task_executor()
                 .spawn_critical_with_graceful_shutdown_signal(
                     "local transactions backup task",
                     |shutdown| {
-                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                        reth::transaction_pool::maintain::backup_local_transactions_task(
                             shutdown,
                             pool.clone(),
                             transactions_backup_config,
@@ -95,7 +95,7 @@ where
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                reth::transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
                     pool,
                     chain_events,

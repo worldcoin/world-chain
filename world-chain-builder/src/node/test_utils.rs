@@ -10,11 +10,15 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use futures::future::join_all;
+use reth::chainspec::{ChainInfo, MAINNET};
+use reth::transaction_pool::{
+    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
+};
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
     ForkChoiceSubscriptions,
 };
-use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_optimism_chainspec::OpChainSpec;
@@ -32,10 +36,6 @@ use reth_provider::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_transaction_pool::{
-    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
-};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
@@ -599,7 +599,7 @@ where
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if let Some(semaphore_proof) = transaction.semaphore_proof() {
+        if let Some(semaphore_proof) = transaction.pbh_payload() {
             self.inner
                 .set_validated(&transaction, semaphore_proof)
                 .expect("Error when writing to the db");

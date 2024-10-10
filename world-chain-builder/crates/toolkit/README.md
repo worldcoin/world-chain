@@ -1,7 +1,9 @@
 # Creating human verified txs
 
 ## 0. Info
+
 In order to create a PBH transaction we'll need 2 bits of secret information:
+
 1. A wallet private key
 2. An identity secret
 
@@ -15,12 +17,14 @@ For the wallet we'll use the default test mnemonic used by both Anvil and Reth `
 The identity secret is a little weird since we never actually access it directly. Instead we use a seed to deterministicly generate an identity. For the purpose of testing we can use `11ff11` as our testing seed (the associated identity commitment is included in the staging sequencer).
 
 ## 1. Craft a transaction with `cast mktx`
+
 ```bash
 # Sends 1ETH from 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 to 0x8603937E3F761958187207aeab2714ECA1C1D031
 > cast mktx --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 0x8603937E3F761958187207aeab2714ECA1C1D031 --value 1ether
 ```
 
 This should return
+
 ```
 0x02f870827a6980018477359401825209948603937e3f761958187207aeab2714eca1c1d031880de0b6b3a764000080c001a00ff6b2d8e020715137f19cbecf3b162576de99ce1b96b7158dafe2962e7d4c9ea0429a0a04cf25ba60444c0275f05bd83c20198be1612b6c08e30243d5feae71e4
 ```
@@ -28,6 +32,7 @@ This should return
 which we'll use in the next step
 
 ## 2. Prove the transaction for PBH
+
 ```bash
 > export IDENTITY=11ff11
 > export INCLUSION_PROOF_URL=https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof
@@ -35,6 +40,7 @@ which we'll use in the next step
 ```
 
 This should return
+
 ```
 02f870827a6980018477359401825209948603937e3f761958187207aeab2714eca1c1d031880de0b6b3a764000080c001a00ff6b2d8e020715137f19cbecf3b162576de99ce1b96b7158dafe2962e7d4c9ea0429a0a04cf25ba60444c0275f05bd83c20198be1612b6c08e30243d5feae71e4f901918b76312d3130323032342d339fba535b5fad84465fa11734ec0b5c932eef8abe2be0bc41b6dacf142efd2e36a02e1d5d3e2d601502f61491450ff8306522fd51153f0530c964f41f137d3fc62c9f2b7a5d363c79e99a8b2beca564b151cc7ec6f91c8bc2a105286deb68954ac7a001df1992cc8c17d0e2b2c2763b49f0fae836a2e967a24c8fa602ce3c17b7dbf4b901000885d05bc5474812458e3a0c8221cd1a1d206a3d14b88803549f08d80b3c6e1e25382e980a49388418261b5c928ce66bd33ee02f41e89e1d072d01c1e151830b0b6022659ce65dde6fc3f21110619c47e31174998b08e25534357a317ad1b7870e7a7044de43bf4a54f7b38a798a03c4404fc4ec8a543f7459555d9084e3f9c62ff7fe8b898e5529538b4d4c4a5cc7d51ad625bb68db07938f0a403968480ed808257ebbb03be708586a764a1eff0e024938440b7401ffba4982776fcfac932503907056ee0171baa1bc02d184afb154270122368a45fc51c66a9ed4c6692ade298500aa348decf3d713ce22e59acc886e43d6064c1c652bbcde38cf893e0392
 ```
@@ -44,8 +50,9 @@ which is a concatenation of both the raw transaction and the PBH proof.
 We can now take this payload and publish it
 
 ## 3. Publish the payload
+
 Assuming you're env vars are pointing to an instance of the world chain builder, we can simply run:
+
 ```bash
 > cast publish 02f870827a6980018477359401825209948603937e3f761958187207aeab2714eca1c1d031880de0b6b3a764000080c001a00ff6b2d8e020715137f19cbecf3b162576de99ce1b96b7158dafe2962e7d4c9ea0429a0a04cf25ba60444c0275f05bd83c20198be1612b6c08e30243d5feae71e4f901918b76312d3130323032342d339fba535b5fad84465fa11734ec0b5c932eef8abe2be0bc41b6dacf142efd2e36a02e1d5d3e2d601502f61491450ff8306522fd51153f0530c964f41f137d3fc62c9f2b7a5d363c79e99a8b2beca564b151cc7ec6f91c8bc2a105286deb68954ac7a001df1992cc8c17d0e2b2c2763b49f0fae836a2e967a24c8fa602ce3c17b7dbf4b901000885d05bc5474812458e3a0c8221cd1a1d206a3d14b88803549f08d80b3c6e1e25382e980a49388418261b5c928ce66bd33ee02f41e89e1d072d01c1e151830b0b6022659ce65dde6fc3f21110619c47e31174998b08e25534357a317ad1b7870e7a7044de43bf4a54f7b38a798a03c4404fc4ec8a543f7459555d9084e3f9c62ff7fe8b898e5529538b4d4c4a5cc7d51ad625bb68db07938f0a403968480ed808257ebbb03be708586a764a1eff0e024938440b7401ffba4982776fcfac932503907056ee0171baa1bc02d184afb154270122368a45fc51c66a9ed4c6692ade298500aa348decf3d713ce22e59acc886e43d6064c1c652bbcde38cf893e0392
 ```
-

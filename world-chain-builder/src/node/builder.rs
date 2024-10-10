@@ -2,8 +2,8 @@ use std::{path::Path, sync::Arc};
 
 use eyre::eyre::Result;
 use reth_db::DatabaseEnv;
-use reth_node_api::{FullNodeComponents, NodeAddOns};
-use reth_node_builder::{
+use reth::api::{FullNodeComponents, NodeAddOns};
+use reth::builder::{
     components::ComponentsBuilder, FullNodeTypes, Node, NodeTypes, NodeTypesWithEngine,
 };
 use reth_optimism_chainspec::OpChainSpec;

@@ -8,12 +8,12 @@ use reth_rpc_eth_types::{EthApiError, EthResult};
 use revm_primitives::Bytes;
 use tracing::warn;
 
-use crate::pbh::semaphore::SemaphoreProof;
+use crate::pbh::semaphore::PbhPayload;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainPooledTransactionsElement {
     pub inner: PooledTransactionsElement,
-    pub semaphore_proof: Option<SemaphoreProof>,
+    pub semaphore_proof: Option<PbhPayload>,
 }
 
 impl Encodable for WorldChainPooledTransactionsElement {
@@ -28,7 +28,7 @@ impl Encodable for WorldChainPooledTransactionsElement {
 impl Decodable for WorldChainPooledTransactionsElement {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = PooledTransactionsElement::decode(buf)?;
-        let semaphore_proof = match SemaphoreProof::decode(buf) {
+        let semaphore_proof = match PbhPayload::decode(buf) {
             Ok(res) => Some(res),
             Err(error) => {
                 warn!(?error, "Failed to decode semaphore proof");
@@ -46,7 +46,7 @@ impl Decodable for WorldChainPooledTransactionsElement {
 impl WorldChainPooledTransactionsElement {
     pub fn decode_enveloped(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = PooledTransactionsElement::decode_enveloped(buf)?;
-        let semaphore_proof = match SemaphoreProof::decode(buf) {
+        let semaphore_proof = match PbhPayload::decode(buf) {
             Ok(res) => Some(res),
             Err(error) => {
                 warn!(?error, "Failed to decode semaphore proof");
@@ -98,12 +98,12 @@ impl TryFrom<TransactionSigned> for WorldChainPooledTransactionsElement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainTransactionSignedEcRecovered {
     pub inner: TransactionSignedEcRecovered,
-    pub semaphore_proof: Option<SemaphoreProof>,
+    pub semaphore_proof: Option<PbhPayload>,
 }
 
 pub struct WorldChainPooledTransactionsElementEcRecovered {
     pub inner: PooledTransactionsElementEcRecovered,
-    pub semaphore_proof: Option<SemaphoreProof>,
+    pub semaphore_proof: Option<PbhPayload>,
 }
 
 impl TryFrom<WorldChainTransactionSignedEcRecovered>

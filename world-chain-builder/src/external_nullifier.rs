@@ -4,17 +4,30 @@ use semaphore::{hash_to_field, Field};
 use thiserror::Error;
 
 use crate::date_marker::{DateMarker, DateMarkerParsingError};
-use crate::pbh::tx::Prefix;
+
+use strum::EnumString;
+use strum_macros::Display;
+
+#[derive(Display, EnumString, Debug, Clone, Copy, PartialEq, Eq)]
+#[strum(serialize_all = "snake_case")]
+pub enum Prefix {
+    V1,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalNullifier {
-    pub month: DateMarker,
+    pub prefix: Prefix,
+    pub date_marker: DateMarker,
     pub nonce: u16,
 }
 
 impl ExternalNullifier {
-    pub fn new(month: DateMarker, nonce: u16) -> Self {
-        Self { month, nonce }
+    pub fn new(prefix: Prefix, date_marker: DateMarker, nonce: u16) -> Self {
+        Self {
+            prefix,
+            date_marker,
+            nonce,
+        }
     }
 
     pub fn hash(&self) -> Field {
@@ -24,7 +37,7 @@ impl ExternalNullifier {
 
 impl std::fmt::Display for ExternalNullifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-{}-{}", Prefix::V1, self.month, self.nonce)
+        write!(f, "{}-{}-{}", self.prefix, self.date_marker, self.nonce)
     }
 }
 
@@ -58,11 +71,11 @@ impl FromStr for ExternalNullifier {
         }
 
         // no need to check the exact value since there's only one variant
-        let Prefix::V1 = parts[0]
+        let prefix: Prefix = parts[0]
             .parse()
             .map_err(ExternalNullifierParsingError::InvalidPrefix)?;
 
-        let month = parts[1]
+        let date_marker = parts[1]
             .parse()
             .map_err(ExternalNullifierParsingError::InvalidMonth)?;
 
@@ -79,7 +92,11 @@ impl FromStr for ExternalNullifier {
             .parse()
             .map_err(ExternalNullifierParsingError::InvalidNonce)?;
 
-        Ok(ExternalNullifier { month, nonce })
+        Ok(ExternalNullifier {
+            prefix,
+            date_marker,
+            nonce,
+        })
     }
 }
 

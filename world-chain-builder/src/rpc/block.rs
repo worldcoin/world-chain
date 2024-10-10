@@ -3,7 +3,7 @@
 use crate::rpc::WorldChainEthApi;
 use alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth::api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::BlockId;

@@ -1,7 +1,7 @@
 use crate::rpc::WorldChainEthApi;
 use alloy_rpc_types::TransactionRequest;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{EthApiTypes, FullNodeComponents, NodeTypes};
+use reth::api::{EthApiTypes, FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::OpEthApi;
 use reth_primitives::{

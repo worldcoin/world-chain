@@ -1,8 +1,8 @@
 use super::tx::WorldChainPoolTransaction;
 use crate::pbh::db::ValidatedPbhTransactionTable;
+use reth::transaction_pool::{CoinbaseTipOrdering, Priority, TransactionOrdering};
 use reth_db::transaction::DbTx;
 use reth_db::{Database as _, DatabaseEnv, DatabaseError};
-use reth_transaction_pool::{CoinbaseTipOrdering, Priority, TransactionOrdering};
 use revm_primitives::U256;
 use std::sync::Arc;
 
@@ -14,10 +14,11 @@ use std::sync::Arc;
 #[non_exhaustive]
 pub struct WorldChainOrdering<T> {
     inner: CoinbaseTipOrdering<T>,
-    database_env: Arc<DatabaseEnv>,
+    pbh_db: Arc<DatabaseEnv>,
 }
 
 /// Ordering is automatically derived.
+///
 /// The ordering of fields here is important.
 #[derive(Debug, Default, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct WorldChainPriority {
@@ -33,11 +34,11 @@ where
     pub fn new(database_env: Arc<DatabaseEnv>) -> Self {
         Self {
             inner: CoinbaseTipOrdering::default(),
-            database_env,
+            pbh_db: database_env,
         }
     }
     fn try_is_pbh(&self, transaction: &T) -> Result<bool, DatabaseError> {
-        let db_tx = self.database_env.tx()?;
+        let db_tx = self.pbh_db.tx()?;
         Ok(db_tx
             .get::<ValidatedPbhTransactionTable>(*transaction.hash())?
             .is_some())
@@ -76,7 +77,7 @@ impl<T> Clone for WorldChainOrdering<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            database_env: self.database_env.clone(),
+            pbh_db: self.pbh_db.clone(),
         }
     }
 }

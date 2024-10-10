@@ -1,7 +1,7 @@
 //! Loads and formats OP receipt RPC response.
 
 use crate::rpc::WorldChainEthApi;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth::api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_eth_api::helpers::LoadReceipt;

@@ -1,7 +1,7 @@
 use reth_db::{DatabaseError, DatabaseWriteOperation};
 use reth_provider::ProviderError;
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
-use reth_transaction_pool::{PoolTransaction, TransactionValidationOutcome};
+use reth::transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
+use reth::transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 use semaphore::Field;
 
 use crate::external_nullifier::ExternalNullifierParsingError;

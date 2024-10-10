@@ -3,6 +3,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use identity_source::IdentitySource;
 use inclusion_proof_source::InclusionProofSource;
+use world_chain_builder::external_nullifier::Prefix;
 
 pub mod identity_source;
 pub mod inclusion_proof_source;
@@ -38,6 +39,10 @@ pub struct ProveArgs {
     #[clap(short, long)]
     #[clap(value_parser = utils::bytes_parse_hex)]
     pub tx: Bytes,
+
+    /// The PBH prefix
+    #[clap(short = 'P', long, default_value = "v1")]
+    pub prefix: Prefix,
 
     /// The PBH nonce for the priority tx
     ///

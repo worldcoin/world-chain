@@ -5,7 +5,7 @@ use crate::{
     rpc::WorldChainEthApi,
 };
 use alloy_primitives::{Bytes, B256};
-use reth_node_api::FullNodeComponents;
+use reth::api::FullNodeComponents;
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
@@ -13,7 +13,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, FullEthApiTypes,
 };
 use reth_rpc_eth_types::EthStateCache;
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth::transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<N> EthTransactions for WorldChainEthApi<N>
 where

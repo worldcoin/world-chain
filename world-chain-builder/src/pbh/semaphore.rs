@@ -42,13 +42,27 @@ impl Encodable for Proof {
     }
 }
 
+/// The payload of a PBH transaction
+///
+/// Contains the semaphore proof and relevent metadata
+/// required to to verify the pbh transaction.
 #[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq, Default)]
-pub struct SemaphoreProof {
+pub struct PbhPayload {
+    /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: String,
+    /// The hash of the external nullifier
     pub external_nullifier_hash: Field,
+    /// A nullifier hash used to keep track of
+    /// previously used pbh transactions
     pub nullifier_hash: Field,
+    /// This is the transaction hash
+    /// which associates this proof with a specific transaction
     pub signal_hash: Field,
+    /// The root of the merkle tree for which this proof
+    /// was generated
     pub root: Field,
+    /// The actual semaphore proof verifying that the sender
+    /// is included in the set of orb verified users
     pub proof: Proof,
 }
 
@@ -68,7 +82,7 @@ mod test {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let semaphore_proof = SemaphoreProof {
+        let semaphore_proof = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
             external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
@@ -78,7 +92,7 @@ mod test {
         };
         let encoded = alloy_rlp::encode(&semaphore_proof);
         let mut buf = encoded.as_slice();
-        let decoded = SemaphoreProof::decode(&mut buf).unwrap();
+        let decoded = PbhPayload::decode(&mut buf).unwrap();
         assert_eq!(semaphore_proof, decoded);
     }
 }
