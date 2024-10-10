@@ -1,10 +1,10 @@
 use alloy_rlp::{Decodable, Encodable};
+use reth::rpc::server_types::eth::{EthApiError, EthResult};
 use reth_primitives::transaction::TransactionConversionError;
 use reth_primitives::{
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, TransactionSigned,
     TransactionSignedEcRecovered,
 };
-use reth_rpc_eth_types::{EthApiError, EthResult};
 use revm_primitives::Bytes;
 use tracing::warn;
 

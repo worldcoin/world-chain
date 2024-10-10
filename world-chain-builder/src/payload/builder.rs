@@ -1,4 +1,5 @@
 use reth_db::transaction::DbTx;
+use reth_evm::ConfigureEvm;
 use std::sync::Arc;
 
 use reth::api::PayloadBuilderError;
@@ -6,6 +7,10 @@ use reth::builder::components::PayloadServiceBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
 use reth::chainspec::EthereumHardforks;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
+use reth::revm::database::StateProviderDatabase;
+use reth::revm::db::states::bundle_state::BundleRetention;
+use reth::revm::DatabaseCommit;
+use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
@@ -15,7 +20,6 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_db::{Database, DatabaseEnv, DatabaseError, DatabaseWriteOperation};
 use reth_evm::system_calls::SystemCaller;
-use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::OptimismEvmConfig;
@@ -31,10 +35,6 @@ use reth_primitives::{Block, Header, Receipt, TxType, EMPTY_OMMER_ROOT_HASH};
 use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, ExecutionOutcome, StateProviderFactory,
 };
-use reth_revm::database::StateProviderDatabase;
-use reth_revm::db::states::bundle_state::BundleRetention;
-use reth_revm::DatabaseCommit;
-use reth_revm::State;
 use reth_trie::HashedPostState;
 use revm_primitives::calc_excess_blob_gas;
 use revm_primitives::{

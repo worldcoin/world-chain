@@ -2,11 +2,10 @@
 
 use crate::rpc::WorldChainEthApi;
 use reth::api::{FullNodeComponents, NodeTypes};
+use reth::core::rpc::eth::helpers::LoadReceipt;
+use reth::{core::rpc::eth::RpcReceipt, rpc::server_types::eth::EthStateCache};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_api::helpers::LoadReceipt;
-use reth_rpc_eth_api::RpcReceipt;
-use reth_rpc_eth_types::EthStateCache;
 
 impl<N> LoadReceipt for WorldChainEthApi<N>
 where

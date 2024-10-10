@@ -10,6 +10,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use futures::future::join_all;
+use reth::api::ConfigureEvmEnv;
 use reth::chainspec::{ChainInfo, MAINNET};
 use reth::transaction_pool::{
     validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
@@ -20,7 +21,6 @@ use reth_chain_state::{
     ForkChoiceSubscriptions,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
     Account, Block, BlockWithSenders, Bytecode, Header, Receipt, SealedBlock,

@@ -11,21 +11,10 @@ members = ["crates/*"]
 [dependencies]
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-cli = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-node-builder = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-network-api = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-rpc = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
-reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-network = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }

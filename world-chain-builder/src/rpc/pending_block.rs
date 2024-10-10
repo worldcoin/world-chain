@@ -2,18 +2,18 @@
 
 use crate::rpc::WorldChainEthApi;
 use alloy_primitives::{BlockNumber, B256};
-use reth::chainspec::EthereumHardforks;
-use reth_evm::ConfigureEvm;
+use reth::api::ConfigureEvm;
 use reth::api::{EthApiTypes, FullNodeComponents, NodeTypes};
+use reth::chainspec::EthereumHardforks;
+use reth::core::rpc::eth::helpers::{LoadPendingBlock, SpawnBlocking};
+use reth::rpc::server_types::eth::PendingBlock;
+use reth::transaction_pool::TransactionPool;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::OpEthApi;
 use reth_primitives::{revm_primitives::BlockEnv, Header, Receipt, SealedBlockWithSenders};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
 };
-use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
-use reth_rpc_eth_types::PendingBlock;
-use reth::transaction_pool::TransactionPool;
 
 impl<N> LoadPendingBlock for WorldChainEthApi<N>
 where

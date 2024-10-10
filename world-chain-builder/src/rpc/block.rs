@@ -4,13 +4,13 @@ use crate::rpc::WorldChainEthApi;
 use alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth::api::{FullNodeComponents, NodeTypes};
+use reth::core::rpc::eth::helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt};
+use reth::core::rpc::eth::RpcReceipt;
+use reth::rpc::server_types::eth::EthStateCache;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::BlockId;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_api::helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt};
-use reth_rpc_eth_api::RpcReceipt;
-use reth_rpc_eth_types::EthStateCache;
 
 impl<N> EthBlocks for WorldChainEthApi<N>
 where

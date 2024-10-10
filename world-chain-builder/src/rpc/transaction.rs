@@ -6,14 +6,12 @@ use crate::{
 };
 use alloy_primitives::{Bytes, B256};
 use reth::api::FullNodeComponents;
+use reth::core::rpc::eth::helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking};
+use reth::core::rpc::eth::FromEthApiError;
+use reth::transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth::{core::rpc::eth::FullEthApiTypes, rpc::server_types::eth::EthStateCache};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
-use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes,
-};
-use reth_rpc_eth_types::EthStateCache;
-use reth::transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<N> EthTransactions for WorldChainEthApi<N>
 where

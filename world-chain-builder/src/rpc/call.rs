@@ -1,14 +1,14 @@
 use crate::rpc::WorldChainEthApi;
 use alloy_rpc_types::TransactionRequest;
-use reth_evm::ConfigureEvm;
+use reth::api::ConfigureEvm;
 use reth::api::{EthApiTypes, FullNodeComponents, NodeTypes};
+use reth::core::rpc::eth::helpers::{Call, EthCall, LoadState, SpawnBlocking};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_rpc::OpEthApi;
 use reth_primitives::{
     revm_primitives::{BlockEnv, TxEnv},
     Header,
 };
-use reth_rpc_eth_api::helpers::{Call, EthCall, LoadState, SpawnBlocking};
 
 impl<N> EthCall for WorldChainEthApi<N>
 where
