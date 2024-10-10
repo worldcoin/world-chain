@@ -4,8 +4,6 @@ use super::tx::WorldChainPooledTransaction;
 use alloy_consensus::BlobTransactionSidecar;
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash};
-use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::PooledTransactionsElement;
 use reth::transaction_pool::{
     noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
@@ -13,6 +11,8 @@ use reth::transaction_pool::{
     TransactionEvents, TransactionListenerKind, TransactionOrigin, TransactionPool,
     ValidPoolTransaction,
 };
+use reth_eth_wire_types::HandleMempoolData;
+use reth_primitives::PooledTransactionsElement;
 use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
