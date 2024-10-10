@@ -50,8 +50,6 @@ impl Encodable for Proof {
 pub struct PbhPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: String,
-    /// The hash of the external nullifier
-    pub external_nullifier_hash: Field,
     /// A nullifier hash used to keep track of
     /// previously used pbh transactions
     pub nullifier_hash: Field,
@@ -81,7 +79,6 @@ mod test {
         ));
         let semaphore_proof = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
-            external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
             root: Field::from(12u64),
             proof,

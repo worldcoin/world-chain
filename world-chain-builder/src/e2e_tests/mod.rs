@@ -226,7 +226,6 @@ impl WorldChainBuilderTestContext {
             nullifier_hash,
             external_nullifier,
             proof,
-            external_nullifier_hash,
         }
     }
 }

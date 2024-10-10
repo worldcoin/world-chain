@@ -12,8 +12,6 @@ pub enum WorldChainTransactionPoolInvalid {
     NullifierAlreadyExists,
     #[error("invalid external nullifier - {0}")]
     InvalidExternalNullifier(ExternalNullifierParsingError),
-    #[error("invalid external nullifier hash - expected {expected:?} got {actual:?}")]
-    InvalidExternalNullifierHash { expected: Field, actual: Field },
     #[error("invalid external nullifier prefix")]
     InvalidExternalNullifierPrefix,
     #[error("invalid external nullifier period")]

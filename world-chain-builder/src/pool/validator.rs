@@ -125,17 +125,6 @@ where
             return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
         }
 
-        let external_nullifier_hash = hash_to_field(semaphore_proof.external_nullifier.as_bytes());
-        if external_nullifier_hash != semaphore_proof.external_nullifier_hash {
-            return Err(
-                WorldChainTransactionPoolInvalid::InvalidExternalNullifierHash {
-                    expected: external_nullifier_hash,
-                    actual: semaphore_proof.external_nullifier_hash,
-                }
-                .into(),
-            );
-        }
-
         Ok(())
     }
 
@@ -158,7 +147,7 @@ where
     pub fn validate_semaphore_proof(
         &self,
         transaction: &Tx,
-        semaphore_proof: &PbhPayload,
+        payload: &PbhPayload,
     ) -> Result<(), TransactionValidationError> {
         // Create db transaction and insert the nullifier hash
         // We do this first to prevent repeatedly validating the same transaction
@@ -169,20 +158,20 @@ where
         let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
         cursor.insert(
             *transaction.hash(),
-            semaphore_proof.nullifier_hash.to_be_bytes().into(),
+            payload.nullifier_hash.to_be_bytes().into(),
         )?;
 
         let date = chrono::Utc::now();
-        self.validate_root(semaphore_proof)?;
-        self.validate_external_nullifier(date, semaphore_proof)?;
-        self.validate_nullifier(semaphore_proof)?;
+        self.validate_root(payload)?;
+        self.validate_external_nullifier(date, payload)?;
+        self.validate_nullifier(payload)?;
 
         let res = verify_proof(
-            semaphore_proof.root,
-            semaphore_proof.nullifier_hash,
+            payload.root,
+            payload.nullifier_hash,
             hash_to_field(transaction.hash().as_ref()),
-            semaphore_proof.external_nullifier_hash,
-            &semaphore_proof.proof.0,
+            hash_to_field(payload.external_nullifier.as_bytes()),
+            &payload.proof.0,
             TREE_DEPTH,
         );
 
@@ -375,7 +364,6 @@ pub mod tests {
             nullifier_hash,
             external_nullifier,
             proof,
-            external_nullifier_hash,
         }
     }
 
@@ -462,12 +450,7 @@ pub mod tests {
     #[tokio::test]
     async fn invalid_external_nullifier_hash() {
         let validator = world_chain_validator();
-        let mut transaction = get_pbh_transaction();
-        transaction
-            .semaphore_proof
-            .as_mut()
-            .unwrap()
-            .external_nullifier_hash = Field::from(0);
+        let transaction = get_pbh_transaction();
 
         validator.inner.client().add_account(
             transaction.sender(),
@@ -524,7 +507,6 @@ pub mod tests {
         ));
         let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
-            external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
             root,
             proof,
@@ -559,7 +541,6 @@ pub mod tests {
         ));
         let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
-            external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
             root,
             proof,
@@ -589,7 +570,6 @@ pub mod tests {
 
         let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
-            external_nullifier_hash: Field::ZERO,
             nullifier_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
@@ -608,7 +588,6 @@ pub mod tests {
 
         let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
-            external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
@@ -627,7 +606,6 @@ pub mod tests {
 
         let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
-            external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
@@ -652,7 +630,6 @@ pub mod tests {
 
         let payload = PbhPayload {
             external_nullifier: external_nullifier.to_string(),
-            external_nullifier_hash: hash_to_field(external_nullifier.as_bytes()),
             nullifier_hash: Field::ZERO,
             root: Field::ZERO,
             proof: Default::default(),
@@ -676,7 +653,6 @@ pub mod tests {
         ));
         let payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
-            external_nullifier_hash: Field::from(9u64),
             nullifier_hash: Field::from(10u64),
             root: Field::from(12u64),
             proof,

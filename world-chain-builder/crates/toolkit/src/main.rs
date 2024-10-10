@@ -67,7 +67,6 @@ async fn main() -> eyre::Result<()> {
 
             let proof = PbhPayload {
                 external_nullifier: external_nullifier.to_string(),
-                external_nullifier_hash,
                 nullifier_hash,
                 root: inclusion_proof.root,
                 proof: world_chain_builder::pbh::payload::Proof(semaphore_proof),
