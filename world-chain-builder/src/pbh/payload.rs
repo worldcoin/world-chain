@@ -77,15 +77,15 @@ mod test {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let semaphore_proof = PbhPayload {
+        let pbh_payload = PbhPayload {
             external_nullifier: "0-012025-11".to_string(),
             nullifier_hash: Field::from(10u64),
             root: Field::from(12u64),
             proof,
         };
-        let encoded = alloy_rlp::encode(&semaphore_proof);
+        let encoded = alloy_rlp::encode(&pbh_payload);
         let mut buf = encoded.as_slice();
         let decoded = PbhPayload::decode(&mut buf).unwrap();
-        assert_eq!(semaphore_proof, decoded);
+        assert_eq!(pbh_payload, decoded);
     }
 }

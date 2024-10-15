@@ -760,7 +760,7 @@ mod tests {
         );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
-        let ordering = WorldChainOrdering::new(db.clone());
+        let ordering = WorldChainOrdering::default();
 
         let world_chain_tx_pool = reth::transaction_pool::Pool::new(
             wc_noop_validator,
@@ -876,7 +876,7 @@ mod tests {
         );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
-        let ordering = WorldChainOrdering::new(db.clone());
+        let ordering = WorldChainOrdering::default();
 
         let world_chain_tx_pool = reth::transaction_pool::Pool::new(
             wc_noop_validator,
@@ -1030,7 +1030,7 @@ mod tests {
                 );
                 let pooled_tx = EthPooledTransaction::new(tx_recovered.clone(), 200);
 
-                let semaphore_proof = if pbh {
+                let pbh_payload = if pbh {
                     Some(PbhPayload::default())
                 } else {
                     None
@@ -1038,7 +1038,7 @@ mod tests {
 
                 WorldChainPooledTransaction {
                     inner: pooled_tx,
-                    semaphore_proof,
+                    pbh_payload,
                 }
             })
             .collect::<Vec<_>>()

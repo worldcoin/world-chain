@@ -168,7 +168,7 @@ impl WorldChainBuilderTestContext {
         let raw_tx = envelope.encoded_2718();
         let mut data = raw_tx.as_ref();
         let recovered = PooledTransactionsElement::decode_enveloped(&mut data).unwrap();
-        let proof = self.valid_proof(
+        let pbh_payload = self.valid_proof(
             signer.address(),
             recovered.hash().as_slice(),
             chrono::Utc::now(),
@@ -177,7 +177,7 @@ impl WorldChainBuilderTestContext {
 
         let world_chain_pooled_tx_element = WorldChainPooledTransactionsElement {
             inner: recovered,
-            semaphore_proof: Some(proof.clone()),
+            pbh_payload: Some(pbh_payload.clone()),
         };
 
         let mut buff = Vec::<u8>::new();

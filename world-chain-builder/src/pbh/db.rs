@@ -14,9 +14,12 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use reth_db::cursor::DbCursorRW;
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db::transaction::DbTxMut;
 
 /// Table for executed nullifiers.
+///
+/// This table stores the nullifiers of PBH transactions that have been
+/// included into a block after it has been sealed.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutedPbhNullifierTable;
 
@@ -29,6 +32,11 @@ impl Table for ExecutedPbhNullifierTable {
 }
 
 /// Table to store PBH validated transactions along with their nullifiers.
+///
+/// When a trasnaction is validated before being inserted into the pool,
+/// a mapping is created from the transaction hash to the nullifier here.
+/// This is primarily used as a caching mechanism to avoid certain types of
+/// DoS attacks.
 #[derive(Debug, Clone, Default)]
 pub struct ValidatedPbhTransactionTable;
 
@@ -53,15 +61,6 @@ impl Compress for EmptyValue {
     type Compressed = Vec<u8>;
 
     fn compress_to_buf<B: BufMut + AsMut<[u8]>>(self, _buf: &mut B) {}
-}
-
-/// Check the database to see if a tx has been validated for PBH
-/// If so return the nullifier
-pub fn get_pbh_validated(
-    db_tx: Tx<RW>,
-    tx: TxHash,
-) -> Result<Option<FixedBytes<32>>, DatabaseError> {
-    db_tx.get::<ValidatedPbhTransactionTable>(tx)
 }
 
 /// Set the store the nullifier for a tx after it

@@ -65,7 +65,7 @@ where
             )
         });
 
-        let ordering = WorldChainOrdering::new(self.db.clone());
+        let ordering = WorldChainOrdering::default();
 
         let transaction_pool =
             reth::transaction_pool::Pool::new(validator, ordering, blob_store, ctx.pool_config());

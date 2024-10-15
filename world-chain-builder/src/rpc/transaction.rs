@@ -32,7 +32,7 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let (recovered, inner_tx) = recover_raw_transaction(tx.clone())?;
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-        let pbh_tx = pool_transaction.semaphore_proof.is_some();
+        let pbh_tx = pool_transaction.pbh_payload.is_some();
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self

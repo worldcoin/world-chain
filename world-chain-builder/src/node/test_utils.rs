@@ -599,9 +599,9 @@ where
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if let Some(semaphore_proof) = transaction.pbh_payload() {
+        if let Some(pbh_paylaod) = transaction.pbh_payload() {
             self.inner
-                .set_validated(&transaction, semaphore_proof)
+                .set_validated(&transaction, pbh_paylaod)
                 .expect("Error when writing to the db");
         }
 

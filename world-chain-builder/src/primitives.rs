@@ -13,14 +13,14 @@ use crate::pbh::payload::PbhPayload;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainPooledTransactionsElement {
     pub inner: PooledTransactionsElement,
-    pub semaphore_proof: Option<PbhPayload>,
+    pub pbh_payload: Option<PbhPayload>,
 }
 
 impl Encodable for WorldChainPooledTransactionsElement {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.inner.encode(out);
-        if let Some(semaphore_proof) = &self.semaphore_proof {
-            semaphore_proof.encode(out);
+        if let Some(pbh_paylaod) = &self.pbh_payload {
+            pbh_paylaod.encode(out);
         }
     }
 }
@@ -28,7 +28,7 @@ impl Encodable for WorldChainPooledTransactionsElement {
 impl Decodable for WorldChainPooledTransactionsElement {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = PooledTransactionsElement::decode(buf)?;
-        let semaphore_proof = match PbhPayload::decode(buf) {
+        let pbh_payload = match PbhPayload::decode(buf) {
             Ok(res) => Some(res),
             Err(error) => {
                 warn!(?error, "Failed to decode semaphore proof");
@@ -36,17 +36,14 @@ impl Decodable for WorldChainPooledTransactionsElement {
             }
         };
 
-        Ok(Self {
-            inner,
-            semaphore_proof,
-        })
+        Ok(Self { inner, pbh_payload })
     }
 }
 
 impl WorldChainPooledTransactionsElement {
     pub fn decode_enveloped(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let inner = PooledTransactionsElement::decode_enveloped(buf)?;
-        let semaphore_proof = match PbhPayload::decode(buf) {
+        let pbh_payload = match PbhPayload::decode(buf) {
             Ok(res) => Some(res),
             Err(error) => {
                 warn!(?error, "Failed to decode semaphore proof");
@@ -54,16 +51,13 @@ impl WorldChainPooledTransactionsElement {
             }
         };
 
-        Ok(Self {
-            inner,
-            semaphore_proof,
-        })
+        Ok(Self { inner, pbh_payload })
     }
 
     pub fn encode_enveloped(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.inner.encode_enveloped(out);
-        if let Some(semaphore_proof) = &self.semaphore_proof {
-            semaphore_proof.encode(out);
+        if let Some(pbh_payload) = &self.pbh_payload {
+            pbh_payload.encode(out);
         }
     }
 
@@ -73,7 +67,7 @@ impl WorldChainPooledTransactionsElement {
         let inner = self.inner.try_into_ecrecovered()?;
         Ok(WorldChainPooledTransactionsElementEcRecovered {
             inner,
-            semaphore_proof: self.semaphore_proof,
+            pbh_payload: self.pbh_payload,
         })
     }
 
@@ -90,7 +84,7 @@ impl TryFrom<TransactionSigned> for WorldChainPooledTransactionsElement {
 
         Ok(Self {
             inner,
-            semaphore_proof: None,
+            pbh_payload: None,
         })
     }
 }
@@ -98,12 +92,12 @@ impl TryFrom<TransactionSigned> for WorldChainPooledTransactionsElement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainTransactionSignedEcRecovered {
     pub inner: TransactionSignedEcRecovered,
-    pub semaphore_proof: Option<PbhPayload>,
+    pub pbh_payload: Option<PbhPayload>,
 }
 
 pub struct WorldChainPooledTransactionsElementEcRecovered {
     pub inner: PooledTransactionsElementEcRecovered,
-    pub semaphore_proof: Option<PbhPayload>,
+    pub pbh_payload: Option<PbhPayload>,
 }
 
 impl TryFrom<WorldChainTransactionSignedEcRecovered>
@@ -115,7 +109,7 @@ impl TryFrom<WorldChainTransactionSignedEcRecovered>
         let inner = tx.inner.try_into()?;
         Ok(Self {
             inner,
-            semaphore_proof: tx.semaphore_proof,
+            pbh_payload: tx.pbh_payload,
         })
     }
 }

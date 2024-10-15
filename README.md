@@ -15,8 +15,6 @@ The PBH payload contains the following fields:
 
 `external_nullifier` - A string containing a prefix, the date marker, and the pbh nonce
 
-`external_nullifier_hash` - The hash of the external nullifier
-
 `nullifier_hash` - A nullifier hash used to keep track of previously used pbh transactions
 
 `root` - The root of the merkle tree for which this proof was generated

@@ -64,17 +64,10 @@ where
         }
     }
 
-    pub fn set_validated(
-        &self,
-        tx: &Tx,
-        semaphore_proof: &PbhPayload,
-    ) -> Result<(), DatabaseError> {
+    pub fn set_validated(&self, tx: &Tx, pbh_payload: &PbhPayload) -> Result<(), DatabaseError> {
         let db_tx = self.database_env.tx_mut()?;
         let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
-        cursor.insert(
-            *tx.hash(),
-            semaphore_proof.nullifier_hash.to_be_bytes().into(),
-        )?;
+        cursor.insert(*tx.hash(), pbh_payload.nullifier_hash.to_be_bytes().into())?;
         db_tx.commit()?;
         Ok(())
     }
@@ -82,9 +75,9 @@ where
     /// Ensure the provided root is on chain and valid
     pub fn validate_root(
         &self,
-        semaphore_proof: &PbhPayload,
+        pbh_payload: &PbhPayload,
     ) -> Result<(), TransactionValidationError> {
-        let is_valid = self.root_validator.validate_root(semaphore_proof.root);
+        let is_valid = self.root_validator.validate_root(pbh_payload.root);
         if !is_valid {
             return Err(WorldChainTransactionPoolInvalid::InvalidRoot.into());
         }
@@ -98,9 +91,9 @@ where
     pub fn validate_external_nullifier(
         &self,
         date: chrono::DateTime<chrono::Utc>,
-        semaphore_proof: &PbhPayload,
+        pbh_payload: &PbhPayload,
     ) -> Result<(), TransactionValidationError> {
-        let external_nullifier: ExternalNullifier = semaphore_proof
+        let external_nullifier: ExternalNullifier = pbh_payload
             .external_nullifier
             .parse()
             .map_err(WorldChainTransactionPoolInvalid::InvalidExternalNullifier)
@@ -130,12 +123,10 @@ where
 
     pub fn validate_nullifier(
         &self,
-        semaphore_proof: &PbhPayload,
+        pbh_payload: &PbhPayload,
     ) -> Result<(), TransactionValidationError> {
         let tx = self.database_env.tx()?;
-        match tx
-            .get::<ExecutedPbhNullifierTable>(semaphore_proof.nullifier_hash.to_be_bytes().into())
-        {
+        match tx.get::<ExecutedPbhNullifierTable>(pbh_payload.nullifier_hash.to_be_bytes().into()) {
             Ok(Some(_)) => Err(WorldChainTransactionPoolInvalid::NullifierAlreadyExists.into()),
             Ok(None) => Ok(()),
             Err(e) => Err(TransactionValidationError::Error(
@@ -144,7 +135,7 @@ where
         }
     }
 
-    pub fn validate_semaphore_proof(
+    pub fn validate_pbh_payload(
         &self,
         transaction: &Tx,
         payload: &PbhPayload,
@@ -191,8 +182,8 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if let Some(semaphore_proof) = transaction.pbh_payload() {
-            if let Err(e) = self.validate_semaphore_proof(&transaction, semaphore_proof) {
+        if let Some(pbh_payload) = transaction.pbh_payload() {
+            if let Err(e) = self.validate_pbh_payload(&transaction, pbh_payload) {
                 return e.to_outcome(transaction);
             }
         };
@@ -289,13 +280,13 @@ pub mod tests {
         let eth_tx = get_eth_transaction();
         WorldChainPooledTransaction {
             inner: eth_tx,
-            semaphore_proof: None,
+            pbh_payload: None,
         }
     }
 
     fn get_pbh_transaction() -> WorldChainPooledTransaction {
         let eth_tx = get_eth_transaction();
-        let semaphore_proof = valid_pbh_payload(
+        let pbh_payload = valid_pbh_payload(
             &mut [0; 32],
             eth_tx.hash().as_slice(),
             chrono::Utc::now(),
@@ -303,7 +294,7 @@ pub mod tests {
         );
         WorldChainPooledTransaction {
             inner: eth_tx,
-            semaphore_proof: Some(semaphore_proof),
+            pbh_payload: Some(pbh_payload),
         }
     }
 
@@ -380,7 +371,7 @@ pub mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         assert!(outcome.is_valid());
 
-        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+        let ordering = WorldChainOrdering::default();
 
         let pool = Pool::new(
             validator,
@@ -408,7 +399,7 @@ pub mod tests {
             OP_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO).extend_storage(vec![(
                 LATEST_ROOT_SLOT.into(),
-                transaction.semaphore_proof.clone().unwrap().root,
+                transaction.pbh_payload.clone().unwrap().root,
             )]),
         );
         let header = SealedHeader::default();
@@ -418,7 +409,7 @@ pub mod tests {
         // Propogate the block to the root validator
         validator.on_new_head_block(&block);
 
-        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+        let ordering = WorldChainOrdering::default();
 
         let pool = Pool::new(
             validator,
@@ -457,7 +448,7 @@ pub mod tests {
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::MAX),
         );
 
-        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+        let ordering = WorldChainOrdering::default();
 
         let pool = Pool::new(
             validator,
@@ -480,7 +471,7 @@ pub mod tests {
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::MAX),
         );
 
-        let ordering = WorldChainOrdering::new(validator.database_env.clone());
+        let ordering = WorldChainOrdering::default();
 
         let pool = Pool::new(
             validator,
@@ -641,7 +632,7 @@ pub mod tests {
         };
 
         let mut tx = get_non_pbh_transaction();
-        tx.semaphore_proof = Some(payload.clone());
+        tx.pbh_payload = Some(payload.clone());
 
         validator.set_validated(&tx, &payload).unwrap();
     }

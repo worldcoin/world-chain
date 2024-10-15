@@ -14,7 +14,7 @@ pub trait WorldChainPoolTransaction: EthPoolTransaction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldChainPooledTransaction {
     pub inner: EthPooledTransaction,
-    pub semaphore_proof: Option<PbhPayload>,
+    pub pbh_payload: Option<PbhPayload>,
 }
 
 impl EthPoolTransaction for WorldChainPooledTransaction {
@@ -41,7 +41,7 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn pbh_payload(&self) -> Option<&PbhPayload> {
-        self.semaphore_proof.as_ref()
+        self.pbh_payload.as_ref()
     }
 }
 
@@ -57,7 +57,7 @@ impl TryFrom<TransactionSignedEcRecovered> for WorldChainPooledTransaction {
     fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
         Ok(Self {
             inner: EthPooledTransaction::try_from(tx)?,
-            semaphore_proof: None,
+            pbh_payload: None,
         })
     }
 }
@@ -66,7 +66,7 @@ impl From<WorldChainPooledTransactionsElementEcRecovered> for WorldChainPooledTr
     fn from(tx: WorldChainPooledTransactionsElementEcRecovered) -> Self {
         Self {
             inner: EthPooledTransaction::from_pooled(tx.inner),
-            semaphore_proof: tx.semaphore_proof,
+            pbh_payload: tx.pbh_payload,
         }
     }
 }
@@ -77,7 +77,7 @@ impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransactions
             inner: value,
             // Incoming consensus transactions do not have a semaphore proof
             // Is this problematic?
-            semaphore_proof: None,
+            pbh_payload: None,
         }
     }
 }
@@ -98,7 +98,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
     fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
         EthPooledTransaction::try_from_consensus(tx).map(|inner| Self {
             inner,
-            semaphore_proof: None,
+            pbh_payload: None,
         })
     }
 
