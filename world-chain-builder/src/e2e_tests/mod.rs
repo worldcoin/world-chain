@@ -4,9 +4,12 @@ use crate::{
         args::{ExtArgs, WorldChainBuilderArgs},
         builder::{WorldChainAddOns, WorldChainBuilder},
     },
-    pbh::date_marker::DateMarker,
-    pbh::external_nullifier::{ExternalNullifier, Prefix},
-    pbh::payload::{PbhPayload, Proof},
+    pbh::{
+        date_marker::DateMarker,
+        db::load_world_chain_db,
+        external_nullifier::{ExternalNullifier, Prefix},
+        payload::{PbhPayload, Proof},
+    },
     pool::{
         ordering::WorldChainOrdering,
         root::{LATEST_ROOT_SLOT, OP_WORLD_ID},
@@ -129,6 +132,8 @@ impl WorldChainBuilderTestContext {
                     .with_http_unused_port(),
             );
         let path = tempdir_path();
+
+        let db: Arc<DatabaseEnv> = load_world_chain_db(&path, false)?;
         let NodeHandle {
             node,
             node_exit_future: _,
@@ -143,7 +148,7 @@ impl WorldChainBuilderTestContext {
                     },
                     ..Default::default()
                 },
-                &path,
+                db,
             )?)
             .launch()
             .await?;

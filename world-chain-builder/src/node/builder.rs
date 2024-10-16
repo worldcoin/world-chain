@@ -32,8 +32,7 @@ pub struct WorldChainBuilder {
 }
 
 impl WorldChainBuilder {
-    pub fn new(args: ExtArgs, data_dir: &Path) -> Result<Self> {
-        let db = load_world_chain_db(data_dir, args.builder_args.clear_nullifiers)?;
+    pub fn new(args: ExtArgs, db: Arc<DatabaseEnv>) -> Result<Self> {
         Ok(Self { args, db })
     }
 

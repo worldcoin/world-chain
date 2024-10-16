@@ -1,8 +1,10 @@
 use clap::Parser;
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
+use world_chain_builder::exex::{self, pbh_exex};
 use world_chain_builder::node::args::ExtArgs;
 use world_chain_builder::node::builder::WorldChainBuilder;
+use world_chain_builder::pbh::db::load_world_chain_db;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -25,13 +27,13 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
-            let data_dir = builder.config().datadir();
+        Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, ext_args| async move {
+            let data_dir = builder.config().datadir().data_dir();
+            let db = load_world_chain_db(data_dir, ext_args.builder_args.clear_nullifiers)?;
+
             let handle = builder
-                .node(WorldChainBuilder::new(
-                    builder_args.clone(),
-                    data_dir.data_dir(),
-                )?)
+                .node(WorldChainBuilder::new(ext_args.clone(), db.clone())?)
+                .install_exex("PBHExEx", move |ctx| pbh_exex(ctx, db))
                 .launch()
                 .await?;
 

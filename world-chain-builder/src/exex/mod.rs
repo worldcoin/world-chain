@@ -11,7 +11,7 @@ use crate::pbh::db::get_validated_nullifier;
 use crate::pbh::db::remove_executed_nullifier;
 use crate::pbh::db::set_executed_nullifier;
 
-async fn pbh_exex<Node: FullNodeComponents>(
+pub async fn pbh_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     pbh_db: Arc<DatabaseEnv>,
 ) -> eyre::Result<()> {
