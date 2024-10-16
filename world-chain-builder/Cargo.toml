@@ -21,6 +21,7 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
+reth-exex = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be" }
 
 # reth-optimism
 reth-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "c35b8be", features = [
