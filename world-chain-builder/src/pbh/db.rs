@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use alloy_primitives::TxHash;
 use bytes::BufMut;
+use reth_db::cursor::DbCursorRO;
 use reth_db::mdbx::tx::Tx;
-use reth_db::mdbx::{DatabaseArguments, DatabaseFlags, RW};
+use reth_db::mdbx::{DatabaseArguments, DatabaseFlags, RO, RW};
+use reth_db::transaction::DbTx;
 use reth_db::{create_db, DatabaseError};
 // TODO: maybe think about some sort of data retention policy for PBH transactions.
 use reth_db::table::{Compress, Decompress, Table};
@@ -46,6 +48,11 @@ impl Table for ValidatedPbhTransactionTable {
     type Key = TxHash;
 
     type Value = B256;
+}
+
+pub fn is_pbh_tx(hash: TxHash, db_tx: &Tx<RO>) -> Result<bool, DatabaseError> {
+    let mut cursor = db_tx.cursor_read::<ValidatedPbhTransactionTable>()?;
+    Ok(cursor.seek_exact(hash)?.is_some())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
