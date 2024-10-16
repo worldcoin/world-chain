@@ -50,9 +50,14 @@ impl Table for ValidatedPbhTransactionTable {
     type Value = B256;
 }
 
-pub fn is_pbh_tx(hash: TxHash, db_tx: &Tx<RO>) -> Result<bool, DatabaseError> {
+pub fn get_validated_nullifier(
+    db_tx: &Tx<RW>,
+    hash: TxHash,
+) -> Result<Option<Field>, DatabaseError> {
     let mut cursor = db_tx.cursor_read::<ValidatedPbhTransactionTable>()?;
-    Ok(cursor.seek_exact(hash)?.is_some())
+    Ok(cursor
+        .seek_exact(hash)?
+        .map(|(_, nullifier)| nullifier.into()))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
