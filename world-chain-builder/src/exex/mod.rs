@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use futures::TryStreamExt;
@@ -14,55 +15,57 @@ use crate::pbh::db::set_executed_nullifier;
 pub async fn pbh_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     pbh_db: Arc<DatabaseEnv>,
-) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.try_next().await? {
-        let db_tx = pbh_db.tx_mut()?;
+) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
+    Ok(async move {
+        while let Some(notification) = ctx.notifications.try_next().await? {
+            let db_tx = pbh_db.tx_mut()?;
 
-        match &notification {
-            ExExNotification::ChainCommitted { new } => {
-                // Insert executed nullifiers for the new block
-                for (_, sealed_block) in new.blocks() {
-                    for tx in sealed_block.transactions() {
-                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
-                            set_executed_nullifier(&db_tx, nullifier)?;
+            match &notification {
+                ExExNotification::ChainCommitted { new } => {
+                    // Insert executed nullifiers for the new block
+                    for (_, sealed_block) in new.blocks() {
+                        for tx in sealed_block.transactions() {
+                            if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                                set_executed_nullifier(&db_tx, nullifier)?;
+                            }
                         }
                     }
                 }
-            }
-            ExExNotification::ChainReorged { old, new } => {
-                // Remove old nullifiers from reorged chain
-                for (_, sealed_block) in old.blocks() {
-                    for tx in sealed_block.transactions() {
-                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
-                            remove_executed_nullifier(&db_tx, nullifier)?;
+                ExExNotification::ChainReorged { old, new } => {
+                    // Remove old nullifiers from reorged chain
+                    for (_, sealed_block) in old.blocks() {
+                        for tx in sealed_block.transactions() {
+                            if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                                remove_executed_nullifier(&db_tx, nullifier)?;
+                            }
+                        }
+                    }
+
+                    // Insert new nullifiers from updated chain
+                    for (_, sealed_block) in new.blocks() {
+                        for tx in sealed_block.transactions() {
+                            if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                                set_executed_nullifier(&db_tx, nullifier)?;
+                            }
                         }
                     }
                 }
-
-                // Insert new nullifiers from updated chain
-                for (_, sealed_block) in new.blocks() {
-                    for tx in sealed_block.transactions() {
-                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
-                            set_executed_nullifier(&db_tx, nullifier)?;
+                ExExNotification::ChainReverted { old } => {
+                    // Remove old nullifiers from reverted chain
+                    for (_, sealed_block) in old.blocks() {
+                        for tx in sealed_block.transactions() {
+                            if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                                remove_executed_nullifier(&db_tx, nullifier)?;
+                            }
                         }
                     }
                 }
-            }
-            ExExNotification::ChainReverted { old } => {
-                // Remove old nullifiers from reverted chain
-                for (_, sealed_block) in old.blocks() {
-                    for tx in sealed_block.transactions() {
-                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
-                            remove_executed_nullifier(&db_tx, nullifier)?;
-                        }
-                    }
-                }
-            }
-        };
+            };
 
-        // Commit the pbh nullifiers to the db
-        db_tx.commit()?;
-    }
+            // Commit the pbh nullifiers to the db
+            db_tx.commit()?;
+        }
 
-    Ok(())
+        Ok(())
+    })
 }
