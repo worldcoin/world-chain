@@ -8,7 +8,8 @@ use reth_db::DatabaseEnv;
 use reth_exex::{ExExContext, ExExNotification};
 
 use crate::pbh::db::get_validated_nullifier;
-use crate::pbh::db::set_pbh_nullifier;
+use crate::pbh::db::remove_executed_nullifier;
+use crate::pbh::db::set_executed_nullifier;
 
 async fn pbh_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
@@ -19,19 +20,47 @@ async fn pbh_exex<Node: FullNodeComponents>(
 
         match &notification {
             ExExNotification::ChainCommitted { new } => {
+                // Insert executed nullifiers for the new block
                 for (_, sealed_block) in new.blocks() {
                     for tx in sealed_block.transactions() {
                         if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
-                            set_pbh_nullifier(&db_tx, nullifier)?;
+                            set_executed_nullifier(&db_tx, nullifier)?;
                         }
                     }
                 }
             }
-            ExExNotification::ChainReorged { old, new } => {}
-            ExExNotification::ChainReverted { old } => {}
+            ExExNotification::ChainReorged { old, new } => {
+                // Remove old nullifiers from reorged chain
+                for (_, sealed_block) in old.blocks() {
+                    for tx in sealed_block.transactions() {
+                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                            remove_executed_nullifier(&db_tx, nullifier)?;
+                        }
+                    }
+                }
+
+                // Insert new nullifiers from updated chain
+                for (_, sealed_block) in new.blocks() {
+                    for tx in sealed_block.transactions() {
+                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                            set_executed_nullifier(&db_tx, nullifier)?;
+                        }
+                    }
+                }
+            }
+            ExExNotification::ChainReverted { old } => {
+                // Remove old nullifiers from reverted chain
+                for (_, sealed_block) in old.blocks() {
+                    for tx in sealed_block.transactions() {
+                        if let Some(nullifier) = get_validated_nullifier(&db_tx, tx.hash())? {
+                            remove_executed_nullifier(&db_tx, nullifier)?;
+                        }
+                    }
+                }
+            }
         };
 
-        // commit the pbh nullifiers to the db
+        // Commit the pbh nullifiers to the db
         db_tx.commit()?;
     }
 

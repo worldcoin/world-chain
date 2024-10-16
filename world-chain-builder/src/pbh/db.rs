@@ -50,16 +50,6 @@ impl Table for ValidatedPbhTransactionTable {
     type Value = B256;
 }
 
-pub fn get_validated_nullifier(
-    db_tx: &Tx<RW>,
-    hash: TxHash,
-) -> Result<Option<Field>, DatabaseError> {
-    let mut cursor = db_tx.cursor_read::<ValidatedPbhTransactionTable>()?;
-    Ok(cursor
-        .seek_exact(hash)?
-        .map(|(_, nullifier)| nullifier.into()))
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmptyValue;
 
@@ -75,13 +65,31 @@ impl Compress for EmptyValue {
     fn compress_to_buf<B: BufMut + AsMut<[u8]>>(self, _buf: &mut B) {}
 }
 
+pub fn get_validated_nullifier(
+    db_tx: &Tx<RW>,
+    hash: TxHash,
+) -> Result<Option<Field>, DatabaseError> {
+    let mut cursor = db_tx.cursor_read::<ValidatedPbhTransactionTable>()?;
+    Ok(cursor
+        .seek_exact(hash)?
+        .map(|(_, nullifier)| nullifier.into()))
+}
+
 /// Set the store the nullifier for a tx after it
 /// has been included in the block
 /// don't forget to call db_tx.commit() at the very end
-pub fn set_pbh_nullifier(db_tx: &Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
+pub fn set_executed_nullifier(db_tx: &Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
     let bytes: FixedBytes<32> = nullifier.into();
     let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
     cursor.insert(bytes, EmptyValue)?;
+    Ok(())
+}
+
+pub fn remove_executed_nullifier(db_tx: &Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
+    let bytes: FixedBytes<32> = nullifier.into();
+    let mut cursor = db_tx.cursor_write::<ExecutedPbhNullifierTable>()?;
+    cursor.seek_exact(bytes)?;
+    cursor.delete_current()?;
     Ok(())
 }
 
