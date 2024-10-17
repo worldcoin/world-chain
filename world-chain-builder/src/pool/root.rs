@@ -166,7 +166,7 @@ mod tests {
 
     use super::*;
     use reth_primitives::Block;
-    fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
+    pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
         let root_validator = WorldChainRootValidator::new(client)?;
         Ok(root_validator)
