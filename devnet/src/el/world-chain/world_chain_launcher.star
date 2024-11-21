@@ -167,7 +167,8 @@ def get_config(
         "--metrics=0.0.0.0:{0}".format(METRICS_PORT_NUM),
         "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
-        "--builder.entry_point=0x0000000000000000000000000000000000000001"
+        # TODO: Get this address from app team
+        "--builder.entry_point=0x0000000000000000000000000000000000000001"  
     ]
 
     if len(existing_el_clients) > 0:
