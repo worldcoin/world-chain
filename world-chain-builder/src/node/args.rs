@@ -27,7 +27,7 @@ pub struct WorldChainBuilderArgs {
 
     /// Sets the ERC-4337 EntryPoint contract address
     /// This contract is used to verify World-Id Proofs attached to 4337 payloads.
-    #[arg(long = "builder.entry_point_contract")]
+    #[arg(long = "builder.entry_point")]
     pub entry_point: Address,
 
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
