@@ -1,7 +1,7 @@
 #[cfg(test)]
 pub mod e2e;
-
 use alloy_eips::eip2718::Decodable2718;
+use alloy_primitives::Address;
 use chrono::Utc;
 use reth::chainspec::MAINNET;
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
@@ -68,7 +68,13 @@ pub fn world_chain_validator(
     let path = temp_dir.path().join("db");
     let db = load_world_chain_db(&path, false).unwrap();
     let root_validator = WorldChainRootValidator::new(client).unwrap();
-    WorldChainTransactionValidator::new(validator, root_validator, db, 30)
+    WorldChainTransactionValidator::new(
+        validator,
+        root_validator,
+        db,
+        30,
+        Address::with_last_byte(1),
+    )
 }
 
 pub fn valid_pbh_payload(

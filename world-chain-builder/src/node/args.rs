@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use clap::value_parser;
 use reth_optimism_node::args::RollupArgs;
 
@@ -23,6 +24,11 @@ pub struct WorldChainBuilderArgs {
     /// Sets the number of allowed PBH transactions per month
     #[arg(long = "builder.num_pbh_txs", default_value = "30")]
     pub num_pbh_txs: u16,
+
+    /// Sets the ERC-4337 EntryPoint contract address
+    /// This contract is used to verify World-Id Proofs attached to 4337 payloads.
+    #[arg(long = "builder.entry_point_contract")]
+    pub entry_point_contract: Address,
 
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
     /// verified transactions to fill the capacity, the remaining blockspace will be filled with
