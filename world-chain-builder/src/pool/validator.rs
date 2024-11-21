@@ -1,6 +1,7 @@
 //! World Chain transaction pool types
 use std::sync::Arc;
 
+use alloy_primitives::{keccak256, Address};
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -11,8 +12,8 @@ use reth_db::{Database, DatabaseEnv, DatabaseError};
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use semaphore::hash_to_field;
 use semaphore::protocol::verify_proof;
+use semaphore::{hash_to_field, Field};
 
 use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
 use super::ordering::WorldChainOrdering;
@@ -42,6 +43,7 @@ where
     root_validator: WorldChainRootValidator<Client>,
     pub(crate) pbh_db: Arc<DatabaseEnv>,
     num_pbh_txs: u16,
+    entry_point_contract: Address,
 }
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
@@ -55,12 +57,14 @@ where
         root_validator: WorldChainRootValidator<Client>,
         pbh_db: Arc<DatabaseEnv>,
         num_pbh_txs: u16,
+        entry_point_contract: Address,
     ) -> Self {
         Self {
             inner,
             root_validator,
             pbh_db,
             num_pbh_txs,
+            entry_point_contract,
         }
     }
 
@@ -126,6 +130,25 @@ where
         Ok(())
     }
 
+    pub fn validate_4337(&self, _transaction: &Tx) -> Result<(), TransactionValidationError> {
+        // TODO: Decode Entry Point Calldata
+        // Enforce single user op
+        Ok(())
+    }
+
+    pub fn compute_4337_signal_hash(
+        &self,
+        transaction: &Tx,
+    ) -> Result<Field, TransactionValidationError> {
+        self.validate_4337(transaction)?;
+        let calldata = if transaction.input().len() > 4 {
+            &transaction.input()[4..]
+        } else {
+            return Err(WorldChainTransactionPoolInvalid::Invalid4337CalldataLength.into());
+        };
+        Ok(hash_to_field(keccak256(calldata).as_ref()))
+    }
+
     pub fn validate_pbh_payload(
         &self,
         transaction: &Tx,
@@ -141,10 +164,15 @@ where
         let mut cursor = db_tx.cursor_write::<ValidatedPbhTransaction>()?;
         cursor.insert(payload.nullifier_hash.to_be_bytes().into(), EmptyValue)?;
 
+        let signal_hash = if transaction.to().unwrap_or_default() == self.entry_point_contract {
+            self.compute_4337_signal_hash(transaction)?
+        } else {
+            hash_to_field(transaction.hash().as_ref())
+        };
         let res = verify_proof(
             payload.root,
             payload.nullifier_hash,
-            hash_to_field(transaction.hash().as_ref()),
+            signal_hash,
             hash_to_field(payload.external_nullifier.as_bytes()),
             &payload.proof.0,
             TREE_DEPTH,

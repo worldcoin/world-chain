@@ -27,6 +27,8 @@ pub enum WorldChainTransactionPoolInvalid {
     DuplicateTxHash,
     #[error("invalid root")]
     InvalidRoot,
+    #[error("invalid 4337 EntryPoint calldata length")]
+    Invalid4337CalldataLength,
 }
 
 #[derive(Debug, thiserror::Error)]
