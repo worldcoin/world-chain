@@ -29,6 +29,12 @@ pub enum WorldChainTransactionPoolInvalid {
     InvalidRoot,
     #[error("invalid 4337 EntryPoint calldata length")]
     Invalid4337CalldataLength,
+    #[error("invalid 4337 EntryPoint Selector")]
+    Invalid4337EntryPointSelector,
+    #[error("4337 Abi decode error")]
+    AbiDecodeError,
+    #[error("4337 More than one user operation")]
+    Invalid4337UserOpsLength,
 }
 
 #[derive(Debug, thiserror::Error)]
