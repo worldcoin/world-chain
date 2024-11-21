@@ -62,6 +62,7 @@ alloy-rpc-types = { version = "0.5.4", features = [
 alloy-rlp = "0.3.4"
 alloy-eips = { version = "0.5.4", default-features = false }
 alloy-genesis = { version = "0.5.4", default-features = false }
+alloy-sol-types = { version = "0.5.4", default-features = false }
 
 # revm
 revm = { version = "17.0.0", features = ["std"], default-features = false }

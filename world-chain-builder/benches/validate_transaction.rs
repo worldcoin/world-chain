@@ -1,5 +1,6 @@
 use std::future::Future;
 
+use alloy_primitives::Address;
 use criterion::{criterion_group, criterion_main, Criterion};
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::{Pool, PoolTransaction as _, TransactionPool, TransactionValidator};
@@ -36,7 +37,7 @@ where
 
 fn validator_setup() -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>
 {
-    let validator = world_chain_validator();
+    let validator = world_chain_validator(Address::with_last_byte(1));
     let transaction = get_pbh_transaction(0);
     validator.inner().client().add_account(
         transaction.sender(),
