@@ -63,7 +63,6 @@ alloy-eips = { version = "0.5.4", default-features = false }
 alloy-genesis = { version = "0.5.4", default-features = false }
 
 # revm
-# revm
 revm = { version = "17.0.0", features = ["std"], default-features = false }
 revm-inspectors = "0.10.0"
 revm-primitives = { version = "13.0.0", features = [
@@ -74,6 +73,7 @@ revm-precompile = "11"
 
 
 # 3rd party
+jsonrpsee = { version = "0.24", features = ["server", "macros"] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 chrono = "0.4"

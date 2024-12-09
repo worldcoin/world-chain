@@ -13537,6 +13537,7 @@ dependencies = [
  "ethers-core 2.0.14 (git+https://github.com/gakonst/ethers-rs)",
  "futures",
  "hex",
+ "jsonrpsee",
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",

@@ -1,11 +1,11 @@
 //! OP-Reth `eth_` endpoint implementation.
 
-pub mod receipt;
-pub mod transaction;
-
 mod block;
+pub mod bundle;
 mod call;
 mod pending_block;
+pub mod receipt;
+pub mod transaction;
 use alloy_primitives::U256;
 use alloy_rpc_types::TransactionInfo;
 use derive_more::derive::Deref;

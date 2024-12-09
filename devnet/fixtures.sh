@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 MNEMONIC="test test test test test test test test test test test junk"
-# This needs to be configured to the enclave (public rpc ports are non-deterministic)
 export IDENTITY=11ff11
 export INCLUSION_PROOF_URL="https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof"
 kurtosis_port=$(kurtosis port print world-chain wc-admin-world-chain-builder rpc)

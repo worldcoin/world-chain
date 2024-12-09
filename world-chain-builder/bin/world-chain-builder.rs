@@ -3,6 +3,8 @@ use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
 use world_chain_builder::node::args::ExtArgs;
 use world_chain_builder::node::builder::WorldChainBuilder;
+use world_chain_builder::rpc::bundle::EthTransactionsExtServer;
+use world_chain_builder::rpc::bundle::WorldChainEthApiExt;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -23,7 +25,6 @@ fn main() {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info,reth=info");
     }
-
     if let Err(err) =
         Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
             let data_dir = builder.config().datadir();
@@ -32,6 +33,13 @@ fn main() {
                     builder_args.clone(),
                     data_dir.data_dir(),
                 )?)
+                .extend_rpc_modules(move |ctx| {
+                    let provider = ctx.provider().clone();
+                    let pool = ctx.pool().clone();
+                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider);
+                    ctx.modules.merge_configured(eth_api_ext.into_rpc())?;
+                    Ok(())
+                })
                 .launch()
                 .await?;
 

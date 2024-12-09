@@ -16,7 +16,9 @@ use crate::{
         validator::WorldChainTransactionValidator,
     },
     primitives::WorldChainPooledTransactionsElement,
+    rpc::bundle::{EthTransactionsExtServer, WorldChainEthApiExt},
 };
+use alloy_primitives::bytes;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
@@ -24,13 +26,16 @@ use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
 use chrono::Utc;
-use reth::builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth::transaction_pool::{blobstore::DiskFileBlobStore, TransactionValidationTaskExecutor};
 use reth::{
     api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter},
     builder::components::Components,
+};
+use reth::{
+    builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle},
+    transaction_pool::Pool,
 };
 use reth_db::{
     test_utils::{tempdir_path, TempDatabase},
@@ -77,7 +82,7 @@ type NodeAdapterType = NodeAdapter<
                 NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
             >,
         >,
-        reth::transaction_pool::Pool<
+        Pool<
             TransactionValidationTaskExecutor<
                 WorldChainTransactionValidator<
                     BlockchainProvider<
@@ -147,6 +152,13 @@ impl WorldChainBuilderTestContext {
                 },
                 &path,
             )?)
+            .extend_rpc_modules(move |ctx| {
+                let provider = ctx.provider().clone();
+                let pool = ctx.pool().clone();
+                let eth_api_ext = WorldChainEthApiExt::new(pool, provider);
+                ctx.modules.merge_configured(eth_api_ext.into_rpc())?;
+                Ok(())
+            })
             .launch()
             .await?;
         let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
@@ -256,6 +268,15 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_decode_transaction() -> eyre::Result<()> {
+    let tx = bytes!("02f8698320d5e4800184516d19dd82520894deadbeefdeadbeefdeadbeefdeadbeefdeadbeef8080c080a081ad5010d3f502b279540af054216ceb8fc929e919022088e766cf2ceced894ea053a971501c8e2b426cf5c043f390b9e454d92794562a60029605d397f02bb27ff901518b76312d3132323032342d30a00192a1143ac457fab0cf5a07a852c15db32a1825d9048a2eb406e8aaffadb742a00ac9d5995841e9d09387685c7155e6f08b2a92d984a8a2f282c48d6cc08db3ceb901002b0592638030cd0a68b32ea2a7461d3dc1cfa78280091ec9688d97698011a47b283d6fac359cd0140f11d105b6a01978bd06b47d5eb6f15991ea2916008534e81e5f13adcf1dab880a7b5d9ee6dca817effff98f27e9699bf6071bf1643fb91a27f772e9311c6dfbd4446e83c18c2ebb4eee2df64e4f5a584a70d96ea0637e2f2fc48dfa438fba778bcdbb3b125e4d56b82c4475ee899924c044b5f24ba795de12ee755d5c96bf31dde93857f790db06fda0d0c2262d75fab74ea840c12381cc1857ee75d5ee27fef42ad0f46e54ac8e7dd05d9bb99af3aafc5c13cbab370a61069e42d444daada4fb0a907ee9b9abf22ffb2d21ca4b064de8647cd94586b2fd");   
+    let pooled_tx = WorldChainPooledTransactionsElement::decode_2718(&mut &tx[..])?; 
+    let root = pooled_tx.pbh_payload.unwrap().root;
+    println!("{:?}", root);
+    Ok(())
+}
+
+#[tokio::test]
 #[serial]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -306,6 +327,14 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
     assert!(dup_pbh_hash_res.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_send_raw_transaction_conditional() -> eyre::Result<()> {
+    let ctx = WorldChainBuilderTestContext::setup().await?;
+    println!("{:?}", ctx.node.rpc.inner.methods());
     Ok(())
 }
 
