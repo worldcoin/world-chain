@@ -14,6 +14,7 @@ reth = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda" }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "ddc9bda", features = [
     "test-utils",
 ] }

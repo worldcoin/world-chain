@@ -1,32 +1,28 @@
+use std::fmt;
+use std::path::Path;
+use std::sync::Arc;
+
 use bytes::BufMut;
 use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
 use reth_db::mdbx::{DatabaseArguments, DatabaseFlags, RW};
 use reth_db::table::{Compress, Decompress, Table};
 use reth_db::transaction::DbTxMut;
-use reth_db::{create_db, DatabaseError};
+use reth_db::{create_db, tables, DatabaseError, TableType, TableViewer};
+use reth_db_api;
 use revm_primitives::{FixedBytes, B256};
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::sync::Arc;
 use tracing::info;
 
-/// Table to store PBH validated transactions along with their nullifiers.
-///
-/// When a trasnaction is validated before being inserted into the pool,
-/// a mapping is created from the transaction hash to the nullifier here.
-/// This is primarily used as a caching mechanism to avoid certain types of
-/// DoS attacks.
-#[derive(Debug, Clone, Default)]
-pub struct ValidatedPbhTransactionTable;
-
-impl Table for ValidatedPbhTransactionTable {
-    const NAME: &'static str = "ValidatedPbhTransactions";
-
-    type Key = B256;
-
-    type Value = EmptyValue;
+tables! {
+    /// Table to store PBH validated transactions along with their nullifiers.
+    ///
+    /// When a trasnaction is validated before being inserted into the pool,
+    /// a mapping is created from the transaction hash to the nullifier here.
+    /// This is primarily used as a caching mechanism to avoid certain types of
+    /// DoS attacks.
+    table ValidatedPbhTransaction<Key = B256, Value = EmptyValue>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -49,7 +45,7 @@ impl Compress for EmptyValue {
 /// don't forget to call db_tx.commit() at the very end
 pub fn set_pbh_nullifier(db_tx: &Tx<RW>, nullifier: Field) -> Result<(), DatabaseError> {
     let bytes: FixedBytes<32> = nullifier.into();
-    let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+    let mut cursor = db_tx.cursor_write::<ValidatedPbhTransaction>()?;
     cursor.insert(bytes, EmptyValue)?;
     Ok(())
 }
@@ -72,7 +68,7 @@ pub fn load_world_chain_db(
         .map_err(|e| DatabaseError::InitTx(e.into()))?;
 
     tx.create_db(
-        Some(ValidatedPbhTransactionTable::NAME),
+        Some(ValidatedPbhTransaction::NAME),
         DatabaseFlags::default(),
     )
     .map_err(|e| DatabaseError::CreateTable(e.into()))?;

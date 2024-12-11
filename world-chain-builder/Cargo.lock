@@ -13549,6 +13549,7 @@ dependencies = [
  "reth-cli-util",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-e2e-test-utils",
  "reth-eth-wire-types",
  "reth-evm",

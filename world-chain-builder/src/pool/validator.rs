@@ -19,7 +19,7 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::pbh::date_marker::DateMarker;
-use crate::pbh::db::{EmptyValue, ValidatedPbhTransactionTable};
+use crate::pbh::db::{EmptyValue, ValidatedPbhTransaction};
 use crate::pbh::external_nullifier::ExternalNullifier;
 use crate::pbh::payload::{PbhPayload, TREE_DEPTH};
 
@@ -71,7 +71,7 @@ where
 
     pub fn set_validated(&self, pbh_payload: &PbhPayload) -> Result<(), DatabaseError> {
         let db_tx = self.pbh_db.tx_mut()?;
-        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransaction>()?;
         cursor.insert(pbh_payload.nullifier_hash.to_be_bytes().into(), EmptyValue)?;
         db_tx.commit()?;
         Ok(())
@@ -138,7 +138,7 @@ where
         // Create db transaction and insert the nullifier hash
         // We do this first to prevent repeatedly validating the same transaction
         let db_tx = self.pbh_db.tx_mut()?;
-        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransactionTable>()?;
+        let mut cursor = db_tx.cursor_write::<ValidatedPbhTransaction>()?;
         cursor.insert(payload.nullifier_hash.to_be_bytes().into(), EmptyValue)?;
 
         let res = verify_proof(
