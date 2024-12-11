@@ -133,44 +133,32 @@ where
     }
 
     pub fn validate_4337(&self, transaction: &Tx) -> Result<(), TransactionValidationError> {
-        transaction
-            .input()
-            .len()
-            .gt(&3)
-            .then(|| {
-                let selector: &[u8; 4] = &transaction.input()[0..4].try_into().unwrap();
-                match *selector {
-                    IEntryPoint::handleAggregatedOpsCall::SELECTOR => {
-                        let result = IEntryPoint::handleAggregatedOpsCall::abi_decode(
-                            transaction.input(),
-                            true,
-                        )
+        if transaction.input().len() <= 3 {
+            Err(WorldChainTransactionPoolInvalid::Invalid4337CalldataLength)?;
+        }
+
+        let selector: &[u8; 4] = &transaction.input()[0..4].try_into().unwrap();
+        match *selector {
+            IEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+                let result =
+                    IEntryPoint::handleAggregatedOpsCall::abi_decode(transaction.input(), true)
                         .map_err(|_| WorldChainTransactionPoolInvalid::AbiDecodeError)?;
-                        if result._0.len() != 1 {
-                            return Err(
-                                WorldChainTransactionPoolInvalid::Invalid4337UserOpsLength.into()
-                            );
-                        }
-                    }
-                    IEntryPoint::handleOpsCall::SELECTOR => {
-                        let result =
-                            IEntryPoint::handleOpsCall::abi_decode(transaction.input(), true)
-                                .map_err(|_| WorldChainTransactionPoolInvalid::AbiDecodeError)?;
-                        if result._0.len() != 1 {
-                            return Err(
-                                WorldChainTransactionPoolInvalid::Invalid4337UserOpsLength.into()
-                            );
-                        }
-                    }
-                    _ => {
-                        return Err(
-                            WorldChainTransactionPoolInvalid::Invalid4337EntryPointSelector.into(),
-                        );
-                    }
+                if result._0.len() != 1 {
+                    return Err(WorldChainTransactionPoolInvalid::Invalid4337UserOpsLength.into());
                 }
-                Ok::<(), WorldChainTransactionPoolInvalid>(())
-            })
-            .ok_or(WorldChainTransactionPoolInvalid::Invalid4337CalldataLength)??;
+            }
+            IEntryPoint::handleOpsCall::SELECTOR => {
+                let result = IEntryPoint::handleOpsCall::abi_decode(transaction.input(), true)
+                    .map_err(|_| WorldChainTransactionPoolInvalid::AbiDecodeError)?;
+                if result._0.len() != 1 {
+                    return Err(WorldChainTransactionPoolInvalid::Invalid4337UserOpsLength.into());
+                }
+            }
+            _ => {
+                return Err(WorldChainTransactionPoolInvalid::Invalid4337EntryPointSelector.into());
+            }
+        }
+
         Ok(())
     }
 
@@ -290,19 +278,8 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use crate::pbh::payload::{PbhPayload, Proof};
-    use crate::pool::bindings::IEntryPoint::{
-        handleAggregatedOpsCall, handleOpsCall, IEntryPointCalls, PackedUserOperation,
-        UserOpsPerAggregator,
-    };
-    use crate::pool::ordering::WorldChainOrdering;
-    use crate::pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
-    use crate::pool::tx::WorldChainPooledTransaction;
-    use crate::test::{get_pbh_transaction, valid_pbh_payload, world_chain_validator};
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::keccak256;
-    use alloy_primitives::{Address, U256 as Uint};
+    use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+    use alloy_primitives::{keccak256, Address, U256 as Uint};
     use alloy_rpc_types::{TransactionInput, TransactionRequest};
     use alloy_signer_local::LocalSigner;
     use alloy_sol_types::SolInterface;
@@ -318,6 +295,16 @@ pub mod tests {
     use revm_primitives::TxKind;
     use semaphore::Field;
     use test_case::test_case;
+
+    use crate::pbh::payload::{PbhPayload, Proof};
+    use crate::pool::bindings::IEntryPoint::{
+        handleAggregatedOpsCall, handleOpsCall, IEntryPointCalls, PackedUserOperation,
+        UserOpsPerAggregator,
+    };
+    use crate::pool::ordering::WorldChainOrdering;
+    use crate::pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
+    use crate::pool::tx::WorldChainPooledTransaction;
+    use crate::test::{get_pbh_transaction, valid_pbh_payload, world_chain_validator};
 
     #[tokio::test]
     async fn validate_pbh_transaction() {
