@@ -1,0 +1,9 @@
+[submodule "contracts/lib/forge-std"]
+	path = contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "contracts/lib/world-id-contracts"]
+	path = contracts/lib/world-id-contracts
+	url = https://github.com/worldcoin/world-id-contracts
+[submodule "contracts/lib/BokkyPooBahsDateTimeLibrary"]
+	path = contracts/lib/BokkyPooBahsDateTimeLibrary
+	url = https://github.com/bokkypoobah/BokkyPooBahsDateTimeLibrary
