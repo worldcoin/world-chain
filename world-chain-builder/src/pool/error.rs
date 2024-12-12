@@ -33,6 +33,8 @@ pub enum WorldChainTransactionPoolInvalid {
     Invalid4337EntryPointSelector,
     #[error("4337 Abi decode error")]
     AbiDecodeError,
+    #[error("Invalid Aggregator address")]
+    InvalidAggregator,
     #[error("4337 More than one user operation")]
     Invalid4337UserOpsLength,
 }

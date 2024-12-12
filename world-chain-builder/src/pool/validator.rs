@@ -2,6 +2,9 @@
 use std::sync::Arc;
 
 use alloy_primitives::Address;
+use alloy_sol_types::{SolCall, SolValue};
+use eyre::owo_colors::OwoColorize;
+use reth::transaction_pool::validate::TransactionValidatorError;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -22,7 +25,6 @@ use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::pbh::date_marker::DateMarker;
 use crate::pbh::db::{EmptyValue, ValidatedPbhTransaction};
 use crate::pbh::eip4337::bindings::IEntryPoint;
-use crate::pbh::eip4337::utils::is_eip4337_pbh_bundle;
 use crate::pbh::external_nullifier::ExternalNullifier;
 use crate::pbh::payload::{PbhPayload, TREE_DEPTH};
 
@@ -172,11 +174,74 @@ where
         }
     }
 
+    pub fn is_eip4337_pbh_bundle(&self, tx: &Tx) -> Option<IEntryPoint::handleAggregatedOpsCall> {
+        let Some(to_address) = tx.to() else {
+            return None;
+        };
+
+        if to_address != self.entry_point_contract {
+            return None;
+        }
+
+        if tx.input().len() <= 3 {
+            return None;
+        }
+
+        if !tx
+            .input()
+            .starts_with(&IEntryPoint::handleAggregatedOpsCall::SELECTOR)
+        {
+            return None;
+        }
+
+        // TODO: Boolean args is `validate`. Can it be `false`?
+        let Ok(decoded) = IEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true) else {
+            return None;
+        };
+
+        let are_aggregators_valid = decoded
+            ._0
+            .iter()
+            // TODO: Why do I have to double deref?!?
+            .any(|per_aggregator| **per_aggregator.aggregator == **self.aggregator_contract);
+
+        if are_aggregators_valid {
+            Some(decoded)
+        } else {
+            None
+        }
+    }
+
     fn validate_eip4337_pbh_bundle(
         &self,
         transaction: &Tx,
         ops_call: &IEntryPoint::handleAggregatedOpsCall,
     ) -> Result<(), TransactionValidationError> {
+        for agg in &ops_call._0 {
+            self.validate_eip4337_pbh_aggregated_bundle(transaction, agg)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_eip4337_pbh_aggregated_bundle(
+        &self,
+        transaction: &Tx,
+        agg: &IEntryPoint::UserOpsPerAggregator,
+    ) -> Result<(), TransactionValidationError> {
+        // TODO: Resolve double quoting
+        if **agg.aggregator != **self.aggregator_contract {
+            return Err(WorldChainTransactionPoolInvalid::InvalidAggregator.into());
+        }
+
+        Ok(())
+    }
+
+    fn validate_eip4337_pbh_bundle_op(
+        &self,
+        bundle: &IEntryPoint::PackedUserOperation,
+    ) -> Result<(), TransactionValidatorError> {
+        // TODO: Parse signature info & check storage for nullifier hash presence
         Ok(())
     }
 
@@ -187,11 +252,7 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         let validation_outcome = self.op_validator.validate_one(origin, transaction.clone());
 
-        if let Some(handle_agg_ops_call) = is_eip4337_pbh_bundle(
-            &transaction,
-            self.entry_point_contract,
-            self.aggregator_contract,
-        ) {
+        if let Some(handle_agg_ops_call) = self.is_eip4337_pbh_bundle(&transaction) {
             if let Err(e) = self.validate_eip4337_pbh_bundle(&transaction, &handle_agg_ops_call) {
                 return e.to_outcome(transaction);
             }
@@ -281,7 +342,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn validate_pbh_transaction() {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let transaction = get_pbh_transaction(0);
         validator.op_validator.client().add_account(
             transaction.sender(),
@@ -333,7 +394,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_validate_4337_transaction_ops() {
-        let validator = world_chain_validator(Address::Zero, Address::Zero);
+        let validator = world_chain_validator(Address::ZERO, Address::ZERO);
         let transaction = pbh_4337_transaction_ops(1).await;
         validator.op_validator.client().add_account(
             transaction.sender(),
@@ -384,7 +445,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_validate_4337_transaction_aggregated_ops() {
-        let validator = world_chain_validator(Address::Zero, Address::Zero);
+        let validator = world_chain_validator(Address::ZERO, Address::ZERO);
         let transaction = pbh_4337_transaction_aggregated_ops(1).await;
         validator.op_validator.client().add_account(
             transaction.sender(),
@@ -435,7 +496,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_invalidate_4337_transaction() {
-        let validator = world_chain_validator(Address::Zero, Address::Zero);
+        let validator = world_chain_validator(Address::ZERO, Address::ZERO);
         // Should fail because the calldata is invalid
         let transaction = pbh_4337_transaction_ops(2).await;
         validator.op_validator.client().add_account(
@@ -536,7 +597,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn invalid_external_nullifier_hash() {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let transaction = get_pbh_transaction(0);
 
         validator.op_validator.client().add_account(
@@ -559,7 +620,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn invalid_signal_hash() {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let transaction = get_pbh_transaction(0);
 
         validator.op_validator.client().add_account(
@@ -582,7 +643,7 @@ pub mod tests {
 
     #[test]
     fn test_validate_root() {
-        let mut validator = world_chain_validator(Address::with_last_byte(1));
+        let mut validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let root = Field::from(1u64);
         let proof = Proof(semaphore::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
@@ -616,7 +677,7 @@ pub mod tests {
 
     #[test]
     fn test_invalidate_root() {
-        let mut validator = world_chain_validator(Address::with_last_byte(1));
+        let mut validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let root = Field::from(0);
         let proof = Proof(semaphore::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
@@ -652,7 +713,7 @@ pub mod tests {
     #[test_case("v1-012025-1")]
     #[test_case("v1-012025-29")]
     fn validate_external_nullifier_valid(external_nullifier: &str) {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
         let payload = PbhPayload {
@@ -670,7 +731,7 @@ pub mod tests {
     #[test_case("v1-012025-0", "2024-12-31 23:59:30Z" ; "a minute early")]
     #[test_case("v1-012025-0", "2025-02-01 00:00:30Z" ; "a minute late")]
     fn validate_external_nullifier_at_time(external_nullifier: &str, time: &str) {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let date: chrono::DateTime<Utc> = time.parse().unwrap();
 
         let payload = PbhPayload {
@@ -694,7 +755,7 @@ pub mod tests {
     #[test_case("12025-0")]
     #[test_case("v1-012025-0-0")]
     fn validate_external_nullifier_invalid(external_nullifier: &str) {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap();
 
         let payload = PbhPayload {
@@ -710,7 +771,7 @@ pub mod tests {
 
     #[test]
     fn test_set_validated() {
-        let validator = world_chain_validator(Address::with_last_byte(1));
+        let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
 
         let proof = Proof(semaphore::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
