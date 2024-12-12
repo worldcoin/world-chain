@@ -728,6 +728,8 @@ mod tests {
             root_validator.unwrap(),
             db.clone(),
             30,
+            Address::ZERO,
+            Address::ZERO,
         );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);
@@ -844,6 +846,8 @@ mod tests {
             root_validator.unwrap(),
             db.clone(),
             30,
+            Address::ZERO,
+            Address::ZERO,
         );
 
         let wc_noop_validator = WorldChainNoopValidator::new(wc_validator);

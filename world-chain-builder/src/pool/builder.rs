@@ -2,6 +2,7 @@ use super::validator::WorldChainTransactionPool;
 use crate::pool::ordering::WorldChainOrdering;
 use crate::pool::root::WorldChainRootValidator;
 use crate::pool::validator::WorldChainTransactionValidator;
+use alloy_primitives::Address;
 use reth::builder::components::PoolBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -23,6 +24,8 @@ pub struct WorldChainPoolBuilder {
     pub clear_nullifiers: bool,
     pub num_pbh_txs: u16,
     pub db: Arc<DatabaseEnv>,
+    pub entry_point: Address,
+    pub aggregator: Address,
 }
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
@@ -57,6 +60,8 @@ where
                 root_validator,
                 self.db.clone(),
                 self.num_pbh_txs,
+                self.entry_point,
+                self.aggregator,
             )
         });
 
