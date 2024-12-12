@@ -1,20 +1,16 @@
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::BEACON_NONCE;
-use reth_evm::ConfigureEvm;
-use reth_optimism_node::OpPayloadBuilder;
-use reth_optimism_payload_builder::config::OpBuilderConfig;
-use std::sync::Arc;
-
 use reth::api::PayloadBuilderError;
 use reth::builder::components::PayloadServiceBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypesWithEngine, PayloadBuilderConfig};
 use reth::chainspec::EthereumHardforks;
+use reth::payload::PayloadBuilderAttributes;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::DatabaseCommit;
 use reth::revm::State;
-use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth::transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BasicPayloadJobGenerator,
     BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome, MissingPayloadBehaviour,
@@ -23,8 +19,17 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_db::DatabaseEnv;
 use reth_evm::system_calls::SystemCaller;
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_node_core::primitives::serde_bincode_compat::SealedHeader;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_cli::ovm_file_codec::TransactionSigned;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
+use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
+use reth_optimism_payload_builder::builder::{
+    OpBuilder, OpPayloadBuilderCtx, OpPayloadTransactions,
+};
+use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_primitives::{proofs, BlockBody};
 use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
@@ -37,6 +42,7 @@ use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
     ResultAndState, U256,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 use crate::pool::noop::NoopWorldChainTransactionPool;
@@ -45,12 +51,12 @@ use crate::rpc::bundle::validate_conditional_options;
 
 /// World Chain payload builder
 #[derive(Debug)]
-pub struct WorldChainPayloadBuilder<EvmConfig> {
-    pub inner: OpPayloadBuilder<EvmConfig>,
+pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
+    pub inner: OpPayloadBuilder<EvmConfig, Tx>,
     pub verified_blockspace_capacity: u8,
 }
 
-impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
+impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig, ()>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -66,6 +72,188 @@ where
             inner,
             verified_blockspace_capacity,
         }
+    }
+}
+
+impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig> {
+    /// Sets the rollup's compute pending block configuration option.
+    pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+        self.inner.compute_pending_block = compute_pending_block;
+        self
+    }
+
+    pub fn with_transactions<T: OpPayloadTransactions>(
+        self,
+        best_transactions: T,
+    ) -> WorldChainPayloadBuilder<EvmConfig, T> {
+        let Self {
+            inner,
+            verified_blockspace_capacity,
+        } = self;
+
+        let OpPayloadBuilder {
+            compute_pending_block,
+            evm_config,
+            config,
+            ..
+        } = inner;
+
+        WorldChainPayloadBuilder {
+            inner: OpPayloadBuilder {
+                compute_pending_block,
+                evm_config,
+                best_transactions,
+                config,
+            },
+            verified_blockspace_capacity,
+        }
+    }
+
+    /// Enables the rollup's compute pending block configuration option.
+    pub const fn compute_pending_block(self) -> Self {
+        self.set_compute_pending_block(true)
+    }
+
+    /// Returns the rollup's compute pending block configuration option.
+    pub const fn is_compute_pending_block(&self) -> bool {
+        self.inner.compute_pending_block
+    }
+}
+
+impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
+where
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    Txs: OpPayloadTransactions,
+{
+    /// Constructs an Optimism payload from the transactions sent via the
+    /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
+    /// the payload attributes, the transaction pool will be ignored and the only transactions
+    /// included in the payload will be those sent through the attributes.
+    ///
+    /// Given build arguments including an Optimism client, transaction pool,
+    /// and configuration, this function creates a transaction payload. Returns
+    /// a result indicating success with the payload or an error in case of failure.
+    fn build_payload<Client, Pool>(
+        &self,
+        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    where
+        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    {
+        let (initialized_cfg, initialized_block_env) = self
+            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
+            .map_err(PayloadBuilderError::other)?;
+
+        let BuildArguments {
+            client,
+            pool,
+            mut cached_reads,
+            config,
+            cancel,
+            best_payload,
+        } = args;
+
+        let ctx = OpPayloadBuilderCtx {
+            evm_config: self.inner.evm_config.clone(),
+            chain_spec: client.chain_spec(),
+            config,
+            initialized_cfg,
+            initialized_block_env,
+            cancel,
+            best_payload,
+        };
+
+        let builder = OpBuilder {
+            pool,
+            best: self.best_transactions.clone(),
+        };
+
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+
+        if ctx.attributes().no_tx_pool {
+            let db = State::builder()
+                .with_database(state)
+                .with_bundle_update()
+                .build();
+            builder.build(db, ctx)
+        } else {
+            // sequencer mode we can reuse cachedreads from previous runs
+            let db = State::builder()
+                .with_database(cached_reads.as_db_mut(state))
+                .with_bundle_update()
+                .build();
+            builder.build(db, ctx)
+        }
+        .map(|out| out.with_cached_reads(cached_reads))
+    }
+}
+
+impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
+where
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    pub fn cfg_and_block_env(
+        &self,
+        attributes: &OpPayloadBuilderAttributes,
+        parent: &Header,
+    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: attributes.timestamp(),
+            suggested_fee_recipient: attributes.suggested_fee_recipient(),
+            prev_randao: attributes.prev_randao(),
+            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
+        };
+        self.evm_config
+            .next_cfg_and_block_env(parent, next_attributes)
+    }
+
+    /// Computes the witness for the payload.
+    pub fn payload_witness<Client>(
+        &self,
+        client: &Client,
+        parent: SealedHeader,
+        attributes: OpPayloadAttributes,
+    ) -> Result<ExecutionWitness, PayloadBuilderError>
+    where
+        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    {
+        let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
+            .map_err(PayloadBuilderError::other)?;
+
+        let (initialized_cfg, initialized_block_env) = self
+            .cfg_and_block_env(&attributes, &parent)
+            .map_err(PayloadBuilderError::other)?;
+
+        let config = PayloadConfig {
+            parent_header: Arc::new(parent),
+            attributes,
+        };
+        let ctx = OpPayloadBuilderCtx {
+            evm_config: self.evm_config.clone(),
+            chain_spec: client.chain_spec(),
+            config,
+            initialized_cfg,
+            initialized_block_env,
+            cancel: Default::default(),
+            best_payload: Default::default(),
+        };
+
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut state = State::builder()
+            .with_database(state)
+            .with_bundle_update()
+            .build();
+
+        let builder = OpBuilder {
+            pool: NoopTransactionPool::default(),
+            best: (),
+        };
+        builder.witness(&mut state, &ctx)
     }
 }
 
@@ -95,11 +283,9 @@ mod tests {
     };
     use reth_db::test_utils::tempdir_path;
     use reth_optimism_chainspec::OpChainSpec;
-    use reth_optimism_evm::OptimismEvmConfig;
     use reth_optimism_node::txpool::OpTransactionValidator;
     use reth_primitives::{
-        transaction::WithEncoded, SealedBlock, Signature, TransactionSigned,
-        TransactionSignedEcRecovered, Withdrawals,
+        transaction::WithEncoded, SealedBlock, TransactionSigned, TransactionSignedEcRecovered,
     };
     use revm_primitives::{ruint::aliases::U256, Address, Bytes, TxKind, B256};
     use std::sync::Arc;
