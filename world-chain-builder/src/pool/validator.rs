@@ -2,8 +2,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::Address;
-use alloy_sol_types::{SolCall, SolValue};
-use eyre::owo_colors::OwoColorize;
+use alloy_sol_types::SolCall;
 use reth::transaction_pool::validate::TransactionValidatorError;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -242,6 +241,7 @@ where
         bundle: &IEntryPoint::PackedUserOperation,
     ) -> Result<(), TransactionValidatorError> {
         // TODO: Parse signature info & check storage for nullifier hash presence
+
         Ok(())
     }
 
