@@ -9,6 +9,7 @@ use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_db::DatabaseEnv;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -27,7 +28,7 @@ pub struct WorldChainPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 

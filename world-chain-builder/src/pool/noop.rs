@@ -12,7 +12,7 @@ use reth::transaction_pool::{
     ValidPoolTransaction,
 };
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::{PooledTransactionsElement, RecoveredTx};
 use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -24,6 +24,19 @@ pub struct NoopWorldChainTransactionPool {
 
 impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
+
+    fn get_pending_transactions_with_predicate(
+        &self,
+        _predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+    fn pending_transactions_max(
+        &self,
+        _max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -120,19 +133,13 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement> {
+    ) -> Option<RecoveredTx<<Self::Transaction as reth::transaction_pool::PoolTransaction>::Pooled>>
+    {
         None
     }
 
     fn best_transactions(
         &self,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        Box::new(std::iter::empty())
-    }
-
-    fn best_transactions_with_base_fee(
-        &self,
-        _: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
     }
@@ -212,25 +219,25 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         Default::default()
     }
 
-    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_blob(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         Ok(None)
     }
 
     fn get_all_blobs(
         &self,
         _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         Ok(vec![])
     }
 
     fn get_all_blobs_exact(
         &self,
-        tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
-        if tx_hashes.is_empty() {
-            return Ok(vec![]);
-        }
-        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+        Ok(vec![])
     }
 
     fn get_blobs_for_versioned_hashes(

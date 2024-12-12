@@ -1,11 +1,13 @@
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
+use alloy_rpc_types::{Withdrawal, Withdrawals};
 use futures::future::join_all;
 use reth::api::ConfigureEvmEnv;
 use reth::chainspec::{ChainInfo, MAINNET};
+use reth::revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use reth::transaction_pool::{
     validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
@@ -17,24 +19,23 @@ use reth_chain_state::{
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, ProviderError, ProviderResult,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, StorageProof,
-    TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    StorageMultiProof, StorageProof, TrieInput,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::PathBuf,
@@ -95,6 +96,7 @@ impl BlockNumReader for WorldChainNoopProvider {
 }
 
 impl BlockReader for WorldChainNoopProvider {
+    type Block = Block;
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -160,6 +162,14 @@ impl BlockReader for WorldChainNoopProvider {
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         Ok(vec![])
     }
+
+    fn block_by_hash(&self, _hash: B256) -> ProviderResult<Option<Self::Block>> {
+        Ok(None)
+    }
+
+    fn block_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Block>> {
+        Ok(None)
+    }
 }
 
 impl BlockReaderIdExt for WorldChainNoopProvider {
@@ -181,32 +191,34 @@ impl BlockReaderIdExt for WorldChainNoopProvider {
 }
 
 impl BlockIdReader for WorldChainNoopProvider {
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(None)
     }
 
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(None)
     }
 }
 
 impl TransactionsProvider for WorldChainNoopProvider {
+    type Transaction = TransactionSigned;
+
+    fn transaction_by_id_unhashed(
+        &self,
+        _id: TxNumber,
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        Ok(None)
+    }
+
     fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(None)
     }
 
     fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        Ok(None)
-    }
-
-    fn transaction_by_id_no_hash(
-        &self,
-        _id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         Ok(None)
     }
 
@@ -242,7 +254,7 @@ impl TransactionsProvider for WorldChainNoopProvider {
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         Ok(Vec::default())
     }
 
@@ -259,6 +271,7 @@ impl TransactionsProvider for WorldChainNoopProvider {
 }
 
 impl ReceiptProvider for WorldChainNoopProvider {
+    type Receipt = Receipt;
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }
@@ -282,6 +295,8 @@ impl ReceiptProvider for WorldChainNoopProvider {
 impl ReceiptProviderIdExt for WorldChainNoopProvider {}
 
 impl HeaderProvider for WorldChainNoopProvider {
+    type Header = Header;
+
     fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -355,6 +370,15 @@ impl StateRootProvider for WorldChainNoopProvider {
 }
 
 impl StorageRootProvider for WorldChainNoopProvider {
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
+    }
+
     fn storage_root(
         &self,
         _address: Address,
@@ -414,20 +438,13 @@ impl StateProvider for WorldChainNoopProvider {
     }
 }
 
-impl EvmEnvProvider for WorldChainNoopProvider {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
+impl HashedPostStateProvider for WorldChainNoopProvider {
+    fn hashed_post_state(&self, _bundle_state: &reth::revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
+}
 
+impl EvmEnvProvider for WorldChainNoopProvider {
     fn fill_env_with_header<EvmConfig>(
         &self,
         _cfg: &mut CfgEnvWithHandlerCfg,
@@ -547,8 +564,11 @@ impl PruneCheckpointReader for WorldChainNoopProvider {
     }
 }
 
+impl NodePrimitivesProvider for WorldChainNoopProvider {
+    type Primitives = EthPrimitives;
+}
 impl StaticFileProviderFactory for WorldChainNoopProvider {
-    fn static_file_provider(&self) -> StaticFileProvider {
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
     }
 }
@@ -560,6 +580,7 @@ impl CanonStateSubscriptions for WorldChainNoopProvider {
 }
 
 impl ForkChoiceSubscriptions for WorldChainNoopProvider {
+    type Header = Header;
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)
@@ -598,12 +619,6 @@ where
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if let Some(pbh_paylaod) = transaction.pbh_payload() {
-            self.inner
-                .set_validated(pbh_paylaod)
-                .expect("Error when writing to the db");
-        }
-
         TransactionValidationOutcome::Valid {
             balance: U256::ZERO,
             state_nonce: 0,

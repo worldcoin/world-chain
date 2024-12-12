@@ -1,4 +1,5 @@
-use crate::{pool::tx::WorldChainPooledTransaction, primitives::recover_raw_transaction};
+use crate::pool::tx::WorldChainPooledTransaction;
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashMap, StorageKey};
 use alloy_rpc_types::erc4337::{AccountStorage, ConditionalOptions};
@@ -7,7 +8,11 @@ use jsonrpsee::{
     proc_macros::rpc,
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
 };
-use reth::transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth::{
+    api::Block,
+    rpc::server_types::eth::utils::recover_raw_transaction,
+    transaction_pool::{EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool},
+};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
 
@@ -46,8 +51,9 @@ where
     ) -> RpcResult<B256> {
         validate_conditional_options(&options, self.provider())?;
 
-        let (recovered, _) = recover_raw_transaction(tx.clone())?;
-        let mut pool_transaction = WorldChainPooledTransaction::from_pooled(recovered);
+        let recovered = recover_raw_transaction(&tx)?;
+        let mut pool_transaction: WorldChainPooledTransaction =
+            EthPooledTransaction::from_pooled(recovered).into();
         pool_transaction.conditional_options = Some(options);
 
         // submit the transaction to the pool with a `Local` origin
@@ -97,30 +103,30 @@ where
 
     validate_known_accounts(
         &options.known_accounts,
-        latest.header.number.into(),
+        latest.header().number().into(),
         provider,
     )?;
 
     if let Some(min_block) = options.block_number_min {
-        if min_block > latest.number {
+        if min_block > latest.header().number() {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(max_block) = options.block_number_max {
-        if max_block < latest.number {
+        if max_block < latest.header().number() {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(min_timestamp) = options.timestamp_min {
-        if min_timestamp > latest.timestamp {
+        if min_timestamp > latest.header().timestamp() {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(max_timestamp) = options.timestamp_max {
-        if max_timestamp < latest.timestamp {
+        if max_timestamp < latest.header().timestamp() {
             return Err(ErrorCode::from(-32003).into());
         }
     }

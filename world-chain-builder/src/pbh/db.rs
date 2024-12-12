@@ -6,8 +6,10 @@ use bytes::BufMut;
 use reth_db::cursor::DbCursorRW;
 use reth_db::mdbx::tx::Tx;
 use reth_db::mdbx::{DatabaseArguments, DatabaseFlags, RW};
+use reth_db::table::TableInfo;
 use reth_db::table::{Compress, Decompress, Table};
 use reth_db::transaction::DbTxMut;
+use reth_db::TableSet;
 use reth_db::{create_db, tables, DatabaseError, TableType, TableViewer};
 use reth_db_api;
 use revm_primitives::{FixedBytes, B256};
@@ -22,7 +24,10 @@ tables! {
     /// a mapping is created from the transaction hash to the nullifier here.
     /// This is primarily used as a caching mechanism to avoid certain types of
     /// DoS attacks.
-    table ValidatedPbhTransaction<Key = B256, Value = EmptyValue>;
+    table ValidatedPbhTransaction {
+        type Key = B256;
+        type Value = EmptyValue;
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
