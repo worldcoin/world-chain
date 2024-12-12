@@ -58,6 +58,7 @@ pub fn get_pbh_transaction(nonce: u16) -> WorldChainPooledTransaction {
 
 pub fn world_chain_validator(
     entry_point: Address,
+    aggregator: Address,
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
     let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
@@ -69,7 +70,7 @@ pub fn world_chain_validator(
     let path = temp_dir.path().join("db");
     let db = load_world_chain_db(&path, false).unwrap();
     let root_validator = WorldChainRootValidator::new(client).unwrap();
-    WorldChainTransactionValidator::new(validator, root_validator, db, 30, entry_point)
+    WorldChainTransactionValidator::new(validator, root_validator, db, 30, entry_point, aggregator)
 }
 
 pub fn valid_pbh_payload(

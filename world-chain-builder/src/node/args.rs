@@ -30,6 +30,11 @@ pub struct WorldChainBuilderArgs {
     #[arg(long = "builder.entry_point")]
     pub entry_point: Address,
 
+    /// Sets the ERC0-7766 Signature Aggregator contract address
+    /// This contract signifies that a given bundle should receive priority inclusion if it passes validation
+    #[arg(long = "builder.aggregator")]
+    pub aggregator: Address,
+
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
     /// verified transactions to fill the capacity, the remaining blockspace will be filled with
     /// unverified transactions.

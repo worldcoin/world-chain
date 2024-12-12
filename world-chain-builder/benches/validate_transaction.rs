@@ -37,7 +37,8 @@ where
 
 fn validator_setup() -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>
 {
-    let validator = world_chain_validator(Address::with_last_byte(1));
+    // TODO: Setup aggregator address
+    let validator = world_chain_validator(Address::with_last_byte(1), Address::ZERO);
     let transaction = get_pbh_transaction(0);
     validator.inner().client().add_account(
         transaction.sender(),

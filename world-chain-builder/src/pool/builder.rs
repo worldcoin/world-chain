@@ -25,6 +25,7 @@ pub struct WorldChainPoolBuilder {
     pub num_pbh_txs: u16,
     pub db: Arc<DatabaseEnv>,
     pub entry_point: Address,
+    pub aggregator: Address,
 }
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
@@ -60,6 +61,7 @@ where
                 self.db.clone(),
                 self.num_pbh_txs,
                 self.entry_point,
+                self.aggregator,
             )
         });
 

@@ -1,4 +1,3 @@
-pub mod bindings;
 pub mod builder;
 pub mod error;
 pub mod noop;
