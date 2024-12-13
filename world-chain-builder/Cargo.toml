@@ -9,6 +9,8 @@ default-run = "world-chain-builder"
 members = ["crates/*"]
 
 [dependencies]
+
+
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
@@ -19,6 +21,7 @@ reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4", f
     "test-utils",
 ] }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
+reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
@@ -64,6 +67,8 @@ alloy-rpc-types = { version = "0.7.3", features = [
 alloy-rlp = "0.3.10"
 alloy-eips = { version = "0.7.3", default-features = false }
 alloy-genesis = { version = "0.7.3", default-features = false }
+alloy-rpc-types-debug = "0.8.0"
+
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }

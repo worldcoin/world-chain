@@ -745,6 +745,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-rpc-types-debug"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fd14f68a482e67dfba52d404dfff1d3b0d9fc3b4775bd0923f3175d7661c3bd"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+]
+
+[[package]]
 name = "alloy-rpc-types-engine"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8661,7 +8671,7 @@ dependencies = [
  "alloy-consensus 0.7.3",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "eyre",
  "futures",
  "jsonrpsee",
@@ -9317,7 +9327,7 @@ dependencies = [
  "alloy-eips 0.7.3",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -9375,7 +9385,7 @@ dependencies = [
  "alloy-consensus 0.7.3",
  "alloy-eips 0.7.3",
  "alloy-primitives",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-eth 0.7.3",
  "jsonrpsee-core",
  "jsonrpsee-types",
@@ -9670,7 +9680,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 0.7.3",
  "alloy-rpc-types-mev",
@@ -9737,7 +9747,7 @@ dependencies = [
  "alloy-rpc-types-admin",
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 0.7.3",
  "alloy-rpc-types-mev",
@@ -13864,6 +13874,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
+ "alloy-rpc-types-debug 0.8.0",
  "alloy-rpc-types-eth 0.7.3",
  "alloy-signer 0.7.3",
  "alloy-signer-local",
@@ -13909,6 +13920,7 @@ dependencies = [
  "reth-prune-types",
  "reth-stages-types",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
  "revm",
