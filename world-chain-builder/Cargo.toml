@@ -16,7 +16,9 @@ members = [
     "crates/world/payload",
     "crates/world/rpc",
     "crates/world/pbh",
-    "crates/world/db", "crates/world/primitives", "crates/world/pool",
+    "crates/world/db",
+    "crates/world/primitives",
+    "crates/world/pool",
 ]
 
 [workspace.lints]
@@ -54,7 +56,7 @@ reth-node-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4", default-features = false}
+reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4", default-features = false }
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 
 # reth-optimism

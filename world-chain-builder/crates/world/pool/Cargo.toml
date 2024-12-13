@@ -37,5 +37,17 @@ thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 
+tempfile = {workspace = true, optional = true}
+
+
+[dev-dependencies]
+ethers-core.workspace = true
+test-case.workspace = true
+tempfile.workspace = true
+
+[features]
+default = []
+test = ["dep:tempfile"]
+
 [lints]
 workspace = true

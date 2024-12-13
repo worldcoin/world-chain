@@ -13,15 +13,15 @@ use reth_primitives::{SealedBlock, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::hash_to_field;
 use semaphore::protocol::verify_proof;
+use world_chain_builder_db::{EmptyValue, ValidatedPbhTransaction};
+use world_chain_builder_pbh::date_marker::DateMarker;
+use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::payload::{PbhPayload, TREE_DEPTH};
 
 use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use world_chain_builder_db::{EmptyValue, ValidatedPbhTransaction};
-use world_chain_builder_pbh::date_marker::DateMarker;
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, TREE_DEPTH};
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -234,11 +234,12 @@ pub mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use semaphore::Field;
     use test_case::test_case;
+    use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 
-    use crate::pbh::payload::{PbhPayload, Proof};
-    use crate::pool::ordering::WorldChainOrdering;
-    use crate::pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
-    use crate::test::{get_pbh_transaction, world_chain_validator};
+    use super::*;
+    use crate::ordering::WorldChainOrdering;
+    use crate::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
+    use crate::test_utils::{get_pbh_transaction, world_chain_validator};
 
     #[tokio::test]
     async fn validate_pbh_transaction() {
