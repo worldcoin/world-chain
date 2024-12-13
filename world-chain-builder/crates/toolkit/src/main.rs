@@ -69,7 +69,7 @@ async fn main() -> eyre::Result<()> {
                 external_nullifier: external_nullifier.to_string(),
                 nullifier_hash,
                 root: inclusion_proof.root,
-                proof: world_chain_builder::pbh::payload::Proof(semaphore_proof),
+                proof: world_chain_builder_pbh::payload::Proof(semaphore_proof),
             };
 
             let encoded = alloy_rlp::encode(proof);

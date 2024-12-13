@@ -1,4 +1,4 @@
-use crate::pbh::payload::PbhPayload;
+use world_chain_builder_pbh::payload::PbhPayload;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rlp::{Decodable, Encodable};

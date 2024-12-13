@@ -21,10 +21,13 @@ reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-evm.workspace = true
 reth-db.workspace = true
+reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-provider.workspace = true
+reth-primitives.workspace = true
+reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # revm
@@ -32,6 +35,8 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 
 # misc

@@ -12,11 +12,17 @@ workspace = true
 
 [dependencies]
 world-chain-builder-pbh.workspace = true
-alloy-eips.workspace = true
-alloy-rlp.workspace = true
+
 reth.workspace = true
 reth-primitives = { workspace = true, features = ["optimism"] }
+
+revm-primitives.workspace = true
+
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+
 tracing.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true

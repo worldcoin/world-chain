@@ -3,7 +3,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use identity_source::IdentitySource;
 use inclusion_proof_source::InclusionProofSource;
-use world_chain_builder::pbh::external_nullifier::Prefix;
+use world_chain_builder_pbh::external_nullifier::Prefix;
 
 pub mod identity_source;
 pub mod inclusion_proof_source;

@@ -43,7 +43,7 @@ use std::{
 };
 use tokio::sync::{broadcast, watch};
 
-use crate::pool::{
+use world_chain_builder_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };

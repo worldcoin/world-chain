@@ -19,14 +19,12 @@ use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_trie_db::MerklePatriciaTrie;
 
-use crate::pool::ordering::WorldChainOrdering;
-use crate::pool::tx::WorldChainPooledTransaction;
-use crate::pool::validator::WorldChainTransactionValidator;
-use crate::{
-    pool::builder::WorldChainPoolBuilder,
-};
+use world_chain_builder_pool::ordering::WorldChainOrdering;
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_builder_pool::validator::WorldChainTransactionValidator;
+use world_chain_builder_pool::builder::WorldChainPoolBuilder;
 use world_chain_builder_payload::builder::WorldChainPayloadServiceBuilder;
-use world_chain_builder_db::db::load_world_chain_db;
+use world_chain_builder_db::load_world_chain_db;
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
 
