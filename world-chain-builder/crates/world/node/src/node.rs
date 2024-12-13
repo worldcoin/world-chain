@@ -23,9 +23,10 @@ use crate::pool::ordering::WorldChainOrdering;
 use crate::pool::tx::WorldChainPooledTransaction;
 use crate::pool::validator::WorldChainTransactionValidator;
 use crate::{
-    payload::builder::WorldChainPayloadServiceBuilder, pbh::db::load_world_chain_db,
     pool::builder::WorldChainPoolBuilder,
 };
+use world_chain_builder_payload::builder::WorldChainPayloadServiceBuilder;
+use world_chain_builder_db::db::load_world_chain_db;
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
 
@@ -67,7 +68,7 @@ impl WorldChainBuilder {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        WorldChainPayloadServiceBuilder,
+        WorldChainPayloadBuilder,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,

@@ -665,6 +665,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-rpc-types-debug"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fd14f68a482e67dfba52d404dfff1d3b0d9fc3b4775bd0923f3175d7661c3bd"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+]
+
+[[package]]
 name = "alloy-rpc-types-engine"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3481,7 +3491,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4458,7 +4468,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.8",
  "tokio",
  "tower-service",
  "tracing",
@@ -5317,7 +5327,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6928,7 +6938,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.8",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8470,7 +8480,7 @@ dependencies = [
  "alloy-consensus 0.7.3",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "eyre",
  "futures",
  "jsonrpsee",
@@ -8961,6 +8971,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-cli"
+version = "1.1.4"
+source = "git+https://github.com/paradigmxyz/reth?tag=v1.1.4#15fac0873e91ea29ab2e605bfba17bedcd7a6084"
+dependencies = [
+ "alloy-consensus 0.7.3",
+ "alloy-eips 0.7.3",
+ "alloy-primitives",
+ "alloy-rlp",
+ "clap 4.5.23",
+ "derive_more",
+ "eyre",
+ "futures-util",
+ "op-alloy-consensus",
+ "reth-chainspec",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-config",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
+ "reth-downloaders",
+ "reth-errors",
+ "reth-execution-types",
+ "reth-fs-util",
+ "reth-network-p2p",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-events",
+ "reth-node-metrics",
+ "reth-optimism-chainspec",
+ "reth-optimism-evm",
+ "reth-optimism-node",
+ "reth-optimism-primitives",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-stages",
+ "reth-stages-types",
+ "reth-static-file",
+ "reth-static-file-types",
+ "reth-tracing",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "reth-optimism-consensus"
 version = "1.1.4"
 source = "git+https://github.com/paradigmxyz/reth?tag=v1.1.4#15fac0873e91ea29ab2e605bfba17bedcd7a6084"
@@ -9080,7 +9140,7 @@ dependencies = [
  "alloy-eips 0.7.3",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -9138,7 +9198,7 @@ dependencies = [
  "alloy-consensus 0.7.3",
  "alloy-eips 0.7.3",
  "alloy-primitives",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-eth 0.7.3",
  "jsonrpsee-core",
  "jsonrpsee-types",
@@ -9433,7 +9493,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 0.7.3",
  "alloy-rpc-types-mev",
@@ -9500,7 +9560,7 @@ dependencies = [
  "alloy-rpc-types-admin",
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-debug",
+ "alloy-rpc-types-debug 0.7.3",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 0.7.3",
  "alloy-rpc-types-mev",
@@ -10403,7 +10463,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11472,7 +11532,7 @@ dependencies = [
  "fastrand",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13077,7 +13137,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -13484,11 +13544,13 @@ dependencies = [
  "alloy-signer-local",
  "clap 4.5.23",
  "color-eyre",
+ "dotenvy",
  "futures",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "parking_lot",
  "reth-basic-payload-builder",
+ "reth-cli-util",
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
@@ -13496,6 +13558,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-optimism-chainspec",
+ "reth-optimism-cli",
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
@@ -13519,6 +13582,8 @@ dependencies = [
  "serde_json",
  "tikv-jemallocator",
  "tokio",
+ "world-chain-builder-node",
+ "world-chain-builder-rpc",
 ]
 
 [[package]]
@@ -13528,7 +13593,7 @@ dependencies = [
  "bytes",
  "reth-db",
  "reth-db-api",
- "revm-primitives",
+ "reth-primitives",
  "semaphore",
  "serde",
  "tracing",
@@ -13582,62 +13647,53 @@ dependencies = [
  "serde_json",
  "tikv-jemallocator",
  "tokio",
+ "world-chain-builder-payload",
 ]
 
 [[package]]
 name = "world-chain-builder-payload"
 version = "0.1.0"
 dependencies = [
- "alloy-consensus 0.7.3",
- "alloy-eips 0.7.3",
- "alloy-genesis",
- "alloy-network 0.7.3",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "alloy-signer-local",
- "clap 4.5.23",
- "color-eyre",
- "futures",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
- "parking_lot",
+ "alloy-rpc-types-debug 0.8.0",
+ "jsonrpsee",
+ "reth",
  "reth-basic-payload-builder",
- "reth-consensus",
+ "reth-chain-state",
  "reth-db",
- "reth-e2e-test-utils",
  "reth-evm",
- "reth-node-builder",
- "reth-node-core",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
  "reth-optimism-payload-builder",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
- "reth-payload-builder",
- "reth-payload-util",
- "reth-payload-validator",
- "reth-primitives",
  "reth-provider",
- "reth-revm",
- "reth-rpc-server-types",
- "reth-tasks",
- "reth-tracing",
- "reth-transaction-pool",
- "reth-trie-db",
+ "reth-trie",
  "revm",
- "serde",
- "serde_json",
- "tokio",
+ "revm-primitives",
+ "tracing",
+ "world-chain-builder-pool",
+ "world-chain-builder-rpc",
 ]
 
 [[package]]
 name = "world-chain-builder-pbh"
 version = "0.1.0"
 dependencies = [
+ "alloy-rlp",
  "chrono",
+ "semaphore",
+ "strum",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "world-chain-builder-pool"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "color-eyre",
+ "reth",
+ "reth-primitives",
+ "reth-provider",
+ "semaphore",
  "thiserror 1.0.69",
 ]
 
@@ -13651,7 +13707,6 @@ dependencies = [
  "alloy-rlp",
  "reth",
  "reth-primitives",
- "revm-primitives",
  "tracing",
  "world-chain-builder-pbh",
 ]

@@ -16,7 +16,7 @@ members = [
     "crates/world/payload",
     "crates/world/rpc",
     "crates/world/pbh",
-    "crates/world/db", "crates/world/primitives",
+    "crates/world/db", "crates/world/primitives", "crates/world/pool",
 ]
 
 [workspace.lints]
@@ -29,6 +29,7 @@ world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-primitives = { path = "crates/world/primitives" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
+world-chain-builder-pool = { path = "crates/world/pool" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
@@ -109,13 +110,7 @@ alloy-signer-local = { version = "0.7.3", default-features = false }
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }
-revm-inspectors = "0.12.0"
-revm-primitives = { version = "14.0.0", features = [
-    "std",
-], default-features = false }
-revm-interpreter = "10"
-revm-precompile = "11"
-
+revm-primitives = { version = "14.0.0", default-features = false }
 
 # 3rd party
 jsonrpsee = { version = "0.24", features = ["server", "macros"] }

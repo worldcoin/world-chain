@@ -4,5 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+alloy-rlp.workspace = true
+
 chrono = { workspace = true }
 thiserror = { workspace = true }
+semaphore.workspace = true
+strum.workspace = true

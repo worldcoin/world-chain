@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 reth-db = { workspace = true }
 reth-db-api = { workspace = true }
-revm-primitives = { workspace = true }
+reth-primitives = { workspace = true, features = ["optimism"] }
 
 semaphore = { workspace = true }
 serde = { workspace = true }

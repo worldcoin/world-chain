@@ -48,9 +48,9 @@ use revm_primitives::{
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
-use crate::pool::noop::NoopWorldChainTransactionPool;
-use crate::pool::tx::WorldChainPoolTransaction;
-use crate::rpc::bundle::validate_conditional_options;
+use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
+use world_chain_builder_pool::tx::WorldChainPoolTransaction;
+use world_chain_builder_rpc::bundle::validate_conditional_options;
 
 /// World Chain payload builder
 #[derive(Debug)]

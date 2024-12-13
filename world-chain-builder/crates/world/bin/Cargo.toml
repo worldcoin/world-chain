@@ -11,8 +11,11 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
+# world-chain
+world-chain-builder-node.workspace = true
+world-chain-builder-rpc.workspace = true
 
+# reth
 reth-db.workspace = true
 
 reth-primitives.workspace = true
@@ -21,7 +24,7 @@ reth-payload-util.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
-
+reth-cli-util.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 reth-provider.workspace = true
@@ -35,6 +38,7 @@ reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, optional = true }
 
 # op-reth
+reth-optimism-cli.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-rpc.workspace = true
@@ -54,6 +58,7 @@ alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
 # misc
+dotenvy.workspace = true
 clap.workspace = true
 serde.workspace = true
 eyre.workspace = true

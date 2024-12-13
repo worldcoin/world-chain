@@ -1,6 +1,5 @@
 pub mod node;
 pub mod args;
-pub mod pool;
 
 // TODO: Conditional compilation?
 // #[cfg(test)]

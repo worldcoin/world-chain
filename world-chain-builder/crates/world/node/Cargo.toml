@@ -11,8 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
+# world-chain-builder
+world-chain-builder-payload.workspace = true
 
+# reth
 reth-db.workspace = true
 
 reth-primitives.workspace = true
