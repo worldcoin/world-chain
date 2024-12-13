@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
 
-use crate::pbh::payload::PbhPayload;
+use world_chain_builder_pbh::payload::PbhPayload;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn pbh_payload(&self) -> Option<&PbhPayload>;

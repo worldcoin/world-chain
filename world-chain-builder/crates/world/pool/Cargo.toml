@@ -8,14 +8,34 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-provider.workspace = true
-reth-primitives.workspace = true
+world-chain-builder-pbh.workspace = true
+world-chain-builder-db.workspace = true
 
+reth.workspace = true
+reth-db.workspace = true
+reth-optimism-node.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-eth-wire-types.workspace = true
+
+reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
+
+revm-primitives.workspace = true
+
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types.workspace = true
+alloy-eips.workspace = true
+
+tokio.workspace = true
 semaphore.workspace = true
 chrono.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
+
+tracing.workspace = true
+parking_lot.workspace = true
 
 [lints]
 workspace = true

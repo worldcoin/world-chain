@@ -10,3 +10,4 @@ chrono = { workspace = true }
 thiserror = { workspace = true }
 semaphore.workspace = true
 strum.workspace = true
+serde.workspace = true

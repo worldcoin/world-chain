@@ -3,7 +3,7 @@ use reth::transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 use reth_db::{DatabaseError, DatabaseWriteOperation};
 use reth_provider::ProviderError;
 
-use crate::pbh::external_nullifier::ExternalNullifierParsingError;
+use world_chain_builder_pbh::external_nullifier::ExternalNullifierParsingError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldChainTransactionPoolInvalid {

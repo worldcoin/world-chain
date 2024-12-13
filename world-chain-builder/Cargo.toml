@@ -54,7 +54,7 @@ reth-node-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4", default-features = false}
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.4" }
 
 # reth-optimism
@@ -118,8 +118,7 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 chrono = "0.4"
 thiserror = "1"
-strum = "0.26"
-strum_macros = "0.26"
+strum = { version = "0.26", features = ["derive"] }
 bytemuck = "1"
 semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "d0d1f899add7116ccc1228f5e5e5ee2e2e233768", features = [
     "depth_30",

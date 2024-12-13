@@ -1,7 +1,7 @@
 use super::validator::WorldChainTransactionPool;
-use crate::pool::ordering::WorldChainOrdering;
-use crate::pool::root::WorldChainRootValidator;
-use crate::pool::validator::WorldChainTransactionValidator;
+use crate::ordering::WorldChainOrdering;
+use crate::root::WorldChainRootValidator;
+use crate::validator::WorldChainTransactionValidator;
 use reth::builder::components::PoolBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;

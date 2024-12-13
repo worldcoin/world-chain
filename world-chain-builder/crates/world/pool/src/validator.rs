@@ -18,10 +18,10 @@ use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid}
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use crate::pbh::date_marker::DateMarker;
-use crate::pbh::db::{EmptyValue, ValidatedPbhTransaction};
-use crate::pbh::external_nullifier::ExternalNullifier;
-use crate::pbh::payload::{PbhPayload, TREE_DEPTH};
+use world_chain_builder_pbh::date_marker::DateMarker;
+use world_chain_builder_db::{EmptyValue, ValidatedPbhTransaction};
+use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::payload::{PbhPayload, TREE_DEPTH};
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<

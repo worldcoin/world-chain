@@ -7,8 +7,10 @@ edition.workspace = true
 reth-db = { workspace = true }
 reth-db-api = { workspace = true }
 reth-primitives = { workspace = true, features = ["optimism"] }
+revm-primitives.workspace = true
 
 semaphore = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
+eyre = { workspace = true }
