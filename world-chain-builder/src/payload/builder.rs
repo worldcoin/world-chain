@@ -23,7 +23,6 @@ use reth_db::DatabaseEnv;
 use reth_evm::system_calls::SystemCaller;
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_cli::ovm_file_codec::TransactionSigned;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::builder::{
@@ -31,7 +30,7 @@ use reth_optimism_payload_builder::builder::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
-use reth_primitives::{proofs, BlockBody, SealedHeader};
+use reth_primitives::{proofs, BlockBody, SealedHeader, TransactionSigned};
 use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ExecutionOutcome,
@@ -167,31 +166,29 @@ where
             best_payload,
         };
 
-        // let builder = WorldChainBuilder {
-        //     pool,
-        //     best: self.best_transactions.clone(),
-        // };
+        let builder = WorldChainBuilder {
+            pool,
+            best: self.inner.best_transactions.clone(),
+        };
 
-        // let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
-        // let state = StateProviderDatabase::new(state_provider);
+        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state = StateProviderDatabase::new(state_provider);
 
-        // if ctx.attributes().no_tx_pool {
-        //     let db = State::builder()
-        //         .with_database(state)
-        //         .with_bundle_update()
-        //         .build();
-        //     builder.build(db, ctx)
-        // } else {
-        //     // sequencer mode we can reuse cachedreads from previous runs
-        //     let db = State::builder()
-        //         .with_database(cached_reads.as_db_mut(state))
-        //         .with_bundle_update()
-        //         .build();
-        //     builder.build(db, ctx)
-        // }
-        // .map(|out| out.with_cached_reads(cached_reads))
-
-        todo!()
+        if ctx.attributes().no_tx_pool {
+            let db = State::builder()
+                .with_database(state)
+                .with_bundle_update()
+                .build();
+            builder.build(db, ctx)
+        } else {
+            // sequencer mode we can reuse cachedreads from previous runs
+            let db = State::builder()
+                .with_database(cached_reads.as_db_mut(state))
+                .with_bundle_update()
+                .build();
+            builder.build(db, ctx)
+        }
+        .map(|out| out.with_cached_reads(cached_reads))
     }
 }
 
