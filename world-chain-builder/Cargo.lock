@@ -13612,6 +13612,7 @@ dependencies = [
  "color-eyre",
  "futures",
  "reth",
+ "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-db",
  "reth-optimism-chainspec",

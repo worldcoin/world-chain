@@ -21,6 +21,7 @@ reth-db.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
+reth-basic-payload-builder.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
