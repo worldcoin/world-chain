@@ -27,7 +27,7 @@ use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{Header, TransactionSigned};
+use reth_primitives::{Header, NodePrimitives, TransactionSigned};
 use reth_provider::CanonStateSubscriptions;
 use reth_trie_db::MerklePatriciaTrie;
 use world_chain_builder_db::load_world_chain_db;
@@ -83,24 +83,12 @@ impl WorldChainBuilder {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<Engine = OpEngineTypes, ChainSpec = OpChainSpec>,
-        >,
-        OpNetworkBuilder: NetworkBuilder<
-            Node,
-            Pool<
-                TransactionValidationTaskExecutor<
-                    WorldChainTransactionValidator<
-                        <Node as FullNodeTypes>::Provider,
-                        WorldChainPooledTransaction,
-                    >,
-                >,
-                WorldChainOrdering<WorldChainPooledTransaction>,
-                DiskFileBlobStore,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
             >,
         >,
-        OpExecutorBuilder: ExecutorBuilder<Node>,
-        OpConsensusBuilder: ConsensusBuilder<Node>,
-        WorldChainPoolBuilder: PoolBuilder<Node>,
     {
         let WorldChainBuilderArgs {
             clear_nullifiers,
@@ -285,9 +273,8 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N::Types>>>
-        + Unpin
-        + 'static,
+    Pool:
+        TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N::Types>>> + Unpin + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(

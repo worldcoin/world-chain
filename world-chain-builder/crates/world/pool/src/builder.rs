@@ -1,7 +1,6 @@
-use super::validator::WorldChainTransactionPool;
-use crate::ordering::WorldChainOrdering;
-use crate::root::WorldChainRootValidator;
-use crate::validator::WorldChainTransactionValidator;
+use std::sync::Arc;
+
+use reth::api::NodeTypesWithEngine;
 use reth::builder::components::PoolBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -9,17 +8,21 @@ use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_db::DatabaseEnv;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
-use std::sync::Arc;
 use tracing::{debug, info};
+
+use super::validator::WorldChainTransactionPool;
+use crate::ordering::WorldChainOrdering;
+use crate::root::WorldChainRootValidator;
+use crate::validator::WorldChainTransactionValidator;
 
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct WorldChainPoolBuilder {
     pub clear_nullifiers: bool,
     pub num_pbh_txs: u16,

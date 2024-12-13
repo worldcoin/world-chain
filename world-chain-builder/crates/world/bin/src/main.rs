@@ -2,9 +2,8 @@ use clap::Parser;
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
 use world_chain_builder_node::args::ExtArgs;
-use world_chain_builder_node::builder::WorldChainBuilder;
-use world_chain_builder_rpc::bundle::EthTransactionsExtServer;
-use world_chain_builder_rpc::bundle::WorldChainEthApiExt;
+use world_chain_builder_node::node::WorldChainBuilder;
+use world_chain_builder_rpc::bundle::{EthTransactionsExtServer, WorldChainEthApiExt};
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
