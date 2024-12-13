@@ -30,11 +30,12 @@ use reth_optimism_payload_builder::builder::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
-use reth_primitives::{proofs, BlockBody, SealedHeader, TransactionSigned};
+use reth_primitives::{proofs, BlockBody, BlockExt, SealedHeader, TransactionSigned};
 use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
     BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, StateProviderFactory, StateRootProvider,
+    HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_transaction_pool::{noop::NoopTransactionPool, pool::BestPayloadTransactions};
 use reth_trie::HashedPostState;
@@ -466,7 +467,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider,
+        P: StateProofProvider,
     {
         let _ = self.execute(state, ctx)?;
         let ExecutionWitnessRecord {
