@@ -28,19 +28,37 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
             let data_dir = builder.config().datadir();
+            // let handle = builder
+            //     .node(WorldChainBuilder::new(
+            //         builder_args.clone(),
+            //         data_dir.data_dir(),
+            //     )?)
+            //     .extend_rpc_modules(move |ctx| {
+            //         let provider = ctx.provider().clone();
+            //         let pool = ctx.pool().clone();
+            //         let eth_api_ext = WorldChainEthApiExt::new(pool, provider);
+            //         ctx.modules.merge_configured(eth_api_ext.into_rpc())?;
+            //         Ok(())
+            //     })
+            //     .launch()
+            //     .await?;
+
+            let engine_tree_config = TreeConfig::default()
+                .with_persistence_threshold(rollup_args.persistence_threshold)
+                .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
+
             let handle = builder
-                .node(WorldChainBuilder::new(
-                    builder_args.clone(),
-                    data_dir.data_dir(),
-                )?)
-                .extend_rpc_modules(move |ctx| {
-                    let provider = ctx.provider().clone();
-                    let pool = ctx.pool().clone();
-                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider);
-                    ctx.modules.merge_configured(eth_api_ext.into_rpc())?;
-                    Ok(())
+                .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+                .with_components(OpNode::components(rollup_args.clone()))
+                .with_add_ons(OpNode::new(rollup_args).add_ons())
+                .launch_with_fn(|builder| {
+                    let launcher = EngineNodeLauncher::new(
+                        builder.task_executor().clone(),
+                        builder.config().datadir(),
+                        engine_tree_config,
+                    );
+                    builder.launch_with(launcher)
                 })
-                .launch()
                 .await?;
 
             handle.node_exit_future.await

@@ -22,10 +22,7 @@ use reth_trie_db::MerklePatriciaTrie;
 use crate::pool::ordering::WorldChainOrdering;
 use crate::pool::tx::WorldChainPooledTransaction;
 use crate::pool::validator::WorldChainTransactionValidator;
-use crate::{
-    payload::builder::WorldChainPayloadServiceBuilder, pbh::db::load_world_chain_db,
-    pool::builder::WorldChainPoolBuilder,
-};
+use crate::{pbh::db::load_world_chain_db, pool::builder::WorldChainPoolBuilder};
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
 
