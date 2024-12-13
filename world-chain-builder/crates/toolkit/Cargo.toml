@@ -4,26 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "d0d1f899add7116ccc1228f5e5e5ee2e2e233768", features = [
-    "depth_30",
-] }
-world-chain-builder = { path = "../.." }
+semaphore = { workspace = true, features = ["depth_30"] }
+world-chain-builder-pbh = { workspace = true }
 
 # Alloy
-alloy-consensus = "0.3"
-alloy-network = "0.3"
-alloy-primitives = "0.8"
-alloy-rlp = "0.3"
+alloy-consensus = { workspace = true }
+alloy-network = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
 
 # 3rd party
-bytes = "1.7.2"
-clap = { version = "4", features = ["derive", "env"] }
-eyre = { version = "0.6", package = "color-eyre" }
-hex = "0.4.3"
-reqwest = "0.12"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
-dotenvy = "0.15.7"
-chrono = "0.4"
-rand = "0.8.5"
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+eyre = { workspace = true }
+hex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+dotenvy = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }

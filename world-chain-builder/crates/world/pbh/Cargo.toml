@@ -1,0 +1,8 @@
+[package]
+name = "world-chain-builder-pbh"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+thiserror = { workspace = true }

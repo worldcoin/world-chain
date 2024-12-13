@@ -7,9 +7,9 @@ use semaphore::identity::Identity;
 use semaphore::poseidon_tree::Proof;
 use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
-use world_chain_builder::pbh::date_marker::DateMarker;
-use world_chain_builder::pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder::pbh::payload::PbhPayload;
+use world_chain_builder_pbh::date_marker::DateMarker;
+use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::payload::PbhPayload;
 
 mod cli;
 

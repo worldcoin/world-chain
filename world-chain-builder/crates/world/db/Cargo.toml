@@ -1,0 +1,14 @@
+[package]
+name = "world-chain-builder-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reth-db = { workspace = true }
+reth-db-api = { workspace = true }
+revm-primitives = { workspace = true }
+
+semaphore = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }

@@ -1,0 +1,84 @@
+[package]
+name = "world-chain-builder-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+
+reth-db.workspace = true
+
+reth-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-util.workspace = true
+reth-payload-validator.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-consensus.workspace = true
+
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+
+reth-evm.workspace = true
+reth-revm = { workspace = true, features = ["std"] }
+
+reth-trie-db.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tasks = { workspace = true, optional = true }
+
+# op-reth
+reth-optimism-payload-builder.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-rpc.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
+
+# revm with required optimism features
+revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+
+# misc
+clap.workspace = true
+serde.workspace = true
+eyre.workspace = true
+parking_lot.workspace = true
+
+# rpc
+serde_json.workspace = true
+
+# test-utils dependencies
+reth-e2e-test-utils = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-db.workspace = true
+reth-node-core.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
+
+alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
+alloy-signer-local.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true
+futures.workspace = true
