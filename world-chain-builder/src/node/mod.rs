@@ -15,7 +15,7 @@ use reth_optimism_node::{
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 
-use crate::{payload::builder::WorldChainPayloadBuilder, pool::builder::WorldChainPoolBuilder};
+use crate::pool::builder::WorldChainPoolBuilder;
 
 pub mod args;
 pub mod builder;
@@ -173,5 +173,128 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOn
     /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
     pub fn builder() -> OpAddOnsBuilder {
         OpAddOnsBuilder::default()
+    }
+}
+
+/// A basic optimism payload service builder
+#[derive(Debug, Default, Clone)]
+pub struct WorldChainPayloadBuilder<Txs = ()> {
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    pub compute_pending_block: bool,
+    /// The type responsible for yielding the best transactions for the payload if mempool
+    /// transactions are allowed.
+    pub best_transactions: Txs,
+
+    // TODO:
+    pub verified_blockspace_capacity: usize,
+}
+
+impl WorldChainPayloadBuilder {
+    /// Create a new instance with the given `compute_pending_block` flag.
+    pub const fn new(compute_pending_block: bool, verified_blockspace_capacity: u8) -> Self {
+        Self {
+            compute_pending_block,
+            best_transactions: (),
+            verified_blockspace_capacity,
+        }
+    }
+}
+
+impl<Txs> WorldChainPayloadBuilder<Txs>
+where
+    Txs: OpPayloadTransactions,
+{
+    /// Configures the type responsible for yielding the transactions that should be included in the
+    /// payload.
+    pub fn with_transactions<T: OpPayloadTransactions>(
+        self,
+        best_transactions: T,
+    ) -> OpPayloadBuilder<T> {
+        let Self {
+            compute_pending_block,
+            ..
+        } = self;
+        OpPayloadBuilder {
+            compute_pending_block,
+            best_transactions,
+        }
+    }
+
+    /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
+    pub fn spawn<Node, Evm, Pool>(
+        self,
+        evm_config: Evm,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
+    where
+        Node: FullNodeTypes<
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
+        >,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
+        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    {
+        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
+            .with_transactions(self.best_transactions)
+            .set_compute_pending_block(self.compute_pending_block);
+        let conf = ctx.payload_builder_config();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks())
+            // no extradata for OP
+            .extradata(Default::default());
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            pool,
+            ctx.task_executor().clone(),
+            payload_job_config,
+            payload_builder,
+        );
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        ctx.task_executor()
+            .spawn_critical("payload builder service", Box::pin(payload_service));
+
+        Ok(payload_builder)
+    }
+}
+
+impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+where
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
+    Txs: OpPayloadTransactions,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
+        self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
