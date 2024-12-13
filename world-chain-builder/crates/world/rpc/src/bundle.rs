@@ -1,4 +1,4 @@
-use crate::pool::tx::WorldChainPooledTransaction;
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashMap, StorageKey};

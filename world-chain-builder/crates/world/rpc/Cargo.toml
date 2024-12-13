@@ -11,3 +11,16 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+world-chain-builder-pool.workspace = true
+
+reth.workspace = true
+
+reth-provider.workspace = true
+revm-primitives.workspace = true
+alloy-consensus.workspace = true
+
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types.workspace = true
+
+jsonrpsee.workspace = true

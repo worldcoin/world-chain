@@ -13732,6 +13732,17 @@ dependencies = [
 [[package]]
 name = "world-chain-builder-rpc"
 version = "0.1.0"
+dependencies = [
+ "alloy-consensus 0.7.3",
+ "alloy-eips 0.7.3",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "jsonrpsee",
+ "reth",
+ "reth-provider",
+ "revm-primitives",
+ "world-chain-builder-pool",
+]
 
 [[package]]
 name = "write16"
