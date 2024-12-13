@@ -1,4 +1,3 @@
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashMap, StorageKey};
@@ -15,6 +14,7 @@ use reth::{
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 
 /// Trait interface for `eth_sendRawTransactionConditional`
 #[cfg_attr(not(test), rpc(server, namespace = "eth"))]

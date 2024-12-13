@@ -4,20 +4,24 @@ use std::sync::Arc;
 use eyre::eyre::Result;
 use reth::api::{ConfigureEvm, TxTy};
 use reth::builder::components::{
-    ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder
+    ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder,
+    PoolBuilder,
 };
 use reth::builder::{
-    BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes, NodeTypesWithEngine, PayloadBuilderConfig
+    BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
+    NodeTypesWithEngine, PayloadBuilderConfig,
 };
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::{Pool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor};
+use reth::transaction_pool::{
+    Pool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
+};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_db::DatabaseEnv;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpStorage
+    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpStorage,
 };
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
@@ -212,11 +216,14 @@ where
         self,
         best_transactions: T,
     ) -> WorldChainPayloadBuilder<T> {
-        let WorldChainPayloadBuilder { inner, verified_blockspace_capacity } = self;
+        let WorldChainPayloadBuilder {
+            inner,
+            verified_blockspace_capacity,
+        } = self;
 
         WorldChainPayloadBuilder {
             inner: inner.with_transactions(best_transactions),
-            verified_blockspace_capacity
+            verified_blockspace_capacity,
         }
     }
 
