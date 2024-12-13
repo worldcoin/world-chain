@@ -276,23 +276,23 @@ where
     }
 }
 
-impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+impl<N, Pool, Txs> PayloadServiceBuilder<N, Pool> for WorldChainPayloadBuilder<Txs>
 where
-    Node: FullNodeTypes<
+    N: FullNodeTypes<
         Types: NodeTypesWithEngine<
             Engine = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N::Types>>>
         + Unpin
         + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
         self,
-        ctx: &BuilderContext<Node>,
+        ctx: &BuilderContext<N>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
         self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
