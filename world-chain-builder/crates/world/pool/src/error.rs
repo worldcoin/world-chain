@@ -2,25 +2,16 @@ use reth::transaction_pool::error::{InvalidPoolTransactionError, PoolTransaction
 use reth::transaction_pool::{PoolTransaction, TransactionValidationOutcome};
 use reth_db::{DatabaseError, DatabaseWriteOperation};
 use reth_provider::ProviderError;
-
 use world_chain_builder_pbh::external_nullifier::ExternalNullifierParsingError;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WorldChainTransactionPoolInvalid {
-    #[error("nullifier has already been seen")]
-    NullifierAlreadyExists,
     #[error("invalid external nullifier - {0}")]
     InvalidExternalNullifier(ExternalNullifierParsingError),
-    #[error("invalid external nullifier prefix")]
-    InvalidExternalNullifierPrefix,
     #[error("invalid external nullifier period")]
     InvalidExternalNullifierPeriod,
     #[error("invalid external nullifier nonce")]
     InvalidExternalNullifierNonce,
-    #[error("invalid nullifier hash")]
-    InvalidNullifierHash,
-    #[error("invalid signal hash")]
-    InvalidSignalHash,
     #[error("invalid semaphore proof")]
     InvalidSemaphoreProof,
     #[error("duplicate tx hash")]
@@ -29,7 +20,7 @@ pub enum WorldChainTransactionPoolInvalid {
     InvalidRoot,
     #[error(transparent)]
     MalformedSignature(#[from] alloy_rlp::Error),
-    #[error("One or more user ops are missing pbh payloads")]
+    #[error("one or more user ops are missing pbh payloads")]
     MissingPbhPayload,
 }
 
