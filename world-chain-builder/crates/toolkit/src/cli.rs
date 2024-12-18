@@ -40,6 +40,7 @@ pub struct ProveArgs {
     #[clap(value_parser = utils::bytes_parse_hex)]
     pub tx: Bytes,
 
+    // TODO: Remove?
     /// The PBH prefix
     #[clap(long, default_value = "v1")]
     pub prefix: Prefix,
@@ -49,7 +50,7 @@ pub struct ProveArgs {
     /// should be in range 0-30 otherwise the tx will be discarded as invalid
     #[clap(short = 'N', long)]
     #[clap(alias = "nonce")]
-    pub pbh_nonce: u16,
+    pub pbh_nonce: u8,
 
     /// Overrides the current date for PBH proof generation
     /// Format: "YYYY-MM-DD"

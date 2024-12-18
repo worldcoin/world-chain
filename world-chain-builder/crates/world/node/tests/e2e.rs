@@ -163,7 +163,7 @@ impl WorldChainBuilderTestContext {
     pub async fn raw_pbh_tx_bytes(
         &self,
         signer: PrivateKeySigner,
-        pbh_nonce: u16,
+        pbh_nonce: u8,
         tx_nonce: u64,
     ) -> Bytes {
         let tx = tx(DEV_CHAIN_ID, None, tx_nonce);
@@ -193,10 +193,10 @@ impl WorldChainBuilderTestContext {
         identity: Address,
         tx_hash: &[u8],
         time: chrono::DateTime<Utc>,
-        pbh_nonce: u16,
+        pbh_nonce: u8,
     ) -> PbhPayload {
         let external_nullifier =
-            ExternalNullifier::new(Prefix::V1, DateMarker::from(time), pbh_nonce).to_string();
+            ExternalNullifier::with_date_marker(DateMarker::from(time), pbh_nonce).to_string();
 
         self.create_proof(identity, external_nullifier, tx_hash)
     }
