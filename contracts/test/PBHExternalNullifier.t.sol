@@ -13,7 +13,7 @@ contract PBHExternalNullifierLibTest is Test {
     uint8 constant MAX_PBH_PER_MONTH = 10;
 
     function testEncodeDecodeValidInput() public {
-        uint8 version = PBHExternalNullifier.V1;
+        uint8 version = VALID_VERSION;
         uint8 pbhNonce = VALID_PBH_NONCE;
         uint8 month = VALID_MONTH;
         uint16 year = VALID_YEAR;
