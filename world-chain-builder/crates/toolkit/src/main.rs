@@ -66,7 +66,7 @@ async fn main() -> eyre::Result<()> {
                 semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
 
             let proof = PbhPayload {
-                external_nullifier: external_nullifier.to_string(),
+                external_nullifier: external_nullifier,
                 nullifier_hash,
                 root: inclusion_proof.root,
                 proof: world_chain_builder_pbh::payload::Proof(semaphore_proof),

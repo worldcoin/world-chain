@@ -206,6 +206,8 @@ impl WorldChainBuilderTestContext {
         external_nullifier: String,
         signal: &[u8],
     ) -> PbhPayload {
+        let external_nullifier: ExternalNullifier = external_nullifier.parse().unwrap();
+
         let idx = self.identities.get(&identity).unwrap();
         let secret = identity.as_mut_slice();
         // generate identity
@@ -213,7 +215,7 @@ impl WorldChainBuilderTestContext {
         let merkle_proof = self.tree.proof(*idx);
 
         let signal_hash = hash_to_field(signal);
-        let external_nullifier_hash = hash_to_field(external_nullifier.as_bytes());
+        let external_nullifier_hash = external_nullifier.hash();
         let nullifier_hash = generate_nullifier_hash(&id, external_nullifier_hash);
 
         let proof = Proof(
