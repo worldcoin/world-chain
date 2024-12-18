@@ -1,3 +1,6 @@
+use std::fmt::Display;
+use std::sync::Arc;
+
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
@@ -7,8 +10,7 @@ use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::witness::ExecutionWitnessRecord;
-use reth::revm::DatabaseCommit;
-use reth::revm::State;
+use reth::revm::{DatabaseCommit, State};
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
@@ -25,27 +27,23 @@ use reth_optimism_payload_builder::builder::{
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_primitives::{
-    proofs, BlockBody, BlockExt, InvalidTransactionError, SealedHeader, TransactionSigned,
+    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, Receipt, SealedHeader,
+    TransactionSigned, TxType,
 };
-use reth_primitives::{Block, Header, Receipt, TxType};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider,
 };
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
-use revm::Database;
+use revm::{Database, StateBuilder};
 use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
-    ResultAndState, U256,
+    BlockEnv, Bytes, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+    ResultAndState, TxEnv, B256, U256,
 };
-use revm_primitives::{Bytes, TxEnv, B256};
-use std::fmt::Display;
-use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
-
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
 use world_chain_builder_rpc::eth::validate_conditional_options;
 
@@ -199,21 +197,24 @@ where
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
 
-        if ctx.attributes().no_tx_pool {
+        let build_outcome = if ctx.attributes().no_tx_pool {
             let db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
                 .build();
-            builder.build(db, ctx)
+
+            builder.build(db, ctx)?
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             let db = State::builder()
                 .with_database(cached_reads.as_db_mut(state))
                 .with_bundle_update()
                 .build();
-            builder.build(db, ctx)
-        }
-        .map(|out| out.with_cached_reads(cached_reads))
+
+            builder.build(db, ctx)?
+        };
+
+        Ok(build_outcome.with_cached_reads(cached_reads))
     }
 }
 
