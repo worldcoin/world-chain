@@ -79,14 +79,14 @@ contract PBHVerifierVerify is PBHVerifierTest {
         // Value starts at 30, make sure 30 reverts.
         uint256 pbhExternalNullifier = PBHExternalNullifier.encode(30, month, year);
         uint256 nullifierHash = 0;
-        vm.expectRevert();
+        vm.expectRevert(PBHExternalNullifier.InvalidPbhNonce.selector);
         PBHVerifierImpl(address(pbhVerifier)).verifyPbhProof(
             root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof
         );
 
         // Increase numPbhPerMonth from non owner, expect revert
         vm.prank(address(123));
-        vm.expectRevert();
+        vm.expectRevert("Ownable: caller is not the owner");
         PBHVerifierImpl(address(pbhVerifier)).setNumPbhPerMonth(40);
 
         // Increase numPbhPerMonth from owner
