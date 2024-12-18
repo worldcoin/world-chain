@@ -19,7 +19,8 @@ contract PBHExternalNullifierLibTest is Test {
         uint16 year = VALID_YEAR;
 
         uint256 encoded = PBHExternalNullifier.encode(version, pbhNonce, month, year);
-        (uint8 decodedVersion, uint8 decodedNonce, uint8 decodedMonth, uint16 decodedYear) = PBHExternalNullifier.decode(encoded);
+        (uint8 decodedVersion, uint8 decodedNonce, uint8 decodedMonth, uint16 decodedYear) =
+            PBHExternalNullifier.decode(encoded);
 
         assertEq(decodedVersion, version, "Decoded version should match the original");
         assertEq(decodedNonce, pbhNonce, "Decoded nonce should match the original");
@@ -97,12 +98,7 @@ contract PBHExternalNullifierLibTest is Test {
         uint256 timestamp = BokkyPooBahsDateTimeLibrary.timestampFromDateTime(VALID_YEAR, VALID_MONTH, 1, 0, 0, 0);
         vm.warp(timestamp);
 
-        uint256 encoded = PBHExternalNullifier.encode(
-            2,
-            VALID_PBH_NONCE,
-            VALID_MONTH,
-            VALID_YEAR
-        );
+        uint256 encoded = PBHExternalNullifier.encode(2, VALID_PBH_NONCE, VALID_MONTH, VALID_YEAR);
 
         vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierVersion.selector);
         PBHExternalNullifier.verify(encoded, MAX_PBH_PER_MONTH);

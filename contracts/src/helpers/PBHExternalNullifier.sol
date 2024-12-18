@@ -30,7 +30,7 @@ library PBHExternalNullifier {
     /// nullifier pbhNonce >= numPbhPerMonth
     error InvalidPbhNonce();
 
-    uint8 constant public V1 = 1;
+    uint8 public constant V1 = 1;
 
     /// @notice Encodes a PBH external nullifier using the provided year, month, and nonce.
     /// @param pbhNonce An 8-bit nonce value (0-255) used to uniquely identify the nullifier within a month.
@@ -48,7 +48,11 @@ library PBHExternalNullifier {
     /// @return pbhNonce The 8-bit nonce extracted from the external nullifier.
     /// @return month The 8-bit month extracted from the external nullifier.
     /// @return year The 16-bit year extracted from the external nullifier.
-    function decode(uint256 externalNullifier) internal pure returns (uint8 version, uint8 pbhNonce, uint8 month, uint16 year) {
+    function decode(uint256 externalNullifier)
+        internal
+        pure
+        returns (uint8 version, uint8 pbhNonce, uint8 month, uint16 year)
+    {
         year = uint16(externalNullifier >> 24);
         month = uint8((externalNullifier >> 16) & 0xFF);
         pbhNonce = uint8((externalNullifier >> 8) & 0xFF);
