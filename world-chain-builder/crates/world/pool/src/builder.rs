@@ -28,11 +28,7 @@ pub struct WorldChainPoolBuilder {
 }
 
 impl WorldChainPoolBuilder {
-    pub fn new(
-        num_pbh_txs: u8,
-        pbh_validator: Address,
-        pbh_signature_aggregator: Address,
-    ) -> Self {
+    pub fn new(num_pbh_txs: u8, pbh_validator: Address, pbh_signature_aggregator: Address) -> Self {
         Self {
             num_pbh_txs,
             pbh_validator,
