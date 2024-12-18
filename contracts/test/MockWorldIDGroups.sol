@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@world-id-contracts/interfaces/IWorldIDGroups.sol";
+import {IWorldIDGroups} from "@world-id-contracts/interfaces/IWorldIDGroups.sol";
 
 contract MockWorldIDGroups is IWorldIDGroups {
     bool public verifyProofSuccess = true;

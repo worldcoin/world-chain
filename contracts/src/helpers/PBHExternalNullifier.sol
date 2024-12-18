@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
-/// @title PBHExternalNullifierLib
+/// @title PBHExternalNullifier
 /// @notice Library for encoding, decoding, and verifying PBH external nullifiers.
 ///         External nullifiers are used to uniquely identify actions or events
 ///         within a specific year and month using a nonce.
@@ -51,6 +51,8 @@ library PBHExternalNullifier {
     /// @param numPbhPerMonth The maximum allowed value for the `pbhNonce` in the nullifier.
     /// @dev This function ensures the external nullifier matches the current year and month,
     ///      and that the nonce does not exceed `numPbhPerMonth`.
+    /// @custom:reverts Reverts if the current block timestamp does not match
+    /// the provided month/year or if pbhNonce !<  numPbhPerMonth.
     function verify(uint256 externalNullifier, uint8 numPbhPerMonth) public view {
         (uint8 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
         require(year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp), InvalidExternalNullifierYear());
