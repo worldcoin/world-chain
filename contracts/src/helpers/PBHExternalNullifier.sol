@@ -8,11 +8,11 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 ///         External nullifiers are used to uniquely identify actions or events
 ///         within a specific year and month using a nonce.
 /// @dev The encoding format is as follows:
-///      - Bits 255-248: Version
-///      - Bits:32-247: Empty
-///      - Bits 16-31: Year
-///      - Bits 8-15: Month
-///      - Bits 0-7: Nonce
+///      - Bits:40-255: Empty
+///      - Bits 32-39: Year
+///      - Bits 16-31: Month
+///      - Bits 8-15: Nonce
+///      - Bits 0-7: Version
 library PBHExternalNullifier {
     /// @notice Thrown when the provided external nullifier version
     /// is not equal to V1 - the only currently supported version
@@ -39,7 +39,7 @@ library PBHExternalNullifier {
     /// @return The encoded PBHExternalNullifier.
     function encode(uint8 version, uint8 pbhNonce, uint8 month, uint16 year) internal pure returns (uint256) {
         require(month > 0 && month < 13, InvalidExternalNullifierMonth());
-        return (uint256(version) << 248 | uint256(year) << 16) | (uint256(month) << 8) | uint256(pbhNonce);
+        return (uint256(year) << 24) | (uint256(month) << 16) | (uint256(pbhNonce) << 8) | uint256(version);
     }
 
     /// @notice Decodes an encoded PBHExternalNullifier into its constituent components.
@@ -49,10 +49,10 @@ library PBHExternalNullifier {
     /// @return month The 8-bit month extracted from the external nullifier.
     /// @return year The 16-bit year extracted from the external nullifier.
     function decode(uint256 externalNullifier) internal pure returns (uint8 version, uint8 pbhNonce, uint8 month, uint16 year) {
-        version = uint8(externalNullifier >> 248);
-        year = uint16(externalNullifier >> 16);
-        month = uint8((externalNullifier >> 8) & 0xFF);
-        pbhNonce = uint8(externalNullifier & 0xFF);
+        year = uint16(externalNullifier >> 24);
+        month = uint8((externalNullifier >> 16) & 0xFF);
+        pbhNonce = uint8((externalNullifier >> 8) & 0xFF);
+        version = uint8(externalNullifier & 0xFF);
     }
 
     /// @notice Verifies the validity of a PBHExternalNullifier by checking its components.

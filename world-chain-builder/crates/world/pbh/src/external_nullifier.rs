@@ -51,11 +51,11 @@ impl ExternalNullifier {
 
         let mut bytes = [0; 32];
 
-        bytes[31] = self.version as u8;
-        bytes[3] = year_bytes[1];
-        bytes[2] = year_bytes[0];
-        bytes[1] = self.month;
-        bytes[0] = self.nonce;
+        bytes[4] = year_bytes[1];
+        bytes[3] = year_bytes[0];
+        bytes[2] = self.month;
+        bytes[1] = self.nonce;
+        bytes[0] = self.version as u8;
 
         bytes
     }
@@ -65,19 +65,19 @@ impl ExternalNullifier {
     }
 
     pub fn try_from_bytes(bytes: [u8; 32]) -> Option<Self> {
-        let version = if bytes[31] == Prefix::V1 as u8 {
+        let version = if bytes[0] == Prefix::V1 as u8 {
             Prefix::V1
         } else {
             return None;
         };
 
         let mut year_bytes = [0; 2];
-        year_bytes[1] = bytes[3];
-        year_bytes[0] = bytes[2];
+        year_bytes[1] = bytes[4];
+        year_bytes[0] = bytes[3];
         let year = u16::from_be_bytes(year_bytes);
 
-        let month = bytes[1];
-        let nonce = bytes[0];
+        let month = bytes[2];
+        let nonce = bytes[1];
 
         Some(Self {
             version,
