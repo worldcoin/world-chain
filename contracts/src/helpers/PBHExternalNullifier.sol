@@ -55,6 +55,6 @@ library PBHExternalNullifier {
         (uint8 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
         require(year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp), InvalidExternalNullifierYear());
         require(month == BokkyPooBahsDateTimeLibrary.getMonth(block.timestamp), InvalidExternalNullifierMonth());
-        require(pbhNonce <= numPbhPerMonth, InvalidPbhNonce());
+        require(pbhNonce < numPbhPerMonth, InvalidPbhNonce());
     }
 }

@@ -2,20 +2,14 @@
 pragma solidity ^0.8.21;
 
 import {PBHVerifierTest} from "./PBHVerifierTest.sol";
-import {IWorldIDGroups} from "@world-id-contracts/interfaces/IWorldIDGroups.sol";
-
 import {CheckInitialized} from "@world-id-contracts/utils/CheckInitialized.sol";
-import {Ownable2StepUpgradeable} from "contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {OwnableUpgradeable} from "contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {UUPSUpgradeable} from "contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
 import {MockWorldIDGroups} from "./MockWorldIDGroups.sol";
 import {ByteHasher} from "@helpers/ByteHasher.sol";
-import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
-import "@helpers/PBHExternalNullifier.sol";
-
 import {PBHVerifierImplV1 as PBHVerifierImpl} from "../src/PBHVerifierImplV1.sol";
 import {PBHVerifier} from "../src/PBHVerifier.sol";
+import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
+import "@helpers/PBHExternalNullifier.sol";
 
 /// @title PBHVerifer Verify Tests
 /// @notice Contains tests for the pbhVerifier
@@ -36,7 +30,6 @@ contract PBHVerifierVerify is PBHVerifierTest {
     address internal sender = address(0x123);
     uint256 internal root = 1;
     uint256 internal nonce = 1;
-    uint256 internal nullifierHash = 1;
     bytes internal testCallData = hex"deadbeef";
     uint256[8] internal proof = [uint256(0), 0, 0, 0, 0, 0, 0, 0];
 
@@ -48,6 +41,7 @@ contract PBHVerifierVerify is PBHVerifierTest {
 
     /// @notice Test that a valid proof is verified correctly.
     function testVerifyPbhProofSuccess() public {
+        uint256 nullifierHash = 0;
         uint256 pbhExternalNullifier = getValidPBHExternalNullifier();
 
         // Expect revert when proof verification fails
@@ -71,6 +65,39 @@ contract PBHVerifierVerify is PBHVerifierTest {
 
         // Now try to use the same nullifier hash again
         vm.expectRevert(PBHVerifierImpl.InvalidNullifier.selector);
+        PBHVerifierImpl(address(pbhVerifier)).verifyPbhProof(
+            root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof
+        );
+    }
+
+    /// @notice Test that setNumPBHPerMonth works as expected
+    function testSetNumPBHPerMonth() public {
+        MockWorldIDGroups(address(worldID)).setVerifyProofSuccess(true);
+        uint8 month = uint8(BokkyPooBahsDateTimeLibrary.getMonth(block.timestamp));
+        uint16 year = uint16(BokkyPooBahsDateTimeLibrary.getYear(block.timestamp));
+
+        // Value starts at 30, make sure 30 reverts.
+        uint256 pbhExternalNullifier = PBHExternalNullifier.encode(30, month, year);
+        uint256 nullifierHash = 0;
+        vm.expectRevert();
+        PBHVerifierImpl(address(pbhVerifier)).verifyPbhProof(
+            root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof
+        );
+
+        // Increase numPbhPerMonth from non owner, expect revert
+        vm.prank(address(123));
+        vm.expectRevert();
+        PBHVerifierImpl(address(pbhVerifier)).setNumPbhPerMonth(40);
+
+        // Increase numPbhPerMonth from owner
+        vm.prank(thisAddress);
+        PBHVerifierImpl(address(pbhVerifier)).setNumPbhPerMonth(40);
+
+        // Try again, it should work
+        pbhExternalNullifier = PBHExternalNullifier.encode(30, month, year);
+        nullifierHash = 1;
+        vm.expectEmit(true, true, true, true);
+        emit PBH(root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof);
         PBHVerifierImpl(address(pbhVerifier)).verifyPbhProof(
             root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof
         );
