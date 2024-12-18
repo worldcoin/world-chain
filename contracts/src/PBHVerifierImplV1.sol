@@ -194,4 +194,11 @@ contract PBHVerifierImplV1 is WorldIDImpl {
 
         emit PBH(root, sender, nonce, callData, pbhExternalNullifier, nullifierHash, proof);
     }
+
+    /// @notice Sets a new value for numPbhPerMonth.
+    /// @param _newValue The new value set.
+    /// @dev Can only be set by the owner.
+    function setNumPbhPerMonth(uint8 _newValue) external virtual onlyOwner onlyProxy onlyInitialized {
+        numPbhPerMonth = _newValue;
+    }
 }
