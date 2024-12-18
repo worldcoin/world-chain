@@ -36,7 +36,7 @@ contract PBHVerifierVerify is PBHVerifierTest {
     function getValidPBHExternalNullifier() public view returns (uint256) {
         uint8 month = uint8(BokkyPooBahsDateTimeLibrary.getMonth(block.timestamp));
         uint16 year = uint16(BokkyPooBahsDateTimeLibrary.getYear(block.timestamp));
-        return PBHExternalNullifier.encode(0, month, year);
+        return PBHExternalNullifier.encode(PBHExternalNullifier.V1, 0, month, year);
     }
 
     /// @notice Test that a valid proof is verified correctly.
