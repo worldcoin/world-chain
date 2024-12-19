@@ -1,24 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-import {PBHVerifierTest} from "./PBHVerifierTest.sol";
+import {Setup} from "./Setup.sol";
 import {IWorldIDGroups} from "@world-id-contracts/interfaces/IWorldIDGroups.sol";
 
 import {CheckInitialized} from "@world-id-contracts/utils/CheckInitialized.sol";
-import {Ownable2StepUpgradeable} from "contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {OwnableUpgradeable} from "contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {UUPSUpgradeable} from "contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
 
-import {PBHVerifierImplV1 as PBHVerifierImpl} from "../src/PBHVerifierImplV1.sol";
 import {PBHVerifier} from "../src/PBHVerifier.sol";
 
-/// @title World ID PBHVerifer Routing Tests
+/// @title World ID PBHEntryPoint Routing Tests
 /// @notice Contains tests for the WorldID pbhVerifier
 /// @author Worldcoin
 /// @dev This test suite tests both the proxy and the functionality of the underlying implementation
 ///      so as to test everything in the context of how it will be deployed.
-contract PBHVerifierRouting is PBHVerifierTest {
+contract PBHVerifierRouting is Setup {
+    address internal pbhEntryPointAddress;
+
+    function setUp() public override {
+        super.setUp();
+        pbhEntryPointAddress = address(pbhEntryPoint);
+    }
+
     /// @notice Taken from OwnableUpgradable.sol
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -30,7 +36,7 @@ contract PBHVerifierRouting is PBHVerifierTest {
         bytes memory expectedReturn = abi.encode(address(this));
 
         // Test
-        assertCallSucceedsOn(pbhVerifierAddress, callData, expectedReturn);
+        assertCallSucceedsOn(pbhEntryPointAddress, callData, expectedReturn);
     }
 
     /// @notice Tests that it is possible to transfer ownership of the contract.
@@ -43,16 +49,16 @@ contract PBHVerifierRouting is PBHVerifierTest {
         bytes memory acceptOwnerCallData = abi.encodeCall(Ownable2StepUpgradeable.acceptOwnership, ());
 
         // Test
-        assertCallSucceedsOn(pbhVerifierAddress, transferCallData, new bytes(0x0));
-        assertCallSucceedsOn(pbhVerifierAddress, pendingOwnerCallData, abi.encode(newOwner));
-        assertCallSucceedsOn(pbhVerifierAddress, ownerCallData, abi.encode(thisAddress));
+        assertCallSucceedsOn(pbhEntryPointAddress, transferCallData, new bytes(0x0));
+        assertCallSucceedsOn(pbhEntryPointAddress, pendingOwnerCallData, abi.encode(newOwner));
+        assertCallSucceedsOn(pbhEntryPointAddress, ownerCallData, abi.encode(thisAddress));
 
         vm.expectEmit(true, true, true, true);
         emit OwnershipTransferred(thisAddress, newOwner);
 
         vm.prank(newOwner);
-        assertCallSucceedsOn(pbhVerifierAddress, acceptOwnerCallData, new bytes(0x0));
-        assertCallSucceedsOn(pbhVerifierAddress, ownerCallData, abi.encode(newOwner));
+        assertCallSucceedsOn(pbhEntryPointAddress, acceptOwnerCallData, new bytes(0x0));
+        assertCallSucceedsOn(pbhEntryPointAddress, ownerCallData, abi.encode(newOwner));
     }
 
     /// @notice Tests that only the pending owner can accept the ownership transfer.
@@ -63,11 +69,11 @@ contract PBHVerifierRouting is PBHVerifierTest {
         bytes memory callData = abi.encodeCall(Ownable2StepUpgradeable.transferOwnership, (newOwner));
         bytes memory acceptCallData = abi.encodeCall(Ownable2StepUpgradeable.acceptOwnership, ());
         bytes memory expectedError = encodeStringRevert("Ownable2Step: caller is not the new owner");
-        assertCallSucceedsOn(pbhVerifierAddress, callData);
+        assertCallSucceedsOn(pbhEntryPointAddress, callData);
         vm.prank(notNewOwner);
 
         // Test
-        assertCallFailsOn(pbhVerifierAddress, acceptCallData, expectedError);
+        assertCallFailsOn(pbhEntryPointAddress, acceptCallData, expectedError);
     }
 
     /// @notice Ensures that it is impossible to transfer ownership without being the owner.
@@ -79,7 +85,7 @@ contract PBHVerifierRouting is PBHVerifierTest {
         vm.prank(naughty);
 
         // Test
-        assertCallFailsOn(pbhVerifierAddress, callData, expectedReturn);
+        assertCallFailsOn(pbhEntryPointAddress, callData, expectedReturn);
     }
 
     /// @notice Tests that it is impossible to renounce ownership, even as the owner.
@@ -89,7 +95,7 @@ contract PBHVerifierRouting is PBHVerifierTest {
         bytes memory errorData = abi.encodeWithSelector(WorldIDImpl.CannotRenounceOwnership.selector);
 
         // Test
-        assertCallFailsOn(pbhVerifierAddress, renounceData, errorData);
+        assertCallFailsOn(pbhEntryPointAddress, renounceData, errorData);
     }
 
     /// @notice Ensures that ownership cannot be renounced by anybody other than the owner.
@@ -101,6 +107,6 @@ contract PBHVerifierRouting is PBHVerifierTest {
         vm.prank(naughty);
 
         // Test
-        assertCallFailsOn(pbhVerifierAddress, callData, returnData);
+        assertCallFailsOn(pbhEntryPointAddress, callData, returnData);
     }
 }
