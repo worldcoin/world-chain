@@ -125,7 +125,7 @@ where
             payload.root,
             payload.nullifier_hash,
             signal,
-            payload.external_nullifier.hash(),
+            payload.external_nullifier.to_word(),
             &payload.proof.0,
             TREE_DEPTH,
         );

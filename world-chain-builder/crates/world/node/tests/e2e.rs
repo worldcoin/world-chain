@@ -215,7 +215,7 @@ impl WorldChainBuilderTestContext {
         let merkle_proof = self.tree.proof(*idx);
 
         let signal_hash = hash_to_field(signal);
-        let external_nullifier_hash = external_nullifier.hash();
+        let external_nullifier_hash = external_nullifier.to_word();
         let nullifier_hash = generate_nullifier_hash(&id, external_nullifier_hash);
 
         let proof = Proof(

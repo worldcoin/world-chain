@@ -150,8 +150,8 @@ pub fn user_op(
 
     let tree = tree();
     let root = tree.root();
-    let proof = semaphore_proof(acc, external_nullifier.hash(), signal);
-    let nullifier_hash = nullifier_hash(acc, external_nullifier.hash());
+    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal);
+    let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
 
     let proof = Proof(proof);
 

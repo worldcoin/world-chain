@@ -53,7 +53,7 @@ async fn main() -> eyre::Result<()> {
 
             let external_nullifier =
                 ExternalNullifier::with_date_marker(date_marker, prove_args.pbh_nonce);
-            let external_nullifier_hash = external_nullifier.hash();
+            let external_nullifier_hash = external_nullifier.to_word();
 
             let semaphore_proof = semaphore::protocol::generate_proof(
                 &identity,
