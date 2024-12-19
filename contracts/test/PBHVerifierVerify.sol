@@ -77,7 +77,7 @@ contract PBHVerifierVerify is PBHVerifierTest {
         uint16 year = uint16(BokkyPooBahsDateTimeLibrary.getYear(block.timestamp));
 
         // Value starts at 30, make sure 30 reverts.
-        uint256 pbhExternalNullifier = PBHExternalNullifier.encode(30, month, year);
+        uint256 pbhExternalNullifier = PBHExternalNullifier.encode(PBHExternalNullifier.V1, 30, month, year);
         uint256 nullifierHash = 0;
         vm.expectRevert(PBHExternalNullifier.InvalidPbhNonce.selector);
         PBHVerifierImpl(address(pbhVerifier)).verifyPbhProof(
@@ -94,7 +94,7 @@ contract PBHVerifierVerify is PBHVerifierTest {
         PBHVerifierImpl(address(pbhVerifier)).setNumPbhPerMonth(40);
 
         // Try again, it should work
-        pbhExternalNullifier = PBHExternalNullifier.encode(30, month, year);
+        pbhExternalNullifier = PBHExternalNullifier.encode(PBHExternalNullifier.V1, 30, month, year);
         nullifierHash = 1;
         vm.expectEmit(true, true, true, true);
         emit PBH(root, sender, nonce, testCallData, pbhExternalNullifier, nullifierHash, proof);

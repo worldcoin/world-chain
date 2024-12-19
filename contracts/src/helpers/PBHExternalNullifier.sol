@@ -17,7 +17,7 @@ library PBHExternalNullifier {
     /// @notice Thrown when the provided external nullifier doesn't
     /// contain the correct leading zeros
     error InvalidExternalNullifierLeadingZeros();
-    
+
     /// @notice Thrown when the provided external nullifier version
     /// is not equal to V1 - the only currently supported version
     error InvalidExternalNullifierVersion();
@@ -71,7 +71,7 @@ library PBHExternalNullifier {
     /// @custom:reverts Reverts if the current block timestamp does not match
     /// the provided month/year or if pbhNonce !<  numPbhPerMonth.
     function verify(uint256 externalNullifier, uint8 numPbhPerMonth) public view {
-     require(externalNullifier <= type(uint40).max, InvalidExternalNullifierLeadingZeros());
+        require(externalNullifier <= type(uint40).max, InvalidExternalNullifierLeadingZeros());
         (uint8 version, uint8 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
         require(version == V1, InvalidExternalNullifierVersion());
         require(year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp), InvalidExternalNullifierYear());
