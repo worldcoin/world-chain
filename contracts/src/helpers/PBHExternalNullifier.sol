@@ -14,6 +14,10 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 ///      - Bits 8-15: Nonce
 ///      - Bits 0-7: Version
 library PBHExternalNullifier {
+    /// @notice Thrown when the provided external nullifier doesn't
+    /// contain the correct leading zeros
+    error InvalidExternalNullifierLeadingZeros();
+    
     /// @notice Thrown when the provided external nullifier version
     /// is not equal to V1 - the only currently supported version
     error InvalidExternalNullifierVersion();
