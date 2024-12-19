@@ -6,10 +6,10 @@ import "@helpers/PBHExternalNullifier.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
 contract PBHExternalNullifierLibTest is Test {
-    uint8 constant VALID_PBH_NONCE = 5;
-    uint8 constant VALID_MONTH = 12;
-    uint16 constant VALID_YEAR = 2024;
-    uint8 constant MAX_PBH_PER_MONTH = 10;
+    uint8 public constant VALID_PBH_NONCE = 5;
+    uint8 public constant VALID_MONTH = 12;
+    uint16 public constant VALID_YEAR = 2024;
+    uint8 public constant MAX_PBH_PER_MONTH = 10;
 
     function testEncodeDecodeValidInput() public {
         uint8 pbhNonce = VALID_PBH_NONCE;

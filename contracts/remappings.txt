@@ -1,6 +1,8 @@
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
+@account-abstraction/contracts/=lib/account-abstraction/contracts/
 @world-id-contracts/=lib/world-id-contracts/src/
-@account-abstraction/=lib/account-abstraction/contracts/
 @BokkyPooBahsDateTimeLibrary/=lib/BokkyPooBahsDateTimeLibrary/contracts/
 @helpers/=src/helpers/
-
 openzeppelin-contracts/=lib/world-id-contracts/lib/openzeppelin-contracts/contracts/
+@forge-std/=lib/forge-std/src/
