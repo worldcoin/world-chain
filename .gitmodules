@@ -7,3 +7,12 @@
 [submodule "contracts/lib/world-id-contracts"]
 	path = contracts/lib/world-id-contracts
 	url = https://github.com/worldcoin/world-id-contracts
+[submodule "contracts/lib/safe-modules"]
+	path = contracts/lib/safe-modules
+	url = https://github.com/safe-global/safe-modules
+[submodule "contracts/lib/account-abstraction"]
+	path = contracts/lib/account-abstraction
+	url = https://github.com/eth-infinitism/account-abstraction
+[submodule "contracts/lib/safe-contracts"]
+	path = contracts/lib/safe-contracts
+	url = https://github.com/safe-global/safe-contracts
