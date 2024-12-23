@@ -233,10 +233,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl {
 
     function pbhMulticall(
         IMulticall3.Call3[] calldata calls,
-        pbhPayload calldata PBHPayload
+        PBHPayload calldata pbhPayload
     ) external {
-        verifyPbh(msg.sender, pbhPayload.nonce, callData, pbhPayload);
-
+        verifyPbh(msg.sender, 0, new bytes(0), pbhPayload);
         multicall.aggregate3(calls);
     }
 
@@ -247,7 +246,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl {
     function verifyPbh(
         address sender,
         uint256 nonce,
-        bytes calldata callData,
+        bytes memory callData,
         PBHPayload memory pbhPayload
     ) internal virtual onlyInitialized onlyProxy {
         // First, we make sure this nullifier has not been used before.
