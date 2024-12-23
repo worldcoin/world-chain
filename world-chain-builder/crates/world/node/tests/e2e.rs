@@ -1,14 +1,14 @@
 //! Utilities for running world chain builder end-to-end tests.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use alloy_eips::eip2718::Decodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawals};
 use alloy_signer_local::PrivateKeySigner;
-use chrono::Utc;
+use alloy_sol_types::SolCall;
+use chrono::Datelike;
 use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth::builder::components::Components;
 use reth::builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
@@ -19,7 +19,6 @@ use reth::transaction_pool::{Pool, TransactionValidationTaskExecutor};
 use reth_db::test_utils::TempDatabase;
 use reth_db::DatabaseEnv;
 use reth_e2e_test_utils::node::NodeTestContext;
-use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_e2e_test_utils::wallet::Wallet;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_core::args::RpcServerArgs;
@@ -28,23 +27,20 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_primitives::PooledTransactionsElement;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::{Address, Bytes, FixedBytes, TxKind, B256, U256};
-use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
-use semaphore::protocol::{generate_nullifier_hash, generate_proof};
-use semaphore::{hash_to_field, Field};
+use semaphore::Field;
 use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
 use world_chain_builder_node::node::WorldChainBuilder;
-use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
+use world_chain_builder_pool::test_utils::{
+    self, PBH_TEST_SIGNATURE_AGGREGATOR, PBH_TEST_VALIDATOR,
+};
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
-use world_chain_builder_primitives::transaction::WorldChainPooledTransactionsElement;
 use world_chain_builder_rpc::{EthTransactionsExtServer, WorldChainEthApiExt};
 
 pub const DEV_CHAIN_ID: u64 = 8453;
@@ -88,20 +84,12 @@ pub struct WorldChainBuilderTestContext {
     pub tree: LazyPoseidonTree,
     pub tasks: TaskManager,
     pub node: Adapter,
-    pub identities: HashMap<Address, usize>,
 }
 
 impl WorldChainBuilderTestContext {
     pub async fn setup() -> eyre::Result<Self> {
         let wallets = Wallet::new(20).with_chain_id(DEV_CHAIN_ID).gen();
-        let mut tree = LazyPoseidonTree::new(30, Field::from(0)).derived();
-        let mut identities = HashMap::new();
-        for (i, signer) in wallets.iter().enumerate() {
-            let address = signer.address();
-            identities.insert(address, i);
-            let identity = Identity::from_secret(signer.address().as_mut_slice(), None);
-            tree = tree.update(i, &identity.commitment());
-        }
+        let tree = test_utils::tree();
 
         let op_chain_spec = Arc::new(get_chain_spec(tree.root()));
 
@@ -130,7 +118,8 @@ impl WorldChainBuilderTestContext {
                 builder_args: WorldChainBuilderArgs {
                     num_pbh_txs: 30,
                     verified_blockspace_capacity: 70,
-                    ..Default::default()
+                    pbh_validator: PBH_TEST_VALIDATOR,
+                    signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
                 },
                 ..Default::default()
             })?)
@@ -155,79 +144,42 @@ impl WorldChainBuilderTestContext {
             tree,
             tasks,
             node: test_ctx,
-            identities,
         })
     }
 
     pub async fn raw_pbh_tx_bytes(
         &self,
-        signer: PrivateKeySigner,
+        // TODO: Use the pregenerated signers
+        _signer: PrivateKeySigner,
         pbh_nonce: u8,
+        op_nonce: u64,
         tx_nonce: u64,
     ) -> Bytes {
-        let tx = tx(DEV_CHAIN_ID, None, tx_nonce);
-        let envelope = TransactionTestContext::sign_tx(signer.clone(), tx).await;
-        let raw_tx = envelope.encoded_2718();
-        let mut data = raw_tx.as_ref();
-        let recovered = PooledTransactionsElement::decode_2718(&mut data).unwrap();
-        let pbh_payload = self.valid_proof(
-            signer.address(),
-            recovered.hash().as_slice(),
-            chrono::Utc::now(),
-            pbh_nonce,
-        );
+        let dt = chrono::Utc::now();
+        let dt = dt.naive_local();
 
-        let world_chain_pooled_tx_element = WorldChainPooledTransactionsElement {
-            inner: recovered,
-            pbh_payload: Some(pbh_payload.clone()),
-        };
+        let month = dt.month() as u8;
+        let year = dt.year() as u16;
+
+        let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
+        let (op_1, pbh_1) = test_utils::user_op()
+            .nonce(U256::from(op_nonce))
+            .external_nullifier(ext_nullifier)
+            .acc(0)
+            .call();
+        let pbh_data = test_utils::pbh_bundle(vec![op_1], vec![pbh_1]);
+        let pbh_data = pbh_data.abi_encode();
+        let tx = test_utils::eip1559()
+            .to(PBH_TEST_VALIDATOR)
+            .input(pbh_data)
+            .chain_id(DEV_CHAIN_ID)
+            .nonce(tx_nonce)
+            .call();
+        let tx = test_utils::eth_tx(0, tx).await;
 
         let mut buff = Vec::<u8>::new();
-        world_chain_pooled_tx_element.encode_2718(&mut buff);
+        tx.transaction().encode_2718(&mut buff);
         buff.into()
-    }
-
-    fn valid_proof(
-        &self,
-        identity: Address,
-        tx_hash: &[u8],
-        time: chrono::DateTime<Utc>,
-        pbh_nonce: u8,
-    ) -> PbhPayload {
-        let external_nullifier =
-            ExternalNullifier::with_date_marker(DateMarker::from(time), pbh_nonce).to_string();
-
-        self.create_proof(identity, external_nullifier, tx_hash)
-    }
-
-    fn create_proof(
-        &self,
-        mut identity: Address,
-        external_nullifier: String,
-        signal: &[u8],
-    ) -> PbhPayload {
-        let external_nullifier: ExternalNullifier = external_nullifier.parse().unwrap();
-
-        let idx = self.identities.get(&identity).unwrap();
-        let secret = identity.as_mut_slice();
-        // generate identity
-        let id = Identity::from_secret(secret, None);
-        let merkle_proof = self.tree.proof(*idx);
-
-        let signal_hash = hash_to_field(signal);
-        let external_nullifier_hash = external_nullifier.to_word();
-        let nullifier_hash = generate_nullifier_hash(&id, external_nullifier_hash);
-
-        let proof = Proof(
-            generate_proof(&id, &merkle_proof, external_nullifier_hash, signal_hash).unwrap(),
-        );
-
-        PbhPayload {
-            root: self.tree.root(),
-            nullifier_hash,
-            external_nullifier,
-            proof,
-        }
     }
 }
 
@@ -236,7 +188,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let mut pbh_tx_hashes = vec![];
     for signer in ctx.pbh_wallets.iter() {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0, 0).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -267,7 +219,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let non_pbh_hash = ctx.node.rpc.inject_tx(signed.encoded_2718().into()).await?;
     let mut pbh_tx_hashes = vec![];
     for signer in ctx.pbh_wallets.iter().skip(1) {
-        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+        let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0, 0).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -298,7 +250,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     let ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = ctx.pbh_wallets[0].clone();
-    let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+    let raw_tx = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0, 0).await;
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
     assert!(dup_pbh_hash_res.is_err());
@@ -310,9 +262,9 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = ctx.pbh_wallets[0].clone();
 
-    let raw_tx_0 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+    let raw_tx_0 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0, 0).await;
     ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
-    let raw_tx_1 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0).await;
+    let raw_tx_1 = ctx.raw_pbh_tx_bytes(signer.clone(), 0, 0, 1).await;
 
     // Now that the nullifier has successfully been stored in
     // the `ExecutedPbhNullifierTable`, inserting a new tx with the
