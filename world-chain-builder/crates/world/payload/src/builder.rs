@@ -332,17 +332,11 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OpBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments {
-            client: client.clone(),
+        <OpPayloadBuilder<EvmConfig, Txs> as PayloadBuilder<Pool, Client>>::build_empty_payload(
+            &self.inner,
+            client,
             config,
-            pool: NoopWorldChainTransactionPool::default(),
-            cached_reads: Default::default(),
-            cancel: Default::default(),
-            best_payload: None,
-        };
-        self.build_payload(args)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        )
     }
 }
 

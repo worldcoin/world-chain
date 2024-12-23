@@ -32,6 +32,7 @@ reth-trie-db.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
+alloy-sol-types.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true

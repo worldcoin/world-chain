@@ -13725,6 +13725,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-signer-local",
+ "alloy-sol-types",
  "chrono",
  "clap 4.5.23",
  "color-eyre",
