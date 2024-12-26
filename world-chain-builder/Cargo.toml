@@ -9,7 +9,7 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "2"
 members = [
-    "crates/assertor",
+    "crates/tests",
     "crates/toolkit",
     "crates/world/node",
     "crates/world/bin",
@@ -109,7 +109,8 @@ alloy-rpc-types-debug = "0.8.0"
 alloy-signer = { version = "0.7.3", default-features = false }
 alloy-signer-local = { version = "0.7.3", default-features = false }
 alloy-sol-types = "0.8.15"
-
+alloy-provider = { version = "0.7.3", default-features = false }
+alloy-transport = { version = "0.7.3", default-features = false }
 
 # revm
 revm = { version = "18.0.0", features = ["std"], default-features = false }
@@ -145,3 +146,4 @@ rand = { version = "0.8", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
 bon = "3.3.0"
 rayon = "1.10.0"
+tracing-subscriber = { version = "0.3.18" }

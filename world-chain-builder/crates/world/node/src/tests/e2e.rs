@@ -1,7 +1,6 @@
 //! Utilities for running world chain builder end-to-end tests.
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawals};
 use alloy_sol_types::SolCall;
 use chrono::Datelike;
@@ -28,8 +27,7 @@ use revm_primitives::{Address, Bytes, FixedBytes, TxKind, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
-use world_chain_builder_node::node::WorldChainBuilder;
+
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
@@ -39,6 +37,9 @@ use world_chain_builder_pool::test_utils::{
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_rpc::{EthTransactionsExtServer, WorldChainEthApiExt};
+
+use crate::args::{ExtArgs, WorldChainBuilderArgs};
+use crate::node::WorldChainBuilder;
 
 pub const DEV_CHAIN_ID: u64 = 8453;
 
@@ -75,6 +76,9 @@ type NodeAdapterType = NodeAdapter<
 >;
 
 type Adapter = NodeTestContext<NodeAdapterType, OpAddOns<NodeAdapterType>>;
+
+#[derive(Default)]
+pub struct PBHTransactionTestContext;
 
 pub struct WorldChainBuilderTestContext {
     pub signers: Range<u32>,
@@ -145,6 +149,17 @@ impl WorldChainBuilderTestContext {
         tx_nonce: u64,
         user_op_nonce: U256,
     ) -> Bytes {
+        PBHTransactionTestContext::raw_pbh_tx_bytes(acc, pbh_nonce, tx_nonce, user_op_nonce).await
+    }
+}
+
+impl PBHTransactionTestContext {
+    pub async fn raw_pbh_tx_bytes(
+        acc: u32,
+        pbh_nonce: u8,
+        tx_nonce: u64,
+        user_op_nonce: U256,
+    ) -> Bytes {
         let dt = chrono::Utc::now();
         let dt = dt.naive_local();
 
@@ -207,10 +222,12 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
         Address::default(),
     );
     let wallet = signer(0);
-    let signer = EthereumWallet::from(wallet);
-    let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(non_pbh_tx, &signer)
-        .await
-        .unwrap();
+    let signer = alloy_network::EthereumWallet::from(wallet);
+    let signed = <TransactionRequest as alloy_network::TransactionBuilder<
+        alloy_network::Ethereum,
+    >>::build(non_pbh_tx, &signer)
+    .await
+    .unwrap();
     let non_pbh_hash = ctx.node.rpc.inject_tx(signed.encoded_2718().into()).await?;
     let mut pbh_tx_hashes = vec![];
     let signers = ctx.signers.clone();
