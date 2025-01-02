@@ -1,6 +1,15 @@
 use alloy_sol_types::sol;
 
 sol! {
+    contract IMulticall3 {
+        #[derive(Default)]
+        struct Call3 {
+            address target;
+            bool allowFailure;
+            bytes callData;
+        }
+    }
+
     contract IEntryPoint {
         #[derive(Default)]
         struct PackedUserOperation {
@@ -24,9 +33,22 @@ sol! {
     }
 
     contract IPBHValidator {
+        #[derive(Default)]
+        struct PBHPayload {
+            uint256 root;
+            uint256 pbhExternalNullifier;
+            uint256 nullifierHash;
+            uint256[8] proof;
+        }
+
         function handleAggregatedOps(
             IEntryPoint.UserOpsPerAggregator[] calldata,
             address payable
-        ) public;
+        ) external;
+
+        function pbhMulticall(
+            IMulticall3.Call3[] calls,
+            PBHPayload paylaod,
+        ) external;
     }
 }
