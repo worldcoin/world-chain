@@ -19,7 +19,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@nextest
       - name: tests
         run: just test-ci
       - name: Test Report
