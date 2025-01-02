@@ -21,7 +21,14 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
       - name: tests
-        run: just test
+        run: just test-ci
+      - name: Test Report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()    # run this step even if previous step failed
+        with:
+          name: Report
+          path: world-chain-builder/target/nextest/ci/junit.xml
+          reporter: jest-junit        # Format of test results
 
   cargo-lint:
     runs-on: ubuntu-latest
