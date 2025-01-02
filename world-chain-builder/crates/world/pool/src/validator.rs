@@ -19,6 +19,7 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHValidator;
+use crate::eip4337;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -137,6 +138,12 @@ where
         }
     }
 
+    /// Validates preconditions for a PBH bundle
+    ///
+    /// If the conditions here are not satisfied the transaction is still valid
+    /// but will not receive priority inclusion
+    ///
+    /// Returns parsed calldata
     pub fn is_valid_eip4337_pbh_bundle(
         &self,
         tx: &Tx,
@@ -164,6 +171,27 @@ where
         } else {
             None
         }
+    }
+
+    /// Validates preconditions for a PBH multicall
+    ///
+    /// If the conditions here are not satisfied the transaction is still valid
+    /// but will not receive priority inclusion
+    ///
+    /// Returns the calldata
+    pub fn is_valid_pbh_multicall(&self, tx: &Tx) -> Option<IPBHValidator::pbhMulticallCall> {
+        if !tx
+            .input()
+            .starts_with(&IPBHValidator::pbhMulticallCall::SELECTOR)
+        {
+            return None;
+        }
+
+        let Ok(decoded) = IPBHValidator::pbhMulticallCall::abi_decode(tx.input(), true) else {
+            return None;
+        };
+
+        Some(decoded)
     }
 
     pub fn validate_pbh_bundle(
@@ -215,8 +243,13 @@ where
         mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() == self.pbh_validator {
-            if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
-                return e.to_outcome(transaction);
+            if eip4337::is_handle_aggregated_ops_call(transaction.input()) {
+                if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
+                    return e.to_outcome(transaction);
+                }
+            } else if eip4337::is_pbh_multicall(transaction.input()) {
+            } else {
+                //return E
             }
         };
 
