@@ -4,9 +4,6 @@ set positional-arguments
 test: nextest
   cargo nextest run --workspace
 
-test-ci: nextest
-  cargo nextest run --profile ci --workspace
-
 # Formats the world-chain-builder
 fmt: fmt-fix fmt-check
 

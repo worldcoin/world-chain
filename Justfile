@@ -23,10 +23,6 @@ build:
 test:
     @just ./world-chain-builder/test
 
-# Tests the world-chain-builder and generates a report
-test-ci:
-    @just ./world-chain-builder/test-ci
-
 # Formats the world-chain-builder
 fmt: 
     @just ./world-chain-builder/fmt
