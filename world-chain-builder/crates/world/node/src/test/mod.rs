@@ -37,9 +37,7 @@ use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 
 use crate::args::{ExtArgs, WorldChainBuilderArgs};
 use crate::node::WorldChainBuilder;
-use crate::test_utils::{tx, PBHTransactionTestContext};
-
-pub const DEV_CHAIN_ID: u64 = 8453;
+use crate::test_utils::{tx, PBHTransactionTestContext, DEV_CHAIN_ID};
 
 type NodeAdapterType = NodeAdapter<
     FullNodeTypesAdapter<
@@ -276,7 +274,9 @@ pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes
 /// Builds an OP Mainnet chain spec with the given merkle root
 /// Populated in the OpWorldID contract.
 fn get_chain_spec() -> OpChainSpec {
-    let genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
+    let mut genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
+    genesis.config.chain_id = DEV_CHAIN_ID;
+
     OpChainSpecBuilder::base_mainnet()
         .genesis(genesis.extend_accounts(vec![(
             OP_WORLD_ID,

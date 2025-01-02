@@ -72,7 +72,7 @@ where
 {
     // Grab the latest block number
     let block_number = sequencer_provider.get_block_number().await?;
-    
+
     run_command(
         "kurtosis",
         &[
