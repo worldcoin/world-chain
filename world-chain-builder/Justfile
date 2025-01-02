@@ -1,7 +1,7 @@
 set positional-arguments
 
 # Tests the world-chain-builder
-test: nextest
+test: 
   cargo nextest run --workspace
 
 # Formats the world-chain-builder
@@ -16,5 +16,3 @@ fmt-check:
 e2e-test:
     RUST_LOG=info cargo run -p tests --release 
 
-nextest:
-  cargo install cargo-nextest
