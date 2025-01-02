@@ -32,6 +32,7 @@ alloy-signer-local.workspace = true
 alloy-network.workspace = true
 
 # 3rd party
+ethers-core.workspace = true
 tokio.workspace = true
 semaphore.workspace = true
 chrono.workspace = true
@@ -45,7 +46,6 @@ rayon.workspace = true
 bytes.workspace = true
 
 [dev-dependencies]
-ethers-core.workspace = true
 test-case.workspace = true
 alloy-signer-local.workspace = true
 reth-e2e-test-utils.workspace = true

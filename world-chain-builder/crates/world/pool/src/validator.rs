@@ -12,14 +12,15 @@ use reth_primitives::{Block, SealedBlock, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::protocol::verify_proof;
 use world_chain_builder_pbh::date_marker::DateMarker;
-use world_chain_builder_pbh::payload::{PbhPayload, TREE_DEPTH};
+use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
 use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHValidator;
-use crate::eip4337;
+use crate::eip4337::hash_pbh_multicall;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -194,6 +195,9 @@ where
         Some(decoded)
     }
 
+    /// Validates a PBH bundle transaction
+    ///
+    /// If the transaction is valid marks it for priority inclusion
     pub fn validate_pbh_bundle(
         &self,
         transaction: &mut Tx,
@@ -228,6 +232,54 @@ where
 
         Ok(())
     }
+
+    /// Validates a PBH multicall transaction
+    ///
+    /// If the transaction is valid marks it for priority inclusion
+    pub fn validate_pbh_multicall(
+        &self,
+        transaction: &mut Tx,
+    ) -> Result<(), TransactionValidationError> {
+        let Some(calldata) = self.is_valid_pbh_multicall(transaction) else {
+            return Ok(());
+        };
+
+        //let semaphore::protocol::Proof(g1a, g2, g1b) = call
+        let proof: [ethers_core::types::U256; 8] = calldata
+            .paylaod
+            .proof
+            .into_iter()
+            .map(|x| {
+                // TODO: Switch to ruint in semaphore-rs and remove this
+                let bytes_repr: [u8; 32] = x.to_be_bytes();
+                ethers_core::types::U256::from_big_endian(&bytes_repr)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let g1a = (proof[0], proof[1]);
+        let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
+        let g1b = (proof[6], proof[7]);
+
+        let proof = semaphore::protocol::Proof(g1a, g2, g1b);
+        let proof = Proof(proof);
+
+        let pbh_payload = PbhPayload {
+            external_nullifier: ExternalNullifier::from_word(calldata.paylaod.pbhExternalNullifier),
+            nullifier_hash: calldata.paylaod.nullifierHash,
+            root: calldata.paylaod.root,
+            proof,
+        };
+
+        let signal_hash = hash_pbh_multicall(transaction.sender(), calldata.calls);
+
+        self.validate_pbh_payload(&pbh_payload, signal_hash)?;
+
+        transaction.set_valid_pbh();
+
+        Ok(())
+    }
 }
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
@@ -243,13 +295,14 @@ where
         mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() == self.pbh_validator {
-            if eip4337::is_handle_aggregated_ops_call(transaction.input()) {
-                if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
-                    return e.to_outcome(transaction);
-                }
-            } else if eip4337::is_pbh_multicall(transaction.input()) {
-            } else {
-                //return E
+            // Try and validate a PBH bundle tx
+            if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
+                return e.to_outcome(transaction);
+            }
+
+            // Try and valdiate a PBH multicall
+            if let Err(e) = self.validate_pbh_multicall(&mut transaction) {
+                return e.to_outcome(transaction);
             }
         };
 
