@@ -48,7 +48,7 @@ sol! {
 
         function pbhMulticall(
             IMulticall3.Call3[] calls,
-            PBHPayload paylaod,
+            PBHPayload payload,
         ) external;
     }
 }
