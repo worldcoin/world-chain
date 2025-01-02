@@ -246,7 +246,7 @@ where
 
         //let semaphore::protocol::Proof(g1a, g2, g1b) = call
         let proof: [ethers_core::types::U256; 8] = calldata
-            .paylaod
+            .payload
             .proof
             .into_iter()
             .map(|x| {
@@ -266,9 +266,9 @@ where
         let proof = Proof(proof);
 
         let pbh_payload = PbhPayload {
-            external_nullifier: ExternalNullifier::from_word(calldata.paylaod.pbhExternalNullifier),
-            nullifier_hash: calldata.paylaod.nullifierHash,
-            root: calldata.paylaod.root,
+            external_nullifier: ExternalNullifier::from_word(calldata.payload.pbhExternalNullifier),
+            nullifier_hash: calldata.payload.nullifierHash,
+            root: calldata.payload.root,
             proof,
         };
 
