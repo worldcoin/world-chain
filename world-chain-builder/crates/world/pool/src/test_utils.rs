@@ -21,7 +21,7 @@ use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
-use crate::bindings::IPBHValidator::{self};
+use crate::bindings::IPBHEntryPoint::{self};
 use crate::root::WorldChainRootValidator;
 use crate::tx::WorldChainPooledTransaction;
 use crate::validator::WorldChainTransactionValidator;
@@ -176,11 +176,11 @@ pub fn user_op(
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
     proofs: Vec<PbhPayload>,
-) -> IPBHValidator::handleAggregatedOpsCall {
+) -> IPBHEntryPoint::handleAggregatedOpsCall {
     let mut signature_buff = Vec::new();
     proofs.encode(&mut signature_buff);
 
-    IPBHValidator::handleAggregatedOpsCall {
+    IPBHEntryPoint::handleAggregatedOpsCall {
         _0: vec![UserOpsPerAggregator {
             userOps: user_ops,
             signature: signature_buff.into(),

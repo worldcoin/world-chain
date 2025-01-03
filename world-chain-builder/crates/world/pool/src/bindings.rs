@@ -32,7 +32,7 @@ sol! {
         }
     }
 
-    contract IPBHValidator {
+    contract IPBHEntryPoint {
         #[derive(Default)]
         struct PBHPayload {
             uint256 root;

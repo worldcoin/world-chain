@@ -19,7 +19,7 @@ use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid}
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use crate::bindings::IPBHValidator;
+use crate::bindings::IPBHEntryPoint;
 use crate::eip4337::hash_pbh_multicall;
 
 /// Type alias for World Chain transaction pool
@@ -148,15 +148,15 @@ where
     pub fn is_valid_eip4337_pbh_bundle(
         &self,
         tx: &Tx,
-    ) -> Option<IPBHValidator::handleAggregatedOpsCall> {
+    ) -> Option<IPBHEntryPoint::handleAggregatedOpsCall> {
         if !tx
             .input()
-            .starts_with(&IPBHValidator::handleAggregatedOpsCall::SELECTOR)
+            .starts_with(&IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR)
         {
             return None;
         }
 
-        let Ok(decoded) = IPBHValidator::handleAggregatedOpsCall::abi_decode(tx.input(), true)
+        let Ok(decoded) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
         else {
             return None;
         };
@@ -180,15 +180,15 @@ where
     /// but will not receive priority inclusion
     ///
     /// Returns the calldata
-    pub fn is_valid_pbh_multicall(&self, tx: &Tx) -> Option<IPBHValidator::pbhMulticallCall> {
+    pub fn is_valid_pbh_multicall(&self, tx: &Tx) -> Option<IPBHEntryPoint::pbhMulticallCall> {
         if !tx
             .input()
-            .starts_with(&IPBHValidator::pbhMulticallCall::SELECTOR)
+            .starts_with(&IPBHEntryPoint::pbhMulticallCall::SELECTOR)
         {
             return None;
         }
 
-        let Ok(decoded) = IPBHValidator::pbhMulticallCall::abi_decode(tx.input(), true) else {
+        let Ok(decoded) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
             return None;
         };
 
