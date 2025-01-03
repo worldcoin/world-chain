@@ -487,7 +487,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn validate_pbh_missing_proof_for_user_op() {
+    async fn validate_pbh_bundle_missing_proof_for_user_op() {
         const BUNDLER_ACCOUNT: u32 = 9;
         const USER_ACCOUNT: u32 = 0;
 
@@ -521,6 +521,33 @@ pub mod tests {
         assert!(err
             .to_string()
             .contains("one or more user ops are missing pbh payloads"),);
+    }
+
+    #[tokio::test]
+    async fn validate_pbh_multicall() {
+        const USER_ACCOUNT: u32 = 1;
+
+        let pool = setup().await;
+
+        let calldata = test_utils::pbh_multicall()
+            .acc(USER_ACCOUNT)
+            .external_nullifier(ExternalNullifier::with_date_marker(
+                DateMarker::from(chrono::Utc::now()),
+                0,
+            ))
+            .call();
+        let calldata = calldata.abi_encode();
+
+        let tx = test_utils::eip1559()
+            .to(PBH_TEST_VALIDATOR)
+            .input(calldata)
+            .call();
+
+        let tx = test_utils::eth_tx(USER_ACCOUNT, tx).await;
+
+        pool.add_external_transaction(tx.clone().into())
+            .await
+            .expect("Failed to add PBH multicall transaction");
     }
 
     #[tokio::test]

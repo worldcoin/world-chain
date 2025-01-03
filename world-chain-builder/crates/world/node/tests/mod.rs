@@ -35,9 +35,9 @@ use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 
-use crate::args::{ExtArgs, WorldChainBuilderArgs};
-use crate::node::WorldChainBuilder;
-use crate::test_utils::{tx, PBHTransactionTestContext, DEV_CHAIN_ID};
+use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
+use world_chain_builder_node::node::WorldChainBuilder;
+use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext, DEV_CHAIN_ID};
 
 type NodeAdapterType = NodeAdapter<
     FullNodeTypesAdapter<

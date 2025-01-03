@@ -21,6 +21,7 @@ use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
+use crate::bindings::IMulticall3;
 use crate::bindings::IPBHEntryPoint::{self};
 use crate::root::WorldChainRootValidator;
 use crate::tx::WorldChainPooledTransaction;
@@ -188,6 +189,57 @@ pub fn pbh_bundle(
         }],
         _1: PBH_TEST_VALIDATOR,
     }
+}
+
+#[builder]
+pub fn pbh_multicall(
+    acc: u32,
+    #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
+) -> IPBHEntryPoint::pbhMulticallCall {
+    let sender = account(acc);
+
+    let call = IMulticall3::Call3::default();
+    let calls = vec![call];
+
+    let signal = crate::eip4337::hash_pbh_multicall(sender, calls.clone());
+
+    let tree = tree();
+    let root = tree.root();
+    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal);
+    let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
+
+    let proof = [
+        proof.0 .0,
+        proof.0 .1,
+        proof.1 .0[0],
+        proof.1 .0[1],
+        proof.1 .1[0],
+        proof.1 .1[1],
+        proof.2 .0,
+        proof.2 .1,
+    ];
+
+    // TODO: Switch to ruint in semaphore-rs and remove this
+    let proof: [U256; 8] = proof
+        .into_iter()
+        .map(|x| {
+            let mut bytes_repr: [u8; 32] = [0; 32];
+            x.to_big_endian(&mut bytes_repr);
+
+            U256::from_be_bytes(bytes_repr)
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let payload = IPBHEntryPoint::PBHPayload {
+        root,
+        pbhExternalNullifier: external_nullifier.to_word(),
+        nullifierHash: nullifier_hash,
+        proof,
+    };
+
+    IPBHEntryPoint::pbhMulticallCall { calls, payload }
 }
 
 pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
