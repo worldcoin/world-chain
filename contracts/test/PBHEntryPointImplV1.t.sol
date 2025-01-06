@@ -17,10 +17,11 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@helpers/PBHExternalNullifier.sol";
-
+import {console} from "forge-std/console.sol";
 /// @title PBHVerifer Verify Tests
 /// @notice Contains tests for the pbhVerifier
 /// @author Worldcoin
+
 contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
 
@@ -46,7 +47,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
         IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
 
         IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](1);
-        pbhEntryPoint.pbhMulticall(calls, testPayload);
+
+        pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload);
 
         bytes memory testCallData = hex"c0ffee";
         uint256 signalHash = abi.encodePacked(sender, pbhNonce, testCallData).hashToField();
@@ -145,7 +147,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         vm.expectEmit(true, false, false, false);
         emit PBH(address(this), testPayload);
-        pbhEntryPoint.pbhMulticall(calls, testPayload);
+        pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload);
     }
 
     function test_pbhMulticall_RevertIf_Reentrancy(uint8 pbhNonce) public {
@@ -159,7 +161,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
         bytes memory testCallData = abi.encodeWithSelector(IPBHEntryPoint.pbhMulticall.selector, calls, testPayload);
         calls[0] = IMulticall3.Call3({target: address(pbhEntryPoint), allowFailure: true, callData: testCallData});
 
-        IMulticall3.Result memory returnData = pbhEntryPoint.pbhMulticall(calls, testPayload)[0];
+        IMulticall3.Result memory returnData =
+            pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload)[0];
 
         bytes memory expectedReturnData = abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
         assert(!returnData.success);
