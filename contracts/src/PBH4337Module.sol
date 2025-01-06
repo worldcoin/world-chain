@@ -13,7 +13,7 @@ contract PBHSafe4337Module is Safe4337Module {
 
     /// @notice The length of the timestamp bytes.
     /// @dev 6 bytes each for validAfter and validUntil.
-    uint256 internal constant TIMESTAMP_BYTES = 12; 
+    uint256 internal constant TIMESTAMP_BYTES = 12;
 
     /// @notice The length of the encoded proof data.
     uint256 internal constant ENCODED_PROOF_BYTES = 352;
@@ -32,13 +32,12 @@ contract PBHSafe4337Module is Safe4337Module {
     error ZeroAddress();
 
     constructor(address entryPoint, address _pbhSignatureAggregator, uint192 _pbhNonceKey) Safe4337Module(entryPoint) {
-        require(_pbhSignatureAggregator != address(0), ZeroAddress());  
+        require(_pbhSignatureAggregator != address(0), ZeroAddress());
         require(entryPoint != address(0), ZeroAddress());
         PBH_SIGNATURE_AGGREGATOR = _pbhSignatureAggregator;
         PBH_NONCE_KEY = _pbhNonceKey;
     }
 
-    // TODO: Fork the Safe4337Module dependency and add 'override' to _validateSignatures. It is manually updated currently and CI will fail
     /**
      * @dev Validates that the user operation is correctly signed and returns an ERC-4337 packed validation data
      * of `validAfter || validUntil || authorizer`:

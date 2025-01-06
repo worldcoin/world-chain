@@ -17,7 +17,7 @@ contract PBHSignatureAggregator is IAggregator {
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
     /// @notice The length of the timestamp bytes.
     /// @dev 6 bytes each for validAfter and validUntil.
-    uint256 internal constant TIMESTAMP_BYTES = 12; 
+    uint256 internal constant TIMESTAMP_BYTES = 12;
     /// @notice The length of the encoded proof data.
     uint256 internal constant PROOF_DATA_LENGTH = 352;
 
