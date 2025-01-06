@@ -17,7 +17,6 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@helpers/PBHExternalNullifier.sol";
-import {console} from "forge-std/console.sol";
 /// @title PBHVerifer Verify Tests
 /// @notice Contains tests for the pbhVerifier
 /// @author Worldcoin
