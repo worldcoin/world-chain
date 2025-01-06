@@ -139,14 +139,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Initializes the contract.
     /// @dev Must be called exactly once.
     /// @dev This is marked `reinitializer()` to allow for updated initialisation steps when working
-    ///      with upgrades based upon this contract. Be aware that there are only 256 (zero-indexed)
+    ///      with upgrades based upon this contract. Be aware that there are only 255 (parameter is `uint8` and first value is 1)
     ///      initialisations allowed, so decide carefully when to use them. Many cases can safely be
     ///      replaced by use of setters.
     /// @dev This function is explicitly not virtual as it does not make sense to override even when
     ///      upgrading. Create a separate initializer function instead.
     ///
-    /// @param _worldId The World ID instance that will be used for verifying proofs. If set to the
-    ///        0 addess, then it will be assumed that verification will take place off chain.
+    /// @param _worldId The World ID instance that will be used for verifying proofs.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     ///
@@ -206,14 +205,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         // Verify the external nullifier
         PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth);
 
-        // If worldId address is set, proceed with on chain verification,
-        // otherwise assume verification has been done off chain by the builder.
-        if (address(worldId) != address(0)) {
-            // We now verify the provided proof is valid and the user is verified by World ID
-            worldId.verifyProof(
-                pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
-            );
-        }
+        // We now verify the provided proof is valid and the user is verified by World ID
+        worldId.verifyProof(
+            pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
+        );
     }
 
     /// Execute a batch of PackedUserOperation with Aggregators
