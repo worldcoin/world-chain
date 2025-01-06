@@ -78,6 +78,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     ///                                  Events                                ///
     //////////////////////////////////////////////////////////////////////////////
 
+    /// @notice Emitted when the contract is initialized.
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    /// @param entryPoint The ERC-4337 Entry Point.
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId, IEntryPoint indexed entryPoint, uint8 indexed numPbhPerMonth, address multicall3
     );
@@ -257,6 +262,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         }
     }
 
+    /// @notice Executes a Priority Multicall3.
+    /// @param calls The calls to execute.
+    /// @param pbhPayload The PBH payload containing the proof data.
+    /// @return returnData The results of the calls.
     function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
         external
         virtual
