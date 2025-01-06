@@ -108,7 +108,7 @@ contract PBHEntryPointImplV1InitTest is Test {
         IPBHEntryPoint pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
 
         vm.expectRevert("Initializable: contract is already initialized");
-        pbhEntryPoint.initialize(worldId, entryPoint, numPbh, multicall);
+        pbhEntryPoint.initialize(worldId, entryPoint, numPbh, multicall, MAX_MULTICALL_GAS_LIMIT);
     }
 
     function test_verifyPbh_RevertIf_Uninitialized() public {
