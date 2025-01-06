@@ -75,10 +75,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     error InvalidHashedOps();
 
     /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
-    error GasLimitExceeded();
+    error GasLimitExceeded(uint256 gasLimit);
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
-    error InvalidMulticallGasLimit(uint256 gasLimit);
+    error InvalidPBHGasLimit(uint256 gasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Events                                ///
@@ -182,7 +182,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         multicall3 = _multicall3;
 
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
-            revert InvalidMulticallGasLimit(_pbhGasLimit);
+            revert InvalidPBHGasLimit(_pbhGasLimit);
         }
 
         pbhGasLimit = _pbhGasLimit;
@@ -285,8 +285,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
+        // Check if pbh gas limit is exceeded
         if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded();
+            revert GasLimitExceeded(gasleft());
         }
 
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
@@ -326,7 +327,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param _pbhGasLimit The max gas limit for a PBH multicall transaction.
     function setPBHGasLimit(uint256 _pbhGasLimit) external virtual onlyProxy onlyInitialized onlyOwner {
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
-            revert InvalidMulticallGasLimit(_pbhGasLimit);
+            revert InvalidPBHGasLimit(_pbhGasLimit);
         }
 
         pbhGasLimit = _pbhGasLimit;
