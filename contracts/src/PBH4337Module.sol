@@ -10,11 +10,9 @@ import {ISafe} from "@4337/interfaces/Safe.sol";
 contract PBHSafe4337Module is Safe4337Module {
     /// @notice The length of an ECDSA signature.
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
-
     /// @notice The length of the timestamp bytes.
     /// @dev 6 bytes each for validAfter and validUntil.
     uint256 internal constant TIMESTAMP_BYTES = 12;
-
     /// @notice The length of the encoded proof data.
     uint256 internal constant ENCODED_PROOF_BYTES = 352;
 
