@@ -26,12 +26,13 @@ contract PBHSafe4337Module is Safe4337Module {
     /// @notice Thrown when the proof size is invalid.
     error InvalidProofSize();
 
-    /// @notice Thrown when a null address is passed in the constructor.
-    error ZeroAddress();
+    /// @notice Thrown when a null data is passed in the constructor.
+    error ZeroInitializedData();
 
     constructor(address entryPoint, address _pbhSignatureAggregator, uint192 _pbhNonceKey) Safe4337Module(entryPoint) {
-        require(_pbhSignatureAggregator != address(0), ZeroAddress());
-        require(entryPoint != address(0), ZeroAddress());
+        require(_pbhSignatureAggregator != address(0), ZeroInitializedData());
+        require(entryPoint != address(0), ZeroInitializedData());
+        require(_pbhNonceKey != 0, ZeroInitializedData());
         PBH_SIGNATURE_AGGREGATOR = _pbhSignatureAggregator;
         PBH_NONCE_KEY = _pbhNonceKey;
     }
