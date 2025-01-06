@@ -89,7 +89,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         IEntryPoint indexed entryPoint,
         uint8 indexed numPbhPerMonth,
         address multicall3,
-        uint256 multicallGasLimit
+        uint256 pbhGasLimit
     );
 
     /// @notice Emitted once for each successful PBH verification.
@@ -107,6 +107,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     ///
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
     event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+
+    /// @notice Emitted when setting the PBH gas limit.
+    ///
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
+    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Vars                                  ///
@@ -331,5 +336,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         }
 
         pbhGasLimit = _pbhGasLimit;
+        emit PBHGasLimitSet(_pbhGasLimit);
     }
 }
