@@ -27,8 +27,13 @@ interface IPBHEntryPoint {
         external
         returns (IMulticall3.Result[] memory returnData);
 
-    function initialize(IWorldID worldId, IEntryPoint entryPoint, uint8 _numPbhPerMonth, address _multicall3, uint256 _multicallGasLimit)
-        external;
+    function initialize(
+        IWorldID worldId,
+        IEntryPoint entryPoint,
+        uint8 _numPbhPerMonth,
+        address _multicall3,
+        uint256 _multicallGasLimit
+    ) external;
 
     function validateSignaturesCallback(bytes32 hashedOps) external view;
 

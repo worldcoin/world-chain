@@ -180,6 +180,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
         multicall3 = _multicall3;
+
+        if (_multicallGasLimit == 0 || _multicallGasLimit > block.gaslimit) {
+            revert InvalidMulticallGasLimit();
+        }
+
         multicallGasLimit = _multicallGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
