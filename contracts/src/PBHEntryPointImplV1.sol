@@ -85,8 +85,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
+    /// @param signalHash Signal hash associated with the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, PBHPayload payload);
+    event PBH(address indexed sender, uint256 signalHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
@@ -238,7 +239,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
 
                 verifyPbh(signalHash, pbhPayloads[j]);
                 nullifierHashes[pbhPayloads[j].nullifierHash] = true;
-                emit PBH(sender, pbhPayloads[j]);
+                emit PBH(sender, signalHash, pbhPayloads[j]);
             }
         }
 
@@ -270,7 +271,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
         returnData = IMulticall3(multicall3).aggregate3(calls);
-        emit PBH(msg.sender, pbhPayload);
+        emit PBH(msg.sender, signalHash, pbhPayload);
 
         return returnData;
     }
