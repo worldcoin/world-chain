@@ -87,7 +87,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param sender The sender of this particular transaction or UserOp.
     /// @param signalHash Signal hash associated with the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 signalHash, PBHPayload payload);
+    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
