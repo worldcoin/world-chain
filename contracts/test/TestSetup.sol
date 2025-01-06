@@ -60,6 +60,8 @@ contract TestSetup is Test {
     uint192 public constant PBH_NONCE_KEY = 1123123123;
 
     uint8 public constant MAX_NUM_PBH_PER_MONTH = 30;
+    uint256 public constant MAX_MULTICALL_GAS_LIMIT = 10000000;
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                            TEST ORCHESTRATION                           ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -108,11 +110,11 @@ contract TestSetup is Test {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3)
+            PBHEntryPointImplV1.initialize, (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_MULTICALL_GAS_LIMIT)
         );
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
-            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3
+            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_MULTICALL_GAS_LIMIT
         );
         pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }

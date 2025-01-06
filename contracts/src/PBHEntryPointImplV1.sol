@@ -74,12 +74,18 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Thrown when the hash of the user operations is invalid
     error InvalidHashedOps();
 
+    /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
+    error GasLimitExceeded();
+
+    /// @notice Thrown when setting the gas limit for a PBH multicall to 0
+    error InvalidMulticallGasLimit();
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Events                                ///
     //////////////////////////////////////////////////////////////////////////////
 
     event PBHEntryPointImplInitialized(
-        IWorldID indexed worldId, IEntryPoint indexed entryPoint, uint8 indexed numPbhPerMonth, address multicall3
+        IWorldID indexed worldId, IEntryPoint indexed entryPoint, uint8 indexed numPbhPerMonth, address multicall3, uint256 multicallGasLimit
     );
 
     /// @notice Emitted once for each successful PBH verification.
@@ -118,6 +124,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
     mapping(uint256 => bool) public nullifierHashes;
 
+    /// @notice The max gas limit for a PBH multicall transaction
+    uint256 public multicallGasLimit;
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                             INITIALIZATION                              ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -145,7 +154,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
-    function initialize(IWorldID _worldId, IEntryPoint _entryPoint, uint8 _numPbhPerMonth, address _multicall3)
+    function initialize(IWorldID _worldId, IEntryPoint _entryPoint, uint8 _numPbhPerMonth, address _multicall3, uint256 _multicallGasLimit)
         external
         reinitializer(1)
     {
@@ -164,10 +173,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
         multicall3 = _multicall3;
-
+        multicallGasLimit = _multicallGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3);
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3, _multicallGasLimit);
     }
 
     /// @notice Responsible for initialising all of the supertypes of this contract.
@@ -264,8 +273,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
+        if (gasleft() > multicallGasLimit) {
+            revert GasLimitExceeded();
+        }
 
+        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
@@ -297,4 +309,15 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         worldId = IWorldID(_worldId);
         emit WorldIdSet(_worldId);
     }
+
+    /// @notice Sets the max gas limit for a PBH multicall transaction.
+    /// @param _multicallGasLimit The max gas limit for a PBH multicall transaction.
+    function setMulticallGasLimit(uint256 _multicallGasLimit) external virtual onlyProxy onlyInitialized onlyOwner {
+        if (_multicallGasLimit == 0 || _multicallGasLimit > block.gaslimit) {
+            revert InvalidMulticallGasLimit();
+        }
+
+        multicallGasLimit = _multicallGasLimit;
+    }
+
 }
