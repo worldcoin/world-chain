@@ -8,17 +8,18 @@ import {ISafe} from "@4337/interfaces/Safe.sol";
 
 /// @title PBH Signature Aggregator
 /// @author Worldcoin
-/// @notice This contract does not implement signature verification.
+/// @dev This contract does not implement signature verification.
 ///         It is instead used as an identifier for Priority User Operations on World Chain.
 ///         Smart Accounts that return the `PBHSignatureAggregator` as the authorizer in `validationData`
 ///         will be considered as Priority User Operations, and will need to pack a World ID proof in the signature field.
 contract PBHSignatureAggregator is IAggregator {
     /// @notice The length of an ECDSA signature.
-    uint256 constant ECDSA_SIGNATURE_LENGTH = 65;
+    uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
     /// @notice The length of the timestamp bytes.
-    uint256 constant TIMESTAMP_BYTES = 12; // 6 bytes each for validAfter and validUntil
+    /// @dev 6 bytes each for validAfter and validUntil.
+    uint256 internal constant TIMESTAMP_BYTES = 12; 
     /// @notice The length of the encoded proof data.
-    uint256 constant PROOF_DATA_LENGTH = 352;
+    uint256 internal constant PROOF_DATA_LENGTH = 352;
 
     /// @notice Thrown when the Hash of the UserOperations is not
     ///         in transient storage of the `PBHVerifier`.
@@ -27,10 +28,14 @@ contract PBHSignatureAggregator is IAggregator {
     /// @notice Thrown when the length of the signature is invalid.
     error InvalidSignatureLength(uint256 expected, uint256 actual);
 
+    /// @notice Thrown when a zero address is passed as the PBHEntryPoint.
+    error ZeroAddress();
+
     /// @notice The PBHVerifier contract.
     IPBHEntryPoint public immutable pbhEntryPoint;
 
     constructor(address _pbhEntryPoint) {
+        require(_pbhEntryPoint != address(0), ZeroAddress());
         pbhEntryPoint = IPBHEntryPoint(_pbhEntryPoint);
     }
 
@@ -82,7 +87,7 @@ contract PBHSignatureAggregator is IAggregator {
                 userOps[i].signature.length == expectedLength + PROOF_DATA_LENGTH,
                 InvalidSignatureLength(expectedLength + PROOF_DATA_LENGTH, userOps[i].signature.length)
             );
-            bytes memory proofData = userOps[i].signature[expectedLength:];
+            bytes memory proofData = userOps[i].signature[expectedLength:expectedLength + PROOF_DATA_LENGTH];
             pbhPayloads[i] = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
         }
         aggregatedSignature = abi.encode(pbhPayloads);
