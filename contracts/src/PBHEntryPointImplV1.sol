@@ -85,7 +85,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     //////////////////////////////////////////////////////////////////////////////
 
     event PBHEntryPointImplInitialized(
-        IWorldID indexed worldId, IEntryPoint indexed entryPoint, uint8 indexed numPbhPerMonth, address multicall3, uint256 multicallGasLimit
+        IWorldID indexed worldId,
+        IEntryPoint indexed entryPoint,
+        uint8 indexed numPbhPerMonth,
+        address multicall3,
+        uint256 multicallGasLimit
     );
 
     /// @notice Emitted once for each successful PBH verification.
@@ -154,10 +158,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
-    function initialize(IWorldID _worldId, IEntryPoint _entryPoint, uint8 _numPbhPerMonth, address _multicall3, uint256 _multicallGasLimit)
-        external
-        reinitializer(1)
-    {
+    function initialize(
+        IWorldID _worldId,
+        IEntryPoint _entryPoint,
+        uint8 _numPbhPerMonth,
+        address _multicall3,
+        uint256 _multicallGasLimit
+    ) external reinitializer(1) {
         if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || _multicall3 == address(0)) {
             revert AddressZero();
         }
@@ -319,5 +326,4 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
 
         multicallGasLimit = _multicallGasLimit;
     }
-
 }

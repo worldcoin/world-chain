@@ -110,7 +110,8 @@ contract TestSetup is Test {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_MULTICALL_GAS_LIMIT)
+            PBHEntryPointImplV1.initialize,
+            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_MULTICALL_GAS_LIMIT)
         );
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
