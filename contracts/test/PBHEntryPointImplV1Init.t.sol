@@ -20,7 +20,7 @@ import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 /// @author Worldcoin
 contract PBHEntryPointImplV1InitTest is Test {
     IPBHEntryPoint uninitializedPBHEntryPoint;
-    uint256 public constant MAX_MULTICALL_GAS_LIMIT = 20000000;
+    uint256 public constant MAX_MULTICALL_GAS_LIMIT = 10000000;
 
     function setUp() public {
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
