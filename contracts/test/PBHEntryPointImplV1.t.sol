@@ -24,7 +24,7 @@ import "@helpers/PBHExternalNullifier.sol";
 contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
 
-    event PBH(address indexed sender, uint256 signalHash, IPBHEntryPoint.PBHPayload payload);
+    event PBH(address indexed sender, uint256 indexed signalHash, IPBHEntryPoint.PBHPayload payload);
     event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
     event WorldIdSet(address indexed worldId);
 
@@ -87,7 +87,6 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         uint256 signalHash0 =
             abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
-
         uint256 signalHash1 =
             abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
 
