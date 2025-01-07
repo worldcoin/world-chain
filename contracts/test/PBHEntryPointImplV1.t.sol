@@ -176,6 +176,9 @@ contract PBHEntryPointImplV1Test is TestSetup {
             assembly {
                 gasLimit := mload(add(err, 36)) // 4 bytes selector + 32 bytes offset
             }
+
+            assertTrue(gasLimit < MAX_MULTICALL_GAS_LIMIT * 2, "Error value for gasLeft should be less that what was provided");
+            assertTrue(gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit");
             assertTrue(gasLimit > 0, "Gas limit should be non-zero");
         }
     }

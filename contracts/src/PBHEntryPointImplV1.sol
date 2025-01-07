@@ -299,7 +299,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        returnData = IMulticall3(multicall3).aggregate3(calls);
+        returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
         emit PBH(msg.sender, pbhPayload);
 
         return returnData;

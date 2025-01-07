@@ -44,4 +44,8 @@ interface IPBHEntryPoint {
     function setNumPbhPerMonth(uint8 _numPbhPerMonth) external;
 
     function setWorldId(address _worldId) external;
+
+    function pbhGasLimit() external view returns (uint256);
+
+    function setPBHGasLimit(uint256 _pbhGasLimit) external;
 }
