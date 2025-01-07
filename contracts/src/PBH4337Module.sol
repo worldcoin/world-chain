@@ -11,11 +11,9 @@ import {ISafe} from "@4337/interfaces/Safe.sol";
 contract PBHSafe4337Module is Safe4337Module {
     /// @notice The length of an ECDSA signature.
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
-
     /// @notice The length of the timestamp bytes.
     /// @dev 6 bytes each for validAfter and validUntil.
     uint256 internal constant TIMESTAMP_BYTES = 12;
-
     /// @notice The length of the encoded proof data.
     uint256 internal constant ENCODED_PROOF_BYTES = 352;
 
@@ -29,12 +27,16 @@ contract PBHSafe4337Module is Safe4337Module {
     /// @notice Thrown when the proof size is invalid.
     error InvalidProofSize();
 
-    /// @notice Thrown when a null address is passed in the constructor.
-    error ZeroAddress();
+    /// @notice Thrown when a null data is passed in the constructor.
+    error AddressZero();
+
+    /// @notice Thrown when the PBH Nonce Key is not initialized.
+    error UninitializedNonceKey();
 
     constructor(address entryPoint, address _pbhSignatureAggregator, uint192 _pbhNonceKey) Safe4337Module(entryPoint) {
-        require(_pbhSignatureAggregator != address(0), ZeroAddress());
-        require(entryPoint != address(0), ZeroAddress());
+        require(_pbhSignatureAggregator != address(0), AddressZero());
+        require(entryPoint != address(0), AddressZero());
+        require(_pbhNonceKey != 0, UninitializedNonceKey());
         PBH_SIGNATURE_AGGREGATOR = _pbhSignatureAggregator;
         PBH_NONCE_KEY = _pbhNonceKey;
     }

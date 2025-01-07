@@ -30,13 +30,13 @@ contract PBHSignatureAggregator is IAggregator {
     error InvalidSignatureLength(uint256 expected, uint256 actual);
 
     /// @notice Thrown when a zero address is passed as the PBHEntryPoint.
-    error ZeroAddress();
+    error AddressZero();
 
     /// @notice The PBHVerifier contract.
     IPBHEntryPoint public immutable pbhEntryPoint;
 
     constructor(address _pbhEntryPoint) {
-        require(_pbhEntryPoint != address(0), ZeroAddress());
+        require(_pbhEntryPoint != address(0), AddressZero());
         pbhEntryPoint = IPBHEntryPoint(_pbhEntryPoint);
     }
 
