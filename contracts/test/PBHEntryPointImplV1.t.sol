@@ -47,7 +47,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](1);
 
-        pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload);
+        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
 
         bytes memory testCallData = hex"c0ffee";
         uint256 signalHash = abi.encodePacked(sender, pbhNonce, testCallData).hashToField();
@@ -146,7 +146,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         vm.expectEmit(true, false, false, false);
         emit PBH(address(this), testPayload);
-        pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload);
+        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
     }
 
     function test_pbhMulticall_RevertIf_GasLimitExceeded(uint8 pbhNonce) public {
@@ -164,7 +164,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         calls[1] = IMulticall3.Call3({target: addr2, allowFailure: false, callData: testCallData});
 
         // Catch the revert and check that it's a GasLimitExceeded with non-zero value
-        try pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT * 2}(calls, testPayload) {
+        try pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT * 2}(calls, testPayload) {
             fail("Should have reverted with GasLimitExceeded");
         } catch (bytes memory err) {
             // Extract error selector
@@ -177,8 +177,12 @@ contract PBHEntryPointImplV1Test is TestSetup {
                 gasLimit := mload(add(err, 36)) // 4 bytes selector + 32 bytes offset
             }
 
-            assertTrue(gasLimit < MAX_MULTICALL_GAS_LIMIT * 2, "Error value for gasLeft should be less that what was provided");
-            assertTrue(gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit");
+            assertTrue(
+                gasLimit < MAX_PBH_GAS_LIMIT * 2, "Error value for gasLeft should be less that what was provided"
+            );
+            assertTrue(
+                gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit"
+            );
             assertTrue(gasLimit > 0, "Gas limit should be non-zero");
         }
     }
@@ -194,8 +198,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         bytes memory testCallData = abi.encodeWithSelector(IPBHEntryPoint.pbhMulticall.selector, calls, testPayload);
         calls[0] = IMulticall3.Call3({target: address(pbhEntryPoint), allowFailure: true, callData: testCallData});
 
-        IMulticall3.Result memory returnData =
-            pbhEntryPoint.pbhMulticall{gas: MAX_MULTICALL_GAS_LIMIT}(calls, testPayload)[0];
+        IMulticall3.Result memory returnData = pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload)[0];
 
         bytes memory expectedReturnData = abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
         assert(!returnData.success);
