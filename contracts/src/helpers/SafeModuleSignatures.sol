@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+/// @title SafeModuleSignatures
+/// @notice Library for determining a variable-threshold signature length.
 library SafeModuleSignatures {
     /// @notice Thrown when the length of the signature is less than the minimum required.
     /// @param min The minimum required length.
