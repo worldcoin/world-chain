@@ -129,7 +129,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         userOpsPerAggregator[0].userOps[0].callData = data;
         bytes32 operationHash = pbh4337Module.getOperationHash(userOpsPerAggregator[0].userOps[0]);
         // Recreate the signature
-        bytes memory signature = TestUtils.createUserOpSignature(vm, operationHash, safeOwnerKey);
+        bytes memory signature = TestUtils.createUserOpECDSASignature(vm, operationHash, safeOwnerKey);
         userOpsPerAggregator[0].userOps[0].signature = bytes.concat(signature, abi.encode(proof0));
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }

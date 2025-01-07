@@ -36,7 +36,7 @@ library TestUtils {
         for (uint256 i = 0; i < proofs.length; i++) {
             PackedUserOperation memory uo = createMockUserOperation(sender, nonceKey, i);
             bytes32 operationHash = Mock4337Module(module).getOperationHash(uo);
-            bytes memory ecdsaSignature = createUserOpSignature(vm, operationHash, signingKey);
+            bytes memory ecdsaSignature = createUserOpECDSASignature(vm, operationHash, signingKey);
             bytes memory signature = encodeSignature(ecdsaSignature, proofs[i]);
             uo.signature = signature;
             uOps[i] = uo;
@@ -66,13 +66,31 @@ library TestUtils {
     }
 
     /// @notice Creates an ECDSA signature from the UserOperation Hash, and signer.
-    function createUserOpSignature(Vm vm, bytes32 operationHash, uint256 signingKey)
+    function createUserOpECDSASignature(Vm vm, bytes32 operationHash, uint256 signingKey)
         public
         pure
         returns (bytes memory)
     {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signingKey, operationHash);
         bytes memory signature = abi.encodePacked(uint48(0), uint48(0), r, s, v);
+        return signature;
+    }
+
+    /// @notice Creates a mock EIP-1271 signature for a given signature verifier.
+    function createUserOpEIP1271Signature(address signatureVerifier) public pure returns (bytes memory) {
+        // Each signature is 0x41 (65) bytes long, where fixed part of a Safe contract signature is encoded as:
+        //      {32-bytes signature verifier}{32-bytes dynamic data position}{1-byte signature type}
+        // and the dynamic part is encoded as:
+        //      {32-bytes signature length}{bytes signature data}
+        // Signature type is 0x01 for EIP-1271
+        uint8 v = 0x00;
+        // Signature verifier is the address of the contract that verifies the signature
+        bytes32 r = bytes32(uint256(uint160(signatureVerifier)));
+        // Signature offset in Aggregate signature passed to the verifier
+        bytes32 s = bytes32(uint256(0x41)); // 0x20 (r) + 0x20 (s) + 0x01 (v) 0x41 Length
+        bytes32 signatureLength = bytes32(uint256(0x20));
+        bytes32 signatureData = bytes32(uint256(0));
+        bytes memory signature = abi.encodePacked(uint48(0), uint48(0), r, s, v, signatureLength, signatureData);
         return signature;
     }
 
