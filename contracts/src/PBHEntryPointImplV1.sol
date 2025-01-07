@@ -246,8 +246,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
         external
         virtual
-        onlyInitialized
         onlyProxy
+        onlyInitialized
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
