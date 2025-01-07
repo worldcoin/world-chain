@@ -35,7 +35,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     uint8 public numPbhPerMonth;
 
     /// @notice Address of the Multicall3 implementation.
-    address internal multicall3;
+    address internal _multicall3;
 
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
     mapping(uint256 => bool) public nullifierHashes;
@@ -139,7 +139,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         IWorldID _worldId,
         IEntryPoint _entryPoint,
         uint8 _numPbhPerMonth,
-        address _multicall3,
+        address multicall3,
         uint256 _pbhGasLimit
     ) external reinitializer(1) {
         if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || _multicall3 == address(0)) {
@@ -155,7 +155,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         worldId = _worldId;
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
-        multicall3 = _multicall3;
+        _multicall3 = multicall3;
 
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
             revert InvalidPBHGasLimit(_pbhGasLimit);
@@ -164,7 +164,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         pbhGasLimit = _pbhGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3, _pbhGasLimit);
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
     }
 
     /// @param pbhPayload The PBH payload containing the proof data.
@@ -255,7 +255,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
+        returnData = IMulticall3(_multicall3).aggregate3{gas: pbhGasLimit}(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
 
         // Check if pbh gas limit is exceeded
