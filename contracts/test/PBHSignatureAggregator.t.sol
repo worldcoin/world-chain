@@ -96,7 +96,15 @@ contract PBHSignatureAggregatorTest is TestSetup {
         bytes memory proofData = abi.encode(proof);
         PackedUserOperation[] memory uoTestFixture = new PackedUserOperation[](1);
         bytes memory buffer = new bytes(uint256(65) * signatureThreshold + 12);
+
+        // Set the signature type to 0x01 for each signature
+        for (uint256 i = 0; i < signatureThreshold; i++) {
+            uint256 wordPos = 12 + (i * 0x41);
+            buffer[wordPos + 0x40] = bytes1(0x01);
+        }
+
         bytes memory signature = bytes.concat(buffer, proofData);
+
         uoTestFixture[0] = PackedUserOperation({
             sender: address(mockSafe),
             nonce: 0,
@@ -142,10 +150,12 @@ contract PBHSignatureAggregatorTest is TestSetup {
         PackedUserOperation[] memory uoTestFixture =
             TestUtils.createUOTestData(vm, PBH_NONCE_KEY, address(pbh4337Module), address(safe), proofs, safeOwnerKey);
 
-        uoTestFixture[0].signature = new bytes(12);
-        vm.expectRevert(abi.encodeWithSelector(PBHSignatureAggregator.InvalidSignatureLength.selector, 429, 12));
+        uoTestFixture[0].signature = bytes.concat(uoTestFixture[0].signature, new bytes(1));
+        vm.expectRevert(abi.encodeWithSelector(PBHSignatureAggregator.InvalidSignatureLength.selector, 429, 430));
         pbhAggregator.aggregateSignatures(uoTestFixture);
     }
+
+    // TODO: Smart Contract Signature Tests
 
     receive() external payable {}
 }

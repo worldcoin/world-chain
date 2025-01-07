@@ -5,6 +5,7 @@ import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
+import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 
 /// @title PBH Signature Aggregator
 /// @author Worldcoin
@@ -81,8 +82,18 @@ contract PBHSignatureAggregator is IAggregator {
     {
         IPBHEntryPoint.PBHPayload[] memory pbhPayloads = new IPBHEntryPoint.PBHPayload[](userOps.length);
         for (uint256 i = 0; i < userOps.length; ++i) {
-            uint256 expectedLength =
-                TIMESTAMP_BYTES + (ISafe(payable(userOps[i].sender)).getThreshold() * ECDSA_SIGNATURE_LENGTH);
+            // Ensure we have the minimum amount of bytes:
+            // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
+            require(
+                userOps[i].signature.length >= TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH,
+                InvalidSignatureLength(TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH, userOps[i].signature.length)
+            );
+
+            uint256 expectedLength = TIMESTAMP_BYTES
+                + SafeModuleSignatures._signatureLength(
+                    userOps[i].signature[TIMESTAMP_BYTES:], ISafe(payable(userOps[i].sender)).getThreshold()
+                );
+
             require(
                 userOps[i].signature.length == expectedLength + PROOF_DATA_LENGTH,
                 InvalidSignatureLength(expectedLength + PROOF_DATA_LENGTH, userOps[i].signature.length)
