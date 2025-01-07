@@ -43,6 +43,8 @@ jobs:
 
       - name: Run Forge tests
         working-directory: contracts
+        env:
+          ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
         run: |
-          forge test -f "${{ secrets.ETHEREUM_PROVIDER }}" -vvv
+          forge test -vvv
         id: test
