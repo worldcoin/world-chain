@@ -86,7 +86,9 @@ contract PBHSignatureAggregator is IAggregator {
             // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
             require(
                 userOps[i].signature.length >= TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH,
-                InvalidSignatureLength(TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH, userOps[i].signature.length)
+                InvalidSignatureLength(
+                    TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH, userOps[i].signature.length
+                )
             );
 
             uint256 expectedLength = TIMESTAMP_BYTES
