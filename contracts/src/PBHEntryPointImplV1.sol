@@ -145,7 +145,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @dev This function is explicitly not virtual as it does not make sense to override even when
     ///      upgrading. Create a separate initializer function instead.
     ///
-    /// @param _worldId The World ID instance that will be used for verifying proofs.
+    /// @param _worldId The World ID instance that will be used for verifying proofs. If set to the
+    ///        0 addess, then it will be assumed that verification will take place off chain.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     ///
@@ -154,7 +155,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         external
         reinitializer(1)
     {
-        if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || _multicall3 == address(0)) {
+        if (address(_entryPoint) == address(0) || _multicall3 == address(0)) {
             revert AddressZero();
         }
 
@@ -205,10 +206,14 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         // Verify the external nullifier
         PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth);
 
-        // We now verify the provided proof is valid and the user is verified by World ID
-        worldId.verifyProof(
-            pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
-        );
+        // If worldId address is set, proceed with on chain verification,
+        // otherwise assume verification has been done off chain by the builder.
+        if (address(worldId) != address(0)) {
+            // We now verify the provided proof is valid and the user is verified by World ID
+            worldId.verifyProof(
+                pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
+            );
+        }
     }
 
     /// Execute a batch of PackedUserOperation with Aggregators
@@ -295,10 +300,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Sets the World ID instance that will be used for verifying proofs.
     /// @param _worldId The World ID instance that will be used for verifying proofs.
     function setWorldId(address _worldId) external virtual onlyProxy onlyInitialized onlyOwner {
-        if (_worldId == address(0)) {
-            revert AddressZero();
-        }
-
         worldId = IWorldID(_worldId);
         emit WorldIdSet(_worldId);
     }

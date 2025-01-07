@@ -47,14 +47,8 @@ contract PBHEntryPointImplV1InitTest is Test {
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
-        // Expect revert when worldId is address(0)
-        bytes memory initCallData =
-            abi.encodeCall(PBHEntryPointImplV1.initialize, (IWorldID(address(0)), entryPoint, numPbh, multicall));
-        vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
-        IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
-
         // Expect revert when entrypoint is address(0)
-        initCallData =
+        bytes memory initCallData =
             abi.encodeCall(PBHEntryPointImplV1.initialize, (worldId, IEntryPoint(address(0)), numPbh, multicall));
         vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
         IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
