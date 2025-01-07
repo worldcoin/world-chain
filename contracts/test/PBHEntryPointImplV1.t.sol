@@ -159,7 +159,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         vm.expectEmit(true, true, true, true);
         emit PBH(address(this), signalHash, testPayload);
-        pbhEntryPoint.pbhMulticall(calls, testPayload);
+        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
     }
 
     function test_pbhMulticall_RevertIf_GasLimitExceeded(uint8 pbhNonce) public {
@@ -196,7 +196,6 @@ contract PBHEntryPointImplV1Test is TestSetup {
             assertTrue(
                 gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit"
             );
-            assertTrue(gasLimit > 0, "Gas limit should be non-zero");
         }
     }
 
