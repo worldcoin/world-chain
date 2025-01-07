@@ -21,6 +21,47 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     using ByteHasher for bytes;
 
     ///////////////////////////////////////////////////////////////////////////////
+    ///                             STATE VARIABLES                             ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    /// @dev The World ID instance that will be used for verifying proofs
+    IWorldID public worldId;
+
+    /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
+    IEntryPoint public entryPoint;
+
+    /// @notice The number of PBH transactions that may be used by a single
+    ///         World ID in a given month.
+    uint8 public numPbhPerMonth;
+
+    /// @notice Address of the Multicall3 implementation.
+    address internal multicall3;
+
+    /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
+    mapping(uint256 => bool) public nullifierHashes;
+
+    /// @notice The gas limit for a PBH multicall transaction
+    uint256 public pbhGasLimit;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                                  Events                                ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    /// @notice Emitted when the contract is initialized.
+    ///
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    /// @param entryPoint The ERC-4337 Entry Point.
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
+    event PBHEntryPointImplInitialized(
+        IWorldID indexed worldId,
+        IEntryPoint indexed entryPoint,
+        uint8 indexed numPbhPerMonth,
+        address multicall3,
+        uint256 pbhGasLimit
+    );
+
+    ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
 
@@ -45,23 +86,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
 
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Events                                ///
-    //////////////////////////////////////////////////////////////////////////////
-
-    /// @notice Emitted when the contract is initialized.
-    /// @param worldId The World ID instance that will be used for verifying proofs.
-    /// @param entryPoint The ERC-4337 Entry Point.
-    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    /// @param multicall3 Address of the Multicall3 implementation.
-    event PBHEntryPointImplInitialized(
-        IWorldID indexed worldId,
-        IEntryPoint indexed entryPoint,
-        uint8 indexed numPbhPerMonth,
-        address multicall3,
-        uint256 pbhGasLimit
-    );
-
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
@@ -83,29 +107,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     ///
     /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
     event PBHGasLimitSet(uint256 indexed pbhGasLimit);
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Vars                                  ///
-    //////////////////////////////////////////////////////////////////////////////
-
-    /// @dev The World ID instance that will be used for verifying proofs
-    IWorldID public worldId;
-
-    /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
-    IEntryPoint public entryPoint;
-
-    /// @notice The number of PBH transactions that may be used by a single
-    ///         World ID in a given month.
-    uint8 public numPbhPerMonth;
-
-    /// @notice Address of the Multicall3 implementation.
-    address internal multicall3;
-
-    /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
-    mapping(uint256 => bool) public nullifierHashes;
-
-    /// @notice The gas limit for a PBH multicall transaction
-    uint256 public pbhGasLimit;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                             INITIALIZATION                              ///
