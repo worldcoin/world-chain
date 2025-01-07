@@ -82,7 +82,6 @@ contract PBHSafe4337Module is Safe4337Module {
         // We need to remove the proof from the signature before validation
         if (isPBH && userOp.signature.length > expectedLength) {
             if (userOp.signature.length - expectedLength != ENCODED_PROOF_BYTES) {
-                // We need at minimum 352 bytes for the proof
                 revert InvalidProofSize();
             }
             // Remove the proof from the signature
