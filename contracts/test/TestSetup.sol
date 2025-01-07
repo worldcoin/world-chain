@@ -22,6 +22,7 @@ import {Mock4337Module} from "./mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {IAccount} from "@account-abstraction/contracts/interfaces/IAccount.sol";
 import {MockAccount} from "./mocks/MockAccount.sol";
+import {MockEIP1271SignatureValidator} from "./mocks/MockEIP1271SignatureValidator.sol";
 
 /// @title Test Setup Contract.
 /// @author Worldcoin
@@ -48,6 +49,8 @@ contract TestSetup is Test {
     SafeModuleSetup public moduleSetup;
 
     IAccount public mockSafe;
+
+    address public mockEIP1271SignatureValidator;
 
     address public safeOwner;
     uint256 public constant safeOwnerKey = 0x1234;
@@ -76,6 +79,7 @@ contract TestSetup is Test {
         deployPBHSignatureAggregator(address(pbhEntryPoint));
         deploySafeAndModule(address(pbhAggregator), 1);
         deployMockSafe(address(pbhAggregator), 1);
+        deployEIP1271SignatureValidator();
         vm.stopPrank();
 
         // Label the addresses for better errors.
@@ -89,6 +93,7 @@ contract TestSetup is Test {
         vm.label(address(factory), "Safe Proxy Factory");
         vm.label(address(moduleSetup), "Safe Module Setup");
         vm.label(address(singleton), "Safe Singleton");
+        vm.label(mockEIP1271SignatureValidator, "Mock EIP1271 Signature Validator");
 
         vm.deal(address(this), type(uint128).max);
         vm.deal(address(pbh4337Module), type(uint128).max);
@@ -118,6 +123,11 @@ contract TestSetup is Test {
             initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_PBH_GAS_LIMIT
         );
         pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+    }
+
+    /// @notice Deploys a new EIP1271 Signature Validator.
+    function deployEIP1271SignatureValidator() public {
+        mockEIP1271SignatureValidator = address(new MockEIP1271SignatureValidator());
     }
 
     /// @notice Initializes a new safe account.

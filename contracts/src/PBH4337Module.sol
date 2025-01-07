@@ -5,6 +5,7 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {ValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
+import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
 
 contract PBHSafe4337Module is Safe4337Module {
@@ -43,7 +44,7 @@ contract PBHSafe4337Module is Safe4337Module {
     /**
      * @dev Validates that the user operation is correctly signed and returns an ERC-4337 packed validation data
      * of `validAfter || validUntil || authorizer`:
-     *  - `authorizer`: 20-byte address, 0 for valid signature or 1 to mark signature failure (this module does not make use of signature aggregators).
+     *  - `authorizer`: 20-byte address, 0 for valid signature or 1 to mark signature failure, `PBH_SIGNATURE_AGGREGATOR` for PBH user operations.
      *  - `validUntil`: 6-byte timestamp value, or zero for "infinite". The user operation is valid only up to this time.
      *  - `validAfter`: 6-byte timestamp. The user operation is valid only after this time.
      * @param userOp User operation struct.
@@ -70,10 +71,12 @@ contract PBHSafe4337Module is Safe4337Module {
         // 2. UserOp execution without proof appended
         bool isPBH = (key == PBH_NONCE_KEY);
 
+        uint256 threshold = ISafe(payable(userOp.sender)).getThreshold();
+
         // Base signature length calculation:
-        // TIMESTAMP_BYTES (12) + (threshold * ECDSA_SIGNATURE_LENGTH)
+        // TIMESTAMP_BYTES (12) + (threshold * ECDSA_SIGNATURE_LENGTH) + contract signatures length
         uint256 expectedLength =
-            TIMESTAMP_BYTES + (ISafe(payable(userOp.sender)).getThreshold() * ECDSA_SIGNATURE_LENGTH);
+            TIMESTAMP_BYTES + SafeModuleSignatures._signatureLength(userOp.signature[TIMESTAMP_BYTES:], threshold);
 
         // If the signature length is greater than the expected length, then we know that the bundler appended the proof
         // We need to remove the proof from the signature before validation
@@ -81,7 +84,6 @@ contract PBHSafe4337Module is Safe4337Module {
             if (userOp.signature.length - expectedLength != ENCODED_PROOF_BYTES) {
                 revert InvalidProofSize();
             }
-
             // Remove the proof from the signature
             signatures = userOp.signature[TIMESTAMP_BYTES:expectedLength];
         }
