@@ -12,47 +12,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
 /// @title PBH Entry Point Implementation V1
-/// @dev This contract is an implementation of the PBH Entry Point.
-///      It is used to verify the signature of a Priority User Operation, and Relaying Priority Bundles to the EIP-4337 Entry Point.
 /// @author Worldcoin
+/// @notice This contract is an implementation of the PBH Entry Point.
+/// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
+/// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
+/// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
 contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                   A NOTE ON IMPLEMENTATION CONTRACTS                    ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    // This contract is designed explicitly to operate from behind a proxy contract. As a result,
-    // there are a few important implementation considerations:
-    //
-    // - All updates made after deploying a given version of the implementation should inherit from
-    //   the latest version of the implementation. This prevents storage clashes.
-    // - All functions that are less access-restricted than `private` should be marked `virtual` in
-    //   order to enable the fixing of bugs in the existing interface.
-    // - Any function that reads from or modifies state (i.e. is not marked `pure`) must be
-    //   annotated with the `onlyProxy` and `onlyInitialized` modifiers. This ensures that it can
-    //   only be called when it has access to the data in the proxy, otherwise results are likely to
-    //   be nonsensical.
-    // - This contract deals with important data for the PBH system. Ensure that all newly-added
-    //   functionality is carefully access controlled using `onlyOwner`, or a more granular access
-    //   mechanism.
-    // - Do not assign any contract-level variables at the definition site unless they are
-    //   `constant`.
-    //
-    // Additionally, the following notes apply:
-    //
-    // - Initialisation and ownership management are not protected behind `onlyProxy` intentionally.
-    //   This ensures that the contract can safely be disposed of after it is no longer used.
-    // - Carefully consider what data recovery options are presented as new functionality is added.
-    //   Care must be taken to ensure that a migration plan can exist for cases where upgrades
-    //   cannot recover from an issue or vulnerability.
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                    !!!!! DATA: DO NOT REORDER !!!!!                     ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    // To ensure compatibility between upgrades, it is exceedingly important that no reordering of
-    // these variables takes place. If reordering happens, a storage clash will occur (effectively a
-    // memory safety error).
-
     using ByteHasher for bytes;
 
     ///////////////////////////////////////////////////////////////////////////////
