@@ -23,7 +23,7 @@ library SafeModuleSignatures {
             revert InvalidSignatureLength(expectedLength, signatures.length);
         }
 
-        for (uint256 i = 0; i < threshold; i++) {
+        for (uint256 i = 0; i < threshold; ++i) {
             uint256 signaturePos = i * 0x41;
             uint8 signatureType = uint8(signatures[signaturePos + 0x40]);
 
