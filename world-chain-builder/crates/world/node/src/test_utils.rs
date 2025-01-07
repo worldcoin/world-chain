@@ -55,7 +55,7 @@ use world_chain_builder_pool::{
     validator::WorldChainTransactionValidator,
 };
 
-pub const DEV_CHAIN_ID: u64 = 8453;
+pub const DEV_CHAIN_ID: u64 = 2151908;
 
 #[derive(Default)]
 pub struct PBHTransactionTestContext;
