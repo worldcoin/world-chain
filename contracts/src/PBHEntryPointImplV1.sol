@@ -150,6 +150,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
             revert InvalidNumPbhPerMonth();
         }
 
+        __WorldIDImpl_init();
+
         worldId = _worldId;
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
@@ -163,10 +165,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         // Say that the contract is initialized.
         __setInitialized();
         emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
-    }
-
-    function __delegateInit() internal virtual onlyInitializing {
-        __WorldIDImpl_init();
     }
 
     /// @param pbhPayload The PBH payload containing the proof data.
