@@ -109,7 +109,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
-    ///                             INITIALIZATION                              ///
+    ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @notice Constructs the contract.
@@ -150,8 +150,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
             revert InvalidNumPbhPerMonth();
         }
 
-        // First, ensure that all of the parent contracts are initialised.
-        __delegateInit();
+        __WorldIDImpl_init();
 
         worldId = _worldId;
         entryPoint = _entryPoint;
@@ -167,20 +166,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         __setInitialized();
         emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3, _pbhGasLimit);
     }
-
-    /// @notice Responsible for initialising all of the supertypes of this contract.
-    /// @dev Must be called exactly once.
-    /// @dev When adding new superclasses, ensure that any initialization that they need to perform
-    ///      is accounted for here.
-    ///
-    /// @custom:reverts string If called more than once.
-    function __delegateInit() internal virtual onlyInitializing {
-        __WorldIDImpl_init();
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Functions                             ///
-    //////////////////////////////////////////////////////////////////////////////
 
     /// @param pbhPayload The PBH payload containing the proof data.
     function verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload)
