@@ -142,15 +142,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         address multicall3,
         uint256 _pbhGasLimit
     ) external reinitializer(1) {
-        if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || _multicall3 == address(0)) {
+        if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || multicall3 == address(0)) {
             revert AddressZero();
         }
 
         if (_numPbhPerMonth == 0) {
             revert InvalidNumPbhPerMonth();
         }
-
-        __WorldIDImpl_init();
 
         worldId = _worldId;
         entryPoint = _entryPoint;
@@ -165,6 +163,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         // Say that the contract is initialized.
         __setInitialized();
         emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
+    }
+
+    function __delegateInit() internal virtual onlyInitializing {
+        __WorldIDImpl_init();
     }
 
     /// @param pbhPayload The PBH payload containing the proof data.
