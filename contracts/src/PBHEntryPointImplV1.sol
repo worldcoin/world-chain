@@ -290,17 +290,17 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        // Check if pbh gas limit is exceeded
-        if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasleft());
-        }
-
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
         returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
         emit PBH(msg.sender, pbhPayload);
+
+        // Check if pbh gas limit is exceeded
+        if (gasleft() > pbhGasLimit) {
+            revert GasLimitExceeded(gasleft());
+        }
 
         return returnData;
     }
