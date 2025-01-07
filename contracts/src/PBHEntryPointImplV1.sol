@@ -84,6 +84,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     ///                                  Events                                ///
     //////////////////////////////////////////////////////////////////////////////
 
+    /// @notice Emitted when the contract is initialized.
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    /// @param entryPoint The ERC-4337 Entry Point.
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId,
         IEntryPoint indexed entryPoint,
@@ -95,8 +100,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
+    /// @param signalHash Signal hash associated with the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, PBHPayload payload);
+    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
@@ -264,7 +270,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
 
                 verifyPbh(signalHash, pbhPayloads[j]);
                 nullifierHashes[pbhPayloads[j].nullifierHash] = true;
-                emit PBH(sender, pbhPayloads[j]);
+                emit PBH(sender, signalHash, pbhPayloads[j]);
             }
         }
 
@@ -282,6 +288,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         }
     }
 
+    /// @notice Executes a Priority Multicall3.
+    /// @param calls The calls to execute.
+    /// @param pbhPayload The PBH payload containing the proof data.
+    /// @return returnData The results of the calls.
     function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
         external
         virtual
@@ -295,7 +305,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
         returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
-        emit PBH(msg.sender, pbhPayload);
+        emit PBH(msg.sender, signalHash, pbhPayload);
 
         // Check if pbh gas limit is exceeded
         if (gasleft() > pbhGasLimit) {

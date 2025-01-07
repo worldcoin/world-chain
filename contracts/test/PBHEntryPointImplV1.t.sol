@@ -24,7 +24,7 @@ import "@helpers/PBHExternalNullifier.sol";
 contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
 
-    event PBH(address indexed sender, IPBHEntryPoint.PBHPayload payload);
+    event PBH(address indexed sender, uint256 indexed signalHash, IPBHEntryPoint.PBHPayload payload);
     event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
     event WorldIdSet(address indexed worldId);
 
@@ -86,6 +86,17 @@ contract PBHEntryPointImplV1Test is TestSetup {
             signature: aggregatedSignature
         });
 
+        uint256 signalHash0 =
+            abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
+        uint256 signalHash1 =
+            abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
+
+        vm.expectEmit(true, true, true, true);
+        emit PBH(uoTestFixture[0].sender, signalHash0, proof0);
+
+        vm.expectEmit(true, true, true, true);
+        emit PBH(uoTestFixture[1].sender, signalHash1, proof1);
+
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
 
@@ -144,9 +155,11 @@ contract PBHEntryPointImplV1Test is TestSetup {
         calls[0] = IMulticall3.Call3({target: addr1, allowFailure: false, callData: testCallData});
         calls[1] = IMulticall3.Call3({target: addr2, allowFailure: false, callData: testCallData});
 
-        vm.expectEmit(true, false, false, false);
-        emit PBH(address(this), testPayload);
-        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
+        uint256 signalHash = abi.encode(address(this), calls).hashToField();
+
+        vm.expectEmit(true, true, true, true);
+        emit PBH(address(this), signalHash, testPayload);
+        pbhEntryPoint.pbhMulticall(calls, testPayload);
     }
 
     function test_pbhMulticall_RevertIf_GasLimitExceeded(uint8 pbhNonce) public {
@@ -229,7 +242,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         vm.assume(addr != address(0));
 
         vm.prank(OWNER);
-        vm.expectEmit(true, false, false, false);
+        vm.expectEmit(true, true, true, true);
         emit WorldIdSet(addr);
         pbhEntryPoint.setWorldId(addr);
     }
