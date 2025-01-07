@@ -39,11 +39,14 @@ contract DeployDevnet is Script {
 
     uint8 constant TREE_DEPTH = 30;
     uint256 constant INITIAL_ROOT = 0x918D46BF52D98B034413F4A1A1C41594E7A7A3F6AE08CB43D1A2A230E1959EF;
+    uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
 
     address semaphoreVerifier = address(0);
 
     address batchInsertionVerifiers = address(0);
     address batchDeletionVerifiers = address(0);
+    uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
+
 
     function run() public {
         console.log(
@@ -77,7 +80,7 @@ contract DeployDevnet is Script {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (IWorldIDG(worldIdGroups), IEntryPoint(entryPoint), 30, address(0))
+            PBHEntryPointImplV1.initialize, (IWorldIDG(worldIdGroups), IEntryPoint(entryPoint), 30, address(0), MAX_PBH_GAS_LIMIT)
         );
         pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);

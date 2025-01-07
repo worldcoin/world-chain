@@ -74,6 +74,12 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Thrown when the hash of the user operations is invalid
     error InvalidHashedOps();
 
+    /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
+    error GasLimitExceeded(uint256 gasLimit);
+
+    /// @notice Thrown when setting the gas limit for a PBH multicall to 0
+    error InvalidPBHGasLimit(uint256 gasLimit);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Events                                ///
     //////////////////////////////////////////////////////////////////////////////
@@ -84,7 +90,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
     /// @param multicall3 Address of the Multicall3 implementation.
     event PBHEntryPointImplInitialized(
-        IWorldID indexed worldId, IEntryPoint indexed entryPoint, uint8 indexed numPbhPerMonth, address multicall3
+        IWorldID indexed worldId,
+        IEntryPoint indexed entryPoint,
+        uint8 indexed numPbhPerMonth,
+        address multicall3,
+        uint256 pbhGasLimit
     );
 
     /// @notice Emitted once for each successful PBH verification.
@@ -103,6 +113,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     ///
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
     event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+
+    /// @notice Emitted when setting the PBH gas limit.
+    ///
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
+    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Vars                                  ///
@@ -123,6 +138,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
 
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
     mapping(uint256 => bool) public nullifierHashes;
+
+    /// @notice The gas limit for a PBH multicall transaction
+    uint256 public pbhGasLimit;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                             INITIALIZATION                              ///
@@ -151,10 +169,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
-    function initialize(IWorldID _worldId, IEntryPoint _entryPoint, uint8 _numPbhPerMonth, address _multicall3)
-        external
-        reinitializer(1)
-    {
+    function initialize(
+        IWorldID _worldId,
+        IEntryPoint _entryPoint,
+        uint8 _numPbhPerMonth,
+        address _multicall3,
+        uint256 _pbhGasLimit
+    ) external reinitializer(1) {
         if (address(_entryPoint) == address(0) || _multicall3 == address(0)) {
             revert AddressZero();
         }
@@ -171,9 +192,14 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         numPbhPerMonth = _numPbhPerMonth;
         multicall3 = _multicall3;
 
+        if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
+            revert InvalidPBHGasLimit(_pbhGasLimit);
+        }
+
+        pbhGasLimit = _pbhGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3);
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3, _pbhGasLimit);
     }
 
     /// @notice Responsible for initialising all of the supertypes of this contract.
@@ -275,12 +301,16 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         returns (IMulticall3.Result[] memory returnData)
     {
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
-
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        returnData = IMulticall3(multicall3).aggregate3(calls);
+        returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
+
+        // Check if pbh gas limit is exceeded
+        if (gasleft() > pbhGasLimit) {
+            revert GasLimitExceeded(gasleft());
+        }
 
         return returnData;
     }
@@ -302,5 +332,16 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     function setWorldId(address _worldId) external virtual onlyProxy onlyInitialized onlyOwner {
         worldId = IWorldID(_worldId);
         emit WorldIdSet(_worldId);
+    }
+
+    /// @notice Sets the max gas limit for a PBH multicall transaction.
+    /// @param _pbhGasLimit The max gas limit for a PBH multicall transaction.
+    function setPBHGasLimit(uint256 _pbhGasLimit) external virtual onlyProxy onlyInitialized onlyOwner {
+        if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
+            revert InvalidPBHGasLimit(_pbhGasLimit);
+        }
+
+        pbhGasLimit = _pbhGasLimit;
+        emit PBHGasLimitSet(_pbhGasLimit);
     }
 }
