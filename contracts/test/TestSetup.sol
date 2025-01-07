@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import {console} from "forge-std/console.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {MockWorldIDGroups} from "./mocks/MockWorldIDGroups.sol";
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
