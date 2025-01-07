@@ -66,6 +66,7 @@ impl PBHTransactionTestContext {
         pbh_nonce: u8,
         tx_nonce: u64,
         user_op_nonce: U256,
+        chain_id: u64,
     ) -> Bytes {
         let dt = chrono::Utc::now();
         let dt = dt.naive_local();
@@ -82,7 +83,7 @@ impl PBHTransactionTestContext {
         let data = pbh_bundle(vec![uo], vec![proof]);
         let encoded = data.abi_encode();
         let tx = tx(
-            DEV_CHAIN_ID,
+            chain_id,
             Some(Bytes::from(encoded)),
             tx_nonce,
             PBH_TEST_VALIDATOR,
