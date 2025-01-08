@@ -100,6 +100,66 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
 
+    function test_handleAggregatedOps_EIP1271() public {
+        // Set Safe Owner to EIP1271 Validator
+        safeOwner = mockEIP1271SignatureValidator;
+        // Deploy new Safe, SafeModuleSetup, SafeProxyFactory, and Safe4337Module
+        deploySafeAndModule(address(pbhAggregator), 1);
+        // Deal the Safe Some ETH.
+        vm.deal(address(safe), type(uint128).max);
+        // Deposit some funds into the Entry Point from the Safe.
+        entryPoint.depositTo{value: 10 ether}(address(safe));
+
+        worldIDGroups.setVerifyProofSuccess(true);
+        IPBHEntryPoint.PBHPayload memory proof0 = IPBHEntryPoint.PBHPayload({
+            root: 1,
+            pbhExternalNullifier: TestUtils.getPBHExternalNullifier(0),
+            nullifierHash: 0,
+            proof: [uint256(0), 0, 0, 0, 0, 0, 0, 0]
+        });
+
+        IPBHEntryPoint.PBHPayload memory proof1 = IPBHEntryPoint.PBHPayload({
+            root: 2,
+            pbhExternalNullifier: TestUtils.getPBHExternalNullifier(1),
+            nullifierHash: 1,
+            proof: [uint256(0), 0, 0, 0, 0, 0, 0, 0]
+        });
+
+        bytes[] memory proofs = new bytes[](2);
+        proofs[0] = abi.encode(proof0);
+        proofs[1] = abi.encode(proof1);
+
+        PackedUserOperation[] memory uoTestFixture =
+            TestUtils.createUOTestData(vm, PBH_NONCE_KEY, address(pbh4337Module), address(safe), proofs, safeOwnerKey);
+
+        uoTestFixture[0].signature =
+            TestUtils.encodeSignature(TestUtils.createUserOpEIP1271Signature(safeOwner), proofs[0]);
+        uoTestFixture[1].signature =
+            TestUtils.encodeSignature(TestUtils.createUserOpEIP1271Signature(safeOwner), proofs[1]);
+
+        bytes memory aggregatedSignature = pbhAggregator.aggregateSignatures(uoTestFixture);
+
+        IEntryPoint.UserOpsPerAggregator[] memory userOpsPerAggregator = new IEntryPoint.UserOpsPerAggregator[](1);
+        userOpsPerAggregator[0] = IEntryPoint.UserOpsPerAggregator({
+            aggregator: pbhAggregator,
+            userOps: uoTestFixture,
+            signature: aggregatedSignature
+        });
+
+        uint256 signalHash0 =
+            abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
+        uint256 signalHash1 =
+            abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
+
+        vm.expectEmit(true, true, true, true);
+        emit PBH(uoTestFixture[0].sender, signalHash0, proof0);
+
+        vm.expectEmit(true, true, true, true);
+        emit PBH(uoTestFixture[1].sender, signalHash1, proof1);
+
+        pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
+    }
+
     function test_handleAggregatedOps_RevertIf_Reentrancy() public {
         worldIDGroups.setVerifyProofSuccess(true);
         IPBHEntryPoint.PBHPayload memory proof0 = IPBHEntryPoint.PBHPayload({
@@ -130,7 +190,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         userOpsPerAggregator[0].userOps[0].callData = data;
         bytes32 operationHash = pbh4337Module.getOperationHash(userOpsPerAggregator[0].userOps[0]);
         // Recreate the signature
-        bytes memory signature = TestUtils.createUserOpSignature(vm, operationHash, safeOwnerKey);
+        bytes memory signature = TestUtils.createUserOpECDSASignature(vm, operationHash, safeOwnerKey);
         userOpsPerAggregator[0].userOps[0].signature = bytes.concat(signature, abi.encode(proof0));
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }

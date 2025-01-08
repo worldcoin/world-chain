@@ -28,8 +28,6 @@ import {Verifier as InsertionB1200} from "@world-id-contracts/verifiers/insertio
 import {Verifier as DeletionB10} from "@world-id-contracts/verifiers/deletion/b10.sol";
 import {Verifier as DeletionB100} from "@world-id-contracts/verifiers/deletion/b100.sol";
 
-import {IWorldID as IWorldIDG} from "../src/interfaces/IWorldID.sol";
-
 contract DeployDevnet is Script {
     address public entryPoint;
     address public worldIdGroups;
@@ -45,8 +43,6 @@ contract DeployDevnet is Script {
 
     address batchInsertionVerifiers = address(0);
     address batchDeletionVerifiers = address(0);
-    uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
-
 
     function run() public {
         console.log(
@@ -80,7 +76,8 @@ contract DeployDevnet is Script {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (IWorldIDG(worldIdGroups), IEntryPoint(entryPoint), 30, address(0), MAX_PBH_GAS_LIMIT)
+            PBHEntryPointImplV1.initialize,
+            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 30, address(0x123), MAX_PBH_GAS_LIMIT)
         );
         pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
