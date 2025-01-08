@@ -123,7 +123,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Initializes the contract.
     /// @dev Must be called exactly once.
     /// @dev This is marked `reinitializer()` to allow for updated initialisation steps when working
-    ///      with upgrades based upon this contract. Be aware that there are only 256 (zero-indexed)
+    ///      with upgrades based upon this contract. Be aware that there are only 255 (parameter is `uint8` and first value is 1)
     ///      initialisations allowed, so decide carefully when to use them. Many cases can safely be
     ///      replaced by use of setters.
     /// @dev This function is explicitly not virtual as it does not make sense to override even when
@@ -281,10 +281,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Sets the World ID instance that will be used for verifying proofs.
     /// @param _worldId The World ID instance that will be used for verifying proofs.
     function setWorldId(address _worldId) external virtual onlyProxy onlyInitialized onlyOwner {
-        if (_worldId == address(0)) {
-            revert AddressZero();
-        }
-
         worldId = IWorldID(_worldId);
         emit WorldIdSet(_worldId);
     }

@@ -33,6 +33,8 @@ contract TestSetup is Test {
     ///                                TEST DATA                                ///
     ///////////////////////////////////////////////////////////////////////////////
 
+    string internal constant MAINNET_RPC_URL = "https://eth.llamarpc.com";
+
     /// @notice The 4337 Entry Point on Ethereum Mainnet.
     IEntryPoint internal entryPoint = IEntryPoint(address(0x0000000071727De22E5E9d8BAf0edAc6f37da032));
     /// @notice The PBHEntryPoint contract.
@@ -72,6 +74,10 @@ contract TestSetup is Test {
     /// @notice This function runs before every single test.
     /// @dev It is run before every single iteration of a property-based fuzzing test.
     function setUp() public virtual {
+        string memory rpcUrl = vm.envOr("ETHEREUM_PROVIDER", MAINNET_RPC_URL);
+        uint256 forkId = vm.createFork(rpcUrl);
+        vm.selectFork(forkId);
+
         safeOwner = vm.addr(safeOwnerKey);
         vm.startPrank(OWNER);
         deployWorldIDGroups();
