@@ -12,48 +12,54 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
 /// @title PBH Entry Point Implementation V1
-/// @dev This contract is an implementation of the PBH Entry Point.
-///      It is used to verify the signature of a Priority User Operation, and Relaying Priority Bundles to the EIP-4337 Entry Point.
 /// @author Worldcoin
+/// @notice This contract is an implementation of the PBH Entry Point.
+/// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
+/// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
+/// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
 contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                   A NOTE ON IMPLEMENTATION CONTRACTS                    ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    // This contract is designed explicitly to operate from behind a proxy contract. As a result,
-    // there are a few important implementation considerations:
-    //
-    // - All updates made after deploying a given version of the implementation should inherit from
-    //   the latest version of the implementation. This prevents storage clashes.
-    // - All functions that are less access-restricted than `private` should be marked `virtual` in
-    //   order to enable the fixing of bugs in the existing interface.
-    // - Any function that reads from or modifies state (i.e. is not marked `pure`) must be
-    //   annotated with the `onlyProxy` and `onlyInitialized` modifiers. This ensures that it can
-    //   only be called when it has access to the data in the proxy, otherwise results are likely to
-    //   be nonsensical.
-    // - This contract deals with important data for the PBH system. Ensure that all newly-added
-    //   functionality is carefully access controlled using `onlyOwner`, or a more granular access
-    //   mechanism.
-    // - Do not assign any contract-level variables at the definition site unless they are
-    //   `constant`.
-    //
-    // Additionally, the following notes apply:
-    //
-    // - Initialisation and ownership management are not protected behind `onlyProxy` intentionally.
-    //   This ensures that the contract can safely be disposed of after it is no longer used.
-    // - Carefully consider what data recovery options are presented as new functionality is added.
-    //   Care must be taken to ensure that a migration plan can exist for cases where upgrades
-    //   cannot recover from an issue or vulnerability.
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                    !!!!! DATA: DO NOT REORDER !!!!!                     ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    // To ensure compatibility between upgrades, it is exceedingly important that no reordering of
-    // these variables takes place. If reordering happens, a storage clash will occur (effectively a
-    // memory safety error).
-
     using ByteHasher for bytes;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                             STATE VARIABLES                             ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    /// @dev The World ID instance that will be used for verifying proofs
+    IWorldID public worldId;
+
+    /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
+    IEntryPoint public entryPoint;
+
+    /// @notice The number of PBH transactions that may be used by a single
+    ///         World ID in a given month.
+    uint8 public numPbhPerMonth;
+
+    /// @notice Address of the Multicall3 implementation.
+    address internal _multicall3;
+
+    /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
+    mapping(uint256 => bool) public nullifierHashes;
+
+    /// @notice The gas limit for a PBH multicall transaction
+    uint256 public pbhGasLimit;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                                  Events                                ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    /// @notice Emitted when the contract is initialized.
+    ///
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    /// @param entryPoint The ERC-4337 Entry Point.
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
+    event PBHEntryPointImplInitialized(
+        IWorldID indexed worldId,
+        IEntryPoint indexed entryPoint,
+        uint8 indexed numPbhPerMonth,
+        address multicall3,
+        uint256 pbhGasLimit
+    );
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
@@ -80,23 +86,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
 
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Events                                ///
-    //////////////////////////////////////////////////////////////////////////////
-
-    /// @notice Emitted when the contract is initialized.
-    /// @param worldId The World ID instance that will be used for verifying proofs.
-    /// @param entryPoint The ERC-4337 Entry Point.
-    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    /// @param multicall3 Address of the Multicall3 implementation.
-    event PBHEntryPointImplInitialized(
-        IWorldID indexed worldId,
-        IEntryPoint indexed entryPoint,
-        uint8 indexed numPbhPerMonth,
-        address multicall3,
-        uint256 pbhGasLimit
-    );
-
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
@@ -120,30 +109,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Vars                                  ///
-    //////////////////////////////////////////////////////////////////////////////
-
-    /// @dev The World ID instance that will be used for verifying proofs
-    IWorldID public worldId;
-
-    /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
-    IEntryPoint public entryPoint;
-
-    /// @notice The number of PBH transactions that may be used by a single
-    ///         World ID in a given month.
-    uint8 public numPbhPerMonth;
-
-    /// @notice Address of the Multicall3 implementation.
-    address internal multicall3;
-
-    /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
-    mapping(uint256 => bool) public nullifierHashes;
-
-    /// @notice The gas limit for a PBH multicall transaction
-    uint256 public pbhGasLimit;
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                             INITIALIZATION                              ///
+    ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @notice Constructs the contract.
@@ -173,10 +139,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         IWorldID _worldId,
         IEntryPoint _entryPoint,
         uint8 _numPbhPerMonth,
-        address _multicall3,
+        address multicall3,
         uint256 _pbhGasLimit
     ) external reinitializer(1) {
-        if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || _multicall3 == address(0)) {
+        if (address(_entryPoint) == address(0) || multicall3 == address(0)) {
             revert AddressZero();
         }
 
@@ -184,13 +150,12 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
             revert InvalidNumPbhPerMonth();
         }
 
-        // First, ensure that all of the parent contracts are initialised.
-        __delegateInit();
+        __WorldIDImpl_init();
 
         worldId = _worldId;
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
-        multicall3 = _multicall3;
+        _multicall3 = multicall3;
 
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
             revert InvalidPBHGasLimit(_pbhGasLimit);
@@ -199,22 +164,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         pbhGasLimit = _pbhGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _multicall3, _pbhGasLimit);
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
     }
-
-    /// @notice Responsible for initialising all of the supertypes of this contract.
-    /// @dev Must be called exactly once.
-    /// @dev When adding new superclasses, ensure that any initialization that they need to perform
-    ///      is accounted for here.
-    ///
-    /// @custom:reverts string If called more than once.
-    function __delegateInit() internal virtual onlyInitializing {
-        __WorldIDImpl_init();
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  Functions                             ///
-    //////////////////////////////////////////////////////////////////////////////
 
     /// @param pbhPayload The PBH payload containing the proof data.
     function verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload)
@@ -295,8 +246,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
     function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
         external
         virtual
-        onlyInitialized
         onlyProxy
+        onlyInitialized
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
@@ -304,7 +255,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        returnData = IMulticall3(multicall3).aggregate3{gas: pbhGasLimit}(calls);
+        returnData = IMulticall3(_multicall3).aggregate3{gas: pbhGasLimit}(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
 
         // Check if pbh gas limit is exceeded
