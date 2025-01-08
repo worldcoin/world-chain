@@ -7,12 +7,12 @@ use alloy_primitives::{Address, TxHash};
 use reth::transaction_pool::{
     noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
-    NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PropagatedTransactions,
-    TransactionEvents, TransactionListenerKind, TransactionOrigin, TransactionPool,
-    ValidPoolTransaction,
+    NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionListenerKind, TransactionOrigin,
+    TransactionPool, ValidPoolTransaction,
 };
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{PooledTransactionsElement, RecoveredTx};
+use reth_primitives::RecoveredTx;
 use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -126,7 +126,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         &self,
         _tx_hashes: Vec<TxHash>,
         _limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
         vec![]
     }
 
