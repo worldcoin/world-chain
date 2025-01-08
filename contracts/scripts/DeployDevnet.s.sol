@@ -44,7 +44,6 @@ contract DeployDevnet is Script {
     address batchInsertionVerifiers = address(0);
     address batchDeletionVerifiers = address(0);
 
-
     function run() public {
         console.log(
             "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, WorldIDRouter, WorldIDOrb"
@@ -77,7 +76,8 @@ contract DeployDevnet is Script {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
-            PBHEntryPointImplV1.initialize, (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 30, address(0x123), MAX_PBH_GAS_LIMIT)
+            PBHEntryPointImplV1.initialize,
+            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 30, address(0x123), MAX_PBH_GAS_LIMIT)
         );
         pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
