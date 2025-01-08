@@ -142,7 +142,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         address multicall3,
         uint256 _pbhGasLimit
     ) external reinitializer(1) {
-        if (address(_worldId) == address(0) || address(_entryPoint) == address(0) || multicall3 == address(0)) {
+        if (address(_entryPoint) == address(0) || multicall3 == address(0)) {
             revert AddressZero();
         }
 
