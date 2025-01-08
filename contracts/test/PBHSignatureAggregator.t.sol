@@ -12,24 +12,37 @@ import "../src/helpers/PBHExternalNullifier.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 
 contract PBHSignatureAggregatorTest is TestSetup {
+    struct ProofData {
+        uint256 p0;
+        uint256 p1;
+        uint256 p2;
+        uint256 p3;
+        uint256 p4;
+        uint256 p5;
+        uint256 p6;
+        uint256 p7;
+    }
+
     function testFuzz_AggregateSignatures(
         uint256 root,
         uint256 pbhExternalNullifier,
         uint256 nullifierHash,
-        uint256 p0,
-        uint256 p1,
-        uint256 p2,
-        uint256 p3,
-        uint256 p4,
-        uint256 p5,
-        uint256 p6,
-        uint256 p7
+        ProofData calldata proofData
     ) public {
         IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
             root: root,
             pbhExternalNullifier: pbhExternalNullifier,
             nullifierHash: nullifierHash,
-            proof: [p0, p1, p2, p3, p4, p5, p6, p7]
+            proof: [
+                proofData.p0,
+                proofData.p1,
+                proofData.p2,
+                proofData.p3,
+                proofData.p4,
+                proofData.p5,
+                proofData.p6,
+                proofData.p7
+            ]
         });
 
         bytes[] memory proofs = new bytes[](2);
@@ -75,14 +88,7 @@ contract PBHSignatureAggregatorTest is TestSetup {
         uint256 pbhExternalNullifier,
         uint256 nullifierHash,
         uint8 signatureThreshold,
-        uint256 p0,
-        uint256 p1,
-        uint256 p2,
-        uint256 p3,
-        uint256 p4,
-        uint256 p5,
-        uint256 p6,
-        uint256 p7
+        ProofData calldata proofData
     ) public {
         vm.assume(signatureThreshold >= 1);
         deployMockSafe(address(pbhAggregator), signatureThreshold);
@@ -90,7 +96,16 @@ contract PBHSignatureAggregatorTest is TestSetup {
             root: root,
             pbhExternalNullifier: pbhExternalNullifier,
             nullifierHash: nullifierHash,
-            proof: [p0, p1, p2, p3, p4, p5, p6, p7]
+            proof: [
+                proofData.p0,
+                proofData.p1,
+                proofData.p2,
+                proofData.p3,
+                proofData.p4,
+                proofData.p5,
+                proofData.p6,
+                proofData.p7
+            ]
         });
 
         bytes memory proofData = abi.encode(proof);
@@ -159,20 +174,22 @@ contract PBHSignatureAggregatorTest is TestSetup {
         uint256 root,
         uint256 pbhExternalNullifier,
         uint256 nullifierHash,
-        uint256 p0,
-        uint256 p1,
-        uint256 p2,
-        uint256 p3,
-        uint256 p4,
-        uint256 p5,
-        uint256 p6,
-        uint256 p7
+        ProofData calldata proofData
     ) public {
         IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
             root: root,
             pbhExternalNullifier: pbhExternalNullifier,
             nullifierHash: nullifierHash,
-            proof: [p0, p1, p2, p3, p4, p5, p6, p7]
+            proof: [
+                proofData.p0,
+                proofData.p1,
+                proofData.p2,
+                proofData.p3,
+                proofData.p4,
+                proofData.p5,
+                proofData.p6,
+                proofData.p7
+            ]
         });
 
         bytes[] memory proofs = new bytes[](2);
