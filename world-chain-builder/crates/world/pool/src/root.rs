@@ -13,7 +13,7 @@ use super::error::WorldChainTransactionPoolError;
 /// The slot of the `_latestRoot` in the
 ///
 /// [WorldID contract](https://github.com/worldcoin/world-id-state-bridge/blob/729d2346a3bb6bac003284bdcefc0cf12ece3f7d/src/abstract/WorldIDBridge.sol#L30)
-pub const LATEST_ROOT_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
+pub const LATEST_ROOT_SLOT: U256 = U256::from_limbs([2, 0, 0, 0]);
 /// Root Expiration Period
 pub const ROOT_EXPIRATION_WINDOW: u64 = 60 * 60; // 1 hour
 
