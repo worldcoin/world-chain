@@ -84,7 +84,7 @@ contract TestSetup is Test {
         deployEntryPoint();
         deployWorldIDGroups();
         deployPBHEntryPoint(worldIDGroups, entryPoint);
-        deployPBHSignatureAggregator(address(pbhEntryPoint));
+        deployPBHSignatureAggregator(address(pbhEntryPoint), address(worldIDGroups));
         deploySafeAndModule(address(pbhAggregator), 1);
         deployMockSafe(address(pbhAggregator), 1);
         deployEIP1271SignatureValidator();
@@ -151,8 +151,8 @@ contract TestSetup is Test {
 
     /// @notice Initializes a new PBHSignatureAggregator.
     /// @dev It is constructed in the globals.
-    function deployPBHSignatureAggregator(address _pbhEntryPoint) public {
-        pbhAggregator = new PBHSignatureAggregator(_pbhEntryPoint);
+    function deployPBHSignatureAggregator(address _pbhEntryPoint, address _worldId) public {
+        pbhAggregator = new PBHSignatureAggregator(_pbhEntryPoint, _worldId);
     }
 
     /// @notice Initializes a new safe account.

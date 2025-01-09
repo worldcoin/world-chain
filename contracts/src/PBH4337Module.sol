@@ -76,7 +76,7 @@ contract PBHSafe4337Module is Safe4337Module {
         // Base signature length calculation:
         // TIMESTAMP_BYTES (12) + (threshold * ECDSA_SIGNATURE_LENGTH) + contract signatures length
         uint256 expectedLength =
-            TIMESTAMP_BYTES + SafeModuleSignatures._signatureLength(userOp.signature[TIMESTAMP_BYTES:], threshold);
+            TIMESTAMP_BYTES + SafeModuleSignatures.signatureLength(userOp.signature[TIMESTAMP_BYTES:], threshold);
 
         // If the signature length is greater than the expected length, then we know that the bundler appended the proof
         // We need to remove the proof from the signature before validation
