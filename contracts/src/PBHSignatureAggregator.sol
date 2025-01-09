@@ -6,6 +6,8 @@ import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
 import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
+import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
+import {ByteHasher} from "./helpers/ByteHasher.sol";
 
 /// @title PBH Signature Aggregator
 /// @author Worldcoin
@@ -14,6 +16,8 @@ import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 ///         Smart Accounts that return the `PBHSignatureAggregator` as the authorizer in `validationData`
 ///         will be considered as Priority User Operations, and will need to pack a World ID proof in the signature field.
 contract PBHSignatureAggregator is IAggregator {
+    using ByteHasher for bytes;
+
     /// @notice The length of an ECDSA signature.
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
     /// @notice The length of the timestamp bytes.
@@ -35,9 +39,14 @@ contract PBHSignatureAggregator is IAggregator {
     /// @notice The PBHVerifier contract.
     IPBHEntryPoint public immutable pbhEntryPoint;
 
-    constructor(address _pbhEntryPoint) {
+    /// @notice The WorldID contract.
+    IWorldID public immutable worldID;
+
+    constructor(address _pbhEntryPoint, address _worldID) {
         require(_pbhEntryPoint != address(0), AddressZero());
+        require(_worldID != address(0), AddressZero());
         pbhEntryPoint = IPBHEntryPoint(_pbhEntryPoint);
+        worldID = IWorldID(_worldID);
     }
 
     /**
@@ -47,10 +56,7 @@ contract PBHSignatureAggregator is IAggregator {
      */
     function validateSignatures(PackedUserOperation[] calldata userOps, bytes calldata) external view {
         bytes memory encoded = abi.encode(userOps);
-        try pbhEntryPoint.validateSignaturesCallback(keccak256(encoded)) {}
-        catch {
-            revert InvalidUserOperations();
-        }
+        pbhEntryPoint.validateSignaturesCallback(keccak256(encoded));
     }
 
     /**
@@ -64,9 +70,39 @@ contract PBHSignatureAggregator is IAggregator {
      */
     function validateUserOpSignature(PackedUserOperation calldata userOp)
         external
-        pure
+        view
         returns (bytes memory sigForUserOp)
-    {}
+    {
+        // Ensure we have the minimum amount of bytes:
+        // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
+        require(
+            userOp.signature.length >= TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH,
+            InvalidSignatureLength(
+                TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH, userOp.signature.length
+            )
+        );
+
+        uint256 expectedLength = TIMESTAMP_BYTES
+            + SafeModuleSignatures._signatureLength(
+                userOp.signature[TIMESTAMP_BYTES:], ISafe(payable(userOp.sender)).getThreshold()
+            );
+
+        require(
+            userOp.signature.length == expectedLength + PROOF_DATA_LENGTH,
+            InvalidSignatureLength(expectedLength + PROOF_DATA_LENGTH, userOp.signature.length)
+        );
+        bytes memory proofData = userOp.signature[expectedLength:expectedLength + PROOF_DATA_LENGTH];
+        IPBHEntryPoint.PBHPayload memory pbhPayload = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
+
+        // We now generate the signal hash from the sender, nonce, and calldata
+        uint256 signalHash = abi.encodePacked(userOp.sender, userOp.nonce, userOp.callData).hashToField();
+
+        worldID.verifyProof(
+            pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
+        );
+
+        sigForUserOp = userOp.signature[:expectedLength];
+    }
 
     /**
      * Aggregate multiple signatures into a single value.
