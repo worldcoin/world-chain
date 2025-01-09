@@ -15,7 +15,7 @@ library SafeModuleSignatures {
     /// @dev 6 bytes each for validAfter and validUntil.
     uint256 internal constant TIMESTAMP_BYTES = 12;
     /// @notice The length of the encoded proof data.
-    uint256 public constant PROOF_DATA_LENGTH = 352;
+    uint256 internal constant PROOF_DATA_LENGTH = 352;
 
     /// @notice Returns the expected length of the signatures.
     /// @param signatures Signature data.
