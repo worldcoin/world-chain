@@ -92,8 +92,6 @@ contract PBHSignatureAggregator is IAggregator {
     {
         IPBHEntryPoint.PBHPayload[] memory pbhPayloads = new IPBHEntryPoint.PBHPayload[](userOps.length);
         for (uint256 i = 0; i < userOps.length; ++i) {
-            // Ensure we have the minimum amount of bytes:
-            // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
             (, bytes memory proofData) = SafeModuleSignatures.extractProof(
                 userOps[i].signature, ISafe(payable(userOps[i].sender)).getThreshold()
             );
