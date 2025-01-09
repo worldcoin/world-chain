@@ -23,6 +23,7 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {IAccount} from "@account-abstraction/contracts/interfaces/IAccount.sol";
 import {MockAccount} from "./mocks/MockAccount.sol";
 import {MockEIP1271SignatureValidator} from "./mocks/MockEIP1271SignatureValidator.sol";
+import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
 
 /// @title Test Setup Contract.
 /// @author Worldcoin
@@ -35,8 +36,8 @@ contract TestSetup is Test {
 
     string internal constant MAINNET_RPC_URL = "https://eth.llamarpc.com";
 
-    /// @notice The 4337 Entry Point on Ethereum Mainnet.
-    IEntryPoint internal entryPoint = IEntryPoint(address(0x0000000071727De22E5E9d8BAf0edAc6f37da032));
+    /// @notice The 4337 Entry Point.
+    IEntryPoint internal entryPoint;
     /// @notice The PBHEntryPoint contract.
     IPBHEntryPoint public pbhEntryPoint;
     /// @notice The PBHSignatureAggregator contract.
@@ -80,6 +81,7 @@ contract TestSetup is Test {
 
         safeOwner = vm.addr(safeOwnerKey);
         vm.startPrank(OWNER);
+        deployEntryPoint();
         deployWorldIDGroups();
         deployPBHEntryPoint(worldIDGroups, entryPoint);
         deployPBHSignatureAggregator(address(pbhEntryPoint), address(worldIDGroups));
@@ -100,9 +102,9 @@ contract TestSetup is Test {
         vm.label(address(moduleSetup), "Safe Module Setup");
         vm.label(address(singleton), "Safe Singleton");
         vm.label(mockEIP1271SignatureValidator, "Mock EIP1271 Signature Validator");
+        vm.label(MULTICALL3, "Multicall3");
 
         vm.deal(address(this), type(uint128).max);
-        vm.deal(address(pbh4337Module), type(uint128).max);
         vm.deal(address(safe), type(uint128).max);
         // Deposit some funds into the Entry Point from the PBH 4337 Module.
         entryPoint.depositTo{value: 10 ether}(address(safe));
@@ -134,6 +136,11 @@ contract TestSetup is Test {
     /// @notice Deploys a new EIP1271 Signature Validator.
     function deployEIP1271SignatureValidator() public {
         mockEIP1271SignatureValidator = address(new MockEIP1271SignatureValidator());
+    }
+
+    /// @notice Deploys the singleton EntryPoint contract.
+    function deployEntryPoint() public {
+        entryPoint = IEntryPoint(address(new EntryPoint()));
     }
 
     /// @notice Initializes a new safe account.
