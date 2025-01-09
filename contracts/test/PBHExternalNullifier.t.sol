@@ -2,9 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "@helpers/PBHExternalNullifier.sol";
+import "@lib/PBHExternalNullifier.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
+/// @title PBHExternalNullifier Tests
+/// @notice Contains tests for the PBHExternalNullifier library
+/// @author Worldcoin
 contract PBHExternalNullifierTest is Test {
     function testFuzz_encode(uint8 pbhNonce, uint8 month, uint16 year) public pure {
         vm.assume(month > 0 && month <= 12);

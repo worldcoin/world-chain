@@ -5,7 +5,7 @@ import "@forge-std/console.sol";
 import "@forge-std/Vm.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
-import "@helpers/PBHExternalNullifier.sol";
+import "@lib/PBHExternalNullifier.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator.sol";
 import {Mock4337Module} from "./mocks/Mock4337Module.sol";

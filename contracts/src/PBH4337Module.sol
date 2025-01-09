@@ -5,8 +5,8 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {ValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
-import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
+import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 
 contract PBHSafe4337Module is Safe4337Module {
     /// @notice The length of an ECDSA signature.
