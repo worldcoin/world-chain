@@ -18,14 +18,6 @@ import {ByteHasher} from "./helpers/ByteHasher.sol";
 contract PBHSignatureAggregator is IAggregator {
     using ByteHasher for bytes;
 
-    /// @notice The length of an ECDSA signature.
-    uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
-    /// @notice The length of the timestamp bytes.
-    /// @dev 6 bytes each for validAfter and validUntil.
-    uint256 internal constant TIMESTAMP_BYTES = 12;
-    /// @notice The length of the encoded proof data.
-    uint256 internal constant PROOF_DATA_LENGTH = 352;
-
     /// @notice Thrown when the Hash of the UserOperations is not
     ///         in transient storage of the `PBHVerifier`.
     error InvalidUserOperations();
@@ -61,37 +53,19 @@ contract PBHSignatureAggregator is IAggregator {
 
     /**
      * Validate signature of a single userOp.
-     * This method should be called by bundler after EntryPointSimulation.simulateValidation() returns
-     * the aggregator this account uses.
-     * First it validates the signature over the userOp. Then it returns data to be used when creating the handleOps.
+     * This method should be called off chain by the bundler to verify the integrity of the encoded signature as
+     * well as verify the proof data. The proof data will then be stripped off the signature, and the remaining
+     * `sigForUserOp` should be passed to handleAggregatedOps.
      * @param userOp        - The userOperation received from the user.
-     * @return sigForUserOp - The value to put into the signature field of the userOp when calling handleOps.
-     *                        (usually empty, unless account and aggregator support some kind of "multisig".
+     * @return sigForUserOp - The new userOperation signature.
      */
     function validateUserOpSignature(PackedUserOperation calldata userOp)
         external
         view
         returns (bytes memory sigForUserOp)
     {
-        // Ensure we have the minimum amount of bytes:
-        // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
-        require(
-            userOp.signature.length >= TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH,
-            InvalidSignatureLength(
-                TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH, userOp.signature.length
-            )
-        );
-
-        uint256 expectedLength = TIMESTAMP_BYTES
-            + SafeModuleSignatures._signatureLength(
-                userOp.signature[TIMESTAMP_BYTES:], ISafe(payable(userOp.sender)).getThreshold()
-            );
-
-        require(
-            userOp.signature.length == expectedLength + PROOF_DATA_LENGTH,
-            InvalidSignatureLength(expectedLength + PROOF_DATA_LENGTH, userOp.signature.length)
-        );
-        bytes memory proofData = userOp.signature[expectedLength:expectedLength + PROOF_DATA_LENGTH];
+        (uint256 expectedLength, bytes memory proofData) =
+            SafeModuleSignatures.extractProof(userOp.signature, ISafe(payable(userOp.sender)).getThreshold());
         IPBHEntryPoint.PBHPayload memory pbhPayload = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
 
         // We now generate the signal hash from the sender, nonce, and calldata
@@ -101,7 +75,7 @@ contract PBHSignatureAggregator is IAggregator {
             pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
         );
 
-        sigForUserOp = userOp.signature[:expectedLength];
+        sigForUserOp = userOp.signature[0:expectedLength];
     }
 
     /**
@@ -120,23 +94,9 @@ contract PBHSignatureAggregator is IAggregator {
         for (uint256 i = 0; i < userOps.length; ++i) {
             // Ensure we have the minimum amount of bytes:
             // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
-            require(
-                userOps[i].signature.length >= TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH,
-                InvalidSignatureLength(
-                    TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH, userOps[i].signature.length
-                )
+            (, bytes memory proofData) = SafeModuleSignatures.extractProof(
+                userOps[i].signature, ISafe(payable(userOps[i].sender)).getThreshold()
             );
-
-            uint256 expectedLength = TIMESTAMP_BYTES
-                + SafeModuleSignatures._signatureLength(
-                    userOps[i].signature[TIMESTAMP_BYTES:], ISafe(payable(userOps[i].sender)).getThreshold()
-                );
-
-            require(
-                userOps[i].signature.length == expectedLength + PROOF_DATA_LENGTH,
-                InvalidSignatureLength(expectedLength + PROOF_DATA_LENGTH, userOps[i].signature.length)
-            );
-            bytes memory proofData = userOps[i].signature[expectedLength:expectedLength + PROOF_DATA_LENGTH];
             pbhPayloads[i] = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
         }
         aggregatedSignature = abi.encode(pbhPayloads);

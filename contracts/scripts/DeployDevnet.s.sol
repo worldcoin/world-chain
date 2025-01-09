@@ -84,7 +84,7 @@ contract DeployDevnet is Script {
     }
 
     function deployPBHSignatureAggregator() public {
-        pbhSignatureAggregator = address(new PBHSignatureAggregator(pbhEntryPoint));
+        pbhSignatureAggregator = address(new PBHSignatureAggregator(pbhEntryPoint, worldIdGroups));
         console.log("PBHSignatureAggregator Deployed at: ", pbhSignatureAggregator);
     }
 
