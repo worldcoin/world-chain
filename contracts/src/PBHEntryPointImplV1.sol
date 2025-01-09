@@ -203,7 +203,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         for (uint256 i = 0; i < opsPerAggregator.length; ++i) {
             bytes32 hashedOps = keccak256(abi.encode(opsPerAggregator[i].userOps));
             assembly ("memory-safe") {
-                if gt(tload(hashedOps), 0) {
+                if tload(hashedOps) {
                     mstore(0x00, 0x5e75ad06) // StorageCollision()
                     revert(0x1c, 0x04)
                 }
