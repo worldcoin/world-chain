@@ -102,9 +102,9 @@ contract TestSetup is Test {
         vm.label(address(moduleSetup), "Safe Module Setup");
         vm.label(address(singleton), "Safe Singleton");
         vm.label(mockEIP1271SignatureValidator, "Mock EIP1271 Signature Validator");
+        vm.label(MULTICALL3, "Multicall3");
 
         vm.deal(address(this), type(uint128).max);
-        vm.deal(address(pbh4337Module), type(uint128).max);
         vm.deal(address(safe), type(uint128).max);
         // Deposit some funds into the Entry Point from the PBH 4337 Module.
         entryPoint.depositTo{value: 10 ether}(address(safe));
