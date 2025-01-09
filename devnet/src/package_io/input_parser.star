@@ -15,7 +15,7 @@ DEFAULT_EL_IMAGES = {
 }
 
 DEFAULT_ENGINE_IMAGES = {
-    "rollup-boost": "flashbots/rollup-boost:0.2",
+    "rollup-boost": "flashbots/rollup-boost:0.3rc4",
 }
 
 DEFAULT_CL_IMAGES = {
@@ -24,7 +24,7 @@ DEFAULT_CL_IMAGES = {
 }
 
 DEFAULT_BATCHER_IMAGES = {
-    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:develop",
+    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.9.4",
 }
 
 DEFAULT_PROPOSER_IMAGES = {

@@ -23,16 +23,23 @@ use crate::validator::WorldChainTransactionValidator;
 #[derive(Debug, Clone)]
 pub struct WorldChainPoolBuilder {
     pub num_pbh_txs: u8,
-    pub pbh_validator: Address,
+    pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
+    pub world_id: Address,
 }
 
 impl WorldChainPoolBuilder {
-    pub fn new(num_pbh_txs: u8, pbh_validator: Address, pbh_signature_aggregator: Address) -> Self {
+    pub fn new(
+        num_pbh_txs: u8,
+        pbh_entrypoint: Address,
+        pbh_signature_aggregator: Address,
+        world_id: Address,
+    ) -> Self {
         Self {
             num_pbh_txs,
-            pbh_validator,
+            pbh_entrypoint,
             pbh_signature_aggregator,
+            world_id,
         }
     }
 }
@@ -62,13 +69,14 @@ where
                 // In --dev mode we can't require gas fees because we're unable to decode the L1
                 // block info
                 .require_l1_data_gas_fee(!ctx.config().dev.dev);
-            let root_validator = WorldChainRootValidator::new(validator.client().clone())
-                .expect("failed to initialize root validator");
+            let root_validator =
+                WorldChainRootValidator::new(validator.client().clone(), self.world_id)
+                    .expect("failed to initialize root validator");
             WorldChainTransactionValidator::new(
                 op_tx_validator,
                 root_validator,
                 self.num_pbh_txs,
-                self.pbh_validator,
+                self.pbh_entrypoint,
                 self.pbh_signature_aggregator,
             )
         });

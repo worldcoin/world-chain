@@ -29,8 +29,16 @@ pub struct WorldChainBuilderArgs {
 
     /// Sets the ERC-4337 EntryPoint Proxy contract address
     /// This contract is used to validate 4337 PBH bundles
-    #[arg(long = "builder.pbh_validator")]
-    pub pbh_validator: Address,
+    #[arg(long = "builder.pbh_entrypoint")]
+    pub pbh_entrypoint: Address,
+
+    /// Sets the WorldID contract address.
+    /// This contract is used to provide the latest merkle root on chain.
+    #[arg(
+        long = "builder.world_id",
+        default_value = "0x047eE5313F98E26Cc8177fA38877cB36292D2364"
+    )]
+    pub world_id: Address,
 
     /// Sets the ERC0-7766 Signature Aggregator contract address
     /// This contract signifies that a given bundle should receive priority inclusion if it passes validation
