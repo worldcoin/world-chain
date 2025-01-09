@@ -4,6 +4,9 @@ set positional-arguments
 test: 
   cargo nextest run --workspace
 
+build-max-perf *args='':
+  RUSTFLAGS="-C target-cpu=native" cargo build --features=jemmaloc $@
+
 # Formats the world-chain-builder
 fmt: fmt-fix fmt-check
 

@@ -20,6 +20,9 @@ e2e-test:
 build:
     @just ./devnet/build
 
+build-node *args='':
+    @just ./world-chain-builder/build-max-perf $@
+
 # Tests the world-chain-builder
 test:
     @just ./world-chain-builder/test
