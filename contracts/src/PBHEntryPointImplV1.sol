@@ -8,7 +8,7 @@ import {IMulticall3} from "./interfaces/IMulticall3.sol";
 import {ByteHasher} from "./helpers/ByteHasher.sol";
 import {PBHExternalNullifier} from "./helpers/PBHExternalNullifier.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
 /// @title PBH Entry Point Implementation V1
@@ -17,7 +17,7 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 /// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
 /// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
 /// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
-contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
+contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTransient {
     using ByteHasher for bytes;
 
     ///////////////////////////////////////////////////////////////////////////////
