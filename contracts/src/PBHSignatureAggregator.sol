@@ -2,12 +2,12 @@
 pragma solidity ^0.8.28;
 
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
-import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
-import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
-import {ByteHasher} from "./helpers/ByteHasher.sol";
+import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
+import {ByteHasher} from "./lib/ByteHasher.sol";
+import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 
 /// @title PBH Signature Aggregator
 /// @author Worldcoin

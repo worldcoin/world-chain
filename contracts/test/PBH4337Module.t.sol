@@ -15,6 +15,9 @@ import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
 import {Mock4337Module} from "./mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 
+/// @title PBH4337Module Tests
+/// @notice Contains tests for the PBH4337Module contract
+/// @author Worldcoin
 contract PBHSafe4337ModuleTest is Test {
     Mock4337Module public module;
     Safe public singleton;

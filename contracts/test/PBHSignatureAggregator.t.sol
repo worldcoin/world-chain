@@ -8,10 +8,13 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
-import "../src/helpers/PBHExternalNullifier.sol";
+import "@lib/PBHExternalNullifier.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
-import {SafeModuleSignatures} from "../src/helpers/SafeModuleSignatures.sol";
+import {SafeModuleSignatures} from "@lib/SafeModuleSignatures.sol";
 
+/// @title PBHSignatureAggregator Tests
+/// @notice Contains tests for signature aggregation, extraction, and validation.
+/// @author Worldcoin
 contract PBHSignatureAggregatorTest is TestSetup {
     struct ProofData {
         uint256 p0;
