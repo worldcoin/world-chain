@@ -324,21 +324,25 @@ contract PBHSignatureAggregatorTest is TestSetup {
         }
 
         bytes memory signatures = bytes.concat(buffer, expected);
-        this.runExtractProofTest(abi.encode(signatures), signatureThreshold, buffer.length, expected);
+        this.runExtractProofTest(abi.encode(signatures), signatureThreshold, buffer, expected);
     }
 
-    function runExtractProofTest(bytes calldata encoded, uint256 threshold, uint256 sigLength, bytes memory proof)
+    function runExtractProofTest(bytes calldata encoded, uint256 threshold, bytes memory signature, bytes memory proof)
         public
     {
         bytes memory signatures = abi.decode(encoded, (bytes));
-        this._runExtractProofTest(signatures, threshold, sigLength, proof);
+        this._runExtractProofTest(signatures, threshold, signature, proof);
     }
 
-    function _runExtractProofTest(bytes calldata signatures, uint256 threshold, uint256 sigLength, bytes memory proof)
-        public
-    {
-        (uint256 length, bytes memory proofData) = SafeModuleSignatures.extractProof(signatures, threshold);
-        assertEq(length, sigLength, "Length should match");
+    function _runExtractProofTest(
+        bytes calldata signatures,
+        uint256 threshold,
+        bytes memory signature,
+        bytes memory proof
+    ) public {
+        (bytes memory userOpSignature, bytes memory proofData) =
+            SafeModuleSignatures.extractProof(signatures, threshold);
+        assertEq(userOpSignature, signature, "Signature should match");
         assertEq(proofData, proof, "Proof should match");
     }
 

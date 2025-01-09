@@ -64,7 +64,9 @@ contract PBHSignatureAggregator is IAggregator {
         view
         returns (bytes memory sigForUserOp)
     {
-        (uint256 expectedLength, bytes memory proofData) =
+        bytes memory proofData;
+
+        (sigForUserOp, proofData) =
             SafeModuleSignatures.extractProof(userOp.signature, ISafe(payable(userOp.sender)).getThreshold());
         IPBHEntryPoint.PBHPayload memory pbhPayload = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
 
@@ -74,8 +76,6 @@ contract PBHSignatureAggregator is IAggregator {
         worldID.verifyProof(
             pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
         );
-
-        sigForUserOp = userOp.signature[0:expectedLength];
     }
 
     /**

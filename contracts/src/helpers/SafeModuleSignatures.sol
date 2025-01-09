@@ -15,7 +15,7 @@ library SafeModuleSignatures {
     /// @dev 6 bytes each for validAfter and validUntil.
     uint256 internal constant TIMESTAMP_BYTES = 12;
     /// @notice The length of the encoded proof data.
-    uint256 internal constant PROOF_DATA_LENGTH = 352;
+    uint256 public constant PROOF_DATA_LENGTH = 352;
 
     /// @notice Returns the expected length of the signatures.
     /// @param signatures Signature data.
@@ -46,12 +46,12 @@ library SafeModuleSignatures {
     /// @notice Utility function to extract the encoded proof data from the signature.
     /// @param signatures Signature data.
     /// @param threshold The Signer threshold.
-    /// @return length The length of the signatures.
+    /// @return userOperationSignature The user operation signature.
     /// @return proofData The encoded proof data.
     function extractProof(bytes calldata signatures, uint256 threshold)
         internal
         pure
-        returns (uint256 length, bytes memory proofData)
+        returns (bytes memory userOperationSignature, bytes memory proofData)
     {
         // Ensure we have the minimum amount of bytes:
         // - 12 Bytes (validUntil, validAfter) 65 Bytes (Fixed ECDSA length) + 352 Bytes (Proof Data)
@@ -60,12 +60,14 @@ library SafeModuleSignatures {
             InvalidSignatureLength(TIMESTAMP_BYTES + ECDSA_SIGNATURE_LENGTH + PROOF_DATA_LENGTH, signatures.length)
         );
 
-        length = TIMESTAMP_BYTES + SafeModuleSignatures.signatureLength(signatures[TIMESTAMP_BYTES:], threshold);
+        uint256 length = TIMESTAMP_BYTES + SafeModuleSignatures.signatureLength(signatures[TIMESTAMP_BYTES:], threshold);
 
         require(
             signatures.length == length + PROOF_DATA_LENGTH,
             InvalidSignatureLength(length + PROOF_DATA_LENGTH, signatures.length)
         );
+
         proofData = signatures[length:length + PROOF_DATA_LENGTH];
+        userOperationSignature = signatures[0:length];
     }
 }
