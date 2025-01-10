@@ -7,6 +7,7 @@ default:
 # Spawns the devnet
 devnet-up:
     @just ./devnet/devnet-up
+    @just ./contracts/deploy-contracts
 
 # Stops the devnet **This will prune all docker containers**
 devnet-down:

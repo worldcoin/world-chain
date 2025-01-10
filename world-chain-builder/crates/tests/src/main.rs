@@ -23,8 +23,6 @@ use tracing::info;
 pub mod cases;
 pub mod fixtures;
 
-const DEPLOYER_DEV: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
@@ -50,9 +48,6 @@ async fn main() -> Result<()> {
         tokio::join!(wait_0, wait_1);
     };
     f.await;
-
-    info!("Deploying contracts");
-    deploy_contracts(builder_rpc.clone()).await?;
 
     info!("Generating test fixtures");
     let fixture = generate_test_fixture().await;
@@ -113,34 +108,6 @@ async fn start_devnet() -> Result<(String, String)> {
     Ok((builder_socket, sequencer_socket))
 }
 
-async fn deploy_contracts(builder_rpc: String) -> Result<()> {
-    if std::env::var("PRIVATE_KEY").is_err() {
-        std::env::set_var("PRIVATE_KEY", DEPLOYER_DEV);
-    }
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .unwrap()
-        .join("contracts/")
-        .canonicalize()?;
-
-    info!("Deploying PBH 4337 contracts at {:?}", builder_rpc);
-
-    run_command(
-        "forge",
-        &[
-            "script",
-            "scripts/DeployDevnet.s.sol:DeployDevnet",
-            "--rpc-url",
-            &builder_rpc,
-            "--broadcast",
-        ],
-        path,
-    )
-    .await?;
-    Ok(())
-}
-
 async fn wait<T, P>(provider: P, timeout: time::Duration)
 where
     T: Transport + Clone,
@@ -166,12 +133,12 @@ pub async fn run_command(cmd: &str, args: &[&str], ctx: impl AsRef<Path>) -> Res
     let output = Command::new(cmd).current_dir(ctx).args(args).output()?;
     if output.status.success() {
         let stdout = String::from_utf8(output.stdout)?;
-        info!("{:?}", stdout.trim_end_matches("/n"));
+        info!("{:?}", stdout.trim_end_matches(r#"\n"#));
         Ok(stdout)
     } else {
         Err(eyre!(
             "Command failed: {:?}",
-            String::from_utf8(output.stdout)?.trim_end_matches("/n"),
+            String::from_utf8(output.stdout)?.trim_end_matches(r#"\n"#),
         ))
     }
 }

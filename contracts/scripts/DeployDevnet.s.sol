@@ -29,6 +29,8 @@ import {Verifier as DeletionB10} from "@world-id-contracts/verifiers/deletion/b1
 import {Verifier as DeletionB100} from "@world-id-contracts/verifiers/deletion/b100.sol";
 
 contract DeployDevnet is Script {
+    WorldIDIdentityManager worldIDOrb;
+
     address public entryPoint;
     address public worldIdGroups;
     address public pbhEntryPoint;
@@ -49,7 +51,7 @@ contract DeployDevnet is Script {
             "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, WorldIDRouter, WorldIDOrb"
         );
 
-        WorldIDIdentityManager worldIDOrb = deployWorldID(INITIAL_ROOT);
+        worldIDOrb = deployWorldID(INITIAL_ROOT);
         console.log("WorldIDOrb Deployed at:", address(worldIDOrb));
 
         WorldIDRouter router = deployWorldIDRouter(IWorldID(address(worldIDOrb)));
@@ -84,7 +86,7 @@ contract DeployDevnet is Script {
     }
 
     function deployPBHSignatureAggregator() public {
-        pbhSignatureAggregator = address(new PBHSignatureAggregator(pbhEntryPoint));
+        pbhSignatureAggregator = address(new PBHSignatureAggregator(pbhEntryPoint, address(worldIDOrb)));
         console.log("PBHSignatureAggregator Deployed at: ", pbhSignatureAggregator);
     }
 

@@ -8,9 +8,13 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
-import "../src/helpers/PBHExternalNullifier.sol";
+import "@lib/PBHExternalNullifier.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
+import {SafeModuleSignatures} from "@lib/SafeModuleSignatures.sol";
 
+/// @title PBHSignatureAggregator Tests
+/// @notice Contains tests for signature aggregation, extraction, and validation.
+/// @author Worldcoin
 contract PBHSignatureAggregatorTest is TestSetup {
     struct ProofData {
         uint256 p0;
@@ -108,7 +112,7 @@ contract PBHSignatureAggregatorTest is TestSetup {
             ]
         });
 
-        bytes memory proofData = abi.encode(proof);
+        bytes memory encodedProof = abi.encode(proof);
         PackedUserOperation[] memory uoTestFixture = new PackedUserOperation[](1);
         bytes memory buffer = new bytes(uint256(65) * signatureThreshold + 12);
 
@@ -118,7 +122,7 @@ contract PBHSignatureAggregatorTest is TestSetup {
             buffer[wordPos + 0x40] = bytes1(0x01);
         }
 
-        bytes memory signature = bytes.concat(buffer, proofData);
+        bytes memory signature = bytes.concat(buffer, encodedProof);
 
         uoTestFixture[0] = PackedUserOperation({
             sender: address(mockSafe),
@@ -235,6 +239,114 @@ contract PBHSignatureAggregatorTest is TestSetup {
         assertEq(decodedProofs[1].proof[5], proof.proof[5], "Proof should match");
         assertEq(decodedProofs[1].proof[6], proof.proof[6], "Proof should match");
         assertEq(decodedProofs[1].proof[7], proof.proof[7], "Proof should match");
+    }
+
+    function testFuzz_ValidateUserOpSignature(
+        uint256 root,
+        uint256 pbhExternalNullifier,
+        uint256 nullifierHash,
+        ProofData calldata proofData,
+        uint8 signatureThreshold
+    ) public {
+        vm.assume(signatureThreshold >= 1);
+        deployMockSafe(address(pbhAggregator), signatureThreshold);
+        IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
+            root: root,
+            pbhExternalNullifier: pbhExternalNullifier,
+            nullifierHash: nullifierHash,
+            proof: [
+                proofData.p0,
+                proofData.p1,
+                proofData.p2,
+                proofData.p3,
+                proofData.p4,
+                proofData.p5,
+                proofData.p6,
+                proofData.p7
+            ]
+        });
+
+        bytes memory expected = abi.encode(proof);
+        bytes memory buffer = new bytes(uint256(65) * signatureThreshold + 12);
+
+        // Set the signature type to 0x01 for each signature
+        for (uint256 i = 0; i < signatureThreshold; i++) {
+            uint256 wordPos = 12 + (i * 0x41);
+            buffer[wordPos + 0x40] = bytes1(0x01);
+        }
+
+        bytes memory signatures = bytes.concat(buffer, expected);
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: address(mockSafe),
+            nonce: 0,
+            initCode: new bytes(0),
+            callData: new bytes(0),
+            accountGasLimits: 0x00000000000000000000000000009fd300000000000000000000000000000000,
+            preVerificationGas: 21000,
+            gasFees: 0x0000000000000000000000000000000100000000000000000000000000000001,
+            paymasterAndData: new bytes(0),
+            signature: signatures
+        });
+
+        bytes memory sigForUserOp = pbhAggregator.validateUserOpSignature(userOp);
+        assertEq(buffer, sigForUserOp, "Signature should match");
+    }
+
+    /// @notice SafeModuleSignatures.extractProof Test
+    function testFuzz_ExtractProof(
+        uint256 root,
+        uint256 pbhExternalNullifier,
+        uint256 nullifierHash,
+        ProofData calldata proofData,
+        uint8 signatureThreshold
+    ) public {
+        vm.assume(signatureThreshold >= 1);
+        IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
+            root: root,
+            pbhExternalNullifier: pbhExternalNullifier,
+            nullifierHash: nullifierHash,
+            proof: [
+                proofData.p0,
+                proofData.p1,
+                proofData.p2,
+                proofData.p3,
+                proofData.p4,
+                proofData.p5,
+                proofData.p6,
+                proofData.p7
+            ]
+        });
+
+        bytes memory expected = abi.encode(proof);
+        bytes memory buffer = new bytes(uint256(65) * signatureThreshold + 12);
+
+        // Set the signature type to 0x01 for each signature
+        for (uint256 i = 0; i < signatureThreshold; i++) {
+            uint256 wordPos = 12 + (i * 0x41);
+            buffer[wordPos + 0x40] = bytes1(0x01);
+        }
+
+        bytes memory signatures = bytes.concat(buffer, expected);
+        this.runExtractProofTest(abi.encode(signatures), signatureThreshold, buffer, expected);
+    }
+
+    function runExtractProofTest(bytes calldata encoded, uint256 threshold, bytes memory signature, bytes memory proof)
+        public
+    {
+        bytes memory signatures = abi.decode(encoded, (bytes));
+        this._runExtractProofTest(signatures, threshold, signature, proof);
+    }
+
+    function _runExtractProofTest(
+        bytes calldata signatures,
+        uint256 threshold,
+        bytes memory signature,
+        bytes memory proof
+    ) public {
+        (bytes memory userOpSignature, bytes memory proofData) =
+            SafeModuleSignatures.extractProof(signatures, threshold);
+        assertEq(userOpSignature, signature, "Signature should match");
+        assertEq(proofData, proof, "Proof should match");
     }
 
     receive() external payable {}

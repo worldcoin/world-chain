@@ -5,10 +5,10 @@ import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {IMulticall3} from "./interfaces/IMulticall3.sol";
-import {ByteHasher} from "./helpers/ByteHasher.sol";
-import {PBHExternalNullifier} from "./helpers/PBHExternalNullifier.sol";
+import {ByteHasher} from "./lib/ByteHasher.sol";
+import {PBHExternalNullifier} from "./lib/PBHExternalNullifier.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
 /// @title PBH Entry Point Implementation V1
@@ -17,7 +17,7 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 /// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
 /// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
 /// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
-contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
+contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTransient {
     using ByteHasher for bytes;
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -61,6 +61,28 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         uint256 pbhGasLimit
     );
 
+    /// @notice Emitted once for each successful PBH verification.
+    ///
+    /// @param sender The sender of this particular transaction or UserOp.
+    /// @param signalHash Signal hash associated with the PBHPayload.
+    /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
+    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
+
+    /// @notice Emitted when the World ID address is set.
+    ///
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    event WorldIdSet(address indexed worldId);
+
+    /// @notice Emitted when the number of PBH transactions allowed per month is set.
+    ///
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+
+    /// @notice Emitted when setting the PBH gas limit.
+    ///
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
+    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
@@ -85,28 +107,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
-
-    /// @notice Emitted once for each successful PBH verification.
-    ///
-    /// @param sender The sender of this particular transaction or UserOp.
-    /// @param signalHash Signal hash associated with the PBHPayload.
-    /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
-
-    /// @notice Emitted when the World ID address is set.
-    ///
-    /// @param worldId The World ID instance that will be used for verifying proofs.
-    event WorldIdSet(address indexed worldId);
-
-    /// @notice Emitted when the number of PBH transactions allowed per month is set.
-    ///
-    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
-
-    /// @notice Emitted when setting the PBH gas limit.
-    ///
-    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
-    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
@@ -203,7 +203,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuard {
         for (uint256 i = 0; i < opsPerAggregator.length; ++i) {
             bytes32 hashedOps = keccak256(abi.encode(opsPerAggregator[i].userOps));
             assembly ("memory-safe") {
-                if gt(tload(hashedOps), 0) {
+                if tload(hashedOps) {
                     mstore(0x00, 0x5e75ad06) // StorageCollision()
                     revert(0x1c, 0x04)
                 }

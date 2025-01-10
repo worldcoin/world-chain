@@ -5,20 +5,30 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {ValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
-import {SafeModuleSignatures} from "./helpers/SafeModuleSignatures.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
+import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 
 contract PBHSafe4337Module is Safe4337Module {
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                             STATE VARIABLES                             ///
+    //////////////////////////////////////////////////////////////////////////////
+
     /// @notice The length of an ECDSA signature.
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
+
     /// @notice The length of the timestamp bytes.
     /// @dev 6 bytes each for validAfter and validUntil.
     uint256 internal constant TIMESTAMP_BYTES = 12;
+
     /// @notice The length of the encoded proof data.
     uint256 internal constant ENCODED_PROOF_BYTES = 352;
 
     /// @notice The PBH Signature Aggregator address.
     address public immutable PBH_SIGNATURE_AGGREGATOR;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                                  ERRORS                                ///
+    //////////////////////////////////////////////////////////////////////////////
 
     /// @notice The PBH Nonce Key.
     /// @dev This key is used to identify a PBH user operation.
@@ -32,6 +42,10 @@ contract PBHSafe4337Module is Safe4337Module {
 
     /// @notice Thrown when the PBH Nonce Key is not initialized.
     error UninitializedNonceKey();
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                               FUNCTIONS                                 ///
+    ///////////////////////////////////////////////////////////////////////////////
 
     constructor(address entryPoint, address _pbhSignatureAggregator, uint192 _pbhNonceKey) Safe4337Module(entryPoint) {
         require(_pbhSignatureAggregator != address(0), AddressZero());
@@ -76,7 +90,7 @@ contract PBHSafe4337Module is Safe4337Module {
         // Base signature length calculation:
         // TIMESTAMP_BYTES (12) + (threshold * ECDSA_SIGNATURE_LENGTH) + contract signatures length
         uint256 expectedLength =
-            TIMESTAMP_BYTES + SafeModuleSignatures._signatureLength(userOp.signature[TIMESTAMP_BYTES:], threshold);
+            TIMESTAMP_BYTES + SafeModuleSignatures.signatureLength(userOp.signature[TIMESTAMP_BYTES:], threshold);
 
         // If the signature length is greater than the expected length, then we know that the bundler appended the proof
         // We need to remove the proof from the signature before validation
