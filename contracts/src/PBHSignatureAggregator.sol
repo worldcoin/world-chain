@@ -18,6 +18,20 @@ import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 contract PBHSignatureAggregator is IAggregator {
     using ByteHasher for bytes;
 
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                             STATE VARIABLES                             ///
+    //////////////////////////////////////////////////////////////////////////////
+
+    /// @notice The PBHVerifier contract.
+    IPBHEntryPoint public immutable pbhEntryPoint;
+
+    /// @notice The WorldID contract.
+    IWorldID public immutable worldID;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                                  ERRORS                                ///
+    //////////////////////////////////////////////////////////////////////////////
+
     /// @notice Thrown when the Hash of the UserOperations is not
     ///         in transient storage of the `PBHVerifier`.
     error InvalidUserOperations();
@@ -28,11 +42,9 @@ contract PBHSignatureAggregator is IAggregator {
     /// @notice Thrown when a zero address is passed as the PBHEntryPoint.
     error AddressZero();
 
-    /// @notice The PBHVerifier contract.
-    IPBHEntryPoint public immutable pbhEntryPoint;
-
-    /// @notice The WorldID contract.
-    IWorldID public immutable worldID;
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                               FUNCTIONS                                 ///
+    ///////////////////////////////////////////////////////////////////////////////
 
     constructor(address _pbhEntryPoint, address _worldID) {
         require(_pbhEntryPoint != address(0), AddressZero());

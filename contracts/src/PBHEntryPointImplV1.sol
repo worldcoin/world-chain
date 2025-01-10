@@ -61,6 +61,28 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         uint256 pbhGasLimit
     );
 
+    /// @notice Emitted once for each successful PBH verification.
+    ///
+    /// @param sender The sender of this particular transaction or UserOp.
+    /// @param signalHash Signal hash associated with the PBHPayload.
+    /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
+    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
+
+    /// @notice Emitted when the World ID address is set.
+    ///
+    /// @param worldId The World ID instance that will be used for verifying proofs.
+    event WorldIdSet(address indexed worldId);
+
+    /// @notice Emitted when the number of PBH transactions allowed per month is set.
+    ///
+    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
+    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+
+    /// @notice Emitted when setting the PBH gas limit.
+    ///
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
+    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
@@ -85,28 +107,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
-
-    /// @notice Emitted once for each successful PBH verification.
-    ///
-    /// @param sender The sender of this particular transaction or UserOp.
-    /// @param signalHash Signal hash associated with the PBHPayload.
-    /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
-
-    /// @notice Emitted when the World ID address is set.
-    ///
-    /// @param worldId The World ID instance that will be used for verifying proofs.
-    event WorldIdSet(address indexed worldId);
-
-    /// @notice Emitted when the number of PBH transactions allowed per month is set.
-    ///
-    /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
-
-    /// @notice Emitted when setting the PBH gas limit.
-    ///
-    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
-    event PBHGasLimitSet(uint256 indexed pbhGasLimit);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
