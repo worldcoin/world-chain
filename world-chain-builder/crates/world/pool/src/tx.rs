@@ -2,33 +2,34 @@ use std::sync::Arc;
 
 use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError, Transaction};
 use alloy_primitives::TxHash;
-use alloy_rpc_types::erc4337::ConditionalOptions;
+use alloy_rpc_types::erc4337::{ConditionalOptions, TransactionConditional};
 use reth::{
+    consensus::Consensus,
     core::primitives::SignedTransaction,
     transaction_pool::{
         EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
     },
 };
+use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
     Transaction as RethTransaction,
 };
-use reth_primitives::{
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, TransactionSigned,
-};
+use reth_primitives::{PooledTransactionsElementEcRecovered, RecoveredTx, TransactionSigned};
 use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
     fn set_valid_pbh(&mut self);
-    fn conditional_options(&self) -> Option<&ConditionalOptions>;
+    fn conditional_options(&self) -> Option<&TransactionConditional>;
 }
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
-    pub inner: EthPooledTransaction,
+    pub inner: OpPooledTransaction,
     pub valid_pbh: bool,
-    pub conditional_options: Option<ConditionalOptions>,
+    pub conditional_options: Option<TransactionConditional>,
 }
 
 impl EthPoolTransaction for WorldChainPooledTransaction {
@@ -90,7 +91,7 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
         self.valid_pbh
     }
 
-    fn conditional_options(&self) -> Option<&ConditionalOptions> {
+    fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.conditional_options.as_ref()
     }
 
@@ -99,8 +100,8 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl From<EthPooledTransaction> for WorldChainPooledTransaction {
-    fn from(tx: EthPooledTransaction) -> Self {
+impl From<OpPooledTransaction> for WorldChainPooledTransaction {
+    fn from(tx: OpPooledTransaction) -> Self {
         Self {
             inner: tx,
             valid_pbh: false,
