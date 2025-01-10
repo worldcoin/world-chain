@@ -21,6 +21,11 @@ members = [
 
 default-members = ["crates/world/bin"]
 
+[profile.maxperf]
+codegen-units = 1
+inherits = "release"
+lto = "fat"
+
 [workspace.lints]
 
 [workspace.dependencies]

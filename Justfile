@@ -21,7 +21,7 @@ build:
     @just ./devnet/build
 
 build-node *args='':
-    @just ./world-chain-builder/build-max-perf $@
+    @just ./world-chain-builder/build $@
 
 # Tests the world-chain-builder
 test:
