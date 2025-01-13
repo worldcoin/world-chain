@@ -20,7 +20,8 @@ e2e-test:
 build:
     @just ./devnet/build
 
-build-node *args='':
+# Cross compiles the world-chain-builder on a specified target
+cross-build *args='':
     @just ./world-chain-builder/build $@
 
 # Tests the world-chain-builder

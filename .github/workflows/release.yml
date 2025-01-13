@@ -43,6 +43,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-20.04
             profile: maxperf
+          - target: x86_64-apple-darwin
+            os: macos-13
+            profile: maxperf
           - target: aarch64-apple-darwin
             os: macos-14
             profile: maxperf
@@ -50,7 +53,7 @@ jobs:
             os: ubuntu-20.04
             profile: maxperf
         build:
-          - command: build-node
+          - command: cross-build
             binary: world-chain-builder
             features: jemalloc
     steps:
@@ -136,8 +139,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: world-chain-builder
-          file: Dockerfile
+          context: .
+          file: world-chain-builder/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
