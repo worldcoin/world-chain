@@ -3,8 +3,7 @@ use alloy_primitives::{Address, U256};
 use alloy_rlp::Decodable;
 use alloy_sol_types::SolCall;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use reth::api::BlockBody;
-use reth::core::primitives::BlockHeader;
+use reth::core::primitives::{BlockBody, BlockHeader};
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -287,7 +286,7 @@ where
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block>,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
@@ -324,7 +323,7 @@ where
         B: BlockBody,
     {
         self.inner.on_new_head_block(new_tip_block);
-        // self.root_validator_on_new_block(new_tip_block);
+        self.root_validator.on_new_block(new_tip_block);
     }
 }
 

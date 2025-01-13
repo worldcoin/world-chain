@@ -6,6 +6,7 @@ use reth::api::Block;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{address, Address, U256};
+
 use semaphore::Field;
 
 use super::error::WorldChainTransactionPoolError;
@@ -75,7 +76,14 @@ where
     /// # Arguments
     ///
     /// * `block` - The new block to be committed.
-    fn on_new_block(&mut self, block: &SealedBlock) -> Result<(), WorldChainTransactionPoolError> {
+    fn on_new_block<H, B>(
+        &mut self,
+        block: &SealedBlock<H, B>,
+    ) -> Result<(), WorldChainTransactionPoolError>
+    where
+        H: reth::core::primitives::BlockHeader,
+        B: reth::core::primitives::BlockBody,
+    {
         let state = self
             .client
             .state_by_block_hash(block.hash())
@@ -83,9 +91,9 @@ where
         let root = state
             .storage(OP_WORLD_ID, LATEST_ROOT_SLOT.into())
             .map_err(WorldChainTransactionPoolError::RootProvider)?;
-        self.latest_valid_timestamp = block.timestamp;
+        self.latest_valid_timestamp = block.timestamp();
         if let Some(root) = root {
-            self.valid_roots.insert(block.timestamp, root);
+            self.valid_roots.insert(block.timestamp(), root);
         }
 
         self.prune_invalid();
@@ -158,7 +166,11 @@ where
     /// # Arguments
     ///
     /// * `block` - The new block to be committed.
-    pub fn on_new_block(&self, block: &SealedBlock) {
+    pub fn on_new_block<H, B>(&self, block: &SealedBlock<H, B>)
+    where
+        H: reth::core::primitives::BlockHeader,
+        B: reth::core::primitives::BlockBody,
+    {
         if let Err(e) = self.cache.write().on_new_block(block) {
             tracing::error!("Failed to commit new block: {e}");
         }
@@ -171,7 +183,8 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     use super::*;
-    use reth_primitives::Block;
+    use reth::api::Block;
+
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
         let root_validator = WorldChainRootValidator::new(client)?;
@@ -187,6 +200,7 @@ mod tests {
             timestamp,
             ..Default::default()
         };
+
         let block = Block {
             header,
             ..Default::default()
@@ -201,10 +215,10 @@ mod tests {
             .read()
             .client()
             .add_block(block.hash_slow(), block.clone());
-        let block = SealedBlock {
-            header: SealedHeader::new(block.header.clone(), block.header.hash_slow()),
-            body: block.body,
-        };
+        let block = SealedBlock::new(
+            SealedHeader::new(block.header.clone(), block.header.hash_slow()),
+            block.body(),
+        );
         validator.on_new_block(&block);
     }
 
