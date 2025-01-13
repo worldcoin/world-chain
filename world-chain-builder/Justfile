@@ -5,7 +5,7 @@ test:
   cargo nextest run --workspace
 
 cross-build *args='':
-  RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" cross-build $@
+  RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" cross build $@
 
 # Formats the world-chain-builder
 fmt: fmt-fix fmt-check
