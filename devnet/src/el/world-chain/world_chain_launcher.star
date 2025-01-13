@@ -167,7 +167,7 @@ def get_config(
         "--metrics=0.0.0.0:{0}".format(METRICS_PORT_NUM),
         "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
-        "--builder.pbh_validator=0x7a2088a1bFc9d81c55368AE168C2C02570cB814F", # Deterministic Deployment Address on re-runs
+        "--builder.pbh_entrypoint=0x7a2088a1bFc9d81c55368AE168C2C02570cB814F", # Deterministic Deployment Address on re-runs
         "--builder.signature_aggregator=0x09635F643e140090A9A8Dcd712eD6285858ceBef" # Deterministic Deployment Address on re-runs
     ]
 
