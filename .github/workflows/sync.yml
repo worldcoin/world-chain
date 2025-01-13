@@ -48,7 +48,7 @@ jobs:
         run: just ${{ matrix.chain.build }} --features ${{ matrix.chain.features }}
       - name: Run sync
         run: |
-          ${{ matrix.chain.bin }} node \
+          ~/.cargo/bin/${{ matrix.chain.bin }} node \
             --chain ${{ matrix.chain.chain }} \
             --debug.tip ${{ matrix.chain.tip }} \
             --debug.max-block ${{ matrix.chain.block }} \
