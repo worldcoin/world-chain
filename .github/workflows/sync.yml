@@ -1,4 +1,5 @@
 # Runs sync tests.
+# This workflow is modified from Reth: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sync.yml
 name: sync test
 
 on:
