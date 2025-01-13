@@ -11,7 +11,6 @@ use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
 use reth::transaction_pool::EthPooledTransaction;
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_primitives::PooledTransactionsElement;
 use reth_provider::test_utils::MockEthProvider;
 use revm_primitives::{Address, TxKind};
 use semaphore::identity::Identity;

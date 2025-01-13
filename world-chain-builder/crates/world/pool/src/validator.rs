@@ -48,7 +48,8 @@ where
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     /// Create a new [`WorldChainTransactionValidator`].
