@@ -13865,6 +13865,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "ethers-core 2.0.14 (git+https://github.com/gakonst/ethers-rs)",
+ "op-alloy-consensus",
  "parking_lot",
  "rayon",
  "reth",

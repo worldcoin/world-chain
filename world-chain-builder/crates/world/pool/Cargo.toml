@@ -16,7 +16,7 @@ reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-eth-wire-types.workspace = true
-reth-e2e-test-utils = { workspace = true, optional = true}
+reth-e2e-test-utils = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
@@ -30,6 +30,7 @@ alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
 alloy-signer-local.workspace = true
 alloy-network.workspace = true
+op-alloy-consensus.workspace = true
 
 # 3rd party
 ethers-core.workspace = true
@@ -52,9 +53,7 @@ reth-e2e-test-utils.workspace = true
 
 [features]
 default = []
-test = [
-    "dep:reth-e2e-test-utils",
-]
+test = ["dep:reth-e2e-test-utils"]
 
 [lints]
 workspace = true
