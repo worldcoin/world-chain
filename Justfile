@@ -22,7 +22,7 @@ build:
 
 # Cross compiles the world-chain-builder on a specified target
 cross-build *args='':
-    @just ./world-chain-builder/build $@
+    @just ./world-chain-builder/cross-build $@
 
 # Tests the world-chain-builder
 test:
