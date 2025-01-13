@@ -160,15 +160,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.into_parts();
-        let inner =
-            RecoveredTx::<OpPooledTransaction>::new_unchecked(tx.try_into()?, signer).into();
-
-        Ok(Self {
-            inner: inner.into(),
-            valid_pbh: false,
-            conditional_options: None,
-        })
+        OpPooledTransaction::try_consensus_into_pooled(tx)
     }
 
     /// Returns hash of the transaction.

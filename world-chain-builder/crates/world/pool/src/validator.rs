@@ -3,11 +3,14 @@ use alloy_primitives::{Address, U256};
 use alloy_rlp::Decodable;
 use alloy_sol_types::SolCall;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reth::api::BlockBody;
+use reth::core::primitives::BlockHeader;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::protocol::verify_proof;
@@ -47,7 +50,7 @@ where
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
-    Tx: WorldChainPoolTransaction<Consensus = TransactionSigned>,
+    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
@@ -285,7 +288,7 @@ where
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block>,
-    Tx: WorldChainPoolTransaction<Consensus = TransactionSigned>,
+    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
 
@@ -309,10 +312,19 @@ where
         self.inner.validate_one(origin, transaction.clone())
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    // fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    //     self.inner.on_new_head_block(new_tip_block);
+    //     // TODO: Handle reorgs
+    //     self.root_validator.on_new_block(new_tip_block);
+    // }
+
+    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    where
+        H: BlockHeader,
+        B: BlockBody,
+    {
         self.inner.on_new_head_block(new_tip_block);
-        // TODO: Handle reorgs
-        self.root_validator.on_new_block(new_tip_block);
+        // self.root_validator_on_new_block(new_tip_block);
     }
 }
 
