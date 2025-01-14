@@ -10,7 +10,7 @@ use reth::transaction_pool::{
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{Block, SealedBlock, TransactionSigned};
+use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::protocol::verify_proof;
 use world_chain_builder_pbh::date_marker::DateMarker;
@@ -330,6 +330,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use alloy_consensus::Header;
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
     use chrono::{TimeZone, Utc};
@@ -338,8 +339,8 @@ pub mod tests {
     use ethers_core::types::U256;
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
+    use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
-    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use semaphore::Field;
     use test_case::test_case;
     use world_chain_builder_pbh::date_marker::DateMarker;
@@ -347,6 +348,7 @@ pub mod tests {
     use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 
     use super::WorldChainTransactionValidator;
+    use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
     use crate::test_utils::{self, world_chain_validator, PBH_TEST_VALIDATOR};
@@ -380,8 +382,8 @@ pub mod tests {
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
 
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
+        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::new(header, body);
 
         // Propogate the block to the root validator
@@ -694,8 +696,8 @@ pub mod tests {
             root,
             proof,
         };
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
+        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::new(header, body);
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account
@@ -728,8 +730,8 @@ pub mod tests {
             root,
             proof,
         };
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
+        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::new(header, body);
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account

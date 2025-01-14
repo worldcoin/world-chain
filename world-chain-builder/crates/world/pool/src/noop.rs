@@ -6,7 +6,7 @@ use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash};
 use reth::transaction_pool::{
     error::PoolError, noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents,
-    BestTransactions, BestTransactionsAttributes, BlobStoreError, BlockInfo, EthPooledTransaction,
+    BestTransactions, BestTransactionsAttributes, BlobStoreError, BlockInfo,
     GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize,
     PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionListenerKind,
     TransactionOrigin, TransactionPool, ValidPoolTransaction,

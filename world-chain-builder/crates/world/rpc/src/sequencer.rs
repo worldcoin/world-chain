@@ -1,5 +1,5 @@
 use alloy_primitives::hex;
-use alloy_rpc_types::erc4337::ConditionalOptions;
+use alloy_rpc_types::erc4337::TransactionConditional;
 use reqwest::Client;
 use reth_optimism_rpc::SequencerClientError;
 use serde_json::json;
@@ -86,7 +86,7 @@ impl SequencerClient {
     pub async fn forward_raw_transaction_conditional(
         &self,
         tx: &[u8],
-        options: ConditionalOptions,
+        options: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
         let body = serde_json::to_string(&json!({
             "jsonrpc": "2.0",

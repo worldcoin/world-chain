@@ -1,26 +1,14 @@
 use std::sync::Arc;
 
-use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError, Transaction};
+use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_primitives::TxHash;
-use alloy_rpc_types::erc4337::{ConditionalOptions, TransactionConditional};
+use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::{
-    consensus::Consensus,
-    core::primitives::SignedTransaction,
-    transaction_pool::{
-        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
-    },
-};
+use reth::transaction_pool::{EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction};
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{
-    transaction::{
-        SignedTransactionIntoRecoveredExt, TransactionConversionError,
-        TryFromRecoveredTransactionError,
-    },
-    Transaction as RethTransaction,
-};
-use reth_primitives::{PooledTransactionsElementEcRecovered, RecoveredTx};
+use reth_primitives::transaction::TransactionConversionError;
+use reth_primitives::RecoveredTx;
 use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {

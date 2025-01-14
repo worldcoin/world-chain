@@ -3,7 +3,7 @@ use std::error::Error;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::HashMap, StorageKey};
-use alloy_rpc_types::erc4337::{AccountStorage, ConditionalOptions};
+use alloy_rpc_types::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee::{
     core::{async_trait, RpcResult},
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
@@ -14,8 +14,9 @@ use reth::{
         api::eth::{AsEthApiError, FromEthApiError, FromEvmError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
     },
-    transaction_pool::{EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool},
+    transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
 };
+use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
@@ -36,7 +37,7 @@ pub trait EthTransactionsExt {
     async fn send_raw_transaction_conditional(
         &self,
         tx: Bytes,
-        options: ConditionalOptions,
+        options: TransactionConditional,
     ) -> Result<B256, Self::Error>;
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error>;
@@ -53,13 +54,13 @@ where
     async fn send_raw_transaction_conditional(
         &self,
         tx: Bytes,
-        options: ConditionalOptions,
+        options: TransactionConditional,
     ) -> Result<B256, Self::Error> {
         validate_conditional_options(&options, self.provider()).map_err(Self::Error::other)?;
 
         let recovered = recover_raw_transaction(&tx)?;
         let mut pool_transaction: WorldChainPooledTransaction =
-            EthPooledTransaction::from_pooled(recovered).into();
+            OpPooledTransaction::from_pooled(recovered).into();
         pool_transaction.conditional_options = Some(options.clone());
 
         // submit the transaction to the pool with a `Local` origin
@@ -81,7 +82,7 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction: WorldChainPooledTransaction =
-            EthPooledTransaction::from_pooled(recovered).into();
+            OpPooledTransaction::from_pooled(recovered).into();
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
@@ -131,7 +132,7 @@ where
 /// reference for the implementation <https://notes.ethereum.org/@yoav/SkaX2lS9j#>
 /// See also <https://pkg.go.dev/github.com/aK0nshin/go-ethereum/arbitrum_types#ConditionalOptions>
 pub fn validate_conditional_options<Client>(
-    options: &ConditionalOptions,
+    options: &TransactionConditional,
     provider: &Client,
 ) -> RpcResult<()>
 where

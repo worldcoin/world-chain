@@ -1,6 +1,6 @@
 use crate::{sequencer::SequencerClient, EthTransactionsExt};
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types::erc4337::ConditionalOptions;
+use alloy_rpc_types::erc4337::TransactionConditional;
 use jsonrpsee::{core::async_trait, core::RpcResult, proc_macros::rpc};
 use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
@@ -27,7 +27,7 @@ pub trait EthApiExt {
     async fn send_raw_transaction_conditional(
         &self,
         tx: Bytes,
-        options: ConditionalOptions,
+        options: TransactionConditional,
     ) -> RpcResult<B256>;
 }
 
@@ -44,7 +44,7 @@ where
     async fn send_raw_transaction_conditional(
         &self,
         tx: Bytes,
-        options: ConditionalOptions,
+        options: TransactionConditional,
     ) -> RpcResult<B256> {
         Ok(EthTransactionsExt::send_raw_transaction_conditional(self, tx, options).await?)
     }

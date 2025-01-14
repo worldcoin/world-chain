@@ -25,6 +25,7 @@ reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
@@ -39,6 +40,7 @@ revm-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
+op-alloy-consensus.workspace = true
 
 # misc
 tracing.workspace = true

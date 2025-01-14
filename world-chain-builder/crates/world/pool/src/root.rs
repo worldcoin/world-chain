@@ -179,11 +179,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reth::api::Block;
     use reth_primitives::{Header, SealedHeader};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     use super::*;
-    use reth::api::Block;
+    use alloy_consensus::Block as AlloyBlock;
 
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
@@ -201,7 +202,7 @@ mod tests {
             ..Default::default()
         };
 
-        let block = Block {
+        let block = AlloyBlock {
             header,
             ..Default::default()
         };
@@ -217,7 +218,7 @@ mod tests {
             .add_block(block.hash_slow(), block.clone());
         let block = SealedBlock::new(
             SealedHeader::new(block.header.clone(), block.header.hash_slow()),
-            block.body(),
+            block.body().clone(),
         );
         validator.on_new_block(&block);
     }
