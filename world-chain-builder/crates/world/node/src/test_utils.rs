@@ -1,6 +1,6 @@
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawal, Withdrawals};
@@ -25,18 +25,18 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, ProviderError, ProviderResult,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
+    OmmersProvider, ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, StorageRootProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::TxKind;
 use std::{
@@ -181,14 +181,6 @@ impl BlockReader for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        Ok(None)
-    }
-
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(None)
-    }
-
     fn block_with_senders(
         &self,
         _id: BlockHashOrNumber,
@@ -228,6 +220,18 @@ impl BlockReader for WorldChainNoopProvider {
     }
 
     fn block_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Block>> {
+        Ok(None)
+    }
+}
+
+impl OmmersProvider for WorldChainNoopProvider {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        Ok(None)
+    }
+}
+
+impl BlockBodyIndicesProvider for WorldChainNoopProvider {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }
@@ -391,7 +395,7 @@ impl HeaderProvider for WorldChainNoopProvider {
 }
 
 impl AccountReader for WorldChainNoopProvider {
-    fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
         Ok(None)
     }
 }
@@ -470,7 +474,7 @@ impl StateProofProvider for WorldChainNoopProvider {
     fn multiproof(
         &self,
         _input: TrieInput,
-        _targets: HashMap<B256, HashSet<B256>>,
+        _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
     }
@@ -479,7 +483,7 @@ impl StateProofProvider for WorldChainNoopProvider {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         Ok(HashMap::default())
     }
 }
@@ -493,7 +497,7 @@ impl StateProvider for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
 }
@@ -501,45 +505,6 @@ impl StateProvider for WorldChainNoopProvider {
 impl HashedPostStateProvider for WorldChainNoopProvider {
     fn hashed_post_state(&self, _bundle_state: &reth::revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
-    }
-}
-
-impl EvmEnvProvider for WorldChainNoopProvider {
-    fn fill_env_with_header<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _header: &Header,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
     }
 }
 
@@ -604,9 +569,6 @@ impl WithdrawalsProvider for WorldChainNoopProvider {
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
 }
@@ -699,7 +661,11 @@ where
         join_all(futures).await
     }
 
-    fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {
-        unreachable!("NoopValidator does not implement on_new_head_block");
+    fn on_new_head_block<H, B>(&self, _new_tip_block: &SealedBlock<H, B>)
+    where
+        H: reth_primitives_traits::BlockHeader,
+        B: reth_primitives_traits::BlockBody,
+    {
+        unimplemented!()
     }
 }
