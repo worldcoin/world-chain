@@ -5,7 +5,9 @@ use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionRequest, Withdrawals};
 use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth::builder::components::Components;
-use reth::builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth::builder::engine_tree_config::TreeConfig;
+use reth::builder::Node;
+use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -20,12 +22,11 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::providers::{BlockchainProvider, BlockchainProvider2};
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
 use world_chain_builder_pool::test_utils::{
@@ -103,18 +104,24 @@ impl WorldChainBuilderTestContext {
 
         // is 0.0.0.0 by default
         node_config.network.addr = [127, 0, 0, 1].into();
-
+        let builder_args = ExtArgs {
+            builder_args: WorldChainBuilderArgs {
+                num_pbh_txs: 30,
+                verified_blockspace_capacity: 70,
+                pbh_validator: PBH_TEST_VALIDATOR,
+                signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
+            },
+            ..Default::default()
+        };
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(builder_args.rollup_args.persistence_threshold)
+            .with_memory_block_buffer_target(builder_args.rollup_args.memory_block_buffer_target);
+        let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .node(WorldChainBuilder::new(ExtArgs {
-                builder_args: WorldChainBuilderArgs {
-                    num_pbh_txs: 30,
-                    verified_blockspace_capacity: 70,
-                    pbh_validator: PBH_TEST_VALIDATOR,
-                    signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
-                },
-                ..Default::default()
-            })?)
+            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider2<_>>()
+            .with_components(WorldChainBuilder::components(builder_args.clone()))
+            .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
                 let provider = ctx.provider().clone();
                 let pool = ctx.pool().clone();
@@ -127,7 +134,16 @@ impl WorldChainBuilderTestContext {
         let NodeHandle {
             node,
             node_exit_future: _,
-        } = builder.launch().await?;
+        } = builder
+            .launch_with_fn(|builder| {
+                let launcher = EngineNodeLauncher::new(
+                    builder.task_executor().clone(),
+                    builder.config().datadir(),
+                    engine_tree_config,
+                );
+                builder.launch_with(launcher)
+            })
+            .await?;
 
         let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
         Ok(Self {
