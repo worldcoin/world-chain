@@ -64,14 +64,15 @@ pub fn identity(index: u32) -> Identity {
 // TODO: Cache with Once or lazy-static?
 pub fn tree() -> LazyPoseidonTree {
     let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
-
+    let mut comms = vec![];
     // Only accounts 0 through 5 are included in the tree
-    for acc in 0..=5 {
+    for acc in 0..=999 {
         let identity = identity(acc);
         let commitment = identity.commitment();
-
+        comms.push(commitment);
         tree = tree.update_with_mutation(acc as usize, &commitment);
     }
+    println!("{:?}", comms);
 
     tree.derived()
 }

@@ -12,7 +12,6 @@ import {WorldIDRouter} from "@world-id-contracts/WorldIDRouter.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-
 import "@world-id-contracts/WorldIDRouter.sol";
 import "@world-id-contracts/WorldIDRouterImplV1.sol";
 import "@world-id-contracts/WorldIDIdentityManager.sol";
@@ -30,7 +29,7 @@ import {Verifier as DeletionB100} from "@world-id-contracts/verifiers/deletion/b
 
 contract DeployDevnet is Script {
     WorldIDIdentityManager worldIDOrb;
-
+    WorldIDIdentityManager worldID;
     address public entryPoint;
     address public worldIdGroups;
     address public pbhEntryPoint;
@@ -39,6 +38,7 @@ contract DeployDevnet is Script {
 
     uint8 constant TREE_DEPTH = 30;
     uint256 constant INITIAL_ROOT = 0x918D46BF52D98B034413F4A1A1C41594E7A7A3F6AE08CB43D1A2A230E1959EF;
+    uint256 constant POST_ROOT = 8894851390847753342088062341507157182152206114845377057718563416586860035060;
     uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
 
     address semaphoreVerifier = address(0);
@@ -122,7 +122,7 @@ contract DeployDevnet is Script {
         WorldIDIdentityManagerImplV1 impl1 = new WorldIDIdentityManagerImplV1();
         WorldIDIdentityManagerImplV2 impl2 = new WorldIDIdentityManagerImplV2();
 
-        WorldIDIdentityManager worldID = new WorldIDIdentityManager(address(impl1), initializeCall);
+        worldID = new WorldIDIdentityManager(address(impl1), initializeCall);
 
         // Recast to access api
         WorldIDIdentityManagerImplV1 worldIDImplV1 = WorldIDIdentityManagerImplV1(address(worldID));
@@ -221,6 +221,31 @@ contract DeployDevnet is Script {
         }
 
         vm.stopBroadcast();
+    }
+    // function registerIdentities(
+    //     uint256[8] calldata insertionProof,
+    //     uint256 preRoot,
+    //     uint32 startIndex,
+    //     uint256[] calldata identityCommitments,
+    //     uint256 postRoot
+    // ) public virtual onlyProxy onlyInitialized onlyIdentityOperator {
+    function registerTestIdentities() internal {
+        console.log("Registering test identities");
+        string memory jsonTree = vm.readFile("scripts/assets/identity_tree.json");
+        uint256[] memory idComms = vm.parseJsonUintArray(jsonTree, ".idComms");
+        uint256[8] memory proof;
+        bytes memory registerIdentitiesCalldata = abi.encodeWithSignature(
+            "registerIdentities(uint256[8],uint256,uint32,uint256[],uint256)",
+            proof,
+            INITIAL_ROOT,
+            0,
+            idComms,
+            POST_ROOT
+        );
+
+        address(worldID).call(
+            registerIdentitiesCalldata
+        );
     }
 
     function beginBroadcast() internal {
