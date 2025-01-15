@@ -195,3 +195,22 @@ def default_op_contract_deployer_params():
     return {
         "image": "ethpandaops/optimism-contract-deployer:develop",
     }
+
+def default_ethereum_package_network_params():
+    return {
+        "network_params": {
+            "preset": "minimal",
+            "genesis_delay": 5,
+            # Preload the Arachnid CREATE2 deployer
+            "additional_preloaded_contracts": json.encode(
+                {
+                    "0x4e59b44847b379578588920cA78FbF26c0B4956C": {
+                        "balance": "0ETH",
+                        "code": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3",
+                        "storage": {},
+                        "nonce": "1",
+                    }
+                }
+            ),
+        }
+    }
