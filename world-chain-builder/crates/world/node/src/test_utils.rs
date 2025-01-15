@@ -48,7 +48,7 @@ use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
 use world_chain_builder_pool::{
-    test_utils::{pbh_bundle, signer, user_op, PBH_TEST_VALIDATOR},
+    test_utils::{pbh_bundle, signer, user_op, PBH_TEST_ENTRYPOINT},
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
@@ -84,7 +84,7 @@ impl PBHTransactionTestContext {
             chain_id,
             Some(Bytes::from(encoded)),
             tx_nonce,
-            PBH_TEST_VALIDATOR,
+            PBH_TEST_ENTRYPOINT,
         );
         let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
         let raw_tx = envelope.encoded_2718();

@@ -29,9 +29,9 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
-use world_chain_builder_pool::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
+use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::test_utils::{
-    signer, tree_root, PBH_TEST_SIGNATURE_AGGREGATOR, PBH_TEST_VALIDATOR,
+    signer, tree_root, PBH_TEST_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR, TEST_WORLD_ID,
 };
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
@@ -106,8 +106,9 @@ impl WorldChainBuilderTestContext {
             builder_args: WorldChainBuilderArgs {
                 num_pbh_txs: 30,
                 verified_blockspace_capacity: 70,
-                pbh_validator: PBH_TEST_VALIDATOR,
+                pbh_entrypoint: PBH_TEST_ENTRYPOINT,
                 signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
+                world_id: TEST_WORLD_ID,
             },
             ..Default::default()
         };
@@ -322,7 +323,7 @@ fn get_chain_spec() -> OpChainSpec {
 
     OpChainSpecBuilder::base_mainnet()
         .genesis(genesis.extend_accounts(vec![(
-            OP_WORLD_ID,
+            TEST_WORLD_ID,
             GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![(
                 LATEST_ROOT_SLOT.into(),
                 tree_root().into(),

@@ -350,8 +350,8 @@ pub mod tests {
     use super::WorldChainTransactionValidator;
     use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
-    use crate::root::{LATEST_ROOT_SLOT, OP_WORLD_ID};
-    use crate::test_utils::{self, world_chain_validator, PBH_TEST_VALIDATOR};
+    use crate::root::LATEST_ROOT_SLOT;
+    use crate::test_utils::{self, world_chain_validator, PBH_TEST_ENTRYPOINT, TEST_WORLD_ID};
     use crate::tx::WorldChainPooledTransaction;
 
     async fn setup() -> Pool<
@@ -377,7 +377,7 @@ pub mod tests {
 
         // Insert a world id root into the OpWorldId Account
         validator.inner.client().add_account(
-            OP_WORLD_ID,
+            TEST_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
@@ -456,7 +456,7 @@ pub mod tests {
         let calldata = bundle.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -524,7 +524,7 @@ pub mod tests {
         let calldata = bundle.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -556,7 +556,7 @@ pub mod tests {
         let calldata = calldata.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -591,7 +591,7 @@ pub mod tests {
         let calldata = bundle.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -631,7 +631,7 @@ pub mod tests {
         let calldata = bundle.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -667,7 +667,7 @@ pub mod tests {
         let calldata = bundle.abi_encode();
 
         let tx = test_utils::eip1559()
-            .to(PBH_TEST_VALIDATOR)
+            .to(PBH_TEST_ENTRYPOINT)
             .input(calldata)
             .call();
 
@@ -705,7 +705,7 @@ pub mod tests {
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account
         client.add_account(
-            OP_WORLD_ID,
+            TEST_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
         );
@@ -739,7 +739,7 @@ pub mod tests {
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account
         client.add_account(
-            OP_WORLD_ID,
+            TEST_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
         );

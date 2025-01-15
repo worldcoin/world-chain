@@ -1,18 +1,16 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Sealable};
+use alloy_primitives::{Address, U256};
 use parking_lot::RwLock;
 use reth::api::Block;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use revm_primitives::{address, Address, U256};
 
 use semaphore::Field;
 
 use super::error::WorldChainTransactionPoolError;
 
-/// The WorldID contract address.
-pub const OP_WORLD_ID: Address = address!("047eE5313F98E26Cc8177fA38877cB36292D2364");
 /// The slot of the `_latestRoot` in the
 ///
 /// [WorldID contract](https://github.com/worldcoin/world-id-state-bridge/blob/729d2346a3bb6bac003284bdcefc0cf12ece3f7d/src/abstract/WorldIDBridge.sol#L30)
@@ -26,6 +24,8 @@ pub struct RootProvider<Client>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
+    /// Address of the WorldID contract
+    world_id: Address,
     /// The client used to aquire account state from the database.
     client: Client,
     /// A map of valid roots indexed by block timestamp.
@@ -46,9 +46,10 @@ where
     /// # Arguments
     ///
     /// * `client` - The client used to aquire account state from the database.
-    pub fn new(client: Client) -> Result<Self, WorldChainTransactionPoolError> {
+    pub fn new(client: Client, world_id: Address) -> Result<Self, WorldChainTransactionPoolError> {
         let mut this = Self {
             client,
+            world_id,
             valid_roots: BTreeMap::new(),
             latest_valid_timestamp: 0,
             latest_root: Field::ZERO,
@@ -61,7 +62,7 @@ where
                 let state = this
                     .client
                     .state_by_block_hash(block.header().hash_slow())?;
-                let latest_root = state.storage(OP_WORLD_ID, LATEST_ROOT_SLOT.into())?;
+                let latest_root = state.storage(this.world_id, LATEST_ROOT_SLOT.into())?;
                 if let Some(latest) = latest_root {
                     this.latest_root = latest;
                     this.valid_roots.insert(block.header().timestamp(), latest);
@@ -89,7 +90,7 @@ where
             .state_by_block_hash(block.hash())
             .map_err(WorldChainTransactionPoolError::RootProvider)?;
         let root = state
-            .storage(OP_WORLD_ID, LATEST_ROOT_SLOT.into())
+            .storage(self.world_id, LATEST_ROOT_SLOT.into())
             .map_err(WorldChainTransactionPoolError::RootProvider)?;
         self.latest_valid_timestamp = block.timestamp();
         if let Some(root) = root {
@@ -140,8 +141,8 @@ where
     /// # Arguments
     ///
     /// * `client` - The client used for state and block operations.
-    pub fn new(client: Client) -> Result<Self, WorldChainTransactionPoolError> {
-        let cache = RootProvider::new(client)?;
+    pub fn new(client: Client, world_id: Address) -> Result<Self, WorldChainTransactionPoolError> {
+        let cache = RootProvider::new(client, world_id)?;
 
         Ok(Self {
             cache: Arc::new(RwLock::new(cache)),
@@ -183,12 +184,14 @@ mod tests {
     use reth_primitives::{Header, SealedHeader};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
+    use crate::test_utils::TEST_WORLD_ID;
+
     use super::*;
     use alloy_consensus::Block as AlloyBlock;
 
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
-        let root_validator = WorldChainRootValidator::new(client)?;
+        let root_validator = WorldChainRootValidator::new(client, TEST_WORLD_ID)?;
         Ok(root_validator)
     }
 
@@ -207,7 +210,7 @@ mod tests {
             ..Default::default()
         };
         validator.cache.read().client().add_account(
-            OP_WORLD_ID,
+            TEST_WORLD_ID,
             ExtendedAccount::new(0, U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );

@@ -26,13 +26,13 @@ contract PBHSafe4337Module is Safe4337Module {
     /// @notice The PBH Signature Aggregator address.
     address public immutable PBH_SIGNATURE_AGGREGATOR;
 
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                  ERRORS                                ///
-    //////////////////////////////////////////////////////////////////////////////
-
     /// @notice The PBH Nonce Key.
     /// @dev This key is used to identify a PBH user operation.
     uint192 public immutable PBH_NONCE_KEY;
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                                  ERRORS                                ///
+    //////////////////////////////////////////////////////////////////////////////
 
     /// @notice Thrown when the proof size is invalid.
     error InvalidProofSize();
