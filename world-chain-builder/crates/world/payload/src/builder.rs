@@ -5,7 +5,7 @@ use alloy_consensus::{Eip658Value, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::{OpDepositReceipt, OpTxType};
+use op_alloy_consensus::OpDepositReceipt;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::database::StateProviderDatabase;
@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
@@ -29,10 +29,8 @@ use reth_optimism_payload_builder::builder::{
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, Receipt, SealedHeader,
-    TransactionSigned, TxType,
+    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, SealedHeader, TxType,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
@@ -42,8 +40,7 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionE
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
 use revm_primitives::{
-    BlockEnv, Bytes, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
-    ResultAndState, TxEnv, B256, U256,
+    Bytes, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv, B256, U256,
 };
 use thiserror::Error;
 use tracing::{debug, trace, warn};

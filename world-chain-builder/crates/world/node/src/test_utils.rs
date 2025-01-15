@@ -3,12 +3,10 @@ use alloy_primitives::{
     map::{B256HashMap, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
-use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawal, Withdrawals};
+use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawals};
 use alloy_sol_types::SolCall;
 use futures::future::join_all;
-use reth::api::ConfigureEvmEnv;
 use reth::chainspec::{ChainInfo, MAINNET};
-use reth::revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use reth::transaction_pool::{
     validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
@@ -225,13 +223,13 @@ impl BlockReader for WorldChainNoopProvider {
 }
 
 impl OmmersProvider for WorldChainNoopProvider {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 }
 
 impl BlockBodyIndicesProvider for WorldChainNoopProvider {
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }

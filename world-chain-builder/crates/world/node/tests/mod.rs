@@ -21,7 +21,8 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
-use reth_optimism_node::OpPayloadBuilderAttributes;
+use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::{BlockchainProvider, BlockchainProvider2};
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
@@ -40,39 +41,84 @@ use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
 use world_chain_builder_node::node::WorldChainBuilder;
 use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext};
 
-type NodeAdapterType = NodeAdapter<
-    FullNodeTypesAdapter<
-        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-        BlockchainProvider<
-            NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-        >,
-    >,
-    Components<
+type Adapter = NodeTestContext<
+    NodeAdapter<
         FullNodeTypesAdapter<
-            NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-            BlockchainProvider<
+            WorldChainBuilder,
+            Arc<TempDatabase<DatabaseEnv>>,
+            BlockchainProvider2<
                 NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
             >,
         >,
-        Pool<
-            TransactionValidationTaskExecutor<
-                WorldChainTransactionValidator<
-                    BlockchainProvider<
-                        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-                    >,
-                    WorldChainPooledTransaction,
+        reth::builder::components::Components<
+            FullNodeTypesAdapter<
+                WorldChainBuilder,
+                Arc<TempDatabase<DatabaseEnv>>,
+                BlockchainProvider2<
+                    NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
                 >,
             >,
-            WorldChainOrdering<WorldChainPooledTransaction>,
-            DiskFileBlobStore,
+            OpNetworkPrimitives,
+            reth::transaction_pool::Pool<
+                TransactionValidationTaskExecutor<
+                    WorldChainTransactionValidator<
+                        BlockchainProvider2<
+                            NodeTypesWithDBAdapter<
+                                WorldChainBuilder,
+                                Arc<TempDatabase<DatabaseEnv>>,
+                            >,
+                        >,
+                        WorldChainPooledTransaction,
+                    >,
+                >,
+                WorldChainOrdering<WorldChainPooledTransaction>,
+                DiskFileBlobStore,
+            >,
+            OpEvmConfig,
+            BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
+            Arc<OpBeaconConsensus>,
         >,
-        OpEvmConfig,
-        BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
-        Arc<OpBeaconConsensus>,
+    >,
+    OpAddOns<
+        NodeAdapter<
+            FullNodeTypesAdapter<
+                WorldChainBuilder,
+                Arc<TempDatabase<DatabaseEnv>>,
+                BlockchainProvider2<
+                    NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
+                >,
+            >,
+            reth::builder::components::Components<
+                FullNodeTypesAdapter<
+                    WorldChainBuilder,
+                    Arc<TempDatabase<DatabaseEnv>>,
+                    BlockchainProvider2<
+                        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
+                    >,
+                >,
+                OpNetworkPrimitives,
+                reth::transaction_pool::Pool<
+                    TransactionValidationTaskExecutor<
+                        WorldChainTransactionValidator<
+                            BlockchainProvider2<
+                                NodeTypesWithDBAdapter<
+                                    WorldChainBuilder,
+                                    Arc<TempDatabase<DatabaseEnv>>,
+                                >,
+                            >,
+                            WorldChainPooledTransaction,
+                        >,
+                    >,
+                    WorldChainOrdering<WorldChainPooledTransaction>,
+                    DiskFileBlobStore,
+                >,
+                OpEvmConfig,
+                BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
+                Arc<OpBeaconConsensus>,
+            >,
+        >,
     >,
 >;
-
-type Adapter = NodeTestContext<NodeAdapterType, OpAddOns<NodeAdapterType>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
@@ -187,7 +233,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
     let (payload, _) = ctx.node.advance_block().await?;
 
-    assert_eq!(payload.block().body.transactions.len(), pbh_tx_hashes.len());
+    assert_eq!(payload.block().body().transactions.len(), pbh_tx_hashes.len());
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
 
@@ -227,12 +273,12 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let (payload, _) = ctx.node.advance_block().await?;
 
     assert_eq!(
-        payload.block().body.transactions.len(),
+        payload.block().body().transactions.len(),
         pbh_tx_hashes.len() + 1
     );
     // Assert the non-pbh transaction is included in the block last
     assert_eq!(
-        payload.block().body.transactions.last().unwrap().hash(),
+        *payload.block().body().transactions.last().unwrap().tx_hash(),
         non_pbh_hash
     );
     let block_hash = payload.block().hash();
@@ -281,7 +327,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 
     // One transaction should be successfully validated
     // and included in the block.
-    assert_eq!(payload.block().body.transactions.len(), 1);
+    assert_eq!(payload.block().body().transactions.len(), 1);
 
     Ok(())
 }
