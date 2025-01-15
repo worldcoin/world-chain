@@ -381,10 +381,13 @@ pub mod tests {
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
-
-        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let header = Header {
+            gas_limit: 20000000,
+            ..Default::default()
+        };
+        let sealed_header = SealedHeader::new(header.clone(), header.hash_slow());
         let body = BlockBody::<OpTransactionSigned>::default();
-        let block = SealedBlock::new(header, body);
+        let block = SealedBlock::new(sealed_header, body);
 
         // Propogate the block to the root validator
         validator.on_new_head_block(&block);

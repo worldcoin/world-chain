@@ -152,7 +152,7 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<'a, Client, Pool>(
+    fn build_payload<Client, Pool>(
         &self,
         args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
