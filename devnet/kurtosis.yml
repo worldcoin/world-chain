@@ -2,3 +2,5 @@ name: "github.com/ewoolsey/optimism-package"
 description: |
   # Optimism Package
   This is a Kurtosis package for deploying an Optimism Rollup
+replace:
+  github.com/ethpandaops/ethereum-package: github.com/ethpandaops/ethereum-package@4.4.0
