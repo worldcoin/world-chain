@@ -45,6 +45,8 @@ tracing.workspace = true
 parking_lot.workspace = true
 bon = { workspace = true, optional = true }
 rayon.workspace = true
+lazy_static = { workspace = true, optional = true }
+reqwest.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true
@@ -61,6 +63,7 @@ test = [
     "dep:alloy-signer-local",
     "dep:alloy-network",
     "dep:bon",
+    "dep:lazy_static",
 ]
 
 [lints]
