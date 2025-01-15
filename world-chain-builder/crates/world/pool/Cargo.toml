@@ -16,10 +16,12 @@ reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-eth-wire-types.workspace = true
-reth-e2e-test-utils = { workspace = true, optional = true}
+reth-e2e-test-utils = { workspace = true, optional = true }
+reth-trie-db = { workspace = true, optional = true }
+reth-trie = { workspace = true, optional = true }
+reth-stages-types = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
-
 revm-primitives.workspace = true
 
 alloy-consensus.workspace = true
@@ -28,8 +30,9 @@ alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
-alloy-signer-local.workspace = true
-alloy-network.workspace = true
+alloy-signer-local = { workspace = true, optional = true }
+alloy-network = { workspace = true, optional = true }
+op-alloy-consensus.workspace = true
 
 # 3rd party
 ethers-core.workspace = true
@@ -40,10 +43,8 @@ eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
-tempfile.workspace = true
-bon.workspace = true
+bon = { workspace = true, optional = true }
 rayon.workspace = true
-bytes.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true
@@ -54,6 +55,12 @@ reth-e2e-test-utils.workspace = true
 default = []
 test = [
     "dep:reth-e2e-test-utils",
+    "dep:reth-trie-db",
+    "dep:reth-stages-types",
+    "dep:reth-trie",
+    "dep:alloy-signer-local",
+    "dep:alloy-network",
+    "dep:bon",
 ]
 
 [lints]

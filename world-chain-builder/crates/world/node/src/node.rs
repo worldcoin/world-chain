@@ -1,5 +1,5 @@
 use eyre::eyre::Result;
-use reth::api::{ConfigureEvm, TxTy};
+use reth::api::{ConfigureEvm, HeaderTy, TxTy};
 use reth::builder::components::{ComponentsBuilder, PayloadServiceBuilder};
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
@@ -17,7 +17,6 @@ use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{Header, TransactionSigned};
 use reth_provider::CanonStateSubscriptions;
 use reth_trie_db::MerklePatriciaTrie;
 use world_chain_builder_pool::builder::WorldChainPoolBuilder;
@@ -226,7 +225,7 @@ where
         Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        Evm: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
     {
         let payload_builder = world_chain_builder_payload::builder::WorldChainPayloadBuilder::new(
             evm_config,
@@ -240,9 +239,7 @@ where
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
             .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            // no extradata for OP
-            .extradata(Default::default());
+            .max_payload_tasks(conf.max_payload_tasks());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

@@ -5,7 +5,9 @@ use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionRequest, Withdrawals};
 use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth::builder::components::Components;
-use reth::builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth::builder::engine_tree_config::TreeConfig;
+use reth::builder::Node;
+use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -19,13 +21,13 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
-use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_provider::providers::BlockchainProvider;
+use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_primitives_traits::SignedTransaction;
+use reth_provider::providers::BlockchainProvider2;
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::test_utils::{
@@ -39,24 +41,21 @@ use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
 use world_chain_builder_node::node::WorldChainBuilder;
 use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext};
 
-type NodeAdapterType = NodeAdapter<
-    FullNodeTypesAdapter<
-        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-        BlockchainProvider<
-            NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-        >,
-    >,
+type NodeTypesAdapter = FullNodeTypesAdapter<
+    WorldChainBuilder,
+    Arc<TempDatabase<DatabaseEnv>>,
+    BlockchainProvider2<NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>>,
+>;
+
+type NodeHelperType = NodeAdapter<
+    NodeTypesAdapter,
     Components<
-        FullNodeTypesAdapter<
-            NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-            BlockchainProvider<
-                NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
-            >,
-        >,
+        NodeTypesAdapter,
+        OpNetworkPrimitives,
         Pool<
             TransactionValidationTaskExecutor<
                 WorldChainTransactionValidator<
-                    BlockchainProvider<
+                    BlockchainProvider2<
                         NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                     WorldChainPooledTransaction,
@@ -71,7 +70,7 @@ type NodeAdapterType = NodeAdapter<
     >,
 >;
 
-type Adapter = NodeTestContext<NodeAdapterType, OpAddOns<NodeAdapterType>>;
+type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
@@ -103,19 +102,25 @@ impl WorldChainBuilderTestContext {
 
         // is 0.0.0.0 by default
         node_config.network.addr = [127, 0, 0, 1].into();
-
+        let builder_args = ExtArgs {
+            builder_args: WorldChainBuilderArgs {
+                num_pbh_txs: 30,
+                verified_blockspace_capacity: 70,
+                pbh_entrypoint: PBH_TEST_ENTRYPOINT,
+                signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
+                world_id: TEST_WORLD_ID,
+            },
+            ..Default::default()
+        };
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(builder_args.rollup_args.persistence_threshold)
+            .with_memory_block_buffer_target(builder_args.rollup_args.memory_block_buffer_target);
+        let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .node(WorldChainBuilder::new(ExtArgs {
-                builder_args: WorldChainBuilderArgs {
-                    num_pbh_txs: 30,
-                    verified_blockspace_capacity: 70,
-                    pbh_entrypoint: PBH_TEST_ENTRYPOINT,
-                    signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
-                    world_id: TEST_WORLD_ID,
-                },
-                ..Default::default()
-            })?)
+            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider2<_>>()
+            .with_components(WorldChainBuilder::components(builder_args.clone()))
+            .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
                 let provider = ctx.provider().clone();
                 let pool = ctx.pool().clone();
@@ -128,7 +133,16 @@ impl WorldChainBuilderTestContext {
         let NodeHandle {
             node,
             node_exit_future: _,
-        } = builder.launch().await?;
+        } = builder
+            .launch_with_fn(|builder| {
+                let launcher = EngineNodeLauncher::new(
+                    builder.task_executor().clone(),
+                    builder.config().datadir(),
+                    engine_tree_config,
+                );
+                builder.launch_with(launcher)
+            })
+            .await?;
 
         let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
         Ok(Self {
@@ -172,7 +186,10 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
     let (payload, _) = ctx.node.advance_block().await?;
 
-    assert_eq!(payload.block().body.transactions.len(), pbh_tx_hashes.len());
+    assert_eq!(
+        payload.block().body().transactions.len(),
+        pbh_tx_hashes.len()
+    );
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
 
@@ -212,12 +229,18 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let (payload, _) = ctx.node.advance_block().await?;
 
     assert_eq!(
-        payload.block().body.transactions.len(),
+        payload.block().body().transactions.len(),
         pbh_tx_hashes.len() + 1
     );
     // Assert the non-pbh transaction is included in the block last
     assert_eq!(
-        payload.block().body.transactions.last().unwrap().hash(),
+        *payload
+            .block()
+            .body()
+            .transactions
+            .last()
+            .unwrap()
+            .tx_hash(),
         non_pbh_hash
     );
     let block_hash = payload.block().hash();
@@ -266,7 +289,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 
     // One transaction should be successfully validated
     // and included in the block.
-    assert_eq!(payload.block().body.transactions.len(), 1);
+    assert_eq!(payload.block().body().transactions.len(), 1);
 
     Ok(())
 }

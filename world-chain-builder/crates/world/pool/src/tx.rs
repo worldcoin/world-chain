@@ -1,34 +1,41 @@
 use std::sync::Arc;
 
-use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError, Transaction};
+use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_primitives::TxHash;
-use alloy_rpc_types::erc4337::ConditionalOptions;
-use reth::{
-    core::primitives::SignedTransaction,
-    transaction_pool::{
-        EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
-    },
-};
-use reth_primitives::{
-    transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    Transaction as RethTransaction,
-};
-use reth_primitives::{
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, TransactionSigned,
-};
+use alloy_rpc_types::erc4337::TransactionConditional;
+use op_alloy_consensus::OpTypedTransaction;
+use reth::transaction_pool::{EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction};
+use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_primitives::OpTransactionSigned;
+use reth_primitives::transaction::TransactionConversionError;
+use reth_primitives::RecoveredTx;
 use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
     fn set_valid_pbh(&mut self);
-    fn conditional_options(&self) -> Option<&ConditionalOptions>;
+    fn conditional_options(&self) -> Option<&TransactionConditional>;
 }
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
-    pub inner: EthPooledTransaction,
+    pub inner: OpPooledTransaction,
     pub valid_pbh: bool,
-    pub conditional_options: Option<ConditionalOptions>,
+    pub conditional_options: Option<TransactionConditional>,
+}
+
+impl WorldChainPoolTransaction for WorldChainPooledTransaction {
+    fn valid_pbh(&self) -> bool {
+        self.valid_pbh
+    }
+
+    fn conditional_options(&self) -> Option<&TransactionConditional> {
+        self.conditional_options.as_ref()
+    }
+
+    fn set_valid_pbh(&mut self) {
+        self.valid_pbh = true;
+    }
 }
 
 impl EthPoolTransaction for WorldChainPooledTransaction {
@@ -48,59 +55,32 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
     }
 
     fn try_from_eip4844(
-        tx: RecoveredTx<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        _tx: RecoveredTx<Self::Consensus>,
+        _sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
-        let (tx, signer) = tx.to_components();
-        let pooled = PooledTransactionsElement::try_from_blob_transaction(tx, sidecar)
-            .ok()
-            .map(|tx| tx.with_signer(signer))
-            .map(EthPooledTransaction::from_pooled);
-
-        pooled.map(|inner| Self {
-            inner,
-            valid_pbh: false,
-            conditional_options: None,
-        })
+        None
     }
 
     fn validate_blob(
         &self,
-        sidecar: &BlobTransactionSidecar,
-        settings: &KzgSettings,
+        _sidecar: &BlobTransactionSidecar,
+        _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        match &self.inner.transaction().transaction {
-            RethTransaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
-            _ => Err(BlobTransactionValidationError::NotBlobTransaction(
-                self.inner.tx_type(),
-            )),
-        }
+        Err(BlobTransactionValidationError::NotBlobTransaction(
+            self.tx_type(),
+        ))
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.inner.transaction().transaction {
-            RethTransaction::Eip7702(tx) => tx.authorization_list.len(),
+        match &self.inner.transaction.transaction {
+            OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }
     }
 }
 
-impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn valid_pbh(&self) -> bool {
-        self.valid_pbh
-    }
-
-    fn conditional_options(&self) -> Option<&ConditionalOptions> {
-        self.conditional_options.as_ref()
-    }
-
-    fn set_valid_pbh(&mut self) {
-        self.valid_pbh = true;
-    }
-}
-
-impl From<EthPooledTransaction> for WorldChainPooledTransaction {
-    fn from(tx: EthPooledTransaction) -> Self {
+impl From<OpPooledTransaction> for WorldChainPooledTransaction {
+    fn from(tx: OpPooledTransaction) -> Self {
         Self {
             inner: tx,
             valid_pbh: false,
@@ -109,10 +89,10 @@ impl From<EthPooledTransaction> for WorldChainPooledTransaction {
     }
 }
 
-/// Conversion from the network transaction type to the pool transaction type.
-impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
-    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        let inner = EthPooledTransaction::from(tx);
+impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for WorldChainPooledTransaction {
+    fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
+        let inner = OpPooledTransaction::from(tx);
+
         Self {
             inner,
             valid_pbh: false,
@@ -121,65 +101,61 @@ impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction 
     }
 }
 
-impl TryFrom<RecoveredTx> for WorldChainPooledTransaction {
-    type Error = TryFromRecoveredTransactionError;
+impl TryFrom<RecoveredTx<OpTransactionSigned>> for WorldChainPooledTransaction {
+    type Error = TransactionConversionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
-        let inner = EthPooledTransaction::try_from(tx)?;
+    fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
+        let (tx, signer) = value.into_parts();
+        let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
+            RecoveredTx::new_unchecked(tx.try_into()?, signer);
+
         Ok(Self {
-            inner,
+            inner: pooled.into(),
             valid_pbh: false,
             conditional_options: None,
         })
     }
 }
 
-impl From<WorldChainPooledTransaction> for RecoveredTx {
+impl From<WorldChainPooledTransaction> for RecoveredTx<OpTransactionSigned> {
     fn from(val: WorldChainPooledTransaction) -> Self {
         val.inner.into()
     }
 }
 
 impl PoolTransaction for WorldChainPooledTransaction {
-    type TryFromConsensusError = TryFromRecoveredTransactionError;
-
-    type Consensus = TransactionSigned;
-
-    type Pooled = PooledTransactionsElement;
+    type TryFromConsensusError = <Self as TryFrom<RecoveredTx<Self::Consensus>>>::Error;
+    type Consensus = OpTransactionSigned;
+    type Pooled = op_alloy_consensus::OpPooledTransaction;
 
     fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
-        self.inner.transaction().clone()
+        self.inner.clone_into_consensus()
     }
 
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
-        let pooled = tx
-            .try_into_pooled()
-            .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
-        Ok(RecoveredTx::from_signed_transaction(pooled, signer))
+        OpPooledTransaction::try_consensus_into_pooled(tx)
     }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
-        let transaction = self.inner.transaction();
-        transaction.tx_hash()
+        self.inner.hash()
     }
 
     /// Returns the Sender of the transaction.
     fn sender(&self) -> Address {
-        self.inner.transaction().signer()
+        self.inner.sender()
     }
 
     /// Returns a reference to the Sender of the transaction.
     fn sender_ref(&self) -> &Address {
-        self.inner.transaction().signer_ref()
+        self.inner.sender_ref()
     }
 
     /// Returns the nonce for this transaction.
     fn nonce(&self) -> u64 {
-        self.inner.transaction().nonce()
+        self.inner.nonce()
     }
 
     /// Returns the cost that this transaction is allowed to consume:
@@ -194,7 +170,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64 {
-        self.inner.transaction().gas_limit()
+        self.inner.gas_limit()
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
@@ -203,25 +179,22 @@ impl PoolTransaction for WorldChainPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
-        self.inner.transaction().transaction.max_fee_per_gas()
+        self.inner.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
-        self.inner.transaction().access_list()
+        self.inner.access_list()
     }
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.inner
-            .transaction()
-            .transaction
-            .max_priority_fee_per_gas()
+        self.inner.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.inner.transaction().max_fee_per_blob_gas()
+        self.inner.max_fee_per_blob_gas()
     }
 
     /// Returns the effective tip for this transaction.
@@ -229,38 +202,38 @@ impl PoolTransaction for WorldChainPooledTransaction {
     /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
     /// For legacy transactions: `gas_price - base_fee`.
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.inner.transaction().effective_tip_per_gas(base_fee)
+        self.inner.effective_tip_per_gas(base_fee)
     }
 
     /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
     /// otherwise returns the gas price.
     fn priority_fee_or_price(&self) -> u128 {
-        self.inner.transaction().priority_fee_or_price()
+        self.inner.priority_fee_or_price()
     }
 
     /// Returns the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> TxKind {
-        self.inner.transaction().kind()
+        self.inner.kind()
     }
 
     /// Returns true if the transaction is a contract creation.
     fn is_create(&self) -> bool {
-        self.inner.transaction().is_create()
+        self.inner.is_create()
     }
 
     fn input(&self) -> &[u8] {
-        self.inner.transaction().input()
+        self.inner.input()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
-        self.inner.transaction().transaction.input().len()
+        self.inner.size()
     }
 
     /// Returns the transaction type
     fn tx_type(&self) -> u8 {
-        self.inner.transaction().tx_type().into()
+        self.inner.tx_type()
     }
 
     /// Returns the length of the rlp encoded object
@@ -270,6 +243,6 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64> {
-        self.inner.transaction().chain_id()
+        self.inner.chain_id()
     }
 }

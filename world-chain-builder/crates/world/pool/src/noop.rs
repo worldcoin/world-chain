@@ -5,14 +5,14 @@ use alloy_consensus::BlobTransactionSidecar;
 use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash};
 use reth::transaction_pool::{
-    noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
-    NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PropagatedTransactions,
-    TransactionEvents, TransactionListenerKind, TransactionOrigin, TransactionPool,
-    ValidPoolTransaction,
+    error::PoolError, noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents,
+    BestTransactions, BestTransactionsAttributes, BlobStoreError, BlockInfo,
+    GetPooledTransactionLimit, NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize,
+    PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionListenerKind,
+    TransactionOrigin, TransactionPool, ValidPoolTransaction,
 };
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{PooledTransactionsElement, RecoveredTx};
+use reth_primitives::RecoveredTx;
 use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -48,29 +48,34 @@ impl TransactionPool for NoopWorldChainTransactionPool {
 
     async fn add_transaction_and_subscribe(
         &self,
-        origin: TransactionOrigin,
+        _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
-        self.inner
-            .add_transaction_and_subscribe(origin, transaction.inner)
-            .await
+        let hash = *transaction.hash();
+        Err(PoolError::other(hash, "noop insertion error"))
     }
 
     async fn add_transaction(
         &self,
-        origin: TransactionOrigin,
+        _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
-        self.inner.add_transaction(origin, transaction.inner).await
+        let hash = *transaction.hash();
+        Err(PoolError::other(hash, "noop insertion error"))
     }
 
     async fn add_transactions(
         &self,
-        origin: TransactionOrigin,
+        _origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<TxHash>> {
-        let transactions = transactions.into_iter().map(|tx| tx.inner).collect();
-        self.inner.add_transactions(origin, transactions).await
+        transactions
+            .into_iter()
+            .map(|transaction| {
+                let hash = *transaction.hash();
+                Err(PoolError::other(hash, "noop insertion error"))
+            })
+            .collect()
     }
 
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -126,7 +131,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         &self,
         _tx_hashes: Vec<TxHash>,
         _limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
         vec![]
     }
 

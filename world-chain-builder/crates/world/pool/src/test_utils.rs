@@ -1,28 +1,30 @@
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::TxEip1559;
 use alloy_eips::eip2930::AccessList;
 use alloy_network::TxSigner;
-use alloy_primitives::{address, Bytes, ChainId, U256};
+use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
 use bon::builder;
+use op_alloy_consensus::OpTypedTransaction;
 use reth::chainspec::MAINNET;
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
-use reth::transaction_pool::EthPooledTransaction;
-use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_primitives::PooledTransactionsElement;
-use reth_provider::test_utils::MockEthProvider;
-use revm_primitives::{Address, TxKind};
+use reth_optimism_node::txpool::{OpPooledTransaction, OpTransactionValidator};
+use reth_optimism_primitives::OpTransactionSigned;
+use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
+use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::Field;
+
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IMulticall3;
 use crate::bindings::IPBHEntryPoint::{self};
+use crate::mock::MockEthProvider;
 use crate::root::WorldChainRootValidator;
 use crate::tx::WorldChainPooledTransaction;
 use crate::validator::WorldChainTransactionValidator;
@@ -50,7 +52,6 @@ fn test_signer() {
 
 pub fn account(index: u32) -> Address {
     let signer = signer(index);
-
     signer.address()
 }
 
@@ -127,18 +128,19 @@ pub fn eip1559(
     }
 }
 
-pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> EthPooledTransaction {
+pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
     let signer = signer(acc);
-
     let signature = signer
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-
-    let tx_signed = tx.into_signed(signature);
-    let pooled = PooledTransactionsElement::Eip1559(tx_signed);
-
-    pooled.try_into_ecrecovered().unwrap().into()
+    let op_tx: OpTypedTransaction = tx.into();
+    let tx_signed = OpTransactionSigned::new(op_tx, signature);
+    let pooled = OpPooledTransaction::new(
+        tx_signed.clone().into_ecrecovered_unchecked().unwrap(),
+        tx_signed.eip1559().unwrap().size(),
+    );
+    pooled
 }
 
 #[builder]

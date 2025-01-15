@@ -1,10 +1,11 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_consensus::{Eip658Value, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_rpc_types_debug::ExecutionWitness;
+use op_alloy_consensus::OpDepositReceipt;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::database::StateProviderDatabase;
@@ -17,7 +18,8 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::env::EvmEnv;
+use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
@@ -26,9 +28,9 @@ use reth_optimism_payload_builder::builder::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, Receipt, SealedHeader,
-    TransactionSigned, TxType,
+    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, SealedHeader, TxType,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
@@ -38,8 +40,7 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionE
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
 use revm_primitives::{
-    BlockEnv, Bytes, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
-    ResultAndState, TxEnv, B256, U256,
+    Bytes, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv, B256, U256,
 };
 use thiserror::Error;
 use tracing::{debug, trace, warn};
@@ -140,7 +141,7 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
 
 impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -158,12 +159,17 @@ where
     where
         Client:
             StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-        Pool:
-            TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
     {
-        let (initialized_cfg, initialized_block_env) = self
+        let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
+        let EvmEnv {
+            cfg_env_with_handler_cfg,
+            block_env,
+        } = evm_env;
 
         let BuildArguments {
             client,
@@ -179,8 +185,8 @@ where
                 evm_config: self.inner.evm_config.clone(),
                 chain_spec: client.chain_spec(),
                 config,
-                initialized_cfg,
-                initialized_block_env,
+                initialized_cfg: cfg_env_with_handler_cfg,
+                initialized_block_env: block_env,
                 cancel,
                 best_payload,
             },
@@ -216,28 +222,15 @@ where
 
         Ok(build_outcome.with_cached_reads(cached_reads))
     }
-}
 
-impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
-where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-{
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
     pub fn cfg_and_block_env(
         &self,
         attributes: &OpPayloadBuilderAttributes,
         parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
-        let next_attributes = NextBlockEnvAttributes {
-            timestamp: attributes.timestamp(),
-            suggested_fee_recipient: attributes.suggested_fee_recipient(),
-            prev_randao: attributes.prev_randao(),
-            // gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
-        };
-        self.inner
-            .evm_config
-            .next_cfg_and_block_env(parent, next_attributes)
+    ) -> Result<EvmEnv, EvmConfig::Error> {
+        self.inner.cfg_and_block_env(attributes, parent)
     }
 
     /// Computes the witness for the payload.
@@ -254,23 +247,25 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let (initialized_cfg, initialized_block_env) = self
+        let evm_env = self
             .cfg_and_block_env(&attributes, &parent)
             .map_err(PayloadBuilderError::other)?;
+        let EvmEnv {
+            cfg_env_with_handler_cfg,
+            block_env,
+        } = evm_env;
 
         let config = PayloadConfig {
             parent_header: Arc::new(parent),
             attributes,
-            extra_data: Default::default(),
         };
-
         let ctx = WorldChainPayloadBuilderCtx {
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 chain_spec: client.chain_spec(),
                 config,
-                initialized_cfg,
-                initialized_block_env,
+                initialized_cfg: cfg_env_with_handler_cfg,
+                initialized_block_env: block_env,
                 cancel: Default::default(),
                 best_payload: Default::default(),
             },
@@ -302,8 +297,8 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + BlockReaderIdExt
         + Clone,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
@@ -371,7 +366,7 @@ pub struct WorldChainBuilder<Pool, Txs> {
 
 impl<Pool, Txs> WorldChainBuilder<Pool, Txs>
 where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
     Txs: OpPayloadTransactions,
 {
     /// Executes the payload and returns the outcome.
@@ -381,7 +376,7 @@ where
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError>,
         Client:
             StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
@@ -434,7 +429,6 @@ where
         })
     }
 
-    // TODO:
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, DB, P, Client>(
         self,
@@ -442,7 +436,7 @@ where
         ctx: WorldChainPayloadBuilderCtx<EvmConfig, Client>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider,
         Client:
@@ -460,7 +454,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            vec![info.receipts].into(),
+            info.receipts.into(),
             block_number,
             Vec::new(),
         );
@@ -523,7 +517,6 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -576,7 +569,7 @@ where
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider,
         Client:
@@ -722,7 +715,7 @@ impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client> {
 
 impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
 {
     /// apply eip-4788 pre block contract call
@@ -764,8 +757,9 @@ where
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool:
-            TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TransactionSigned>>,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
     {
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
@@ -873,15 +867,25 @@ where
             // receipt
             info.cumulative_gas_used += gas_used;
 
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(Some(Receipt {
-                tx_type: consensus_tx.tx_type(),
-                success: result.is_success(),
+            let receipt = alloy_consensus::Receipt {
+                status: Eip658Value::Eip658(result.is_success()),
                 cumulative_gas_used: info.cumulative_gas_used,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            }));
+                logs: result.into_logs().into_iter().collect(),
+            };
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            info.receipts.push(match tx.tx_type() {
+                0 => OpReceipt::Legacy(receipt),
+                1 => OpReceipt::Eip2930(receipt),
+                2 => OpReceipt::Eip1559(receipt),
+                4 => OpReceipt::Eip7702(receipt),
+                126 => OpReceipt::Deposit(OpDepositReceipt {
+                    inner: receipt,
+                    deposit_nonce: None,
+                    deposit_receipt_version: None,
+                }),
+                _ => unreachable!(),
+            });
 
             // update add to total fees
             let miner_fee = tx
@@ -891,7 +895,7 @@ where
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(consensus_tx.signer());
-            info.executed_transactions.push(consensus_tx.into_signed());
+            info.executed_transactions.push(consensus_tx.into_tx());
         }
 
         if !invalid_txs.is_empty() {

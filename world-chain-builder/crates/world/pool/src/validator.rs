@@ -3,12 +3,14 @@ use alloy_primitives::{Address, U256};
 use alloy_rlp::Decodable;
 use alloy_sol_types::SolCall;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reth::core::primitives::{BlockBody, BlockHeader};
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_primitives::{Block, SealedBlock, TransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
+use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::protocol::verify_proof;
 use world_chain_builder_pbh::date_marker::DateMarker;
@@ -46,8 +48,9 @@ where
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
-    Tx: WorldChainPoolTransaction<Consensus = TransactionSigned>,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
+    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
@@ -284,8 +287,8 @@ where
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block>,
-    Tx: WorldChainPoolTransaction<Consensus = TransactionSigned>,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
 
@@ -309,15 +312,19 @@ where
         self.inner.validate_one(origin, transaction.clone())
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    where
+        H: BlockHeader,
+        B: BlockBody,
+    {
         self.inner.on_new_head_block(new_tip_block);
-        // TODO: Handle reorgs
         self.root_validator.on_new_block(new_tip_block);
     }
 }
 
 #[cfg(test)]
 pub mod tests {
+    use alloy_consensus::Header;
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
     use chrono::{TimeZone, Utc};
@@ -326,8 +333,8 @@ pub mod tests {
     use ethers_core::types::U256;
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
+    use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
-    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use semaphore::Field;
     use test_case::test_case;
     use world_chain_builder_pbh::date_marker::DateMarker;
@@ -335,6 +342,7 @@ pub mod tests {
     use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 
     use super::WorldChainTransactionValidator;
+    use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
     use crate::test_utils::{self, world_chain_validator, PBH_TEST_ENTRYPOINT, TEST_WORLD_ID};
@@ -367,10 +375,13 @@ pub mod tests {
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
-
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
-        let block = SealedBlock::new(header, body);
+        let header = Header {
+            gas_limit: 20000000,
+            ..Default::default()
+        };
+        let sealed_header = SealedHeader::new(header.clone(), header.hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
+        let block = SealedBlock::new(sealed_header, body);
 
         // Propogate the block to the root validator
         validator.on_new_head_block(&block);
@@ -682,8 +693,8 @@ pub mod tests {
             root,
             proof,
         };
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
+        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::new(header, body);
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account
@@ -716,8 +727,8 @@ pub mod tests {
             root,
             proof,
         };
-        let header = SealedHeader::default();
-        let body = BlockBody::default();
+        let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+        let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::new(header, body);
         let client = MockEthProvider::default();
         // Insert a world id root into the OpWorldId Account
