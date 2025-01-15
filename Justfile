@@ -27,3 +27,7 @@ test:
 # Formats the world-chain-builder
 fmt: 
     @just ./world-chain-builder/fmt
+
+# Installs the world-chain-builder
+install *args='':
+    @just ./world-chain-builder/install $@
