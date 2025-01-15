@@ -30,8 +30,8 @@ alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
-alloy-signer-local.workspace = true
-alloy-network.workspace = true
+alloy-signer-local = { workspace = true, optional = true }
+alloy-network = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
 # 3rd party
@@ -43,10 +43,8 @@ eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
-tempfile.workspace = true
-bon.workspace = true
+bon = { workspace = true, optional = true }
 rayon.workspace = true
-bytes.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true
@@ -55,7 +53,15 @@ reth-e2e-test-utils.workspace = true
 
 [features]
 default = []
-test = ["dep:reth-e2e-test-utils", "dep:reth-trie-db", "dep:reth-stages-types", "dep:reth-trie"]
+test = [
+    "dep:reth-e2e-test-utils",
+    "dep:reth-trie-db",
+    "dep:reth-stages-types",
+    "dep:reth-trie",
+    "dep:alloy-signer-local",
+    "dep:alloy-network",
+    "dep:bon",
+]
 
 [lints]
 workspace = true

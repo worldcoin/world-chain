@@ -1,3 +1,5 @@
+#![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
+
 pub mod bindings;
 pub mod builder;
 pub mod eip4337;

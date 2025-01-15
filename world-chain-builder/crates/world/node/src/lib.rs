@@ -1,3 +1,5 @@
+#![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
+
 pub mod args;
 pub mod node;
 

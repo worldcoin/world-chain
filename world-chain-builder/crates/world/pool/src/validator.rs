@@ -312,12 +312,6 @@ where
         self.inner.validate_one(origin, transaction.clone())
     }
 
-    // fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
-    //     self.inner.on_new_head_block(new_tip_block);
-    //     // TODO: Handle reorgs
-    //     self.root_validator.on_new_block(new_tip_block);
-    // }
-
     fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
     where
         H: BlockHeader,

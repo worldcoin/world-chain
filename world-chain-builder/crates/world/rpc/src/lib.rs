@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 pub mod sequencer;
 pub use sequencer::SequencerClient;
 
