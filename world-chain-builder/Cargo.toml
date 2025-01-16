@@ -114,6 +114,8 @@ alloy-rpc-types-debug = "0.9.2"
 alloy-signer = { version = "0.9.2", default-features = false }
 alloy-signer-local = { version = "0.9.2", default-features = false }
 alloy-sol-types = "0.8.18"
+alloy-provider = { version = "0.9.2", default-features = false }
+alloy-transport = { version = "0.9.2", default-features = false }
 
 
 # revm
@@ -138,6 +140,7 @@ clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
 derive_more = "1"
 dotenvy = "0.15.7"

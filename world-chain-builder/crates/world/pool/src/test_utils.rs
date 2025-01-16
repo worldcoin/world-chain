@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
 use alloy_consensus::TxEip1559;
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2930::AccessList,eip2718::Encodable2718};
 use alloy_network::TxSigner;
-use alloy_primitives::{address, keccak256, Address, Bytes, ChainId, U256};
+use alloy_primitives::{address,  Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
@@ -81,24 +81,6 @@ pub fn tree_inclusion_proof(acc: u32) -> semaphore::poseidon_tree::Proof {
     TREE.proof(acc as usize)
 }
 
-pub fn compute_insertion_proof_input_hash(
-    start_index: u32,
-    pre_root: U256,
-    post_root: U256,
-    identity_commitments: &[U256],
-) -> U256 {
-    let mut bytes: Vec<u8> = vec![];
-    bytes.extend_from_slice(&start_index.to_be_bytes());
-    bytes.extend(pre_root.to_be_bytes::<32>().iter());
-    bytes.extend(post_root.to_be_bytes::<32>().iter());
-
-    for commitment in identity_commitments {
-        bytes.extend(commitment.to_be_bytes::<32>().iter());
-    }
-
-    keccak256(bytes).into()
-}
-
 pub fn nullifier_hash(acc: u32, external_nullifier: Field) -> Field {
     let identity = identity(acc);
 
@@ -156,6 +138,16 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
+}
+
+pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
+    let signer = signer(acc);
+    let signature = signer
+        .sign_transaction(&mut tx).await.expect("Failed to sign transaction");
+    let tx_signed = OpTransactionSigned::new(tx.into(), signature);
+    let mut buff = vec![];
+    tx_signed.encode_2718(&mut buff);
+    buff.into()
 }
 
 #[builder]

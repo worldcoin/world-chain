@@ -1,12 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::fixtures::PBHFixture;
-use crate::run_command;
 use alloy_primitives::hex;
+use alloy_primitives::Bytes;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
-use alloy_rpc_types_eth::erc4337::ConditionalOptions;
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport::Transport;
 use eyre::eyre::Result;
 use futures::stream;
@@ -15,38 +14,24 @@ use futures::TryStreamExt;
 use tokio::time::sleep;
 use tracing::debug;
 
+use crate::run_command;
+
 const CONCURRENCY_LIMIT: usize = 50;
 
 /// Asserts that the world-chain-builder payload is built correctly with a set of PBH transactions.
-pub async fn ordering_test<T, P>(builder_provider: Arc<P>, fixture: PBHFixture) -> Result<()>
+pub async fn ordering_test<T, P>(builder_provider: Arc<P>, fixture: Vec<Bytes>) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T>,
 {
-    let num_transactions = fixture.fixture.len();
-    let half = num_transactions / 2;
     let builder_provider_clone = builder_provider.clone();
-    stream::iter(fixture.fixture.chunks(30).enumerate())
+    stream::iter(fixture.chunks(100).enumerate())
         .map(Ok)
         .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, transactions)| {
             let builder_provider = builder_provider_clone.clone();
             async move {
                 for transaction in transactions {
-                    let tx = if index < half {
-                        // First half, use eth_sendRawTransaction
-                        builder_provider.send_raw_transaction(transaction).await?
-                    } else {
-                        // Second half, use eth_sendRawTransactionConditional
-                        let rlp_hex = hex::encode_prefixed(transaction);
-                        let tx_hash = builder_provider
-                            .client()
-                            .request(
-                                "eth_sendRawTransactionConditional",
-                                (rlp_hex, ConditionalOptions::default()),
-                            )
-                            .await?;
-                        PendingTransactionBuilder::new(&builder_provider.root(), tx_hash)
-                    };
+                    let tx = builder_provider.send_raw_transaction(transaction).await?;
                     let hash = *tx.tx_hash();
                     let receipt = tx.get_receipt().await;
                     assert!(receipt.is_ok());
@@ -70,9 +55,6 @@ where
     T: Transport + Clone,
     P: Provider<T>,
 {
-    // Grab the latest block number
-    let block_number = sequencer_provider.get_block_number().await?;
-
     run_command(
         "kurtosis",
         &[
@@ -84,7 +66,11 @@ where
         env!("CARGO_MANIFEST_DIR"),
     )
     .await?;
+
     sleep(Duration::from_secs(5)).await;
+    
+    // Grab the latest block number
+    let block_number = sequencer_provider.get_block_number().await?;
 
     let retries = 3;
     let mut tries = 0;
@@ -107,8 +93,27 @@ where
 
 /// Spams the builder with 4000 transactions at once. 
 /// This is to test the builder's ability to handle a large number of transactions.
-pub async fn load_test<T, P>(builder_provider: Arc<P>) -> Result<()>
+pub async fn load_test<T, P>(_builder_provider: Arc<P>) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T>,
 { todo!() } 
+
+/// `eth_sendRawTransactionConditional` test cases
+pub async fn transact_conditional_test<T, P>(builder_provider: Arc<P>) -> Result<()>
+where
+    T: Transport + Clone,
+    P: Provider<T>,
+{ 
+    // // Second half, use eth_sendRawTransactionConditional
+    // let rlp_hex = hex::encode_prefixed(transaction);
+    // let tx_hash = builder_provider
+    //     .client()
+    //     .request(
+    //         "eth_sendRawTransactionConditional",
+    //         (rlp_hex, TransactionConditional::default()),
+    //     )
+    //     .await?;
+    // PendingTransactionBuilder::new(builder_provider.root().clone(), tx_hash)
+    todo!()
+}

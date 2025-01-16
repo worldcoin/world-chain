@@ -12,16 +12,18 @@ use std::{
 };
 
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::BlockNumberOrTag;
+use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
 use eyre::eyre::{eyre, Result};
-use fixtures::generate_test_fixture;
+use fixtures::generate_pbh_4337_fixture;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
 
 pub mod cases;
 pub mod fixtures;
+
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,7 +52,7 @@ async fn main() -> Result<()> {
     f.await;
 
     info!("Generating test fixtures");
-    let fixture = generate_test_fixture().await;
+    let fixture = generate_pbh_4337_fixture(1000).await;
 
     info!("Running block building test");
     cases::ordering_test(builder_provider.clone(), fixture).await?;
@@ -117,7 +119,7 @@ where
     let start = Instant::now();
     loop {
         if provider
-            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .get_block_by_number(BlockNumberOrTag::Latest, BlockTransactionsKind::Hashes)
             .await
             .is_ok()
         {
