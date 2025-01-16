@@ -53,10 +53,11 @@ async fn main() -> Result<()> {
     let fixture = generate_test_fixture().await;
 
     info!("Running block building test");
-    cases::assert_build(builder_provider.clone(), fixture).await?;
+    cases::ordering_test(builder_provider.clone(), fixture).await?;
     info!("Running fallback test");
-    cases::assert_fallback(sequencer_provider.clone()).await?;
-
+    cases::fallback_test(sequencer_provider.clone()).await?;
+    info!("Running Load Test");
+    cases::load_test(builder_provider.clone()).await?;
     Ok(())
 }
 

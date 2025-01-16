@@ -37,8 +37,7 @@ contract DeployDevnet is Script {
     address public pbhSignatureAggregator;
 
     uint8 constant TREE_DEPTH = 30;
-    uint256 constant INITIAL_ROOT = 0x918D46BF52D98B034413F4A1A1C41594E7A7A3F6AE08CB43D1A2A230E1959EF;
-    uint256 constant POST_ROOT = 8894851390847753342088062341507157182152206114845377057718563416586860035060;
+    uint256 constant INITIAL_ROOT = 2331208655746773478043068354535648778756593025616855591272936751328757051821;
     uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
 
     address semaphoreVerifier = address(0);
@@ -79,7 +78,7 @@ contract DeployDevnet is Script {
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 30, address(0x123), MAX_PBH_GAS_LIMIT)
+            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 1000, address(0x123), MAX_PBH_GAS_LIMIT)
         );
         pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
@@ -221,31 +220,6 @@ contract DeployDevnet is Script {
         }
 
         vm.stopBroadcast();
-    }
-    // function registerIdentities(
-    //     uint256[8] calldata insertionProof,
-    //     uint256 preRoot,
-    //     uint32 startIndex,
-    //     uint256[] calldata identityCommitments,
-    //     uint256 postRoot
-    // ) public virtual onlyProxy onlyInitialized onlyIdentityOperator {
-    function registerTestIdentities() internal {
-        console.log("Registering test identities");
-        string memory jsonTree = vm.readFile("scripts/assets/identity_tree.json");
-        uint256[] memory idComms = vm.parseJsonUintArray(jsonTree, ".idComms");
-        uint256[8] memory proof;
-        bytes memory registerIdentitiesCalldata = abi.encodeWithSignature(
-            "registerIdentities(uint256[8],uint256,uint32,uint256[],uint256)",
-            proof,
-            INITIAL_ROOT,
-            0,
-            idComms,
-            POST_ROOT
-        );
-
-        address(worldID).call(
-            registerIdentitiesCalldata
-        );
     }
 
     function beginBroadcast() internal {

@@ -345,7 +345,9 @@ pub mod tests {
     use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
-    use crate::test_utils::{self, world_chain_validator, PBH_TEST_ENTRYPOINT, TEST_WORLD_ID, TREE};
+    use crate::test_utils::{
+        self, world_chain_validator, PBH_TEST_ENTRYPOINT, TEST_WORLD_ID, TREE,
+    };
     use crate::tx::WorldChainPooledTransaction;
 
     async fn setup() -> Pool<

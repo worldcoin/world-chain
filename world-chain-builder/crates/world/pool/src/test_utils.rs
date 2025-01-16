@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use std::sync::LazyLock;
 use alloy_consensus::TxEip1559;
 use alloy_eips::eip2930::AccessList;
 use alloy_network::TxSigner;
@@ -8,7 +7,6 @@ use alloy_rlp::Encodable;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
 use bon::builder;
-use lazy_static::lazy_static;
 use op_alloy_consensus::OpTypedTransaction;
 use reth::chainspec::MAINNET;
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
@@ -20,7 +18,6 @@ use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::Field;
-use std::str::FromStr;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
@@ -34,28 +31,25 @@ use crate::validator::WorldChainTransactionValidator;
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
-lazy_static! {
-    pub static ref TREE: LazyPoseidonTree = {
-        let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
-        let mut comms = vec![];
-        for acc in 0..=999 {
-            let identity = identity(acc);
-            let commitment = identity.commitment();
-            comms.push(commitment);
-            tree = tree.update_with_mutation(acc as usize, &commitment);
-        }
+pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
+    address!("09635F643e140090A9A8Dcd712eD6285858ceBef");
 
-        tree.derived()
-    };
-    static ref ID_COMMS: Vec<U256> = {
-        let mut comms = vec![];
-        for acc in 0..=999 {
-            let identity = identity(acc);
-            comms.push(identity.commitment().into());
-        }
-        comms
-    };
-}
+pub const PBH_TEST_ENTRYPOINT: Address = address!("7a2088a1bFc9d81c55368AE168C2C02570cB814F");
+
+pub const TEST_WORLD_ID: Address = address!("047eE5313F98E26Cc8177fA38877cB36292D2364");
+
+pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
+    let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
+    let mut comms = vec![];
+    for acc in 0..=5 {
+        let identity = identity(acc);
+        let commitment = identity.commitment();
+        comms.push(commitment);
+        tree = tree.update_with_mutation(acc as usize, &commitment);
+    }
+
+    tree.derived()
+});
 
 pub fn signer(index: u32) -> PrivateKeySigner {
     let signer = alloy_signer_local::MnemonicBuilder::<English>::default()
@@ -66,14 +60,6 @@ pub fn signer(index: u32) -> PrivateKeySigner {
         .expect("Failed to create signer");
 
     signer
-}
-
-#[cfg(test)]
-#[test]
-fn test_signer() {
-    let signer = signer(0);
-
-    println!("Signer: {:?}", signer);
 }
 
 pub fn account(index: u32) -> Address {
@@ -111,55 +97,6 @@ pub fn compute_insertion_proof_input_hash(
     }
 
     keccak256(bytes).into()
-}
-
-pub struct InsertionProofInputs {}
-
-pub async fn generate_insertion_proof() -> Vec<U256> {
-    let url = "https://semaphore-mtb-orb-ethereum-deletion.internal.stage-crypto.worldcoin.dev";
-    let timeout_duration = Duration::from_secs(30);
-    let client = reqwest::Client::builder()
-        .connect_timeout(timeout_duration)
-        .https_only(false)
-        .build()
-        .expect("Failed to create reqwest client");
-    let input_hash = compute_insertion_proof_input_hash(
-        0,
-        U256::from_str("0x918D46BF52D98B034413F4A1A1C41594E7A7A3F6AE08CB43D1A2A230E1959EF")
-            .unwrap(),
-        U256::from_str(
-            "8894851390847753342088062341507157182152206114845377057718563416586860035060",
-        )
-        .unwrap(),
-        &ID_COMMS,
-    );
-    let merkle_proofs = ID_COMMS
-        .iter()
-        .enumerate()
-        .map(|(i, _)| tree_inclusion_proof(i as u32).0)
-        .collect::<Vec<_>>();
-
-    let proof_input = InsertionProofInput {
-        input_hash,
-        start_index,
-        pre_root,
-        post_root,
-        identity_commitments,
-        merkle_proofs,
-    };
-
-    let mut headers = HeaderMap::new();
-    trace_to_headers(&mut headers);
-
-    let request = self
-        .client
-        .post(self.target_url.join(MTB_PROVE_ENDPOINT)?)
-        .body("OH MY GOD")
-        .json(&proof_input)
-        .headers(headers)
-        .build()?;
-
-    vec![]
 }
 
 pub fn nullifier_hash(acc: u32, external_nullifier: Field) -> Field {
@@ -319,13 +256,6 @@ pub fn pbh_multicall(
 
     IPBHEntryPoint::pbhMulticallCall { calls, payload }
 }
-
-pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
-    address!("09635F643e140090A9A8Dcd712eD6285858ceBef");
-
-pub const PBH_TEST_ENTRYPOINT: Address = address!("7a2088a1bFc9d81c55368AE168C2C02570cB814F");
-
-pub const TEST_WORLD_ID: Address = address!("047eE5313F98E26Cc8177fA38877cB36292D2364");
 
 pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {

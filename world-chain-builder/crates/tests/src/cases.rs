@@ -18,7 +18,7 @@ use tracing::debug;
 const CONCURRENCY_LIMIT: usize = 50;
 
 /// Asserts that the world-chain-builder payload is built correctly with a set of PBH transactions.
-pub async fn assert_build<T, P>(builder_provider: Arc<P>, fixture: PBHFixture) -> Result<()>
+pub async fn ordering_test<T, P>(builder_provider: Arc<P>, fixture: PBHFixture) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T>,
@@ -65,7 +65,7 @@ where
 }
 
 /// Asserts that the chain continues to advance in the case when the world-chain-builder service is MIA.
-pub async fn assert_fallback<T, P>(sequencer_provider: P) -> Result<()>
+pub async fn fallback_test<T, P>(sequencer_provider: P) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T>,
@@ -104,3 +104,11 @@ where
     }
     Ok(())
 }
+
+/// Spams the builder with 4000 transactions at once. 
+/// This is to test the builder's ability to handle a large number of transactions.
+pub async fn load_test<T, P>(builder_provider: Arc<P>) -> Result<()>
+where
+    T: Transport + Clone,
+    P: Provider<T>,
+{ todo!() } 
