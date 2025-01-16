@@ -15,7 +15,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
 use eyre::eyre::{eyre, Result};
-use fixtures::generate_pbh_4337_fixture;
+use fixtures::generate_fixture;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
@@ -23,15 +23,15 @@ use tracing::info;
 pub mod cases;
 pub mod fixtures;
 
-
-
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info");
     }
 
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let (builder_rpc, sequencer_rpc) = start_devnet().await?;
 
@@ -51,15 +51,13 @@ async fn main() -> Result<()> {
     };
     f.await;
 
-    info!("Generating test fixtures");
-    let fixture = generate_pbh_4337_fixture(1000).await;
-
+    let fixture = generate_fixture(1000).await;
     info!("Running block building test");
-    cases::ordering_test(builder_provider.clone(), fixture).await?;
+    cases::load_test(builder_provider.clone(), fixture.pbh).await?;
     info!("Running fallback test");
     cases::fallback_test(sequencer_provider.clone()).await?;
     info!("Running Load Test");
-    cases::load_test(builder_provider.clone()).await?;
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     Ok(())
 }
 

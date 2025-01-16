@@ -1,8 +1,7 @@
-use std::sync::LazyLock;
 use alloy_consensus::TxEip1559;
-use alloy_eips::{eip2930::AccessList,eip2718::Encodable2718};
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
-use alloy_primitives::{address,  Address, Bytes, ChainId, U256};
+use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
@@ -18,6 +17,7 @@ use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::Field;
+use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
@@ -143,7 +143,9 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
 pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
     let signer = signer(acc);
     let signature = signer
-        .sign_transaction(&mut tx).await.expect("Failed to sign transaction");
+        .sign_transaction(&mut tx)
+        .await
+        .expect("Failed to sign transaction");
     let tx_signed = OpTransactionSigned::new(tx.into(), signature);
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);

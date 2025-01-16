@@ -12,7 +12,7 @@ pub struct TransactionFixtures {
 }
 
 /// Generates test fixtures for PBH transactions
-pub async fn generate_fixture(size: u32) -> Vec<Bytes> {
+pub async fn generate_fixture(size: u32) -> TransactionFixtures {
     let mut test_fixture = TransactionFixtures::default();
     for i in 0..=5 {
         for j in 0..=size {
@@ -29,19 +29,11 @@ pub async fn generate_fixture(size: u32) -> Vec<Bytes> {
         }
     }
 
-    test_fixture
-}
-
-/// Generates test fixture for standerd EIP-1559 transactions
-pub async fn generate_eip1559_fixture(size: u32) -> Vec<Bytes> {
-    let mut test_fixture = vec![];
-    for i in 0..=5 {
-        for j in 0..=size {
-            let tx = tx(DEV_CHAIN_ID, None, j as u64, Address::with_last_byte(0x01));
-            let envelope = TransactionTestContext::sign_tx(signer(i), tx).await;
-            let raw_tx = envelope.encoded_2718();
-            test_fixture.push(raw_tx.into());
-        }
+    for j in size..=size + 2 {
+        let tx = tx(DEV_CHAIN_ID, None, j as u64, Address::with_last_byte(0x01));
+        let envelope = TransactionTestContext::sign_tx(signer(0), tx).await;
+        let raw_tx = envelope.encoded_2718();
+        test_fixture.eip1559.push(raw_tx.into());
     }
 
     test_fixture
