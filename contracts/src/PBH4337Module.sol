@@ -124,6 +124,6 @@ contract PBHSafe4337Module is Safe4337Module {
         }
 
         // The timestamps are validated by the entry point, therefore we will not check them again.
-        validationData = _packValidationData(ValidationData(authorizer, validUntil, validAfter));
+        validationData = _packValidationData(ValidationData(authorizer, validAfter, validUntil));
     }
 }
