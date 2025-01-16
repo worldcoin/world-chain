@@ -89,19 +89,6 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
     }
 }
 
-// /// Conversion from the network transaction type to the pool transaction type.
-// impl From<PooledTransactionsElementEcRecovered> for WorldChainPooledTransaction {
-//     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-//         let inner = EthPooledTransaction::from(tx);
-//         Self {
-//             inner,
-//             valid_pbh: false,
-//             conditional_options: None,
-//         }
-//     }
-// }
-
-// TODO: check if valid PBH
 impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for WorldChainPooledTransaction {
     fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let inner = OpPooledTransaction::from(tx);
