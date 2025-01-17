@@ -21,7 +21,7 @@ use crate::run_command;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
-/// Sends 5k transactions to the builder concurrently
+/// Sends a high volume of transactions to the builder concurrently.
 pub async fn load_test<T, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
 where
     T: Transport + Clone,
@@ -134,7 +134,11 @@ where
         ..Default::default()
     };
 
-    assert!(send_raw_transaction_conditional(tx.clone(), conditions, builder_provider.clone()).await.is_err());
+    assert!(
+        send_raw_transaction_conditional(tx.clone(), conditions, builder_provider.clone())
+            .await
+            .is_err()
+    );
     Ok(())
 }
 

@@ -78,7 +78,7 @@ contract DeployDevnet is Script {
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 1000, address(0x123), MAX_PBH_GAS_LIMIT)
+            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 255, address(0x123), MAX_PBH_GAS_LIMIT)
         );
         pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
