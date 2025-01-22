@@ -63,6 +63,17 @@ pub struct PbhPayload {
     pub proof: Proof,
 }
 
+impl Into<PbhPayload> for IPBHEntryPoint::PBHPayload {
+    fn into(self) -> PbhPayload {
+        PbhPayload {
+            external_nullifier: self.external_nullifier,
+            nullifier_hash: self.nullifier_hash,
+            root: self.root,
+            proof: self.proof.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use ethers_core::types::U256;

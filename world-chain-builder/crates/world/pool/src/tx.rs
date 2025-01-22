@@ -38,6 +38,7 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
         match self {
             WorldChainPoolTransactionError::ConditionalValidationFailed(_) => true,
             WorldChainPoolTransactionError::EVMError(_) => true, // TODO: Should we return false here?
+            WorldChainPoolTransactionError::InvalidCalldata => true,
         }
     }
 }

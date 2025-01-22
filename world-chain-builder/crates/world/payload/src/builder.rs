@@ -45,7 +45,7 @@ use revm_primitives::{
 use thiserror::Error;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
-use world_chain_builder_pool::tx::WorldChainPoolTransaction;
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// World Chain payload builder

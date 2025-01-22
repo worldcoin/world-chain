@@ -222,10 +222,14 @@ where
     /// Validates a PBH multicall transaction
     ///
     /// If the transaction is valid marks it for priority inclusion
-    pub fn validate_pbh_multicall(&self, tx: Tx) -> TransactionValidationOutcome<Tx> {
+    pub fn validate_pbh_multicall(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
         let calldata = match IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) {
             Ok(decoded) => decoded,
-            Err(e) => {
+            Err(_) => {
                 return TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(
                     Box::new(WorldChainPoolTransactionError::InvalidCalldata),
                 ))
@@ -233,7 +237,8 @@ where
             }
         };
 
-        //let semaphore::protocol::Proof(g1a, g2, g1b) = call
+        // TODO: impl into for pbh payload
+
         let proof: [ethers_core::types::U256; 8] = calldata
             .payload
             .proof
@@ -251,8 +256,7 @@ where
         let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
         let g1b = (proof[6], proof[7]);
 
-        let proof = semaphore::protocol::Proof(g1a, g2, g1b);
-        let proof = Proof(proof);
+        let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
 
         let pbh_payload = PbhPayload {
             external_nullifier: ExternalNullifier::from_word(calldata.payload.pbhExternalNullifier),
@@ -261,13 +265,13 @@ where
             proof,
         };
 
-        let signal_hash = hash_pbh_multicall(tx.sender(), calldata.calls);
+        // let signal_hash = hash_pbh_multicall(tx.sender(), calldata.calls);
 
-        self.validate_pbh_payload(&pbh_payload, signal_hash)?;
+        // self.validate_pbh_payload(&pbh_payload, signal_hash)?;
 
-        tx.set_valid_pbh();
+        // tx.set_valid_pbh();
 
-        self.inner.validate_one(origin, transaction.clone())
+        self.inner.validate_one(origin, tx)
     }
 }
 
@@ -295,30 +299,20 @@ where
             match function_signature {
                 IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
                     todo!()
+                    // self.validate_pbh_bundle(&mut transaction)
                 }
                 IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
-                    todo!()
+                    self.validate_pbh_multicall(origin, transaction)
                 }
                 _ => {
-                    todo!("Error")
+                    return TransactionValidationError::Invalid(
+                        InvalidPoolTransactionError::Other(Box::new(
+                            WorldChainPoolTransactionError::InvalidCalldata,
+                        )),
+                    )
+                    .to_outcome(transaction);
                 }
             }
-
-            // if transaction
-            //     .input()
-            //     .starts_with(&IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR)
-            // {
-            //     if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
-            //         return e.to_outcome(transaction);
-            //     }
-            // } else if transaction
-            //     .input()
-            //     .starts_with(&IPBHEntryPoint::pbhMulticallCall::SELECTOR)
-            // {
-            //     self.validate_pbh_multicall(&mut transaction)
-            // } else {
-            //     todo!("TODO: error ");
-            // }
         }
     }
 
