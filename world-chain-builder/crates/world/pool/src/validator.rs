@@ -1,7 +1,8 @@
 //! World Chain transaction pool types
 use alloy_primitives::{Address, U256};
 use alloy_rlp::Decodable;
-use alloy_sol_types::SolCall;
+use alloy_sol_types::{SolCall, SolValue};
+use ethers_core::utils::keccak256;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use reth::core::primitives::{BlockBody, BlockHeader};
 use reth::transaction_pool::error::InvalidPoolTransactionError;
@@ -13,6 +14,7 @@ use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use semaphore::hash_to_field;
 use semaphore::protocol::verify_proof;
 use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
@@ -239,7 +241,8 @@ where
 
         let proof: PbhPayload = calldata.payload.into();
 
-        // let signal_hash = hash_pbh_multicall(tx.sender(), calldata.calls);
+        let signal_hash =
+            hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
         // self.validate_pbh_payload(&pbh_payload, signal_hash)?;
 
