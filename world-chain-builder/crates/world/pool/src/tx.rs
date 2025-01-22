@@ -4,17 +4,42 @@ use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_primitives::TxHash;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::transaction_pool::{EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction};
+use reth::{
+    core::primitives::transaction::error,
+    transaction_pool::{
+        error::PoolTransactionError, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+    },
+};
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::TransactionConversionError;
 use reth_primitives::RecoveredTx;
-use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
+use revm_primitives::{AccessList, Address, InvalidTransaction, KzgSettings, TxKind, B256, U256};
+use thiserror::Error;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
     fn set_valid_pbh(&mut self);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
+}
+
+#[derive(Debug, Error)]
+pub enum WorldChainPoolTransactionError {
+    #[error("Conditional Validation Failed: {0}")]
+    ConditionalValidationFailed(B256),
+    #[error("EVM Error: {0}")]
+    EVMError(#[from] InvalidTransaction),
+    #[error("Invalid calldata encoding")]
+    InvalidCalldata,
+}
+
+impl PoolTransactionError for WorldChainPoolTransactionError {
+    fn is_bad_transaction(&self) -> bool {
+        match self {
+            WorldChainPoolTransactionError::ConditionalValidationFailed(_) => true,
+            WorldChainPoolTransactionError::EVMError(_) => true, // TODO: Should we return false here?
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

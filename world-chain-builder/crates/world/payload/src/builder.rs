@@ -55,23 +55,6 @@ pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
     pub verified_blockspace_capacity: u8,
 }
 
-#[derive(Debug, Error)]
-pub enum WorldChainPoolTransactionError {
-    #[error("Conditional Validation Failed: {0}")]
-    ConditionalValidationFailed(B256),
-    #[error("EVM Error: {0}")]
-    EVMError(#[from] InvalidTransaction),
-}
-
-impl PoolTransactionError for WorldChainPoolTransactionError {
-    fn is_bad_transaction(&self) -> bool {
-        match self {
-            WorldChainPoolTransactionError::ConditionalValidationFailed(_) => true,
-            WorldChainPoolTransactionError::EVMError(_) => true, // TODO: Should we return false here?
-        }
-    }
-}
-
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
