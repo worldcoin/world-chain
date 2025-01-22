@@ -237,33 +237,7 @@ where
             }
         };
 
-        // TODO: impl into for pbh payload
-
-        let proof: [ethers_core::types::U256; 8] = calldata
-            .payload
-            .proof
-            .into_iter()
-            .map(|x| {
-                // TODO: Switch to ruint in semaphore-rs and remove this
-                let bytes_repr: [u8; 32] = x.to_be_bytes();
-                ethers_core::types::U256::from_big_endian(&bytes_repr)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(); // TODO: should we be unwrapping here?
-
-        let g1a = (proof[0], proof[1]);
-        let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
-        let g1b = (proof[6], proof[7]);
-
-        let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
-
-        let pbh_payload = PbhPayload {
-            external_nullifier: ExternalNullifier::from_word(calldata.payload.pbhExternalNullifier),
-            nullifier_hash: calldata.payload.nullifierHash,
-            root: calldata.payload.root,
-            proof,
-        };
+        let proof: PbhPayload = calldata.payload.into();
 
         // let signal_hash = hash_pbh_multicall(tx.sender(), calldata.calls);
 

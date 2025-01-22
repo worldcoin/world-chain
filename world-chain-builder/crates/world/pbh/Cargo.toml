@@ -4,8 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-
-
 alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-primitives = { workspace = true, features = ["rlp"] }
 
