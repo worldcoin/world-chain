@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{default, str::FromStr};
 
 use alloy_primitives::{ruint, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -8,14 +8,15 @@ use thiserror::Error;
 
 use crate::date_marker::DateMarker;
 
-#[derive(Display, EnumString, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Display, Default, EnumString, Debug, Clone, Copy, PartialEq, Eq)]
 #[strum(serialize_all = "snake_case")]
 #[repr(u8)]
 pub enum Prefix {
+    #[default]
     V1 = 1,
 }
 
-#[derive(Builder, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Builder, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalNullifier {
     #[builder(default = Prefix::V1)]
     pub version: Prefix,

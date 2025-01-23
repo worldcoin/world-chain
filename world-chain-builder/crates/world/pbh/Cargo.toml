@@ -13,6 +13,7 @@ semaphore.workspace = true
 strum.workspace = true
 serde.workspace = true
 bon.workspace = true
+eyre.workspace = true
 
 [dev-dependencies]
 ethers-core.workspace = true

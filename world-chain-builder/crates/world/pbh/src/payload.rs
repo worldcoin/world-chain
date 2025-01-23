@@ -47,7 +47,7 @@ impl Encodable for Proof {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum PbhValidationError {
     #[error("Invalid root")]
     InvalidRoot,
@@ -65,7 +65,7 @@ pub enum PbhValidationError {
 ///
 /// Contains the semaphore proof and relevent metadata
 /// required to to verify the pbh transaction.
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct PbhPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,
@@ -144,12 +144,18 @@ impl PbhPayload {
 
 #[cfg(test)]
 mod test {
+    use alloy_primitives::Address;
+    use chrono::{TimeZone, Utc};
+    use ethers_core::rand::rngs::SmallRng;
+    use ethers_core::rand::{Rng, SeedableRng};
     use ethers_core::types::U256;
+    use semaphore::Field;
 
     use super::*;
 
     #[test]
-    fn encode_decode() {
+    // TODO: fuzz inputs
+    fn test_encode_decode() {
         let proof = Proof(semaphore::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
             (
@@ -164,9 +170,142 @@ mod test {
             root: Field::from(12u64),
             proof,
         };
-        let encoded = alloy_rlp::encode(&pbh_payload);
-        let mut buf = encoded.as_slice();
-        let decoded = PbhPayload::decode(&mut buf).unwrap();
+
+        let mut out = vec![];
+        pbh_payload.encode(&mut out);
+        let decoded = PbhPayload::decode(&mut out.as_slice()).unwrap();
         assert_eq!(pbh_payload, decoded);
     }
+
+    #[test]
+    fn test_validate_root() -> eyre::Result<()> {
+        // Test when the root is valid
+        let mut pbh_payload = PbhPayload::default();
+        pbh_payload.root = Field::from(1u64);
+
+        let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
+        pbh_payload.validate_root(&valid_roots)?;
+
+        // Test invalid root
+        pbh_payload.root = Field::from(3u64);
+        let res = pbh_payload.validate_root(&valid_roots);
+        assert_eq!(
+            res.expect_err("Expected an error"),
+            PbhValidationError::InvalidRoot
+        );
+
+        Ok(())
+    }
+
+    // TODO: move validate roto test to pbhpayload tests
+    // #[test]
+    // fn valid_root() {
+    //     let mut validator = world_chain_validator();
+    //     let root = Field::from(1u64);
+    //     let proof = Proof(semaphore::protocol::Proof(
+    //         (U256::from(1u64), U256::from(2u64)),
+    //         (
+    //             [U256::from(3u64), U256::from(4u64)],
+    //             [U256::from(5u64), U256::from(6u64)],
+    //         ),
+    //         (U256::from(7u64), U256::from(8u64)),
+    //     ));
+    //     let payload = PbhPayload {
+    //         external_nullifier: ExternalNullifier::v1(1, 2025, 11),
+    //         nullifier_hash: Field::from(10u64),
+    //         root,
+    //         proof,
+    //     };
+    //     let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+    //     let body = BlockBody::<OpTransactionSigned>::default();
+    //     let block = SealedBlock::new(header, body);
+    //     let client = MockEthProvider::default();
+    //     // Insert a world id root into the OpWorldId Account
+    //     client.add_account(
+    //         TEST_WORLD_ID,
+    //         ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
+    //             .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
+    //     );
+    //     validator.root_validator.set_client(client);
+    //     validator.on_new_head_block(&block);
+    //     let res = validator.validate_root(&payload);
+
+    //     let valid_roots = validator.roots();
+    //     payload.validate_root(valid_roots);
+    //     assert!(res.is_ok());
+    // }
+
+    // TODO: move validate roto test to pbhpayload tests
+    // #[test]
+    // fn invalid_root() {
+    //     let mut validator = world_chain_validator();
+    //     let root = Field::from(0);
+    //     let proof = Proof(semaphore::protocol::Proof(
+    //         (U256::from(1u64), U256::from(2u64)),
+    //         (
+    //             [U256::from(3u64), U256::from(4u64)],
+    //             [U256::from(5u64), U256::from(6u64)],
+    //         ),
+    //         (U256::from(7u64), U256::from(8u64)),
+    //     ));
+    //     let payload = PbhPayload {
+    //         external_nullifier: ExternalNullifier::v1(1, 2025, 11),
+    //         nullifier_hash: Field::from(10u64),
+    //         root,
+    //         proof,
+    //     };
+    //     let header = SealedHeader::new(Header::default(), Header::default().hash_slow());
+    //     let body = BlockBody::<OpTransactionSigned>::default();
+    //     let block = SealedBlock::new(header, body);
+    //     let client = MockEthProvider::default();
+    //     // Insert a world id root into the OpWorldId Account
+    //     client.add_account(
+    //         TEST_WORLD_ID,
+    //         ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
+    //             .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
+    //     );
+    //     validator.root_validator.set_client(client);
+    //     validator.on_new_head_block(&block);
+    //     let res = validator.validate_root(&payload);
+    //     assert!(res.is_err());
+    // }
+
+    // TODO: move validate roto test to pbhpayload tests
+    // #[test_case(ExternalNullifier::v1(1, 2025, 0) ; "01-2025-0")]
+    // #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
+    // #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
+    // fn validate_external_nullifier_valid(external_nullifier: ExternalNullifier) {
+    //     let validator = world_chain_validator();
+    //     let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+    //     let payload = PbhPayload {
+    //         external_nullifier,
+    //         nullifier_hash: Field::ZERO,
+    //         root: Field::ZERO,
+    //         proof: Default::default(),
+    //     };
+
+    //     validator
+    //         .validate_external_nullifier(date, &payload)
+    //         .unwrap();
+    // }
+
+    // TODO: move validate roto test to pbhpayload tests
+    // #[test_case(ExternalNullifier::v1(1, 2025, 0), "2024-12-31 23:59:30Z" ; "a minute early")]
+    // #[test_case(ExternalNullifier::v1(1, 2025, 0), "2025-02-01 00:00:30Z" ; "a minute late")]
+    // fn validate_external_nullifier_at_time(external_nullifier: ExternalNullifier, time: &str) {
+    //     let validator = world_chain_validator();
+    //     let date: chrono::DateTime<Utc> = time.parse().unwrap();
+
+    //     let payload = PbhPayload {
+    //         external_nullifier,
+    //         nullifier_hash: Field::ZERO,
+    //         root: Field::ZERO,
+    //         proof: Default::default(),
+    //     };
+
+    //     validator
+    //         .validate_external_nullifier(date, &payload)
+    //         .unwrap();
+    // }
 }

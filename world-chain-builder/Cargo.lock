@@ -13838,6 +13838,7 @@ dependencies = [
  "alloy-rlp",
  "bon",
  "chrono",
+ "color-eyre",
  "ethers-core 2.0.14 (git+https://github.com/gakonst/ethers-rs)",
  "semaphore",
  "serde",
