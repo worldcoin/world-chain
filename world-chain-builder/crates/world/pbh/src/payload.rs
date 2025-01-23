@@ -1,9 +1,12 @@
+use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use semaphore::packed_proof::PackedProof;
+use semaphore::protocol::{verify_proof, ProofError};
 use semaphore::Field;
+use semaphore::{packed_proof::PackedProof, protocol::authentication::verify_proof};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::external_nullifier::ExternalNullifier;
+use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
 
 pub const TREE_DEPTH: usize = 30;
 
@@ -44,6 +47,20 @@ impl Encodable for Proof {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum PbhValidationError {
+    #[error("Invalid root")]
+    InvalidRoot,
+    #[error("Invalid external nullifier period")]
+    InvalidExternalNullifierPeriod,
+    #[error("Invalid external nullifier nonce")]
+    InvalidExternalNullifierNonce,
+    #[error("Invalid proof")]
+    InvalidProof,
+    #[error(transparent)]
+    ProofError(#[from] ProofError),
+}
+
 /// The payload of a PBH transaction
 ///
 /// Contains the semaphore proof and relevent metadata
@@ -61,6 +78,62 @@ pub struct PbhPayload {
     /// The actual semaphore proof verifying that the sender
     /// is included in the set of orb verified users
     pub proof: Proof,
+}
+
+impl PbhPayload {
+    pub fn validate(
+        &self,
+        signal: U256,
+        valid_roots: &[Field],
+        pbh_nonce_limit: u8,
+    ) -> Result<(), PbhValidationError> {
+        if !valid_roots.contains(&self.root) {
+            return Err(PbhValidationError::InvalidRoot);
+        }
+
+        let date = chrono::Utc::now();
+        self.validate_external_nullifier(date, pbh_nonce_limit)?;
+
+        if verify_proof(
+            self.root,
+            self.nullifier_hash,
+            signal,
+            self.external_nullifier.to_word(),
+            &self.proof.0,
+            TREE_DEPTH,
+        )? {
+            Ok(())
+        } else {
+            Err(PbhValidationError::InvalidProof)
+        }
+    }
+
+    pub fn validate_external_nullifier(
+        &self,
+        date: chrono::DateTime<chrono::Utc>,
+        pbh_nonce_limit: u8,
+    ) -> Result<(), PbhValidationError> {
+        // In most cases these will be the same value, but at the month boundary
+        // we'll still accept the previous month if the transaction is at most a minute late
+        // or the next month if the transaction is at most a minute early
+        let valid_dates = [
+            DateMarker::from(date - chrono::Duration::minutes(1)),
+            DateMarker::from(date),
+            DateMarker::from(date + chrono::Duration::minutes(1)),
+        ];
+        if valid_dates
+            .iter()
+            .all(|d| self.external_nullifier.date_marker() != *d)
+        {
+            return Err(PbhValidationError::InvalidExternalNullifierPeriod);
+        }
+
+        if self.external_nullifier.nonce >= pbh_nonce_limit {
+            return Err(PbhValidationError::InvalidExternalNullifierNonce);
+        }
+
+        Ok(())
+    }
 }
 
 impl Into<PbhPayload> for IPBHEntryPoint::PBHPayload {

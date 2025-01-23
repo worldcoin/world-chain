@@ -78,6 +78,7 @@ where
         &self.inner
     }
 
+    // TODO: move to pbhpayload impl
     /// Ensure the provided root is on chain and valid
     pub fn validate_root(
         &self,
@@ -239,12 +240,14 @@ where
             }
         };
 
-        let proof: PbhPayload = calldata.payload.into();
-
-        let signal_hash =
+        let pbh_payload: PbhPayload = calldata.payload.into();
+        let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
-        // self.validate_pbh_payload(&pbh_payload, signal_hash)?;
+        // TODO: if payload is valid, set the transaction as valid_pbh
+        // pbh_payload
+        //     .validate(signal_hash)
+        //     .map_err(TransactionValidationError::from)?;
 
         // tx.set_valid_pbh();
 
