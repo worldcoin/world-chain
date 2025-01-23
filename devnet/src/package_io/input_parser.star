@@ -19,16 +19,16 @@ DEFAULT_ENGINE_IMAGES = {
 }
 
 DEFAULT_CL_IMAGES = {
-    "op-node": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop",
+    "op-node": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:latest",
     "hildr": "ghcr.io/optimism-java/hildr:latest",
 }
 
 DEFAULT_BATCHER_IMAGES = {
-    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.9.4",
+    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:latest",
 }
 
 DEFAULT_PROPOSER_IMAGES = {
-    "op-proposer": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:develop",
+    "op-proposer": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:latest",
 }
 
 ATTR_TO_BE_SKIPPED_AT_ROOT = (
