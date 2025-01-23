@@ -227,7 +227,7 @@ where
     pub fn validate_pbh_multicall(
         &self,
         origin: TransactionOrigin,
-        tx: Tx,
+        mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         let calldata = match IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) {
             Ok(decoded) => decoded,
@@ -243,14 +243,8 @@ where
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
-        // pbh_payload.validate()?;
-
-        // TODO: if payload is valid, set the transaction as valid_pbh
-        // pbh_payload
-        //     .validate(signal_hash)
-        //     .map_err(TransactionValidationError::from)?;
-
-        // tx.set_valid_pbh();
+        pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)?;
+        tx.set_valid_pbh();
 
         self.inner.validate_one(origin, tx)
     }
