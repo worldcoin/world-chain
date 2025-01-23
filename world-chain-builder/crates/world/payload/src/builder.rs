@@ -4,6 +4,7 @@ use std::sync::Arc;
 use alloy_consensus::{proofs, Eip658Value, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth::api::PayloadBuilderError;
@@ -755,6 +756,8 @@ where
         >,
     {
         let block_gas_limit = self.block_gas_limit();
+        let block_da_limit = self.inner.da_config.max_da_block_size();
+        let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
         let mut evm = self
@@ -767,6 +770,24 @@ where
         while let Some(tx) = best_txs.next() {
             let pooled_tx = &tx.transaction;
             let consensus_tx = tx.to_consensus();
+            if info.is_tx_over_limits(
+                &consensus_tx.tx(),
+                block_gas_limit,
+                tx_da_limit,
+                block_da_limit,
+            ) {
+                // we can't fit this transaction into the block, so we need to mark it as
+                // invalid which also removes all dependent transaction from
+                // the iterator before we can continue
+                best_txs.mark_invalid(
+                    &tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        tx_da_limit.unwrap_or_default(),
+                        block_da_limit.unwrap_or_default(),
+                    ),
+                );
+                continue;
+            }
             if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(
@@ -857,6 +878,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
+            info.cumulative_da_bytes_used += consensus_tx.length() as u64;
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),

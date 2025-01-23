@@ -39,6 +39,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 op-alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 # misc
 tracing.workspace = true
