@@ -87,9 +87,7 @@ impl PbhPayload {
         valid_roots: &[Field],
         pbh_nonce_limit: u8,
     ) -> Result<(), PbhValidationError> {
-        if !valid_roots.contains(&self.root) {
-            return Err(PbhValidationError::InvalidRoot);
-        }
+        self.validate_root(valid_roots)?;
 
         let date = chrono::Utc::now();
         self.validate_external_nullifier(date, pbh_nonce_limit)?;
@@ -106,6 +104,14 @@ impl PbhPayload {
         } else {
             Err(PbhValidationError::InvalidProof)
         }
+    }
+
+    pub fn validate_root(&self, valid_roots: &[Field]) -> Result<(), PbhValidationError> {
+        if !valid_roots.contains(&self.root) {
+            return Err(PbhValidationError::InvalidRoot);
+        }
+
+        Ok(())
     }
 
     pub fn validate_external_nullifier(
