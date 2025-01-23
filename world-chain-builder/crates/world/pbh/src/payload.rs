@@ -144,12 +144,10 @@ impl PbhPayload {
 
 #[cfg(test)]
 mod test {
-    use alloy_primitives::Address;
     use chrono::{TimeZone, Utc};
-    use ethers_core::rand::rngs::SmallRng;
-    use ethers_core::rand::{Rng, SeedableRng};
     use ethers_core::types::U256;
     use semaphore::Field;
+    use test_case::test_case;
 
     use super::*;
 
@@ -213,7 +211,6 @@ mod test {
         pbh_payload.external_nullifier = external_nullifier;
 
         pbh_payload.validate_external_nullifier(date, pbh_nonce_limit)?;
-
         Ok(())
     }
 
@@ -230,5 +227,6 @@ mod test {
         pbh_payload.external_nullifier = external_nullifier;
 
         pbh_payload.validate_external_nullifier(date, pbh_nonce_limit)?;
+        Ok(())
     }
 }
