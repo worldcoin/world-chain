@@ -23,7 +23,7 @@ use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -44,7 +44,7 @@ use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext};
 type NodeTypesAdapter = FullNodeTypesAdapter<
     WorldChainBuilder,
     Arc<TempDatabase<DatabaseEnv>>,
-    BlockchainProvider2<NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>>,
+    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>>,
 >;
 
 type NodeHelperType = NodeAdapter<
@@ -55,7 +55,7 @@ type NodeHelperType = NodeAdapter<
         Pool<
             TransactionValidationTaskExecutor<
                 WorldChainTransactionValidator<
-                    BlockchainProvider2<
+                    BlockchainProvider<
                         NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                     WorldChainPooledTransaction,
@@ -112,14 +112,12 @@ impl WorldChainBuilderTestContext {
             },
             ..Default::default()
         };
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder_args.rollup_args.persistence_threshold)
-            .with_memory_block_buffer_target(builder_args.rollup_args.memory_block_buffer_target);
+
         let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider2<_>>()
-            .with_components(WorldChainBuilder::components(builder_args.clone()))
+            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider<_>>()
+            .with_components(world_chain_node.components_builder())
             .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
                 let provider = ctx.provider().clone();
@@ -138,7 +136,7 @@ impl WorldChainBuilderTestContext {
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),
                     builder.config().datadir(),
-                    engine_tree_config,
+                    TreeConfig::default(),
                 );
                 builder.launch_with(launcher)
             })

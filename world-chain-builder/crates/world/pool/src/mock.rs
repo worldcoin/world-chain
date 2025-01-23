@@ -25,10 +25,9 @@ use reth_db::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::BlockBody;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader,
+    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
+    SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentViewError, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
@@ -243,7 +242,7 @@ impl HeaderProvider for MockEthProvider {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(self.header_by_number(number)?.map(SealedHeader::seal))
+        Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
     }
 
     fn sealed_headers_while(
@@ -254,7 +253,7 @@ impl HeaderProvider for MockEthProvider {
         Ok(self
             .headers_range(range)?
             .into_iter()
-            .map(SealedHeader::seal)
+            .map(SealedHeader::seal_slow)
             .take_while(|h| predicate(h))
             .collect())
     }
@@ -402,13 +401,13 @@ impl TransactionsProvider for MockEthProvider {
             .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
-                range
-                    .contains(&(tx_number as TxNumber))
-                    .then(|| tx.recover_signer())
-                    .flatten()
+                if range.contains(&(tx_number as TxNumber)) {
+                    tx.recover_signer().ok()
+                } else {
+                    None
+                }
             })
             .collect();
-
         Ok(transactions)
     }
 
@@ -540,26 +539,19 @@ impl BlockReader for MockEthProvider {
         }
     }
 
-    fn pending_block(
-        &self,
-    ) -> ProviderResult<Option<SealedBlock<Header, BlockBody<OpTransactionSigned>>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Block<OpTransactionSigned>>>> {
         Ok(None)
     }
 
     fn pending_block_with_senders(
         &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(
-            SealedBlock<Header, BlockBody<OpTransactionSigned>>,
-            Vec<Receipt>,
-        )>,
-    > {
+    ) -> ProviderResult<Option<(SealedBlock<Block<OpTransactionSigned>>, Vec<Receipt>)>> {
         Ok(None)
     }
 
@@ -567,7 +559,7 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(None)
     }
 
@@ -575,7 +567,7 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(None)
     }
 
@@ -598,14 +590,14 @@ impl BlockReader for MockEthProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(vec![])
     }
 
     fn sealed_block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(vec![])
     }
 }
@@ -620,7 +612,7 @@ impl BlockReaderIdExt for MockEthProvider {
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
         self.header_by_id(id)?
-            .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h))))
+            .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
@@ -853,6 +845,13 @@ impl OmmersProvider for MockEthProvider {
 impl BlockBodyIndicesProvider for MockEthProvider {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
+    }
+
+    fn block_body_indices_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(vec![])
     }
 }
 

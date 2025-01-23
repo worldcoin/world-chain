@@ -28,6 +28,7 @@ reth-optimism-primitives.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
+reth-primitives-traits.workspace = true
 
 # revm
 revm.workspace = true
