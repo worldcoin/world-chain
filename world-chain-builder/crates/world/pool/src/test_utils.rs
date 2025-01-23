@@ -5,6 +5,7 @@ use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::SolValue;
 use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth::chainspec::MAINNET;
@@ -16,7 +17,7 @@ use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
 use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
-use semaphore::Field;
+use semaphore::{hash_to_field, Field};
 
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
@@ -203,11 +204,12 @@ pub fn pbh_multicall(
     let call = IMulticall3::Call3::default();
     let calls = vec![call];
 
-    let signal = crate::eip4337::hash_pbh_multicall(sender, calls.clone());
+    let signal_hash: alloy_primitives::Uint<256, 4> =
+        hash_to_field(&SolValue::abi_encode_packed(&(sender, calls.clone())));
 
     let tree = tree();
     let root = tree.root();
-    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal);
+    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal_hash);
     let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
 
     let proof = [

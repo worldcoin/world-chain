@@ -25,7 +25,6 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHEntryPoint;
-use crate::eip4337::hash_pbh_multicall;
 use crate::tx::WorldChainPoolTransactionError;
 
 /// Type alias for World Chain transaction pool
@@ -244,6 +243,8 @@ where
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
+        // pbh_payload.validate()?;
+
         // TODO: if payload is valid, set the transaction as valid_pbh
         // pbh_payload
         //     .validate(signal_hash)
@@ -268,30 +269,28 @@ where
         mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() != self.pbh_validator {
-            self.inner.validate_one(origin, transaction.clone())
-        } else {
-            let function_signature: [u8; 4] = transaction
-                .input()
-                .get(..4)
-                .and_then(|bytes| bytes.try_into().ok())
-                .unwrap_or_default();
+            return self.inner.validate_one(origin, transaction.clone());
+        }
 
-            match function_signature {
-                IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
-                    todo!()
-                    // self.validate_pbh_bundle(&mut transaction)
-                }
-                IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
-                    self.validate_pbh_multicall(origin, transaction)
-                }
-                _ => {
-                    return TransactionValidationError::Invalid(
-                        InvalidPoolTransactionError::Other(Box::new(
-                            WorldChainPoolTransactionError::InvalidCalldata,
-                        )),
-                    )
-                    .to_outcome(transaction);
-                }
+        let function_signature: [u8; 4] = transaction
+            .input()
+            .get(..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .unwrap_or_default();
+
+        match function_signature {
+            IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+                todo!()
+                // self.validate_pbh_bundle(&mut transaction)
+            }
+            IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
+                self.validate_pbh_multicall(origin, transaction)
+            }
+            _ => {
+                return TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(
+                    Box::new(WorldChainPoolTransactionError::InvalidCalldata),
+                ))
+                .to_outcome(transaction);
             }
         }
     }
