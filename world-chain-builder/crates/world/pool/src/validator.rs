@@ -78,8 +78,11 @@ where
         origin: TransactionOrigin,
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        // Ensure that the tx is a valid OP transaction
-        let tx_outcome = self.inner.validate_one(origin, tx.clone());
+        // Ensure that the tx is a valid OP transaction and return early if invalid
+        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+            valid @ TransactionValidationOutcome::Valid { .. } => valid,
+            other => return other,
+        };
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
@@ -136,8 +139,11 @@ where
         origin: TransactionOrigin,
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        // Ensure that the tx is a valid OP transaction
-        let tx_outcome = self.inner.validate_one(origin, tx.clone());
+        // Ensure that the tx is a valid OP transaction and return early if invalid
+        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+            valid @ TransactionValidationOutcome::Valid { .. } => valid,
+            other => return other,
+        };
 
         // Decode the calldata and extract the PBH payload
         let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
@@ -190,9 +196,7 @@ where
             IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
                 self.validate_pbh_multicall(origin, transaction)
             }
-            _ => {
-                WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction)
-            }
+            _ => WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction),
         }
     }
 
@@ -266,8 +270,6 @@ pub mod tests {
         validator.on_new_head_block(&block);
 
         let ordering = WorldChainOrdering::default();
-
-        
 
         Pool::new(
             validator,
