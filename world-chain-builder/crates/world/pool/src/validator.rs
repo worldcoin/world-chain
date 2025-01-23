@@ -20,7 +20,7 @@ use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
-use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
+use super::error::WorldChainTransactionPoolInvalid;
 use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
@@ -77,75 +77,6 @@ where
         &self.inner
     }
 
-    // TODO: move to pbhpayload impl
-    /// Ensure the provided root is on chain and valid
-    pub fn validate_root(
-        &self,
-        pbh_payload: &PbhPayload,
-    ) -> Result<(), TransactionValidationError> {
-        let is_valid = self.root_validator.validate_root(pbh_payload.root);
-        if !is_valid {
-            return Err(WorldChainTransactionPoolInvalid::InvalidRoot.into());
-        }
-        Ok(())
-    }
-
-    /// External nullifiers must be of the form
-    /// `<prefix>-<periodId>-<PbhNonce>`.
-    /// example:
-    /// `v1-012025-11`
-    pub fn validate_external_nullifier(
-        &self,
-        date: chrono::DateTime<chrono::Utc>,
-        pbh_payload: &PbhPayload,
-    ) -> Result<(), TransactionValidationError> {
-        // In most cases these will be the same value, but at the month boundary
-        // we'll still accept the previous month if the transaction is at most a minute late
-        // or the next month if the transaction is at most a minute early
-        let valid_dates = [
-            DateMarker::from(date - chrono::Duration::minutes(1)),
-            DateMarker::from(date),
-            DateMarker::from(date + chrono::Duration::minutes(1)),
-        ];
-        if valid_dates
-            .iter()
-            .all(|d| pbh_payload.external_nullifier.date_marker() != *d)
-        {
-            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
-        }
-
-        if pbh_payload.external_nullifier.nonce >= self.num_pbh_txs {
-            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
-        }
-
-        Ok(())
-    }
-
-    pub fn validate_pbh_payload(
-        &self,
-        payload: &PbhPayload,
-        signal: U256,
-    ) -> Result<(), TransactionValidationError> {
-        self.validate_root(payload)?;
-        let date = chrono::Utc::now();
-        self.validate_external_nullifier(date, payload)?;
-
-        let res = verify_proof(
-            payload.root,
-            payload.nullifier_hash,
-            signal,
-            payload.external_nullifier.to_word(),
-            &payload.proof.0,
-            TREE_DEPTH,
-        );
-
-        match res {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(WorldChainTransactionPoolInvalid::InvalidSemaphoreProof.into()),
-            Err(e) => Err(TransactionValidationError::Error(e.into())),
-        }
-    }
-
     /// Validates preconditions for a PBH bundle
     ///
     /// If the conditions here are not satisfied the transaction is still valid
@@ -183,43 +114,43 @@ where
         }
     }
 
-    /// Validates a PBH bundle transaction
-    ///
-    /// If the transaction is valid marks it for priority inclusion
-    pub fn validate_pbh_bundle(
-        &self,
-        transaction: &mut Tx,
-    ) -> Result<(), TransactionValidationError> {
-        let Some(calldata) = self.is_valid_eip4337_pbh_bundle(transaction) else {
-            return Ok(());
-        };
+    // /// Validates a PBH bundle transaction
+    // ///
+    // /// If the transaction is valid marks it for priority inclusion
+    // pub fn validate_pbh_bundle(
+    //     &self,
+    //     transaction: &mut Tx,
+    // ) -> Result<(), TransactionValidationError> {
+    //     let Some(calldata) = self.is_valid_eip4337_pbh_bundle(transaction) else {
+    //         return Ok(());
+    //     };
 
-        for aggregated_ops in calldata._0 {
-            let mut buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = <Vec<PbhPayload>>::decode(&mut buff)
-                .map_err(WorldChainTransactionPoolInvalid::from)
-                .map_err(TransactionValidationError::from)?;
+    //     for aggregated_ops in calldata._0 {
+    //         let mut buff = aggregated_ops.signature.as_ref();
+    //         let pbh_payloads = <Vec<PbhPayload>>::decode(&mut buff)
+    //             .map_err(WorldChainTransactionPoolInvalid::from)
+    //             .map_err(TransactionValidationError::from)?;
 
-            if pbh_payloads.len() != aggregated_ops.userOps.len() {
-                Err(WorldChainTransactionPoolInvalid::MissingPbhPayload)?;
-            }
+    //         if pbh_payloads.len() != aggregated_ops.userOps.len() {
+    //             Err(WorldChainTransactionPoolInvalid::MissingPbhPayload)?;
+    //         }
 
-            pbh_payloads
-                .par_iter()
-                .zip(aggregated_ops.userOps)
-                .try_for_each(|(payload, op)| {
-                    let signal = crate::eip4337::hash_user_op(&op);
+    //         pbh_payloads
+    //             .par_iter()
+    //             .zip(aggregated_ops.userOps)
+    //             .try_for_each(|(payload, op)| {
+    //                 let signal = crate::eip4337::hash_user_op(&op);
 
-                    self.validate_pbh_payload(payload, signal)?;
+    //                 self.validate_pbh_payload(payload, signal)?;
 
-                    Ok::<(), TransactionValidationError>(())
-                })?;
-        }
+    //                 Ok::<(), TransactionValidationError>(())
+    //             })?;
+    //     }
 
-        transaction.set_valid_pbh();
+    //     transaction.set_valid_pbh();
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Validates a PBH multicall transaction
     ///
@@ -232,10 +163,7 @@ where
         let calldata = match IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) {
             Ok(decoded) => decoded,
             Err(_) => {
-                return TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(
-                    Box::new(WorldChainPoolTransactionError::InvalidCalldata),
-                ))
-                .to_outcome(tx);
+                return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
             }
         };
 
@@ -243,7 +171,12 @@ where
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
-        pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)?;
+        if let Err(err) =
+            pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
+        {
+            return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
+        }
+
         tx.set_valid_pbh();
 
         self.inner.validate_one(origin, tx)
@@ -260,7 +193,7 @@ where
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        mut transaction: Self::Transaction,
+        transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() != self.pbh_validator {
             return self.inner.validate_one(origin, transaction.clone());
@@ -281,10 +214,7 @@ where
                 self.validate_pbh_multicall(origin, transaction)
             }
             _ => {
-                return TransactionValidationError::Invalid(InvalidPoolTransactionError::Other(
-                    Box::new(WorldChainPoolTransactionError::InvalidCalldata),
-                ))
-                .to_outcome(transaction);
+                return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction);
             }
         }
     }

@@ -7,7 +7,9 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth::{
     core::primitives::transaction::error,
     transaction_pool::{
-        error::PoolTransactionError, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+        error::{InvalidPoolTransactionError, PoolTransactionError},
+        EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+        TransactionValidationOutcome,
     },
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
@@ -16,6 +18,7 @@ use reth_primitives::transaction::TransactionConversionError;
 use reth_primitives::RecoveredTx;
 use revm_primitives::{AccessList, Address, InvalidTransaction, KzgSettings, TxKind, B256, U256};
 use thiserror::Error;
+use world_chain_builder_pbh::payload::PbhValidationError;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
@@ -27,18 +30,33 @@ pub trait WorldChainPoolTransaction: EthPoolTransaction {
 pub enum WorldChainPoolTransactionError {
     #[error("Conditional Validation Failed: {0}")]
     ConditionalValidationFailed(B256),
-    #[error("EVM Error: {0}")]
-    EVMError(#[from] InvalidTransaction),
+    #[error(transparent)]
+    InvalidTransaction(#[from] InvalidTransaction),
+    #[error(transparent)]
+    PbhValidationError(#[from] PbhValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
 }
 
+impl WorldChainPoolTransactionError {
+    pub fn to_outcome<T: PoolTransaction>(self, tx: T) -> TransactionValidationOutcome<T> {
+        TransactionValidationOutcome::Invalid(tx, self.into())
+    }
+}
+
+impl Into<InvalidPoolTransactionError> for WorldChainPoolTransactionError {
+    fn into(self) -> InvalidPoolTransactionError {
+        InvalidPoolTransactionError::Other(Box::new(self))
+    }
+}
+
+//TODO: double check this?
 impl PoolTransactionError for WorldChainPoolTransactionError {
     fn is_bad_transaction(&self) -> bool {
+        // TODO: double check if invalid transaction should be penalized, we could also make this a match statement
+        // If all errors should not be penalized, we can just return false
         match self {
-            WorldChainPoolTransactionError::ConditionalValidationFailed(_) => true,
-            WorldChainPoolTransactionError::EVMError(_) => true, // TODO: Should we return false here?
-            WorldChainPoolTransactionError::InvalidCalldata => true,
+            _ => false,
         }
     }
 }

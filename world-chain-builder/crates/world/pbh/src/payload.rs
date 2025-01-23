@@ -1,8 +1,8 @@
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use semaphore::packed_proof::PackedProof;
 use semaphore::protocol::{verify_proof, ProofError};
 use semaphore::Field;
-use semaphore::{packed_proof::PackedProof, protocol::authentication::verify_proof};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -133,17 +133,6 @@ impl PbhPayload {
         }
 
         Ok(())
-    }
-}
-
-impl Into<PbhPayload> for IPBHEntryPoint::PBHPayload {
-    fn into(self) -> PbhPayload {
-        PbhPayload {
-            external_nullifier: self.external_nullifier,
-            nullifier_hash: self.nullifier_hash,
-            root: self.root,
-            proof: self.proof.into(),
-        }
     }
 }
 
