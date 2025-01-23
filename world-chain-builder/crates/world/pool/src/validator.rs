@@ -4,7 +4,7 @@ use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHEntryPoint;
 use crate::tx::WorldChainPoolTransactionError;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -79,10 +79,7 @@ where
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction
-        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
@@ -140,10 +137,7 @@ where
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction
-        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and extract the PBH payload
         let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
@@ -197,7 +191,7 @@ where
                 self.validate_pbh_multicall(origin, transaction)
             }
             _ => {
-                return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction);
+                WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction)
             }
         }
     }
@@ -273,14 +267,14 @@ pub mod tests {
 
         let ordering = WorldChainOrdering::default();
 
-        let pool = Pool::new(
+        
+
+        Pool::new(
             validator,
             ordering,
             InMemoryBlobStore::default(),
             Default::default(),
-        );
-
-        pool
+        )
     }
 
     #[tokio::test]

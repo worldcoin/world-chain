@@ -117,7 +117,6 @@ where
     /// # Returns
     ///
     /// A `Vec<Field>` containing all valid roots.
-
     // TODO: can this be a slice instead?
     fn roots(&self) -> Vec<Field> {
         self.valid_roots.values().cloned().collect()

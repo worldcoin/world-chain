@@ -144,6 +144,8 @@ impl PbhPayload {
 
 #[cfg(test)]
 mod test {
+    use std::default;
+
     use chrono::{TimeZone, Utc};
     use ethers_core::types::U256;
     use semaphore::Field;
@@ -177,9 +179,10 @@ mod test {
 
     #[test]
     fn test_valid_root() -> eyre::Result<()> {
-        // Test when the root is valid
-        let mut pbh_payload = PbhPayload::default();
-        pbh_payload.root = Field::from(1u64);
+        let pbh_payload = PbhPayload {
+            root: Field::from(1u64),
+            ..Default::default()
+        };
 
         let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
         pbh_payload.validate_root(&valid_roots)?;
@@ -189,9 +192,10 @@ mod test {
 
     #[test]
     fn test_invalid_root() -> eyre::Result<()> {
-        // Test invalid root
-        let mut pbh_payload = PbhPayload::default();
-        pbh_payload.root = Field::from(3u64);
+        let pbh_payload = PbhPayload {
+            root: Field::from(3u64),
+            ..Default::default()
+        };
 
         let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
         let res = pbh_payload.validate_root(&valid_roots);
@@ -207,8 +211,10 @@ mod test {
         let pbh_nonce_limit = 10;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut pbh_payload = PbhPayload::default();
-        pbh_payload.external_nullifier = external_nullifier;
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
 
         pbh_payload.validate_external_nullifier(date, pbh_nonce_limit)?;
         Ok(())
@@ -223,8 +229,10 @@ mod test {
         let pbh_nonce_limit = 10;
         let date: chrono::DateTime<Utc> = time.parse().unwrap();
 
-        let mut pbh_payload = PbhPayload::default();
-        pbh_payload.external_nullifier = external_nullifier;
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
 
         pbh_payload.validate_external_nullifier(date, pbh_nonce_limit)?;
         Ok(())

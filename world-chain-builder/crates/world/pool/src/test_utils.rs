@@ -33,14 +33,14 @@ use crate::validator::WorldChainTransactionValidator;
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 pub fn signer(index: u32) -> PrivateKeySigner {
-    let signer = alloy_signer_local::MnemonicBuilder::<English>::default()
+    
+
+    alloy_signer_local::MnemonicBuilder::<English>::default()
         .phrase(MNEMONIC)
         .index(index)
         .expect("Failed to set index")
         .build()
-        .expect("Failed to create signer");
-
-    signer
+        .expect("Failed to create signer")
 }
 
 #[cfg(test)]

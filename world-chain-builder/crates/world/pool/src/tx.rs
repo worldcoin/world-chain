@@ -4,14 +4,11 @@ use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_primitives::TxHash;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::{
-    core::primitives::transaction::error,
-    transaction_pool::{
+use reth::transaction_pool::{
         error::{InvalidPoolTransactionError, PoolTransactionError},
         EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
         TransactionValidationOutcome,
-    },
-};
+    };
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::TransactionConversionError;
@@ -48,9 +45,9 @@ impl WorldChainPoolTransactionError {
     }
 }
 
-impl Into<InvalidPoolTransactionError> for WorldChainPoolTransactionError {
-    fn into(self) -> InvalidPoolTransactionError {
-        InvalidPoolTransactionError::Other(Box::new(self))
+impl From<WorldChainPoolTransactionError> for InvalidPoolTransactionError {
+    fn from(val: WorldChainPoolTransactionError) -> Self {
+        InvalidPoolTransactionError::Other(Box::new(val))
     }
 }
 
@@ -59,9 +56,7 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
     fn is_bad_transaction(&self) -> bool {
         // TODO: double check if invalid transaction should be penalized, we could also make this a match statement
         // If all errors should not be penalized, we can just return false
-        match self {
-            _ => false,
-        }
+        false
     }
 }
 

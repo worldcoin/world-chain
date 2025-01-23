@@ -36,13 +36,12 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider,
 };
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
+use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
 use revm_primitives::{
     Bytes, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv, B256, U256,
 };
-use thiserror::Error;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};

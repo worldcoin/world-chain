@@ -58,9 +58,9 @@ sol! {
     }
 }
 
-impl Into<PbhPayload> for PBHPayload {
-    fn into(self) -> PbhPayload {
-        let proof: [ethers_core::types::U256; 8] = self
+impl From<PBHPayload> for PbhPayload {
+    fn from(val: PBHPayload) -> Self {
+        let proof: [ethers_core::types::U256; 8] = val
             .proof
             .into_iter()
             .map(|x| {
@@ -79,9 +79,9 @@ impl Into<PbhPayload> for PBHPayload {
         let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
 
         PbhPayload {
-            external_nullifier: ExternalNullifier::from_word(self.pbhExternalNullifier),
-            nullifier_hash: self.nullifierHash,
-            root: self.root,
+            external_nullifier: ExternalNullifier::from_word(val.pbhExternalNullifier),
+            nullifier_hash: val.nullifierHash,
+            root: val.root,
             proof,
         }
     }

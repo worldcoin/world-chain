@@ -1,4 +1,4 @@
-use std::{default, str::FromStr};
+use std::str::FromStr;
 
 use alloy_primitives::{ruint, U256};
 use alloy_rlp::{Decodable, Encodable};
