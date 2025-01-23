@@ -1,11 +1,14 @@
 //! World Chain transaction pool types
+use super::ordering::WorldChainOrdering;
+use super::root::WorldChainRootValidator;
+use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use crate::bindings::IPBHEntryPoint;
+use crate::tx::WorldChainPoolTransactionError;
 use alloy_primitives::{Address, U256};
 use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
-use ethers_core::utils::keccak256;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use reth::core::primitives::{BlockBody, BlockHeader};
-use reth::transaction_pool::error::InvalidPoolTransactionError;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -15,17 +18,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use semaphore::hash_to_field;
-use semaphore::protocol::verify_proof;
-use world_chain_builder_pbh::date_marker::DateMarker;
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
-
-use super::error::WorldChainTransactionPoolInvalid;
-use super::ordering::WorldChainOrdering;
-use super::root::WorldChainRootValidator;
-use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use crate::bindings::IPBHEntryPoint;
-use crate::tx::WorldChainPoolTransactionError;
+use world_chain_builder_pbh::payload::PbhPayload;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -77,43 +70,6 @@ where
         &self.inner
     }
 
-    /// Validates preconditions for a PBH bundle
-    ///
-    /// If the conditions here are not satisfied the transaction is still valid
-    /// but will not receive priority inclusion
-    ///
-    /// Returns parsed calldata
-
-    // TODO: return an error if non valid, maybe rename function its not really checking if valid
-    pub fn is_valid_eip4337_pbh_bundle(
-        &self,
-        tx: &Tx,
-    ) -> Option<IPBHEntryPoint::handleAggregatedOpsCall> {
-        if !tx
-            .input()
-            .starts_with(&IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR)
-        {
-            return None;
-        }
-
-        let Ok(decoded) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
-        else {
-            return None;
-        };
-
-        let are_aggregators_valid = decoded
-            ._0
-            .iter()
-            .cloned()
-            .all(|per_aggregator| per_aggregator.aggregator == self.pbh_signature_aggregator);
-
-        if are_aggregators_valid {
-            Some(decoded)
-        } else {
-            None
-        }
-    }
-
     /// Validates a PBH bundle transaction
     ///
     /// If the transaction is valid marks it for priority inclusion
@@ -122,11 +78,13 @@ where
         origin: TransactionOrigin,
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let tx_outcome = match self.inner.validate_one(origin, tx) {
+        // Ensure that the tx is a valid OP transaction
+        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
             valid @ TransactionValidationOutcome::Valid { .. } => valid,
             other => return other,
         };
 
+        // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
         else {
             return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
@@ -137,9 +95,10 @@ where
             .iter()
             .all(|aggregator| aggregator.aggregator == self.pbh_signature_aggregator)
         {
-            todo!("TODO: return invalid signature aggreagator");
+            return WorldChainPoolTransactionError::InvalidSignatureAggregator.to_outcome(tx);
         }
 
+        // Validate all proofs associated with each UserOp
         for aggregated_ops in calldata._0 {
             let mut buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PbhPayload>>::decode(&mut buff) {
@@ -151,17 +110,20 @@ where
                 return WorldChainPoolTransactionError::MissingPbhPayload.to_outcome(tx);
             }
 
-            // TODO:
-            // pbh_payloads
-            //     .par_iter()
-            //     .zip(aggregated_ops.userOps)
-            //     .try_for_each(|(payload, op)| {
-            //         let signal = crate::eip4337::hash_user_op(&op);
+            let valid_roots = self.root_validator.roots();
+            if let Err(err) = pbh_payloads
+                .par_iter()
+                .zip(aggregated_ops.userOps)
+                .try_for_each(|(payload, op)| {
+                    let signal = crate::eip4337::hash_user_op(&op);
 
-            //         self.validate_pbh_payload(payload, signal)?;
+                    payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
 
-            //         Ok::<(), TransactionValidationError>(())
-            //     })?;
+                    Ok::<(), WorldChainPoolTransactionError>(())
+                })
+            {
+                return err.to_outcome(tx);
+            }
         }
 
         tx.set_valid_pbh();
@@ -177,11 +139,13 @@ where
         origin: TransactionOrigin,
         mut tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let tx_outcome = match self.inner.validate_one(origin, tx) {
+        // Ensure that the tx is a valid OP transaction
+        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
             valid @ TransactionValidationOutcome::Valid { .. } => valid,
             other => return other,
         };
 
+        // Decode the calldata and extract the PBH payload
         let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
             return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
         };
@@ -190,6 +154,7 @@ where
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
+        // Verify the proof
         if let Err(err) =
             pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
         {
@@ -252,19 +217,14 @@ pub mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
-    use chrono::{TimeZone, Utc};
     use ethers_core::rand::rngs::SmallRng;
     use ethers_core::rand::{Rng, SeedableRng};
-    use ethers_core::types::U256;
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
-    use semaphore::Field;
-    use test_case::test_case;
     use world_chain_builder_pbh::date_marker::DateMarker;
     use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-    use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 
     use super::WorldChainTransactionValidator;
     use crate::mock::{ExtendedAccount, MockEthProvider};
