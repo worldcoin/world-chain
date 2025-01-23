@@ -36,6 +36,8 @@ pub enum WorldChainPoolTransactionError {
     PbhValidationError(#[from] PbhValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
+    #[error("Missing PBH Payload")]
+    MissingPbhPayload,
 }
 
 impl WorldChainPoolTransactionError {

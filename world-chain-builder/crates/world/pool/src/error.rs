@@ -20,8 +20,6 @@ pub enum WorldChainTransactionPoolInvalid {
     InvalidRoot,
     #[error(transparent)]
     MalformedSignature(#[from] alloy_rlp::Error),
-    #[error("one or more user ops are missing pbh payloads")]
-    MissingPbhPayload,
 }
 
 #[derive(Debug, thiserror::Error)]
