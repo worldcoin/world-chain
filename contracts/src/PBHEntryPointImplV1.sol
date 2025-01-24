@@ -108,6 +108,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
 
+    /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations. 
+    error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -212,6 +215,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
             }
 
             PBHPayload[] memory pbhPayloads = abi.decode(opsPerAggregator[i].signature, (PBHPayload[]));
+            require(pbhPayloads.length == opsPerAggregator[i].userOps.length, InvalidAggregatedSignature(pbhPayloads.length, opsPerAggregator[i].userOps.length));
             for (uint256 j = 0; j < pbhPayloads.length; ++j) {
                 address sender = opsPerAggregator[i].userOps[j].sender;
                 // We now generate the signal hash from the sender, nonce, and calldata
