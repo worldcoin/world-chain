@@ -106,7 +106,7 @@ contract PBHSafe4337Module is Safe4337Module {
         // A malicious bundler can pad the Safe operation `signatures` with additional bytes, causing the account to pay
         // more gas than needed for user operation validation (capped by `verificationGasLimit`).
         // `_checkSignaturesLength` ensures that there are no additional bytes in the `signature` than are required.
-        bool validSignature = _checkSignaturesLength(signatures, ISafe(payable(userOp.sender)).getThreshold());
+        bool validSignature = _checkSignaturesLength(signatures, threshold);
 
         try ISafe(payable(userOp.sender)).checkSignatures(keccak256(operationData), operationData, signatures) {}
         catch {
