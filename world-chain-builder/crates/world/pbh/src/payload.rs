@@ -119,14 +119,6 @@ impl PbhPayload {
         date: chrono::DateTime<chrono::Utc>,
         pbh_nonce_limit: u8,
     ) -> Result<(), PbhValidationError> {
-        // In most cases these will be the same value, but at the month boundary
-        // we'll still accept the previous month if the transaction is at most a minute late
-        // or the next month if the transaction is at most a minute early
-        let valid_dates = [
-            DateMarker::from(date - chrono::Duration::minutes(1)),
-            DateMarker::from(date),
-            DateMarker::from(date + chrono::Duration::minutes(1)),
-        ];
         if valid_dates
             .iter()
             .all(|d| self.external_nullifier.date_marker() != *d)
