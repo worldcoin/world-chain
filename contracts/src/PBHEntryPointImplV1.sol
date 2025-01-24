@@ -103,7 +103,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     error InvalidHashedOps();
 
     /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
-    error GasLimitExceeded(uint256 gasLimit);
+    error GasLimitExceeded(uint256 gasUsed);
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
