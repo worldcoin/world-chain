@@ -144,8 +144,6 @@ impl PbhPayload {
 
 #[cfg(test)]
 mod test {
-    use std::default;
-
     use chrono::{TimeZone, Utc};
     use ethers_core::types::U256;
     use semaphore::Field;
