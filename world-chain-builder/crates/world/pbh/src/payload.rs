@@ -133,7 +133,7 @@ impl PbhPayload {
 
 #[cfg(test)]
 mod test {
-    use chrono::{TimeZone, Utc};
+    use chrono::TimeZone;
     use ethers_core::types::U256;
     use semaphore::Field;
     use test_case::test_case;

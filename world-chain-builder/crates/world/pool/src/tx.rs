@@ -5,10 +5,9 @@ use alloy_primitives::TxHash;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
 use reth::transaction_pool::{
-        error::{InvalidPoolTransactionError, PoolTransactionError},
-        EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
-        TransactionValidationOutcome,
-    };
+    error::{InvalidPoolTransactionError, PoolTransactionError},
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
+};
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::TransactionConversionError;

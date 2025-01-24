@@ -33,8 +33,6 @@ use crate::validator::WorldChainTransactionValidator;
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 pub fn signer(index: u32) -> PrivateKeySigner {
-    
-
     alloy_signer_local::MnemonicBuilder::<English>::default()
         .phrase(MNEMONIC)
         .index(index)

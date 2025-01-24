@@ -423,9 +423,7 @@ pub mod tests {
             .await
             .expect_err("Validation should fail because of missing proof");
 
-        assert!(err
-            .to_string()
-            .contains("one or more user ops are missing pbh payloads"),);
+        assert!(err.to_string().contains("Missing PBH Payload"),);
     }
 
     #[tokio::test]
@@ -489,10 +487,9 @@ pub mod tests {
             .add_external_transaction(tx.clone().into())
             .await
             .expect_err("Validation should fail because of missing proof");
-
         assert!(err
             .to_string()
-            .contains("invalid external nullifier period"),);
+            .contains("Invalid external nullifier period"),);
     }
 
     #[tokio::test]
@@ -532,7 +529,7 @@ pub mod tests {
 
         assert!(err
             .to_string()
-            .contains("invalid external nullifier period"),);
+            .contains("Invalid external nullifier period"),);
     }
 
     #[tokio::test]
@@ -566,6 +563,6 @@ pub mod tests {
             .await
             .expect_err("Validation should fail because of missing proof");
 
-        assert!(err.to_string().contains("invalid external nullifier nonce"),);
+        assert!(err.to_string().contains("Invalid external nullifier nonce"),);
     }
 }
