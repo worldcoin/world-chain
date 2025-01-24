@@ -9,6 +9,7 @@ use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use reth::core::primitives::{BlockBody, BlockHeader};
+use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -76,10 +77,10 @@ where
     pub fn validate_pbh_bundle(
         &self,
         origin: TransactionOrigin,
-        mut tx: Tx,
+        tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
             valid @ TransactionValidationOutcome::Valid { .. } => valid,
             other => return other,
         };
@@ -126,7 +127,13 @@ where
             }
         }
 
-        tx.set_valid_pbh();
+        if let TransactionValidationOutcome::Valid {
+            transaction: ValidTransaction::Valid(tx),
+            ..
+        } = &mut tx_outcome
+        {
+            tx.set_valid_pbh();
+        }
 
         tx_outcome
     }
@@ -137,10 +144,10 @@ where
     pub fn validate_pbh_multicall(
         &self,
         origin: TransactionOrigin,
-        mut tx: Tx,
+        tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
             valid @ TransactionValidationOutcome::Valid { .. } => valid,
             other => return other,
         };
@@ -161,7 +168,13 @@ where
             return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
         }
 
-        tx.set_valid_pbh();
+        if let TransactionValidationOutcome::Valid {
+            transaction: ValidTransaction::Valid(tx),
+            ..
+        } = &mut tx_outcome
+        {
+            tx.set_valid_pbh();
+        }
 
         tx_outcome
     }
