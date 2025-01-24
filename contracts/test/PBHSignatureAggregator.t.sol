@@ -170,7 +170,7 @@ contract PBHSignatureAggregatorTest is TestSetup {
             TestUtils.createUOTestData(vm, PBH_NONCE_KEY, address(pbh4337Module), address(safe), proofs, safeOwnerKey);
 
         uoTestFixture[0].signature = bytes.concat(uoTestFixture[0].signature, new bytes(1));
-        vm.expectRevert(abi.encodeWithSelector(PBHSignatureAggregator.InvalidSignatureLength.selector, 429, 430));
+        vm.expectRevert(abi.encodeWithSelector(SafeModuleSignatures.InvalidSignatureLength.selector, 429, 430));
         pbhAggregator.aggregateSignatures(uoTestFixture);
     }
 
