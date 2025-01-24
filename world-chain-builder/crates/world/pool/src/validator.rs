@@ -209,7 +209,7 @@ where
             IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
                 self.validate_pbh_multicall(origin, transaction)
             }
-            _ => WorldChainPoolTransactionError::InvalidCalldata.to_outcome(transaction),
+            _ => return self.inner.validate_one(origin, transaction.clone()),
         }
     }
 
