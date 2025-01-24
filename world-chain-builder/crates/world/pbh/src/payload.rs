@@ -206,7 +206,7 @@ mod test {
     #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
     #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
     fn test_valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
-        let pbh_nonce_limit = 10;
+        let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
         let pbh_payload = PbhPayload {
@@ -218,13 +218,55 @@ mod test {
         Ok(())
     }
 
+    #[test_case(ExternalNullifier::v1(1, 2024, 0) ; "01-2024-0")]
+    #[test_case(ExternalNullifier::v1(2, 2025, 0) ; "02-2025-0")]
+    fn test_invalid_external_nullifier_invalid_period(
+        external_nullifier: ExternalNullifier,
+    ) -> eyre::Result<()> {
+        let pbh_nonce_limit = 30;
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
+        assert!(matches!(
+            res,
+            Err(PbhValidationError::InvalidExternalNullifierPeriod)
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
+        let pbh_nonce_limit = 30;
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let external_nullifier = ExternalNullifier::v1(1, 2025, 30);
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
+        assert!(matches!(
+            res,
+            Err(PbhValidationError::InvalidExternalNullifierNonce)
+        ));
+
+        Ok(())
+    }
+
     #[test_case(ExternalNullifier::v1(1, 2025, 0), "2024-12-31 23:59:30Z" ; "a minute early")]
     #[test_case(ExternalNullifier::v1(1, 2025, 0), "2025-02-01 00:00:30Z" ; "a minute late")]
     fn test_validate_external_nullifier_time(
         external_nullifier: ExternalNullifier,
         time: &str,
     ) -> eyre::Result<()> {
-        let pbh_nonce_limit = 10;
+        let pbh_nonce_limit = 30;
         let date: chrono::DateTime<Utc> = time.parse().unwrap();
 
         let pbh_payload = PbhPayload {
