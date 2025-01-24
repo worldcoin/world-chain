@@ -119,10 +119,7 @@ impl PbhPayload {
         date: chrono::DateTime<chrono::Utc>,
         pbh_nonce_limit: u8,
     ) -> Result<(), PbhValidationError> {
-        if valid_dates
-            .iter()
-            .all(|d| self.external_nullifier.date_marker() != *d)
-        {
+        if self.external_nullifier.date_marker() != DateMarker::from(date) {
             return Err(PbhValidationError::InvalidExternalNullifierPeriod);
         }
 
