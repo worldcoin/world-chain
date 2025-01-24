@@ -15,6 +15,7 @@ import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 ///         It is instead used as an identifier for Priority User Operations on World Chain.
 ///         Smart Accounts that return the `PBHSignatureAggregator` as the authorizer in `validationData`
 ///         will be considered as Priority User Operations, and will need to pack a World ID proof in the signature field.
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHSignatureAggregator is IAggregator {
     using ByteHasher for bytes;
 

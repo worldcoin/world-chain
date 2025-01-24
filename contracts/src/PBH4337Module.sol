@@ -8,6 +8,9 @@ import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.s
 import {ISafe} from "@4337/interfaces/Safe.sol";
 import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 
+/// @title PBH Safe 4337 Module
+/// @author Worldcoin
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHSafe4337Module is Safe4337Module {
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
