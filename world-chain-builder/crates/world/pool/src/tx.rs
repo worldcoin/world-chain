@@ -4,16 +4,58 @@ use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_primitives::TxHash;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::transaction_pool::{EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction};
+use reth::transaction_pool::{
+    error::{InvalidPoolTransactionError, PoolTransactionError},
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
+};
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{transaction::TransactionConversionError, Recovered};
-use revm_primitives::{AccessList, Address, KzgSettings, TxKind, U256};
+use revm_primitives::{AccessList, Address, InvalidTransaction, KzgSettings, TxKind, B256, U256};
+use thiserror::Error;
+use world_chain_builder_pbh::payload::PbhValidationError;
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
     fn set_valid_pbh(&mut self);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
+}
+
+#[derive(Debug, Error)]
+pub enum WorldChainPoolTransactionError {
+    #[error("Conditional Validation Failed: {0}")]
+    ConditionalValidationFailed(B256),
+    #[error(transparent)]
+    InvalidTransaction(#[from] InvalidTransaction),
+    #[error(transparent)]
+    PbhValidationError(#[from] PbhValidationError),
+    #[error("Invalid calldata encoding")]
+    InvalidCalldata,
+    #[error("Missing PBH Payload")]
+    MissingPbhPayload,
+    #[error("InvalidSignatureAggregator")]
+    InvalidSignatureAggregator,
+}
+
+impl WorldChainPoolTransactionError {
+    pub fn to_outcome<T: PoolTransaction>(self, tx: T) -> TransactionValidationOutcome<T> {
+        TransactionValidationOutcome::Invalid(tx, self.into())
+    }
+}
+
+impl From<WorldChainPoolTransactionError> for InvalidPoolTransactionError {
+    fn from(val: WorldChainPoolTransactionError) -> Self {
+        InvalidPoolTransactionError::Other(Box::new(val))
+    }
+}
+
+//TODO: double check this?
+impl PoolTransactionError for WorldChainPoolTransactionError {
+    fn is_bad_transaction(&self) -> bool {
+        // TODO: double check if invalid transaction should be penalized, we could also make this a match statement
+        // If all errors should not be penalized, we can just return false
+        false
+    }
 }
 
 #[derive(Debug, Clone)]

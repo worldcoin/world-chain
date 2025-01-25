@@ -218,7 +218,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let signers = ctx.signers.clone();
     for signer in signers.into_iter().skip(1) {
         let raw_tx = ctx
-            .raw_pbh_tx_bytes(signer.clone(), 0, 0, U256::ZERO, BASE_CHAIN_ID)
+            .raw_pbh_tx_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID)
             .await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
@@ -257,7 +257,7 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     let ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
     let raw_tx = ctx
-        .raw_pbh_tx_bytes(signer.clone(), 0, 0, U256::ZERO, BASE_CHAIN_ID)
+        .raw_pbh_tx_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID)
         .await;
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
@@ -271,11 +271,11 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     let signer = 0;
 
     let raw_tx_0 = ctx
-        .raw_pbh_tx_bytes(signer.clone(), 0, 0, U256::ZERO, BASE_CHAIN_ID)
+        .raw_pbh_tx_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID)
         .await;
     ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
     let raw_tx_1 = ctx
-        .raw_pbh_tx_bytes(signer.clone(), 0, 0, U256::ZERO, BASE_CHAIN_ID)
+        .raw_pbh_tx_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID)
         .await;
 
     // Now that the nullifier has successfully been stored in

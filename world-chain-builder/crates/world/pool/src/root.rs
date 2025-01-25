@@ -116,6 +116,7 @@ where
     /// # Returns
     ///
     /// A `Vec<Field>` containing all valid roots.
+    // TODO: can this be a slice instead?
     fn roots(&self) -> Vec<Field> {
         self.valid_roots.values().cloned().collect()
     }
@@ -173,6 +174,10 @@ where
         if let Err(e) = self.cache.write().on_new_block(block) {
             tracing::error!("Failed to commit new block: {e}");
         }
+    }
+
+    pub fn roots(&self) -> Vec<Field> {
+        self.cache.read().roots()
     }
 }
 

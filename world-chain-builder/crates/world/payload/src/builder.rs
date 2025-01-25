@@ -38,14 +38,13 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider,
 };
-use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolTransactionError};
+use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
 use revm_primitives::{Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
-use thiserror::Error;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
-use world_chain_builder_pool::tx::WorldChainPoolTransaction;
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// World Chain payload builder
@@ -53,23 +52,6 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
     pub inner: OpPayloadBuilder<EvmConfig, Tx>,
     pub verified_blockspace_capacity: u8,
-}
-
-#[derive(Debug, Error)]
-pub enum WorldChainPoolTransactionError {
-    #[error("Conditional Validation Failed: {0}")]
-    ConditionalValidationFailed(B256),
-    #[error("EVM Error: {0}")]
-    EVMError(#[from] InvalidTransaction),
-}
-
-impl PoolTransactionError for WorldChainPoolTransactionError {
-    fn is_bad_transaction(&self) -> bool {
-        match self {
-            WorldChainPoolTransactionError::ConditionalValidationFailed(_) => true,
-            WorldChainPoolTransactionError::EVMError(_) => true, // TODO: Should we return false here?
-        }
-    }
 }
 
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>

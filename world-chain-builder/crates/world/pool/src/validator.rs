@@ -1,8 +1,14 @@
 //! World Chain transaction pool types
-use alloy_primitives::{Address, U256};
+use super::ordering::WorldChainOrdering;
+use super::root::WorldChainRootValidator;
+use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use crate::bindings::IPBHEntryPoint;
+use crate::tx::WorldChainPoolTransactionError;
+use alloy_primitives::Address;
 use alloy_rlp::Decodable;
-use alloy_sol_types::SolCall;
+use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -11,17 +17,8 @@ use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use semaphore::protocol::verify_proof;
-use world_chain_builder_pbh::date_marker::DateMarker;
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
-
-use super::error::{TransactionValidationError, WorldChainTransactionPoolInvalid};
-use super::ordering::WorldChainOrdering;
-use super::root::WorldChainRootValidator;
-use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use crate::bindings::IPBHEntryPoint;
-use crate::eip4337::hash_pbh_multicall;
+use semaphore::hash_to_field;
+use world_chain_builder_pbh::payload::PbhPayload;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
@@ -73,166 +70,71 @@ where
         &self.inner
     }
 
-    /// Ensure the provided root is on chain and valid
-    pub fn validate_root(
-        &self,
-        pbh_payload: &PbhPayload,
-    ) -> Result<(), TransactionValidationError> {
-        let is_valid = self.root_validator.validate_root(pbh_payload.root);
-        if !is_valid {
-            return Err(WorldChainTransactionPoolInvalid::InvalidRoot.into());
-        }
-        Ok(())
-    }
-
-    /// External nullifiers must be of the form
-    /// `<prefix>-<periodId>-<PbhNonce>`.
-    /// example:
-    /// `v1-012025-11`
-    pub fn validate_external_nullifier(
-        &self,
-        date: chrono::DateTime<chrono::Utc>,
-        pbh_payload: &PbhPayload,
-    ) -> Result<(), TransactionValidationError> {
-        // In most cases these will be the same value, but at the month boundary
-        // we'll still accept the previous month if the transaction is at most a minute late
-        // or the next month if the transaction is at most a minute early
-        let valid_dates = [
-            DateMarker::from(date - chrono::Duration::minutes(1)),
-            DateMarker::from(date),
-            DateMarker::from(date + chrono::Duration::minutes(1)),
-        ];
-        if valid_dates
-            .iter()
-            .all(|d| pbh_payload.external_nullifier.date_marker() != *d)
-        {
-            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierPeriod.into());
-        }
-
-        if pbh_payload.external_nullifier.nonce >= self.num_pbh_txs {
-            return Err(WorldChainTransactionPoolInvalid::InvalidExternalNullifierNonce.into());
-        }
-
-        Ok(())
-    }
-
-    pub fn validate_pbh_payload(
-        &self,
-        payload: &PbhPayload,
-        signal: U256,
-    ) -> Result<(), TransactionValidationError> {
-        self.validate_root(payload)?;
-        let date = chrono::Utc::now();
-        self.validate_external_nullifier(date, payload)?;
-
-        let res = verify_proof(
-            payload.root,
-            payload.nullifier_hash,
-            signal,
-            payload.external_nullifier.to_word(),
-            &payload.proof.0,
-            TREE_DEPTH,
-        );
-
-        match res {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(WorldChainTransactionPoolInvalid::InvalidSemaphoreProof.into()),
-            Err(e) => Err(TransactionValidationError::Error(e.into())),
-        }
-    }
-
-    /// Validates preconditions for a PBH bundle
-    ///
-    /// If the conditions here are not satisfied the transaction is still valid
-    /// but will not receive priority inclusion
-    ///
-    /// Returns parsed calldata
-    pub fn is_valid_eip4337_pbh_bundle(
-        &self,
-        tx: &Tx,
-    ) -> Option<IPBHEntryPoint::handleAggregatedOpsCall> {
-        if !tx
-            .input()
-            .starts_with(&IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR)
-        {
-            return None;
-        }
-
-        let Ok(decoded) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
-        else {
-            return None;
-        };
-
-        let are_aggregators_valid = decoded
-            ._0
-            .iter()
-            .cloned()
-            .all(|per_aggregator| per_aggregator.aggregator == self.pbh_signature_aggregator);
-
-        if are_aggregators_valid {
-            Some(decoded)
-        } else {
-            None
-        }
-    }
-
-    /// Validates preconditions for a PBH multicall
-    ///
-    /// If the conditions here are not satisfied the transaction is still valid
-    /// but will not receive priority inclusion
-    ///
-    /// Returns the calldata
-    pub fn is_valid_pbh_multicall(&self, tx: &Tx) -> Option<IPBHEntryPoint::pbhMulticallCall> {
-        if !tx
-            .input()
-            .starts_with(&IPBHEntryPoint::pbhMulticallCall::SELECTOR)
-        {
-            return None;
-        }
-
-        let Ok(decoded) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
-            return None;
-        };
-
-        Some(decoded)
-    }
-
     /// Validates a PBH bundle transaction
     ///
     /// If the transaction is valid marks it for priority inclusion
     pub fn validate_pbh_bundle(
         &self,
-        transaction: &mut Tx,
-    ) -> Result<(), TransactionValidationError> {
-        let Some(calldata) = self.is_valid_eip4337_pbh_bundle(transaction) else {
-            return Ok(());
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        // Ensure that the tx is a valid OP transaction and return early if invalid
+        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+            valid @ TransactionValidationOutcome::Valid { .. } => valid,
+            other => return other,
         };
 
+        // Decode the calldata and check that all UserOp specify the PBH signature aggregator
+        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
+        else {
+            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
+        };
+
+        if !calldata
+            ._0
+            .iter()
+            .all(|aggregator| aggregator.aggregator == self.pbh_signature_aggregator)
+        {
+            return WorldChainPoolTransactionError::InvalidSignatureAggregator.to_outcome(tx);
+        }
+
+        // Validate all proofs associated with each UserOp
         for aggregated_ops in calldata._0 {
             let mut buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = <Vec<PbhPayload>>::decode(&mut buff)
-                .map_err(WorldChainTransactionPoolInvalid::from)
-                .map_err(TransactionValidationError::from)?;
+            let pbh_payloads = match <Vec<PbhPayload>>::decode(&mut buff) {
+                Ok(pbh_payloads) => pbh_payloads,
+                Err(_) => return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx),
+            };
 
             if pbh_payloads.len() != aggregated_ops.userOps.len() {
-                Err(WorldChainTransactionPoolInvalid::MissingPbhPayload)?;
+                return WorldChainPoolTransactionError::MissingPbhPayload.to_outcome(tx);
             }
 
-            pbh_payloads
+            let valid_roots = self.root_validator.roots();
+            if let Err(err) = pbh_payloads
                 .par_iter()
                 .zip(aggregated_ops.userOps)
                 .try_for_each(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
 
-                    self.validate_pbh_payload(payload, signal)?;
+                    payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
 
-                    Ok::<(), TransactionValidationError>(())
-                })?;
+                    Ok::<(), WorldChainPoolTransactionError>(())
+                })
+            {
+                return err.to_outcome(tx);
+            }
         }
 
-        transaction.set_valid_pbh();
+        if let TransactionValidationOutcome::Valid {
+            transaction: ValidTransaction::Valid(tx),
+            ..
+        } = &mut tx_outcome
+        {
+            tx.set_valid_pbh();
+        }
 
-        Ok(())
+        tx_outcome
     }
 
     /// Validates a PBH multicall transaction
@@ -240,47 +142,40 @@ where
     /// If the transaction is valid marks it for priority inclusion
     pub fn validate_pbh_multicall(
         &self,
-        transaction: &mut Tx,
-    ) -> Result<(), TransactionValidationError> {
-        let Some(calldata) = self.is_valid_pbh_multicall(transaction) else {
-            return Ok(());
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        // Ensure that the tx is a valid OP transaction and return early if invalid
+        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+            valid @ TransactionValidationOutcome::Valid { .. } => valid,
+            other => return other,
         };
 
-        //let semaphore::protocol::Proof(g1a, g2, g1b) = call
-        let proof: [ethers_core::types::U256; 8] = calldata
-            .payload
-            .proof
-            .into_iter()
-            .map(|x| {
-                // TODO: Switch to ruint in semaphore-rs and remove this
-                let bytes_repr: [u8; 32] = x.to_be_bytes();
-                ethers_core::types::U256::from_big_endian(&bytes_repr)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-
-        let g1a = (proof[0], proof[1]);
-        let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
-        let g1b = (proof[6], proof[7]);
-
-        let proof = semaphore::protocol::Proof(g1a, g2, g1b);
-        let proof = Proof(proof);
-
-        let pbh_payload = PbhPayload {
-            external_nullifier: ExternalNullifier::from_word(calldata.payload.pbhExternalNullifier),
-            nullifier_hash: calldata.payload.nullifierHash,
-            root: calldata.payload.root,
-            proof,
+        // Decode the calldata and extract the PBH payload
+        let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
+            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
         };
 
-        let signal_hash = hash_pbh_multicall(transaction.sender(), calldata.calls);
+        let pbh_payload: PbhPayload = calldata.payload.into();
+        let signal_hash: alloy_primitives::Uint<256, 4> =
+            hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
-        self.validate_pbh_payload(&pbh_payload, signal_hash)?;
+        // Verify the proof
+        if let Err(err) =
+            pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
+        {
+            return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
+        }
 
-        transaction.set_valid_pbh();
+        if let TransactionValidationOutcome::Valid {
+            transaction: ValidTransaction::Valid(tx),
+            ..
+        } = &mut tx_outcome
+        {
+            tx.set_valid_pbh();
+        }
 
-        Ok(())
+        tx_outcome
     }
 }
 
@@ -294,21 +189,27 @@ where
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        mut transaction: Self::Transaction,
+        transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if transaction.to().unwrap_or_default() == self.pbh_validator {
-            // Try and validate a PBH bundle tx
-            if let Err(e) = self.validate_pbh_bundle(&mut transaction) {
-                return e.to_outcome(transaction);
-            }
+        if transaction.to().unwrap_or_default() != self.pbh_validator {
+            return self.inner.validate_one(origin, transaction.clone());
+        }
 
-            // Try and valdiate a PBH multicall
-            if let Err(e) = self.validate_pbh_multicall(&mut transaction) {
-                return e.to_outcome(transaction);
-            }
-        };
+        let function_signature: [u8; 4] = transaction
+            .input()
+            .get(..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .unwrap_or_default();
 
-        self.inner.validate_one(origin, transaction.clone())
+        match function_signature {
+            IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+                self.validate_pbh_bundle(origin, transaction)
+            }
+            IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
+                self.validate_pbh_multicall(origin, transaction)
+            }
+            _ => return self.inner.validate_one(origin, transaction.clone()),
+        }
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -322,23 +223,17 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use alloy_consensus::Header;
+    use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
-    use chrono::{TimeZone, Utc};
     use ethers_core::rand::rngs::SmallRng;
     use ethers_core::rand::{Rng, SeedableRng};
-    use ethers_core::types::U256;
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::Block;
     use reth_primitives::{BlockBody, SealedBlock};
-    use semaphore::Field;
-    use test_case::test_case;
     use world_chain_builder_pbh::date_marker::DateMarker;
     use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-    use world_chain_builder_pbh::payload::{PbhPayload, Proof};
 
     use super::WorldChainTransactionValidator;
     use crate::mock::{ExtendedAccount, MockEthProvider};
@@ -386,14 +281,12 @@ pub mod tests {
 
         let ordering = WorldChainOrdering::default();
 
-        let pool = Pool::new(
+        Pool::new(
             validator,
             ordering,
             InMemoryBlobStore::default(),
             Default::default(),
-        );
-
-        pool
+        )
     }
 
     #[tokio::test]
@@ -527,9 +420,7 @@ pub mod tests {
             .await
             .expect_err("Validation should fail because of missing proof");
 
-        assert!(err
-            .to_string()
-            .contains("one or more user ops are missing pbh payloads"),);
+        assert!(err.to_string().contains("Missing PBH Payload"),);
     }
 
     #[tokio::test]
@@ -593,10 +484,9 @@ pub mod tests {
             .add_external_transaction(tx.clone().into())
             .await
             .expect_err("Validation should fail because of missing proof");
-
         assert!(err
             .to_string()
-            .contains("invalid external nullifier period"),);
+            .contains("Invalid external nullifier period"),);
     }
 
     #[tokio::test]
@@ -636,7 +526,7 @@ pub mod tests {
 
         assert!(err
             .to_string()
-            .contains("invalid external nullifier period"),);
+            .contains("Invalid external nullifier period"),);
     }
 
     #[tokio::test]
@@ -670,116 +560,6 @@ pub mod tests {
             .await
             .expect_err("Validation should fail because of missing proof");
 
-        assert!(err.to_string().contains("invalid external nullifier nonce"),);
-    }
-
-    #[test]
-    fn valid_root() {
-        let mut validator = world_chain_validator();
-        let root = Field::from(1u64);
-        let proof = Proof(semaphore::protocol::Proof(
-            (U256::from(1u64), U256::from(2u64)),
-            (
-                [U256::from(3u64), U256::from(4u64)],
-                [U256::from(5u64), U256::from(6u64)],
-            ),
-            (U256::from(7u64), U256::from(8u64)),
-        ));
-        let payload = PbhPayload {
-            external_nullifier: ExternalNullifier::v1(1, 2025, 11),
-            nullifier_hash: Field::from(10u64),
-            root,
-            proof,
-        };
-        let body = BlockBody::<OpTransactionSigned>::default();
-        let block = Block {
-            header: Header::default(),
-            body,
-        };
-        let block = SealedBlock::seal_slow(block);
-        let client = MockEthProvider::default();
-        // Insert a world id root into the OpWorldId Account
-        client.add_account(
-            TEST_WORLD_ID,
-            ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
-                .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
-        );
-        validator.root_validator.set_client(client);
-        validator.on_new_head_block(&block);
-        let res = validator.validate_root(&payload);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn invalid_root() {
-        let mut validator = world_chain_validator();
-        let root = Field::from(0);
-        let proof = Proof(semaphore::protocol::Proof(
-            (U256::from(1u64), U256::from(2u64)),
-            (
-                [U256::from(3u64), U256::from(4u64)],
-                [U256::from(5u64), U256::from(6u64)],
-            ),
-            (U256::from(7u64), U256::from(8u64)),
-        ));
-        let payload = PbhPayload {
-            external_nullifier: ExternalNullifier::v1(1, 2025, 11),
-            nullifier_hash: Field::from(10u64),
-            root,
-            proof,
-        };
-        let body = BlockBody::<OpTransactionSigned>::default();
-        let block = SealedBlock::seal_slow(Block {
-            header: Header::default(),
-            body,
-        });
-        let client = MockEthProvider::default();
-        // Insert a world id root into the OpWorldId Account
-        client.add_account(
-            TEST_WORLD_ID,
-            ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
-                .extend_storage(vec![(LATEST_ROOT_SLOT.into(), Field::from(1u64))]),
-        );
-        validator.root_validator.set_client(client);
-        validator.on_new_head_block(&block);
-        let res = validator.validate_root(&payload);
-        assert!(res.is_err());
-    }
-
-    #[test_case(ExternalNullifier::v1(1, 2025, 0) ; "01-2025-0")]
-    #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
-    #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
-    fn validate_external_nullifier_valid(external_nullifier: ExternalNullifier) {
-        let validator = world_chain_validator();
-        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
-
-        let payload = PbhPayload {
-            external_nullifier,
-            nullifier_hash: Field::ZERO,
-            root: Field::ZERO,
-            proof: Default::default(),
-        };
-
-        validator
-            .validate_external_nullifier(date, &payload)
-            .unwrap();
-    }
-
-    #[test_case(ExternalNullifier::v1(1, 2025, 0), "2024-12-31 23:59:30Z" ; "a minute early")]
-    #[test_case(ExternalNullifier::v1(1, 2025, 0), "2025-02-01 00:00:30Z" ; "a minute late")]
-    fn validate_external_nullifier_at_time(external_nullifier: ExternalNullifier, time: &str) {
-        let validator = world_chain_validator();
-        let date: chrono::DateTime<Utc> = time.parse().unwrap();
-
-        let payload = PbhPayload {
-            external_nullifier,
-            nullifier_hash: Field::ZERO,
-            root: Field::ZERO,
-            proof: Default::default(),
-        };
-
-        validator
-            .validate_external_nullifier(date, &payload)
-            .unwrap();
+        assert!(err.to_string().contains("Invalid external nullifier nonce"),);
     }
 }
