@@ -12,7 +12,7 @@ use reth::transaction_pool::{
     TransactionOrigin, TransactionPool, ValidPoolTransaction,
 };
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -138,7 +138,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<RecoveredTx<<Self::Transaction as reth::transaction_pool::PoolTransaction>::Pooled>>
+    ) -> Option<Recovered<<Self::Transaction as reth::transaction_pool::PoolTransaction>::Pooled>>
     {
         None
     }

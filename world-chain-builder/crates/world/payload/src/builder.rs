@@ -1,11 +1,12 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
-use alloy_consensus::{Eip658Value, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{proofs, Eip658Value, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::OpDepositReceipt;
+use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::database::StateProviderDatabase;
@@ -19,7 +20,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::env::EvmEnv;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
@@ -28,10 +29,11 @@ use reth_optimism_payload_builder::builder::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{
-    proofs, Block, BlockBody, BlockExt, Header, InvalidTransactionError, SealedHeader, TxType,
+    Block, BlockBody, Header, InvalidTransactionError, RecoveredBlock, SealedHeader,
 };
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider,
@@ -39,9 +41,7 @@ use reth_provider::{
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{
-    Bytes, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState, TxEnv, B256, U256,
-};
+use revm_primitives::{Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
@@ -148,10 +148,6 @@ where
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
-        let EvmEnv {
-            cfg_env_with_handler_cfg,
-            block_env,
-        } = evm_env;
 
         let BuildArguments {
             client,
@@ -165,10 +161,10 @@ where
         let ctx = WorldChainPayloadBuilderCtx {
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
+                da_config: self.inner.config.da_config.clone(),
                 chain_spec: client.chain_spec(),
                 config,
-                initialized_cfg: cfg_env_with_handler_cfg,
-                initialized_block_env: block_env,
+                evm_env,
                 cancel,
                 best_payload,
             },
@@ -232,10 +228,6 @@ where
         let evm_env = self
             .cfg_and_block_env(&attributes, &parent)
             .map_err(PayloadBuilderError::other)?;
-        let EvmEnv {
-            cfg_env_with_handler_cfg,
-            block_env,
-        } = evm_env;
 
         let config = PayloadConfig {
             parent_header: Arc::new(parent),
@@ -244,10 +236,10 @@ where
         let ctx = WorldChainPayloadBuilderCtx {
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
+                da_config: self.inner.config.da_config.clone(),
                 chain_spec: client.chain_spec(),
                 config,
-                initialized_cfg: cfg_env_with_handler_cfg,
-                initialized_block_env: block_env,
+                evm_env,
                 cancel: Default::default(),
                 best_payload: Default::default(),
             },
@@ -480,7 +472,7 @@ where
         let header = Header {
             parent_hash: ctx.parent().hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: ctx.inner.initialized_block_env.coinbase,
+            beneficiary: ctx.inner.evm_env.block_env.coinbase,
             state_root,
             transactions_root,
             receipts_root,
@@ -512,12 +504,14 @@ where
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header, "sealed built block");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         // create the executed block data
-        let executed = ExecutedBlock {
-            block: sealed_block.clone(),
-            senders: Arc::new(info.executed_senders),
+        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                sealed_block.as_ref().clone(),
+                info.executed_senders,
+            )),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -744,20 +738,38 @@ where
         >,
     {
         let block_gas_limit = self.block_gas_limit();
+        let block_da_limit = self.inner.da_config.max_da_block_size();
+        let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            self.inner.initialized_cfg.clone(),
-            self.inner.initialized_block_env.clone(),
-            TxEnv::default(),
-        );
-        let mut evm = self.inner.evm_config.evm_with_env(&mut *db, env);
+        let mut evm = self
+            .inner
+            .evm_config
+            .evm_with_env(&mut *db, self.inner.evm_env.clone());
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
         while let Some(tx) = best_txs.next() {
             let pooled_tx = &tx.transaction;
             let consensus_tx = tx.to_consensus();
+            if info.is_tx_over_limits(
+                &consensus_tx.tx(),
+                block_gas_limit,
+                tx_da_limit,
+                block_da_limit,
+            ) {
+                // we can't fit this transaction into the block, so we need to mark it as
+                // invalid which also removes all dependent transaction from
+                // the iterator before we can continue
+                best_txs.mark_invalid(
+                    &tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        tx_da_limit.unwrap_or_default(),
+                        block_da_limit.unwrap_or_default(),
+                    ),
+                );
+                continue;
+            }
             if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(
@@ -789,7 +801,7 @@ where
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+            if tx.is_eip4844() || tx.tx_type() == OpTxType::Deposit as u8 {
                 best_txs.mark_invalid(
                     &tx,
                     InvalidPoolTransactionError::Consensus(
@@ -805,12 +817,12 @@ where
             }
 
             // Configure the environment for the tx.
-            *evm.tx_mut() = self
+            let tx_env = self
                 .inner
                 .evm_config
-                .tx_env(&consensus_tx, consensus_tx.signer());
+                .tx_env(consensus_tx.tx(), consensus_tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact() {
+            let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     match err {
@@ -848,6 +860,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
+            info.cumulative_da_bytes_used += consensus_tx.length() as u64;
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
