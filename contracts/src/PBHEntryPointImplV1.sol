@@ -53,6 +53,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param entryPoint The ERC-4337 Entry Point.
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
     /// @param multicall3 Address of the Multicall3 implementation.
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId,
         IEntryPoint indexed entryPoint,
@@ -136,6 +137,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///        0 addess, then it will be assumed that verification will take place off chain.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
+    /// @param _pbhGasLimit The gas limit for a PBH multicall transaction.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
     function initialize(
