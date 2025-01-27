@@ -17,6 +17,7 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 /// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
 /// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
 /// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTransient {
     using ByteHasher for bytes;
 
@@ -30,8 +31,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
     IEntryPoint public entryPoint;
 
-    /// @notice The number of PBH transactions that may be used by a single
-    ///         World ID in a given month.
+    /// @notice The number of PBH transactions alloted to each World ID per month, 0 indexed.
+    ///         For example, if the pbhNonceLimit is 29, a user can submit 30 PBH txs
     uint8 public numPbhPerMonth;
 
     /// @notice Address of the Multicall3 implementation.
@@ -53,6 +54,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param entryPoint The ERC-4337 Entry Point.
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
     /// @param multicall3 Address of the Multicall3 implementation.
+    /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId,
         IEntryPoint indexed entryPoint,
@@ -108,6 +110,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
 
+    /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations.
+    error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -133,6 +138,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///        0 addess, then it will be assumed that verification will take place off chain.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
+    /// @param multicall3 Address of the Multicall3 implementation.
+    /// @param _pbhGasLimit The gas limit for a PBH multicall transaction.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
     function initialize(
@@ -167,6 +174,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
     }
 
+    /// @notice Verifies a PBH payload.
+    /// @param signalHash The signal hash associated with the PBH payload.
     /// @param pbhPayload The PBH payload containing the proof data.
     function verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload)
         public
@@ -175,6 +184,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         onlyProxy
         onlyInitialized
     {
+        _verifyPbh(signalHash, pbhPayload);
+    }
+
+    /// @notice Verifies a PBH payload.
+    /// @param signalHash The signal hash associated with the PBH payload.
+    /// @param pbhPayload The PBH payload containing the proof data.
+    function _verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload) internal view {
         // First, we make sure this nullifier has not been used before.
         if (nullifierHashes[pbhPayload.nullifierHash]) {
             revert InvalidNullifier();
@@ -212,6 +228,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
             }
 
             PBHPayload[] memory pbhPayloads = abi.decode(opsPerAggregator[i].signature, (PBHPayload[]));
+            require(
+                pbhPayloads.length == opsPerAggregator[i].userOps.length,
+                InvalidAggregatedSignature(pbhPayloads.length, opsPerAggregator[i].userOps.length)
+            );
             for (uint256 j = 0; j < pbhPayloads.length; ++j) {
                 address sender = opsPerAggregator[i].userOps[j].sender;
                 // We now generate the signal hash from the sender, nonce, and calldata
@@ -219,7 +239,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
                     sender, opsPerAggregator[i].userOps[j].nonce, opsPerAggregator[i].userOps[j].callData
                 ).hashToField();
 
-                verifyPbh(signalHash, pbhPayloads[j]);
+                _verifyPbh(signalHash, pbhPayloads[j]);
                 nullifierHashes[pbhPayloads[j].nullifierHash] = true;
                 emit PBH(sender, signalHash, pbhPayloads[j]);
             }
@@ -251,19 +271,15 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
-        verifyPbh(signalHash, pbhPayload);
-        nullifierHashes[pbhPayload.nullifierHash] = true;
-
-        returnData = IMulticall3(_multicall3).aggregate3{gas: pbhGasLimit}(calls);
-        emit PBH(msg.sender, signalHash, pbhPayload);
-
-        // Check if pbh gas limit is exceeded
         if (gasleft() > pbhGasLimit) {
             revert GasLimitExceeded(gasleft());
         }
+        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
+        _verifyPbh(signalHash, pbhPayload);
+        nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        return returnData;
+        returnData = IMulticall3(_multicall3).aggregate3(calls);
+        emit PBH(msg.sender, signalHash, pbhPayload);
     }
 
     /// @notice Sets the number of PBH transactions allowed per month.

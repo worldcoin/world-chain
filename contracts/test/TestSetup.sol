@@ -83,7 +83,7 @@ contract TestSetup is Test {
         vm.startPrank(OWNER);
         deployEntryPoint();
         deployWorldIDGroups();
-        deployPBHEntryPoint(worldIDGroups, entryPoint);
+        deployPBHEntryPoint(worldIDGroups, entryPoint, MAX_PBH_GAS_LIMIT);
         deployPBHSignatureAggregator(address(pbhEntryPoint), address(worldIDGroups));
         deploySafeAndModule(address(pbhAggregator), 1);
         deployMockSafe(address(pbhAggregator), 1);
@@ -119,16 +119,18 @@ contract TestSetup is Test {
     ///
     /// @param initialGroupAddress The initial group's identity manager.
     /// @param initialEntryPoint The initial entry point.
-    function deployPBHEntryPoint(IWorldID initialGroupAddress, IEntryPoint initialEntryPoint) public {
+    function deployPBHEntryPoint(IWorldID initialGroupAddress, IEntryPoint initialEntryPoint, uint256 maxPbhGasLimit)
+        public
+    {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_PBH_GAS_LIMIT)
+            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit)
         );
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
-            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, MAX_PBH_GAS_LIMIT
+            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit
         );
         pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }

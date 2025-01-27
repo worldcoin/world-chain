@@ -37,6 +37,7 @@ library PBHExternalNullifier {
     uint8 public constant V1 = 1;
 
     /// @notice Encodes a PBH external nullifier using the provided year, month, and nonce.
+    /// @param version An 8-bit version number (0-255) used to identify the encoding format.
     /// @param pbhNonce An 8-bit nonce value (0-255) used to uniquely identify the nullifier within a month.
     /// @param month An 8-bit 1-indexed value representing the month (1-12).
     /// @param year A 16-bit value representing the year (e.g., 2024).

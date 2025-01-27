@@ -224,6 +224,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_pbhMulticall_RevertIf_GasLimitExceeded(uint8 pbhNonce) public {
         vm.assume(pbhNonce < MAX_NUM_PBH_PER_MONTH);
+        deployPBHEntryPoint(worldIDGroups, entryPoint, 1);
         address addr1 = address(0x1);
         address addr2 = address(0x2);
 
@@ -237,7 +238,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         calls[1] = IMulticall3.Call3({target: addr2, allowFailure: false, callData: testCallData});
 
         // Catch the revert and check that it's a GasLimitExceeded with non-zero value
-        try pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT * 2}(calls, testPayload) {
+        try pbhEntryPoint.pbhMulticall(calls, testPayload) {
             fail("Should have reverted with GasLimitExceeded");
         } catch (bytes memory err) {
             // Extract error selector
@@ -251,10 +252,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
             }
 
             assertTrue(
-                gasLimit < MAX_PBH_GAS_LIMIT * 2, "Error value for gasLeft should be less that what was provided"
-            );
-            assertTrue(
-                gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit"
+                gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLimit should be more than the pbhGasLimit"
             );
         }
     }
