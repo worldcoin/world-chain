@@ -263,8 +263,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         if (gasBefore - gasleft() > pbhGasLimit) {
             revert GasLimitExceeded(gasBefore - gasleft());
         }
-
-        return returnData;
     }
 
     /// @notice Sets the number of PBH transactions allowed per month.
