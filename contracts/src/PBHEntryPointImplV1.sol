@@ -30,8 +30,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
     IEntryPoint public entryPoint;
 
-    /// @notice The number of PBH transactions that may be used by a single
-    ///         World ID in a given month.
+    /// @notice The number of PBH transactions alloted to each World ID per month, 0 indexed.
+    ///         For example, if the pbhNonceLimit is 29, a user can submit 30 PBH txs
     uint8 public numPbhPerMonth;
 
     /// @notice Address of the Multicall3 implementation.

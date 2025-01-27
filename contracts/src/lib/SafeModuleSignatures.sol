@@ -5,9 +5,9 @@ pragma solidity ^0.8.28;
 /// @notice Library for determining a variable-threshold signature length.
 library SafeModuleSignatures {
     /// @notice Thrown when the length of the signature is less than the minimum required.
-    /// @param min The minimum required length.
+    /// @param expected The expected minimum or exact length of the signature.
     /// @param actual The actual length of the signature.
-    error InvalidSignatureLength(uint256 min, uint256 actual);
+    error InvalidSignatureLength(uint256 expected, uint256 actual);
 
     /// @notice The length of an ECDSA signature.
     uint256 internal constant ECDSA_SIGNATURE_LENGTH = 65;
