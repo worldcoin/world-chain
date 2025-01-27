@@ -32,6 +32,13 @@ contract PBHSignatureAggregator is IAggregator {
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
 
+    /// @notice Thrown when the Hash of the UserOperations is not
+    ///         in transient storage of the `PBHVerifier`.
+    error InvalidUserOperations();
+
+    /// @notice Thrown when the length of the signature is invalid.
+    error InvalidSignatureLength(uint256 expected, uint256 actual);
+
     /// @notice Thrown when a zero address is passed as the PBHEntryPoint.
     error AddressZero();
 
