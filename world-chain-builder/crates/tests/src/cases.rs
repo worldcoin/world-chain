@@ -6,7 +6,7 @@ use crate::run_command;
 use alloy_primitives::hex;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
-use alloy_rpc_types_eth::erc4337::ConditionalOptions;
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport::Transport;
 use eyre::eyre::Result;
 use futures::stream;
@@ -42,10 +42,10 @@ where
                             .client()
                             .request(
                                 "eth_sendRawTransactionConditional",
-                                (rlp_hex, ConditionalOptions::default()),
+                                (rlp_hex, TransactionConditional::default()),
                             )
                             .await?;
-                        PendingTransactionBuilder::new(&builder_provider.root(), tx_hash)
+                        PendingTransactionBuilder::new(builder_provider.root().clone(), tx_hash)
                     };
                     let hash = *tx.tx_hash();
                     let receipt = tx.get_receipt().await;

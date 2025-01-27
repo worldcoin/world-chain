@@ -17,8 +17,8 @@ deploy-contracts:
 devnet-down:
     @just ./devnet/devnet-down
 
-e2e-test:
-    @just ./world-chain-builder/e2e-test
+e2e-test *args='':
+    @just ./world-chain-builder/e2e-test $@
 
 # Builds and tags the world-chain-builder image
 build:

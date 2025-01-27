@@ -12,8 +12,9 @@ use std::{
 };
 
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::BlockNumberOrTag;
+use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
+use clap::Parser;
 use eyre::eyre::{eyre, Result};
 use fixtures::generate_test_fixture;
 use std::process::Command;
@@ -23,6 +24,12 @@ use tracing::info;
 pub mod cases;
 pub mod fixtures;
 
+#[derive(Parser)]
+struct Args {
+    #[clap(short, long, default_value = "false")]
+    no_deploy: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
@@ -30,8 +37,12 @@ async fn main() -> Result<()> {
     }
 
     tracing_subscriber::fmt::init();
-
-    let (builder_rpc, sequencer_rpc) = start_devnet().await?;
+    let args = Args::parse();
+    let (builder_rpc, sequencer_rpc) = if !args.no_deploy {
+        start_devnet().await?
+    } else {
+        get_endpoints().await?
+    };
 
     let sequencer_provider =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
@@ -69,6 +80,18 @@ async fn start_devnet() -> Result<(String, String)> {
 
     run_command(&"just", &["devnet-up"], path).await?;
 
+    let (builder_socket, sequencer_socket) = get_endpoints().await?;
+
+    info!(
+        builder_rpc = %builder_socket,
+        sequencer_rpc = %sequencer_socket,
+        "Devnet is ready"
+    );
+
+    Ok((builder_socket, sequencer_socket))
+}
+
+async fn get_endpoints() -> Result<(String, String)> {
     let builder_socket = run_command(
         "kurtosis",
         &[
@@ -99,12 +122,6 @@ async fn start_devnet() -> Result<(String, String)> {
         sequencer_socket.split("http://").collect::<Vec<&str>>()[1]
     );
 
-    info!(
-        builder_rpc = %builder_socket,
-        sequencer_rpc = %sequencer_socket,
-        "Devnet is ready"
-    );
-
     Ok((builder_socket, sequencer_socket))
 }
 
@@ -116,7 +133,7 @@ where
     let start = Instant::now();
     loop {
         if provider
-            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .get_block_by_number(BlockNumberOrTag::Latest, BlockTransactionsKind::Hashes)
             .await
             .is_ok()
         {
