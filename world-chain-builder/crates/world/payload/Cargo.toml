@@ -41,4 +41,3 @@ op-alloy-consensus.workspace = true
 
 # misc
 tracing.workspace = true
-thiserror.workspace = true
