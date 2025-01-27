@@ -246,13 +246,13 @@ contract PBHEntryPointImplV1Test is TestSetup {
             assertEq(selector, PBHEntryPointImplV1.GasLimitExceeded.selector);
 
             // Extract value from error data and verify it's non-zero
-            uint256 gasUsed;
+            uint256 gasLimit;
             assembly {
-                gasUsed := mload(add(err, 36)) // 4 bytes selector + 32 bytes offset
+                gasLimit := mload(add(err, 36)) // 4 bytes selector + 32 bytes offset
             }
 
             assertTrue(
-                gasUsed > pbhEntryPoint.pbhGasLimit(), "Error value for gasLeft should be more than the pbhGasLimit"
+                gasLimit > pbhEntryPoint.pbhGasLimit(), "Error value for gasLimit should be more than the pbhGasLimit"
             );
         }
     }

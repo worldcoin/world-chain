@@ -103,7 +103,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     error InvalidHashedOps();
 
     /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
-    error GasLimitExceeded(uint256 gasUsed);
+    error GasLimitExceeded(uint256 gasLimit);
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
@@ -251,18 +251,15 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        uint256 gasBefore = gasleft();
+        if (gasleft() > pbhGasLimit) {
+            revert GasLimitExceeded(gasleft());
+        }
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
         returnData = IMulticall3(_multicall3).aggregate3(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
-
-        // Check if pbh gas limit is exceeded
-        if (gasBefore - gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasBefore - gasleft());
-        }
     }
 
     /// @notice Sets the number of PBH transactions allowed per month.
