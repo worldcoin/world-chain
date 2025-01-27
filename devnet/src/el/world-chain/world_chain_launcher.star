@@ -40,6 +40,10 @@ METRICS_PATH = "/metrics"
 # The dirpath of the execution data directory on the client container
 EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER = "/data/op-reth/execution-data"
 
+# Worldcoin Contracts
+PBH_ENTRY_POINT = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+PBH_SIGNATURE_AGGREGATOR = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
+WORLD_ID = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -154,7 +158,7 @@ def get_config(
         "--http.corsdomain=*",
         # WARNING: The admin info endpoint is enabled so that we can easily get ENR/enode, which means
         #  that users should NOT store private information in these Kurtosis nodes!
-        "--http.api=admin,net,eth,web3,debug,trace",
+        "--http.api=admin,net,eth,web3,debug,trace,miner",
         "--ws",
         "--ws.addr=0.0.0.0",
         "--ws.port={0}".format(WS_PORT_NUM),
@@ -167,8 +171,9 @@ def get_config(
         "--metrics=0.0.0.0:{0}".format(METRICS_PORT_NUM),
         "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
-        "--builder.pbh_entrypoint=0x7a2088a1bFc9d81c55368AE168C2C02570cB814F", # Deterministic Deployment Address on re-runs
-        "--builder.signature_aggregator=0x09635F643e140090A9A8Dcd712eD6285858ceBef" # Deterministic Deployment Address on re-runs
+        "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT), 
+        "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
+        "--builder.world_id={0}".format(WORLD_ID),
     ]
 
     if len(existing_el_clients) > 0:
