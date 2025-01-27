@@ -1,9 +1,12 @@
+use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use semaphore::packed_proof::PackedProof;
+use semaphore::protocol::{verify_proof, ProofError};
 use semaphore::Field;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::external_nullifier::ExternalNullifier;
+use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
 
 pub const TREE_DEPTH: usize = 30;
 
@@ -44,11 +47,25 @@ impl Encodable for Proof {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum PbhValidationError {
+    #[error("Invalid root")]
+    InvalidRoot,
+    #[error("Invalid external nullifier period")]
+    InvalidExternalNullifierPeriod,
+    #[error("Invalid external nullifier nonce")]
+    InvalidExternalNullifierNonce,
+    #[error("Invalid proof")]
+    InvalidProof,
+    #[error(transparent)]
+    ProofError(#[from] ProofError),
+}
+
 /// The payload of a PBH transaction
 ///
 /// Contains the semaphore proof and relevent metadata
 /// required to to verify the pbh transaction.
-#[derive(Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct PbhPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,
@@ -63,14 +80,69 @@ pub struct PbhPayload {
     pub proof: Proof,
 }
 
+impl PbhPayload {
+    pub fn validate(
+        &self,
+        signal: U256,
+        valid_roots: &[Field],
+        pbh_nonce_limit: u8,
+    ) -> Result<(), PbhValidationError> {
+        self.validate_root(valid_roots)?;
+
+        let date = chrono::Utc::now();
+        self.validate_external_nullifier(date, pbh_nonce_limit)?;
+
+        if verify_proof(
+            self.root,
+            self.nullifier_hash,
+            signal,
+            self.external_nullifier.to_word(),
+            &self.proof.0,
+            TREE_DEPTH,
+        )? {
+            Ok(())
+        } else {
+            Err(PbhValidationError::InvalidProof)
+        }
+    }
+
+    pub fn validate_root(&self, valid_roots: &[Field]) -> Result<(), PbhValidationError> {
+        if !valid_roots.contains(&self.root) {
+            return Err(PbhValidationError::InvalidRoot);
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_external_nullifier(
+        &self,
+        date: chrono::DateTime<chrono::Utc>,
+        pbh_nonce_limit: u8,
+    ) -> Result<(), PbhValidationError> {
+        if self.external_nullifier.date_marker() != DateMarker::from(date) {
+            return Err(PbhValidationError::InvalidExternalNullifierPeriod);
+        }
+
+        if self.external_nullifier.nonce >= pbh_nonce_limit {
+            return Err(PbhValidationError::InvalidExternalNullifierNonce);
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use chrono::TimeZone;
     use ethers_core::types::U256;
+    use semaphore::Field;
+    use test_case::test_case;
 
     use super::*;
 
     #[test]
-    fn encode_decode() {
+    // TODO: fuzz inputs
+    fn test_encode_decode() {
         let proof = Proof(semaphore::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
             (
@@ -85,9 +157,95 @@ mod test {
             root: Field::from(12u64),
             proof,
         };
-        let encoded = alloy_rlp::encode(&pbh_payload);
-        let mut buf = encoded.as_slice();
-        let decoded = PbhPayload::decode(&mut buf).unwrap();
+
+        let mut out = vec![];
+        pbh_payload.encode(&mut out);
+        let decoded = PbhPayload::decode(&mut out.as_slice()).unwrap();
         assert_eq!(pbh_payload, decoded);
+    }
+
+    #[test]
+    fn test_valid_root() -> eyre::Result<()> {
+        let pbh_payload = PbhPayload {
+            root: Field::from(1u64),
+            ..Default::default()
+        };
+
+        let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
+        pbh_payload.validate_root(&valid_roots)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_root() -> eyre::Result<()> {
+        let pbh_payload = PbhPayload {
+            root: Field::from(3u64),
+            ..Default::default()
+        };
+
+        let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
+        let res = pbh_payload.validate_root(&valid_roots);
+        assert!(matches!(res, Err(PbhValidationError::InvalidRoot)));
+
+        Ok(())
+    }
+
+    #[test_case(ExternalNullifier::v1(1, 2025, 0) ; "01-2025-0")]
+    #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
+    #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
+    fn test_valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
+        let pbh_nonce_limit = 30;
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        pbh_payload.validate_external_nullifier(date, pbh_nonce_limit)?;
+        Ok(())
+    }
+
+    #[test_case(ExternalNullifier::v1(1, 2024, 0) ; "01-2024-0")]
+    #[test_case(ExternalNullifier::v1(2, 2025, 0) ; "02-2025-0")]
+    fn test_invalid_external_nullifier_invalid_period(
+        external_nullifier: ExternalNullifier,
+    ) -> eyre::Result<()> {
+        let pbh_nonce_limit = 30;
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
+        assert!(matches!(
+            res,
+            Err(PbhValidationError::InvalidExternalNullifierPeriod)
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
+        let pbh_nonce_limit = 30;
+        let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let external_nullifier = ExternalNullifier::v1(1, 2025, 30);
+        let pbh_payload = PbhPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
+        assert!(matches!(
+            res,
+            Err(PbhValidationError::InvalidExternalNullifierNonce)
+        ));
+
+        Ok(())
     }
 }
