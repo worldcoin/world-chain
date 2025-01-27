@@ -1,4 +1,9 @@
 use alloy_sol_types::sol;
+use world_chain_builder_pbh::{
+    external_nullifier::ExternalNullifier,
+    payload::{PbhPayload, Proof},
+};
+use IPBHEntryPoint::PBHPayload;
 
 sol! {
     contract IMulticall3 {
@@ -50,5 +55,34 @@ sol! {
             IMulticall3.Call3[] calls,
             PBHPayload payload,
         ) external;
+    }
+}
+
+impl From<PBHPayload> for PbhPayload {
+    fn from(val: PBHPayload) -> Self {
+        let proof: [ethers_core::types::U256; 8] = val
+            .proof
+            .into_iter()
+            .map(|x| {
+                // TODO: Switch to ruint in semaphore-rs and remove this
+                let bytes_repr: [u8; 32] = x.to_be_bytes();
+                ethers_core::types::U256::from_big_endian(&bytes_repr)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(); // TODO: should we be unwrapping here?
+
+        let g1a = (proof[0], proof[1]);
+        let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
+        let g1b = (proof[6], proof[7]);
+
+        let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
+
+        PbhPayload {
+            external_nullifier: ExternalNullifier::from_word(val.pbhExternalNullifier),
+            nullifier_hash: val.nullifierHash,
+            root: val.root,
+            proof,
+        }
     }
 }
