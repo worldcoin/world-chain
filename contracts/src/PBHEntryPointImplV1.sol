@@ -17,6 +17,7 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 /// It is used to verify the signatures in a PBH bundle, and relay bundles to the EIP-4337 Entry Point.
 /// @dev All upgrades to the PBHEntryPoint after initial deployment must inherit this contract to avoid storage collisions.
 /// Also note that that storage variables must not be reordered after deployment otherwise storage collisions will occur.
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTransient {
     using ByteHasher for bytes;
 
