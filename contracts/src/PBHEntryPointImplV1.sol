@@ -108,6 +108,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
 
+    /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations.
+    error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -212,6 +215,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
             }
 
             PBHPayload[] memory pbhPayloads = abi.decode(opsPerAggregator[i].signature, (PBHPayload[]));
+            require(
+                pbhPayloads.length == opsPerAggregator[i].userOps.length,
+                InvalidAggregatedSignature(pbhPayloads.length, opsPerAggregator[i].userOps.length)
+            );
             for (uint256 j = 0; j < pbhPayloads.length; ++j) {
                 address sender = opsPerAggregator[i].userOps[j].sender;
                 // We now generate the signal hash from the sender, nonce, and calldata
@@ -251,19 +258,15 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
+        if (gasleft() > pbhGasLimit) {
+            revert GasLimitExceeded(gasleft());
+        }
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
-        returnData = IMulticall3(_multicall3).aggregate3{gas: pbhGasLimit}(calls);
+        returnData = IMulticall3(_multicall3).aggregate3(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
-
-        // Check if pbh gas limit is exceeded
-        if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasleft());
-        }
-
-        return returnData;
     }
 
     /// @notice Sets the number of PBH transactions allowed per month.
