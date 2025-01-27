@@ -26,13 +26,13 @@ library SafeModuleSignatures {
         pure
         returns (uint256 expectedLength)
     {
-        expectedLength = 0x41 * threshold;
+        expectedLength = ECDSA_SIGNATURE_LENGTH * threshold;
         if (signatures.length < expectedLength) {
             revert InvalidSignatureLength(expectedLength, signatures.length);
         }
 
         for (uint256 i = 0; i < threshold; ++i) {
-            uint256 signaturePos = i * 0x41;
+            uint256 signaturePos = i * ECDSA_SIGNATURE_LENGTH;
             uint8 signatureType = uint8(signatures[signaturePos + 0x40]);
 
             if (signatureType == 0) {
