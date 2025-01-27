@@ -174,6 +174,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit);
     }
 
+    /// @notice Verifies a PBH payload.
+    /// @param signalHash The signal hash associated with the PBH payload.
     /// @param pbhPayload The PBH payload containing the proof data.
     function verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload)
         public
@@ -182,6 +184,13 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         onlyProxy
         onlyInitialized
     {
+        _verifyPbh(signalHash, pbhPayload);
+    }
+
+    /// @notice Verifies a PBH payload.
+    /// @param signalHash The signal hash associated with the PBH payload.
+    /// @param pbhPayload The PBH payload containing the proof data.
+    function _verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload) internal view {
         // First, we make sure this nullifier has not been used before.
         if (nullifierHashes[pbhPayload.nullifierHash]) {
             revert InvalidNullifier();
@@ -230,7 +239,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
                     sender, opsPerAggregator[i].userOps[j].nonce, opsPerAggregator[i].userOps[j].callData
                 ).hashToField();
 
-                verifyPbh(signalHash, pbhPayloads[j]);
+                _verifyPbh(signalHash, pbhPayloads[j]);
                 nullifierHashes[pbhPayloads[j].nullifierHash] = true;
                 emit PBH(sender, signalHash, pbhPayloads[j]);
             }
@@ -266,7 +275,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
             revert GasLimitExceeded(gasleft());
         }
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
-        verifyPbh(signalHash, pbhPayload);
+        _verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
 
         returnData = IMulticall3(_multicall3).aggregate3(calls);
