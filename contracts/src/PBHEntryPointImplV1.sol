@@ -105,7 +105,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     error InvalidHashedOps();
 
     /// @notice Thrown when the gas limit for a PBH multicall transaction is exceeded
-    error GasLimitExceeded(uint256 gasLimit);
+    error GasLimitExceeded(uint256 gasLeft, uint256 gasLimit);
 
     /// @notice Thrown when setting the gas limit for a PBH multicall to 0
     error InvalidPBHGasLimit(uint256 gasLimit);
@@ -272,8 +272,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         returns (IMulticall3.Result[] memory returnData)
     {
         if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasleft());
+            revert GasLimitExceeded(gasleft(), pbhGasLimit);
         }
+
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         _verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
