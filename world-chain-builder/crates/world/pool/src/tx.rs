@@ -10,8 +10,7 @@ use reth::transaction_pool::{
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::transaction::TransactionConversionError;
-use reth_primitives::RecoveredTx;
+use reth_primitives::{transaction::TransactionConversionError, Recovered};
 use revm_primitives::{AccessList, Address, InvalidTransaction, KzgSettings, TxKind, B256, U256};
 use thiserror::Error;
 use world_chain_builder_pbh::payload::PbhValidationError;
@@ -92,12 +91,12 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>> {
+    ) -> Option<Recovered<Self::Pooled>> {
         self.inner.try_into_pooled_eip4844(sidecar)
     }
 
     fn try_from_eip4844(
-        _tx: RecoveredTx<Self::Consensus>,
+        _tx: Recovered<Self::Consensus>,
         _sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         None
@@ -131,8 +130,8 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
     }
 }
 
-impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for WorldChainPooledTransaction {
-    fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
+impl From<Recovered<op_alloy_consensus::OpPooledTransaction>> for WorldChainPooledTransaction {
+    fn from(tx: Recovered<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let inner = OpPooledTransaction::from(tx);
 
         Self {
@@ -143,13 +142,13 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for WorldChainPo
     }
 }
 
-impl TryFrom<RecoveredTx<OpTransactionSigned>> for WorldChainPooledTransaction {
+impl TryFrom<Recovered<OpTransactionSigned>> for WorldChainPooledTransaction {
     type Error = TransactionConversionError;
 
-    fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(value: Recovered<OpTransactionSigned>) -> Result<Self, Self::Error> {
         let (tx, signer) = value.into_parts();
-        let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
-            RecoveredTx::new_unchecked(tx.try_into()?, signer);
+        let pooled: Recovered<op_alloy_consensus::OpPooledTransaction> =
+            Recovered::new_unchecked(tx.try_into()?, signer);
 
         Ok(Self {
             inner: pooled.into(),
@@ -159,24 +158,24 @@ impl TryFrom<RecoveredTx<OpTransactionSigned>> for WorldChainPooledTransaction {
     }
 }
 
-impl From<WorldChainPooledTransaction> for RecoveredTx<OpTransactionSigned> {
+impl From<WorldChainPooledTransaction> for Recovered<OpTransactionSigned> {
     fn from(val: WorldChainPooledTransaction) -> Self {
         val.inner.into()
     }
 }
 
 impl PoolTransaction for WorldChainPooledTransaction {
-    type TryFromConsensusError = <Self as TryFrom<RecoveredTx<Self::Consensus>>>::Error;
+    type TryFromConsensusError = <Self as TryFrom<Recovered<Self::Consensus>>>::Error;
     type Consensus = OpTransactionSigned;
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
-    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
+    fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.clone_into_consensus()
     }
 
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         OpPooledTransaction::try_consensus_into_pooled(tx)
     }
 

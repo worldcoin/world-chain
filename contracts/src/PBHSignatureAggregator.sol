@@ -15,6 +15,7 @@ import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 ///         It is instead used as an identifier for Priority User Operations on World Chain.
 ///         Smart Accounts that return the `PBHSignatureAggregator` as the authorizer in `validationData`
 ///         will be considered as Priority User Operations, and will need to pack a World ID proof in the signature field.
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHSignatureAggregator is IAggregator {
     using ByteHasher for bytes;
 
@@ -31,13 +32,6 @@ contract PBHSignatureAggregator is IAggregator {
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
-
-    /// @notice Thrown when the Hash of the UserOperations is not
-    ///         in transient storage of the `PBHVerifier`.
-    error InvalidUserOperations();
-
-    /// @notice Thrown when the length of the signature is invalid.
-    error InvalidSignatureLength(uint256 expected, uint256 actual);
 
     /// @notice Thrown when a zero address is passed as the PBHEntryPoint.
     error AddressZero();

@@ -19,8 +19,8 @@ use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
+    SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
@@ -171,7 +171,7 @@ impl BlockReader for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Block>>> {
         Ok(None)
     }
 
@@ -183,7 +183,7 @@ impl BlockReader for WorldChainNoopProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<reth_primitives::BlockWithSenders>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Block>>> {
         Ok(None)
     }
 
@@ -191,7 +191,7 @@ impl BlockReader for WorldChainNoopProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Block>>> {
         Ok(None)
     }
 
@@ -202,14 +202,14 @@ impl BlockReader for WorldChainNoopProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Block>>> {
         Ok(vec![])
     }
 
     fn sealed_block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Block>>> {
         Ok(vec![])
     }
 
@@ -231,6 +231,13 @@ impl OmmersProvider for WorldChainNoopProvider {
 impl BlockBodyIndicesProvider for WorldChainNoopProvider {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
+    }
+
+    fn block_body_indices_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(vec![])
     }
 }
 
@@ -659,10 +666,9 @@ where
         join_all(futures).await
     }
 
-    fn on_new_head_block<H, B>(&self, _new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: reth_primitives_traits::BlockBody,
+        B: reth_primitives_traits::Block,
     {
         unimplemented!()
     }

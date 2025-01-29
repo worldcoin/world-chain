@@ -28,6 +28,7 @@ reth-optimism-primitives.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
+reth-primitives-traits.workspace = true
 
 # revm
 revm.workspace = true
@@ -38,6 +39,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 op-alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 # misc
 tracing.workspace = true

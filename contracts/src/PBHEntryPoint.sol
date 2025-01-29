@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 /// @title PBH Entry Point
 /// @author Worldcoin
 /// @notice An implementation of an on chain PBH Entry Point.
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHEntryPoint is ERC1967Proxy {
     ///////////////////////////////////////////////////////////////////////////////
     ///                    !!!! DO NOT ADD MEMBERS HERE !!!!                    ///
