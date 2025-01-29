@@ -233,11 +233,11 @@ mod tests {
         add_block_with_root_with_timestamp(&validator, timestamp, root_1);
         assert!(validator.validate_root(root_1));
         let root_2 = Field::from(2u64);
-        add_block_with_root_with_timestamp(&validator, timestamp + 3601, root_2);
+        add_block_with_root_with_timestamp(&validator, timestamp + 604800 + 1, root_2);
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));
         let root_3 = Field::from(3u64);
-        add_block_with_root_with_timestamp(&validator, timestamp + 3600 + 3600, root_3);
+        add_block_with_root_with_timestamp(&validator, timestamp + 604800 + 604800, root_3);
         assert!(validator.validate_root(root_3));
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));
