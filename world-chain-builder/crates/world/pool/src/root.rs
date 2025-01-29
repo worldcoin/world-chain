@@ -77,13 +77,12 @@ where
     /// # Arguments
     ///
     /// * `block` - The new block to be committed.
-    fn on_new_block<H, B>(
+    fn on_new_block<B>(
         &mut self,
-        block: &SealedBlock<H, B>,
+        block: &SealedBlock<B>,
     ) -> Result<(), WorldChainTransactionPoolError>
     where
-        H: reth::core::primitives::BlockHeader,
-        B: reth::core::primitives::BlockBody,
+        B: reth_primitives_traits::Block,
     {
         let state = self
             .client
@@ -168,10 +167,9 @@ where
     /// # Arguments
     ///
     /// * `block` - The new block to be committed.
-    pub fn on_new_block<H, B>(&self, block: &SealedBlock<H, B>)
+    pub fn on_new_block<B>(&self, block: &SealedBlock<B>)
     where
-        H: reth::core::primitives::BlockHeader,
-        B: reth::core::primitives::BlockBody,
+        B: reth_primitives_traits::Block,
     {
         if let Err(e) = self.cache.write().on_new_block(block) {
             tracing::error!("Failed to commit new block: {e}");
@@ -185,8 +183,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use reth::api::Block;
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     use crate::test_utils::TEST_WORLD_ID;
@@ -224,10 +221,7 @@ mod tests {
             .read()
             .client()
             .add_block(block.hash_slow(), block.clone());
-        let block = SealedBlock::new(
-            SealedHeader::new(block.header.clone(), block.header.hash_slow()),
-            block.body().clone(),
-        );
+        let block = SealedBlock::seal_slow(block);
         validator.on_new_block(&block);
     }
 

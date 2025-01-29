@@ -23,6 +23,7 @@ reth-stages-types = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 revm-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true

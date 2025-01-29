@@ -8,7 +8,6 @@ use alloy_primitives::Address;
 use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use reth::core::primitives::{BlockBody, BlockHeader};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -213,10 +212,9 @@ where
         }
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: BlockHeader,
-        B: BlockBody,
+        B: reth_primitives_traits::Block,
     {
         self.inner.on_new_head_block(new_tip_block);
         self.root_validator.on_new_block(new_tip_block);
@@ -225,7 +223,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use alloy_consensus::Header;
+    use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
     use ethers_core::rand::rngs::SmallRng;
@@ -233,7 +231,7 @@ pub mod tests {
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
+    use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_builder_pbh::date_marker::DateMarker;
     use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 
@@ -276,9 +274,8 @@ pub mod tests {
             gas_limit: 20000000,
             ..Default::default()
         };
-        let sealed_header = SealedHeader::new(header.clone(), header.hash_slow());
         let body = BlockBody::<OpTransactionSigned>::default();
-        let block = SealedBlock::new(sealed_header, body);
+        let block = SealedBlock::seal_slow(Block { header, body });
 
         // Propogate the block to the root validator
         validator.on_new_head_block(&block);

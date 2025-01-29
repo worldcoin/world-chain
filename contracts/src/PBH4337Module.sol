@@ -8,6 +8,9 @@ import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.s
 import {ISafe} from "@4337/interfaces/Safe.sol";
 import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
 
+/// @title PBH Safe 4337 Module
+/// @author Worldcoin
+/// @custom:security-contact security@toolsforhumanity.com
 contract PBHSafe4337Module is Safe4337Module {
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
@@ -106,7 +109,7 @@ contract PBHSafe4337Module is Safe4337Module {
         // A malicious bundler can pad the Safe operation `signatures` with additional bytes, causing the account to pay
         // more gas than needed for user operation validation (capped by `verificationGasLimit`).
         // `_checkSignaturesLength` ensures that there are no additional bytes in the `signature` than are required.
-        bool validSignature = _checkSignaturesLength(signatures, ISafe(payable(userOp.sender)).getThreshold());
+        bool validSignature = _checkSignaturesLength(signatures, threshold);
 
         try ISafe(payable(userOp.sender)).checkSignatures(keccak256(operationData), operationData, signatures) {}
         catch {

@@ -2,7 +2,7 @@ use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use world_chain_builder_node::args::ExtArgs;
 use world_chain_builder_node::node::WorldChainBuilder;
 use world_chain_builder_rpc::{sequencer::SequencerClient, EthApiExtServer, WorldChainEthApiExt};
@@ -28,14 +28,9 @@ fn main() {
     }
     if let Err(err) =
         Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
-            let engine_tree_config = TreeConfig::default()
-                .with_persistence_threshold(builder_args.rollup_args.persistence_threshold)
-                .with_memory_block_buffer_target(
-                    builder_args.rollup_args.memory_block_buffer_target,
-                );
             let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
             let handle = builder
-                .with_types_and_provider::<WorldChainBuilder, BlockchainProvider2<_>>()
+                .with_types_and_provider::<WorldChainBuilder, BlockchainProvider<_>>()
                 .with_components(world_chain_node.components_builder())
                 .with_add_ons(world_chain_node.add_ons())
                 .extend_rpc_modules(move |ctx| {
@@ -53,7 +48,7 @@ fn main() {
                     let launcher = EngineNodeLauncher::new(
                         builder.task_executor().clone(),
                         builder.config().datadir(),
-                        engine_tree_config,
+                        TreeConfig::default(),
                     );
                     builder.launch_with(launcher)
                 })
