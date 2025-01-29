@@ -45,6 +45,7 @@ PBH_ENTRY_POINT = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
 PBH_SIGNATURE_AGGREGATOR = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
 WORLD_ID = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 
+
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
         RPC_PORT_ID: shared_utils.new_port_spec(
@@ -162,7 +163,7 @@ def get_config(
         "--ws",
         "--ws.addr=0.0.0.0",
         "--ws.port={0}".format(WS_PORT_NUM),
-        "--ws.api=net,eth",
+        "--ws.api=admin,net,eth,miner,debug",
         "--ws.origins=*",
         "--nat=extip:" + constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
         "--authrpc.port={0}".format(ENGINE_RPC_PORT_NUM),
@@ -171,7 +172,7 @@ def get_config(
         "--metrics=0.0.0.0:{0}".format(METRICS_PORT_NUM),
         "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
-        "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT), 
+        "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
     ]

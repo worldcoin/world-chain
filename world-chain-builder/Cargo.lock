@@ -11484,12 +11484,14 @@ dependencies = [
  "clap 4.5.24",
  "color-eyre",
  "futures",
+ "reth-e2e-test-utils",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.19",
  "world-chain-builder-node",
+ "world-chain-builder-pool",
 ]
 
 [[package]]

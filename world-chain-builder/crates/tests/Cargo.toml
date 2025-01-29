@@ -12,12 +12,15 @@ workspace = true
 
 [dependencies]
 world-chain-builder-node = { workspace = true, features = ["test"]}
+world-chain-builder-pool = { workspace = true, features = ["test"]}
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-transport.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
+
+reth-e2e-test-utils.workspace = true
 
 tracing.workspace = true
 tracing-subscriber.workspace = true

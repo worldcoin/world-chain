@@ -1,28 +1,39 @@
-use alloy_primitives::{Bytes, U256};
+use alloy_network::eip2718::Encodable2718;
+use alloy_primitives::{Address, Bytes, U256};
+use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
-use world_chain_builder_node::test_utils::{PBHTransactionTestContext, DEV_CHAIN_ID};
+use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext, DEV_CHAIN_ID};
+use world_chain_builder_pool::test_utils::signer;
 
-#[derive(Deserialize, Serialize, Clone, Default)]
-pub struct PBHFixture {
-    pub fixture: Vec<Bytes>,
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct TransactionFixtures {
+    pub pbh: Vec<Bytes>,
+    pub eip1559: Vec<Bytes>,
 }
 
 /// Generates test fixtures for PBH transactions
-pub async fn generate_test_fixture() -> PBHFixture {
-    let mut test_fixture = PBHFixture::default();
-    for i in 1..=4 {
-        for j in 0..=29 {
-            test_fixture.fixture.push(
+pub async fn generate_fixture(size: u32) -> TransactionFixtures {
+    let mut test_fixture = TransactionFixtures::default();
+    for i in 0..=5 {
+        for j in 0..=size {
+            test_fixture.pbh.push(
                 PBHTransactionTestContext::raw_pbh_tx_bytes(
                     i,
-                    j,
-                    j.into(),
+                    j as u8,
+                    j as u64,
                     U256::from(j),
                     DEV_CHAIN_ID,
                 )
                 .await,
             );
         }
+    }
+
+    for j in size..=size + 2 {
+        let tx = tx(DEV_CHAIN_ID, None, j as u64, Address::with_last_byte(0x01));
+        let envelope = TransactionTestContext::sign_tx(signer(0), tx).await;
+        let raw_tx = envelope.encoded_2718();
+        test_fixture.eip1559.push(raw_tx.into());
     }
 
     test_fixture

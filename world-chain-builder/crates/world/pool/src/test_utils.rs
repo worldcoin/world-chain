@@ -1,5 +1,5 @@
 use alloy_consensus::TxEip1559;
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
@@ -18,7 +18,7 @@ use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
-
+use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
@@ -32,6 +32,26 @@ use crate::validator::WorldChainTransactionValidator;
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
+pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
+    address!("5FC8d32690cc91D4c39d9d3abcBD16989F875707");
+
+pub const PBH_TEST_ENTRYPOINT: Address = address!("Dc64a140Aa3E981100a9becA4E685f962f0cF6C9");
+
+pub const TEST_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
+
+pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
+    let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
+    let mut comms = vec![];
+    for acc in 0..=5 {
+        let identity = identity(acc);
+        let commitment = identity.commitment();
+        comms.push(commitment);
+        tree = tree.update_with_mutation(acc as usize, &commitment);
+    }
+
+    tree.derived()
+});
+
 pub fn signer(index: u32) -> PrivateKeySigner {
     alloy_signer_local::MnemonicBuilder::<English>::default()
         .phrase(MNEMONIC)
@@ -39,14 +59,6 @@ pub fn signer(index: u32) -> PrivateKeySigner {
         .expect("Failed to set index")
         .build()
         .expect("Failed to create signer")
-}
-
-#[cfg(test)]
-#[test]
-fn test_signer() {
-    let signer = signer(0);
-
-    println!("Signer: {:?}", signer);
 }
 
 pub fn account(index: u32) -> Address {
@@ -60,27 +72,12 @@ pub fn identity(index: u32) -> Identity {
     Identity::from_secret(&mut secret as &mut _, None)
 }
 
-// TODO: Cache with Once or lazy-static?
-pub fn tree() -> LazyPoseidonTree {
-    let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
-
-    // Only accounts 0 through 5 are included in the tree
-    for acc in 0..=5 {
-        let identity = identity(acc);
-        let commitment = identity.commitment();
-
-        tree = tree.update_with_mutation(acc as usize, &commitment);
-    }
-
-    tree.derived()
-}
-
 pub fn tree_root() -> Field {
-    tree().root()
+    TREE.root()
 }
 
 pub fn tree_inclusion_proof(acc: u32) -> semaphore::poseidon_tree::Proof {
-    tree().proof(acc as usize)
+    TREE.proof(acc as usize)
 }
 
 pub fn nullifier_hash(acc: u32, external_nullifier: Field) -> Field {
@@ -142,6 +139,18 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
     pooled
 }
 
+pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
+    let signer = signer(acc);
+    let signature = signer
+        .sign_transaction(&mut tx)
+        .await
+        .expect("Failed to sign transaction");
+    let tx_signed = OpTransactionSigned::new(tx.into(), signature);
+    let mut buff = vec![];
+    tx_signed.encode_2718(&mut buff);
+    buff.into()
+}
+
 #[builder]
 pub fn user_op(
     acc: u32,
@@ -158,8 +167,7 @@ pub fn user_op(
 
     let signal = crate::eip4337::hash_user_op(&user_op);
 
-    let tree = tree();
-    let root = tree.root();
+    let root = TREE.root();
     let proof = semaphore_proof(acc, external_nullifier.to_word(), signal);
     let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
 
@@ -205,8 +213,7 @@ pub fn pbh_multicall(
     let signal_hash: alloy_primitives::Uint<256, 4> =
         hash_to_field(&SolValue::abi_encode_packed(&(sender, calls.clone())));
 
-    let tree = tree();
-    let root = tree.root();
+    let root = TREE.root();
     let proof = semaphore_proof(acc, external_nullifier.to_word(), signal_hash);
     let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
 
@@ -244,13 +251,6 @@ pub fn pbh_multicall(
     IPBHEntryPoint::pbhMulticallCall { calls, payload }
 }
 
-pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
-    address!("5FC8d32690cc91D4c39d9d3abcBD16989F875707");
-
-pub const PBH_TEST_ENTRYPOINT: Address = address!("Dc64a140Aa3E981100a9becA4E685f962f0cF6C9");
-
-pub const TEST_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
-
 pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
@@ -268,7 +268,6 @@ pub fn world_chain_validator(
         PBH_TEST_SIGNATURE_AGGREGATOR,
     )
 }
-
 #[cfg(test)]
 mod tests {
     use test_case::test_case;

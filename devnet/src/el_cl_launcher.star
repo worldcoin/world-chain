@@ -280,12 +280,13 @@ def launch(
                 gs_sequencer_private_key,
                 sequencer_enabled,
             )
-
-            all_el_contexts.append(el_context)
-            all_cl_contexts.append(cl_context)
-            all_el_contexts.append(el_builder_context)
-            all_cl_contexts.append(cl_builder_context)
             all_el_contexts.append(engine_relay_context)
+            all_el_contexts.append(el_context)
+            all_el_contexts.append(
+                el_builder_context
+            )  # [rollup-boost, op-geth, world-chain]
+            all_cl_contexts.append(cl_context)
+            all_cl_contexts.append(cl_builder_context)
         else:
             # Launch a standard participant (non sequencer)
             cl_type = participant.cl_type

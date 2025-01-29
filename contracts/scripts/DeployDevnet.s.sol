@@ -7,21 +7,19 @@ import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 import {console} from "forge-std/console.sol";
 import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
-import {WorldIDIdentityManager} from "@world-id-contracts/WorldIDIdentityManager.sol";
-import {WorldIDRouter} from "@world-id-contracts/WorldIDRouter.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 
 contract DeployDevnet is Script {
     address public entryPoint;
-    address public worldIdGroups;
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
 
     address public constant WORLD_ID = 0x5FbDB2315678afecb367f032d93F642f64180aa3;
-    uint256 constant INITIAL_ROOT = 0x918D46BF52D98B034413F4A1A1C41594E7A7A3F6AE08CB43D1A2A230E1959EF;
+    /// @dev The root of the Test tree.
+    uint256 constant INITIAL_ROOT = 0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
     uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
 
     function run() public {
@@ -48,9 +46,17 @@ contract DeployDevnet is Script {
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (IWorldID(worldIdGroups), IEntryPoint(entryPoint), 30, address(0x123), MAX_PBH_GAS_LIMIT)
+            (
+                IWorldID(WORLD_ID),
+                IEntryPoint(entryPoint),
+                255,
+                address(0x123),
+                MAX_PBH_GAS_LIMIT
+            )
         );
-        pbhEntryPoint = address(new PBHEntryPoint(pbhEntryPointImpl, initCallData));
+        pbhEntryPoint = address(
+            new PBHEntryPoint(pbhEntryPointImpl, initCallData)
+        );
         console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
     }
 
@@ -69,6 +75,5 @@ contract DeployDevnet is Script {
             data
         );
         require(success, "Failed to update WorldID root");
-
     }
 }

@@ -38,7 +38,6 @@ op-alloy-consensus.workspace = true
 ethers-core.workspace = true
 tokio.workspace = true
 semaphore.workspace = true
-chrono.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -50,6 +49,7 @@ rayon.workspace = true
 test-case.workspace = true
 alloy-signer-local.workspace = true
 reth-e2e-test-utils.workspace = true
+chrono.workspace = true
 
 [features]
 default = []

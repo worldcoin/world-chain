@@ -36,7 +36,7 @@ fn main() {
             let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
             let handle = builder
                 .with_types_and_provider::<WorldChainBuilder, BlockchainProvider2<_>>()
-                .with_components(WorldChainBuilder::components(builder_args.clone()))
+                .with_components(world_chain_node.components_builder())
                 .with_add_ons(world_chain_node.add_ons())
                 .extend_rpc_modules(move |ctx| {
                     let provider = ctx.provider().clone();

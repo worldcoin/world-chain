@@ -16,7 +16,7 @@ use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
 use clap::Parser;
 use eyre::eyre::{eyre, Result};
-use fixtures::generate_test_fixture;
+use fixtures::generate_fixture;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
@@ -25,9 +25,9 @@ pub mod cases;
 pub mod fixtures;
 
 #[derive(Parser)]
-struct Args {
-    #[clap(short, long, default_value = "false")]
-    no_deploy: bool,
+pub struct Args {
+    #[clap(short, long, default_value_t = false)]
+    pub no_deploy: bool,
 }
 
 #[tokio::main]
@@ -36,13 +36,11 @@ async fn main() -> Result<()> {
         std::env::set_var("RUST_LOG", "info");
     }
 
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let args = Args::parse();
-    let (builder_rpc, sequencer_rpc) = if !args.no_deploy {
-        start_devnet().await?
-    } else {
-        get_endpoints().await?
-    };
+    let (builder_rpc, sequencer_rpc) = start_devnet(args).await?;
 
     let sequencer_provider =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
@@ -60,25 +58,26 @@ async fn main() -> Result<()> {
     };
     f.await;
 
-    info!("Generating test fixtures");
-    let fixture = generate_test_fixture().await;
-
+    let fixture = generate_fixture(255).await;
     info!("Running block building test");
-    cases::assert_build(builder_provider.clone(), fixture).await?;
+    cases::load_test(builder_provider.clone(), fixture.pbh).await?;
     info!("Running fallback test");
-    cases::assert_fallback(sequencer_provider.clone()).await?;
-
+    cases::fallback_test(sequencer_provider.clone()).await?;
+    info!("Running Load Test");
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     Ok(())
 }
 
-async fn start_devnet() -> Result<(String, String)> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .unwrap()
-        .canonicalize()?;
+async fn start_devnet(args: Args) -> Result<(String, String)> {
+    if !args.no_deploy {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .canonicalize()?;
 
-    run_command(&"just", &["devnet-up"], path).await?;
+        run_command(&"just", &["devnet-up"], path).await?;
+    }
 
     let (builder_socket, sequencer_socket) = get_endpoints().await?;
 
