@@ -22,6 +22,3 @@
 [submodule "contracts/lib/safe-modules"]
 	path = contracts/lib/safe-modules
 	url = https://github.com/worldcoin/safe-modules
-[submodule "contracts/lib/world-id-state-bridge"]
-	path = contracts/lib/world-id-state-bridge
-	url = https://github.com/worldcoin/world-id-state-bridge
