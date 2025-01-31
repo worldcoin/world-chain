@@ -15,7 +15,7 @@ DEFAULT_EL_IMAGES = {
 }
 
 DEFAULT_ENGINE_IMAGES = {
-    "rollup-boost": "0xkitsune/rollup-boost:latest",
+    "rollup-boost": "leytont/rollup-boost:latest",
 }
 
 DEFAULT_CL_IMAGES = {

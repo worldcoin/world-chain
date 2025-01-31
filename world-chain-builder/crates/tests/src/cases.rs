@@ -36,6 +36,7 @@ where
             async move {
                 let tx = builder_provider.send_raw_transaction(tx).await?;
                 let hash = *tx.tx_hash();
+                debug!(hash = ?hash, index = index, "Transaction Sent");
                 let receipt = tx.get_receipt().await;
                 assert!(receipt.is_ok());
                 debug!(
@@ -109,10 +110,12 @@ where
     let tx = &transactions[0];
     let latest = builder_provider.get_block_number().await?;
     let conditions = TransactionConditional {
-        block_number_max: Some(latest + 2),
+        block_number_max: Some(latest + 10),
         block_number_min: Some(latest),
         ..Default::default()
     };
+
+    info!(?conditions, "Sending Transaction with Conditional");
     let builder =
         send_raw_transaction_conditional(tx.clone(), conditions, builder_provider.clone()).await?;
     let hash = *builder.tx_hash();

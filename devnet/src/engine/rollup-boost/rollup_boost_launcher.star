@@ -81,23 +81,22 @@ def get_config(
     sequencer_context,
     builder_context,
 ):
-    L2_EXECUTION_ENGINE_ENDPOINT = "http://{0}:{1}".format(
-        sequencer_context.ip_addr,
-        sequencer_context.engine_rpc_port_num,
-    )
-
-    BUILDER_EXECUTION_ENGINE_ENDPOINT = "http://{0}:{1}".format(
-        builder_context.ip_addr,
-        builder_context.engine_rpc_port_num,
-    )
-
     used_ports = get_used_ports(DISCOVERY_PORT_NUM)
 
     public_ports = {}
     cmd = [
-        "--jwt-path=" + constants.JWT_MOUNT_PATH_ON_CONTAINER,
-        "--l2-url={0}".format(L2_EXECUTION_ENGINE_ENDPOINT),
-        "--builder-url={0}".format(BUILDER_EXECUTION_ENGINE_ENDPOINT),
+        "--builder.http.addr={0}".format(builder_context.ip_addr),
+        "--builder.http.port={0}".format(builder_context.rpc_port_num),
+        "--builder.auth.addr={0}".format(builder_context.ip_addr),
+        "--builder.auth.port={0}".format(builder_context.engine_rpc_port_num),
+        "--builder.authrpc.jwtsecret.path={0}".format(constants.JWT_MOUNT_PATH_ON_CONTAINER),
+        "--builder.timeout=1000",
+        "--l2.http.addr={0}".format(sequencer_context.ip_addr),
+        "--l2.http.port={0}".format(sequencer_context.rpc_port_num),
+        "--l2.auth.addr={0}".format(sequencer_context.ip_addr),
+        "--l2.auth.port={0}".format(sequencer_context.engine_rpc_port_num),
+        "--l2.timeout=1000",
+        "--l2.authrpc.jwtsecret.path={0}".format(constants.JWT_MOUNT_PATH_ON_CONTAINER),
         "--rpc-port={0}".format(RPC_PORT_NUM),
         "--boost-sync",
         "--log-level=debug",

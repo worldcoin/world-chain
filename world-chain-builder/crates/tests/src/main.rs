@@ -59,12 +59,12 @@ async fn main() -> Result<()> {
     f.await;
 
     let fixture = generate_fixture(255).await;
-    info!("Running block building test");
+    info!("Running load test");
     cases::load_test(builder_provider.clone(), fixture.pbh).await?;
+    info!("Running Transact Conditional Test");
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     info!("Running fallback test");
     cases::fallback_test(sequencer_provider.clone()).await?;
-    info!("Running Load Test");
-    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     Ok(())
 }
 

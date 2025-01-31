@@ -14,8 +14,8 @@ pub struct TransactionFixtures {
 /// Generates test fixtures for PBH transactions
 pub async fn generate_fixture(size: u32) -> TransactionFixtures {
     let mut test_fixture = TransactionFixtures::default();
-    for i in 0..=5 {
-        for j in 0..=size {
+    for i in 1..=5 {
+        for j in 0..size {
             test_fixture.pbh.push(
                 PBHTransactionTestContext::raw_pbh_tx_bytes(
                     i,
@@ -31,7 +31,7 @@ pub async fn generate_fixture(size: u32) -> TransactionFixtures {
 
     for j in size..=size + 2 {
         let tx = tx(DEV_CHAIN_ID, None, j as u64, Address::with_last_byte(0x01));
-        let envelope = TransactionTestContext::sign_tx(signer(0), tx).await;
+        let envelope = TransactionTestContext::sign_tx(signer(1), tx).await;
         let raw_tx = envelope.encoded_2718();
         test_fixture.eip1559.push(raw_tx.into());
     }

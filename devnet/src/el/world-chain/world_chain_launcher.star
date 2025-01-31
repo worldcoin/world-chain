@@ -175,6 +175,7 @@ def get_config(
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
+        "--builder.num_pbh_txs=255"
     ]
 
     if len(existing_el_clients) > 0:
