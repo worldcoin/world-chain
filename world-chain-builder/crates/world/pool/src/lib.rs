@@ -9,6 +9,7 @@ pub mod ordering;
 pub mod root;
 pub mod tx;
 pub mod validator;
+pub mod inspector;
 
 #[cfg(any(feature = "test", test))]
 pub mod mock;

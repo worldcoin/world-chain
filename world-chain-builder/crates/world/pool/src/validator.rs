@@ -3,11 +3,16 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHEntryPoint;
+use crate::inspector::CallTracer;
 use crate::tx::WorldChainPoolTransactionError;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::Address;
 use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reth::revm::database::StateProviderDatabase;
+use reth::revm::db::State;
+use reth::revm::{Context, Database, EvmBuilder};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -16,7 +21,8 @@ use reth::transaction_pool::{
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, StateProvider, StateProviderFactory};
+use revm_primitives::{BlockEnv, OptimismFields, TxEnv, U256};
 use semaphore::hash_to_field;
 use world_chain_builder_pbh::payload::PbhPayload;
 
@@ -179,6 +185,40 @@ where
     }
 }
 
+impl<'a, Client, Tx> WorldChainTransactionValidator<Client, Tx>
+where
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+{
+    fn evm(
+        &self,
+        tx: Tx,
+    ) -> reth::revm::Evm<'a, CallTracer, State<StateProviderDatabase<Box<dyn StateProvider>>>> {
+        let state_provider = self
+            .inner
+            .client()
+            .state_by_block_id(BlockId::latest())
+            .unwrap();
+        let state = StateProviderDatabase::new(state_provider);
+        EvmBuilder::default()
+            .with_db(state)
+            .with_block_env(self.block_env())
+            .with_tx_env(self.tx_env(&tx))
+            .with_external_context(CallTracer::new())
+            .append_handler_register(reth::revm::inspector_handle_register)
+            .build()
+    }
+
+    fn block_env(&self) -> BlockEnv {
+        // TODO:
+        BlockEnv::default()
+    }
+
+    fn tx_env(&self, tx: &Tx) -> TxEnv {
+        // TODO:
+        TxEnv::default()
+    }
+}
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
@@ -193,6 +233,12 @@ where
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() != self.pbh_validator {
             return self.inner.validate_one(origin, transaction.clone());
+        }
+
+        let evm = self.evm(transaction.clone());
+        let context = evm.context.external;
+        if !context.is_valid(self.pbh_validator) {
+            return WorldChainPoolTransactionError::MalformedCallTrace.to_outcome(transaction);
         }
 
         let function_signature: [u8; 4] = transaction
