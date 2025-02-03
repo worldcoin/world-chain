@@ -3,6 +3,7 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHEntryPoint;
+use crate::error::WorldChainTransactionPoolError;
 use crate::inspector::CallTracer;
 use crate::tx::WorldChainPoolTransactionError;
 use alloy_consensus::Transaction;
@@ -194,34 +195,32 @@ where
     fn evm(
         &self,
         tx: Tx,
-    ) -> reth::revm::Evm<'_, CallTracer, State<StateProviderDatabase<Box<dyn StateProvider>>>> {
-        let state_provider = self
-            .inner
-            .client()
-            .state_by_block_id(BlockId::latest())
-            .unwrap();
+    ) -> Result<
+        reth::revm::Evm<'_, CallTracer, State<StateProviderDatabase<Box<dyn StateProvider>>>>,
+        WorldChainTransactionPoolError,
+    > {
+        let state_provider = self.inner.client().state_by_block_id(BlockId::latest())?;
         let state = StateProviderDatabase::new(state_provider);
         let db = State::builder()
             .with_database(state)
             .with_bundle_update()
             .build();
-        EvmBuilder::default()
+        Ok(EvmBuilder::default()
             .with_db(db)
-            .with_block_env(self.block_env())
+            .with_block_env(self.block_env()?)
             .with_tx_env(self.tx_env(&tx))
             .with_external_context(CallTracer::new())
             .append_handler_register(reth::revm::inspector_handle_register)
-            .build()
+            .build())
     }
 
-    fn block_env(&self) -> BlockEnv {
+    fn block_env(&self) -> Result<BlockEnv, WorldChainTransactionPoolError> {
         let block = self
             .inner
             .client()
-            .block_by_id(BlockId::latest())
-            .unwrap()
+            .block_by_id(BlockId::latest())?
             .unwrap_or_default();
-        BlockEnv {
+        Ok(BlockEnv {
             number: U256::from(block.number),
             basefee: block.base_fee_per_gas.map(U256::from).unwrap_or_default(),
             timestamp: U256::from(block.timestamp),
@@ -230,7 +229,7 @@ where
             gas_limit: U256::from(block.gas_limit),
             prevrandao: Some(block.mix_hash),
             blob_excess_gas_and_price: None, // EIP-4844 Is not supported
-        }
+        })
     }
 
     fn tx_env(&self, tx: &Tx) -> TxEnv {
@@ -281,7 +280,14 @@ where
             return self.inner.validate_one(origin, transaction.clone());
         }
 
-        let mut evm = self.evm(transaction.clone());
+        let mut evm = match self.evm(transaction.clone()) {
+            Ok(evm) => evm,
+            Err(err) => {
+                return WorldChainPoolTransactionError::EvmError(err.to_string())
+                    .to_outcome(transaction.clone())
+            }
+        };
+
         let _ = evm.transact();
         let context = evm.context.external;
         if !context.is_valid(self.pbh_validator) {

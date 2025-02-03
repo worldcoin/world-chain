@@ -25,5 +25,5 @@ pub enum WorldChainTransactionPoolError {
     #[error(transparent)]
     Database(#[from] DatabaseError),
     #[error(transparent)]
-    RootProvider(#[from] ProviderError),
+    Provider(#[from] ProviderError),
 }

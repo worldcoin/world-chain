@@ -37,6 +37,8 @@ pub enum WorldChainPoolTransactionError {
     InvalidSignatureAggregator,
     #[error("Malformed Call Trace")]
     MalformedCallTrace,
+    #[error("Evm Error {0}")]
+    EvmError(String),
 }
 
 impl WorldChainPoolTransactionError {
