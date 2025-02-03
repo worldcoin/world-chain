@@ -14,6 +14,7 @@ use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
 use reth_optimism_node::txpool::{OpPooledTransaction, OpTransactionValidator};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
+use reth_primitives::Block;
 use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
@@ -254,6 +255,8 @@ pub const TEST_WORLD_ID: Address = address!("047eE5313F98E26Cc8177fA38877cB36292
 pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
+    let block = Block::<OpTransactionSigned>::default();
+    client.add_block(block.hash_slow(), block);
     let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
         .no_shanghai()
         .no_cancun()

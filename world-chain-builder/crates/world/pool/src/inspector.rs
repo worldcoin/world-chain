@@ -14,9 +14,9 @@ impl CallTracer {
     }
 
     /// Checks whether the `pbh_entrypoint` exists within the call stack.
-    /// 
+    ///
     /// Note: This is excluding the target of the transaction from an EOA as the first external call interpreted will be
-    ///       within the call context of a contract. 
+    ///       within the call context of a contract.
     pub fn is_valid(&self, pbh_entrypoint: Address) -> bool {
         self.stack.iter().all(|&addr| addr != pbh_entrypoint)
     }
