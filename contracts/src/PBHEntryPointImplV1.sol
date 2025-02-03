@@ -32,7 +32,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     IEntryPoint public entryPoint;
 
     /// @notice The number of PBH transactions alloted to each World ID per month, 0 indexed.
-    ///         For example, if the pbhNonceLimit is 29, a user can submit 30 PBH txs
+    ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs
     uint8 public numPbhPerMonth;
 
     /// @notice Address of the Multicall3 implementation.
