@@ -15,7 +15,7 @@ contract DeployDevnet is Script {
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
 
-    address internal constant WORLD_ID = 0xE177F37AF0A862A02edFEa4F59C02668E9d0aAA4;
+    address internal constant WORLD_ID = address(0);
     address internal constant MULTICALL3_ADDRESS = 0xcA11bde05977b3631167028862bE2a173976CA11;
     address internal constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     uint256 internal constant MAX_PBH_GAS_LIMIT = 10500000; // 10.5M 70% of 15M
