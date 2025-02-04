@@ -135,7 +135,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///      upgrading. Create a separate initializer function instead.
     ///
     /// @param _worldId The World ID instance that will be used for verifying proofs. If set to the
-    ///        0 addess, then it will be assumed that verification will take place off chain.
+    ///        0 address, then it will be assumed that verification will take place off chain.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
     /// @param multicall3 Address of the Multicall3 implementation.
