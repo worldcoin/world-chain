@@ -5,22 +5,17 @@ use revm_primitives::Address;
 pub struct CallTracer {
     /// A vector of addresses across the call stack.
     pub stack: Vec<Address>,
-    /// Depth of the call stack
-    pub depth: u32,
 }
 
 impl CallTracer {
     /// Creates a new instance [`CallTracer`]
     pub fn new() -> Self {
-        Self {
-            stack: Vec::new(),
-            depth: 0,
-        }
+        Self { stack: Vec::new() }
     }
 
     /// Checks whether the `pbh_entrypoint` exists within the call stack.
     pub fn is_valid(&self, pbh_entrypoint: Address) -> bool {
-        self.stack.iter().all(|&addr| addr != pbh_entrypoint)
+        self.stack[1..].iter().all(|&addr| addr != pbh_entrypoint)
     }
 }
 
@@ -30,10 +25,8 @@ impl<DB: Database> Inspector<DB> for CallTracer {
         _context: &mut reth::revm::EvmContext<DB>,
         inputs: &mut reth::revm::interpreter::CallInputs,
     ) -> Option<reth::revm::interpreter::CallOutcome> {
-        if self.depth != 0 {
-            self.stack.push(inputs.target_address);
-        }
-        self.depth += 1;
+        self.stack.push(inputs.target_address);
+
         None
     }
 }
