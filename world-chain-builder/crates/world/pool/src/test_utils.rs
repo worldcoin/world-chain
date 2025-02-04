@@ -1,4 +1,7 @@
-use alloy_consensus::TxEip1559;
+use std::sync::Arc;
+
+use alloy_consensus::Block;
+use alloy_consensus::{BlockBody, Header, TxEip1559};
 use alloy_eips::eip2930::AccessList;
 use alloy_network::TxSigner;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
@@ -8,13 +11,14 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
 use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::chainspec::MAINNET;
+use reth::chainspec::{ChainSpec, MAINNET};
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::{OpPooledTransaction, OpTransactionValidator};
+use reth_optimism_node::OpEvmConfig;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
-use reth_primitives::Block;
 use revm_primitives::TxKind;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
@@ -253,9 +257,16 @@ pub const PBH_TEST_ENTRYPOINT: Address = address!("7a2088a1bFc9d81c55368AE168C2C
 pub const TEST_WORLD_ID: Address = address!("047eE5313F98E26Cc8177fA38877cB36292D2364");
 
 pub fn world_chain_validator(
-) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig> {
     let client = MockEthProvider::default();
-    let block = Block::<OpTransactionSigned>::default();
+    let header = Header {
+        gas_limit: 20000000,
+        ..Default::default()
+    };
+    let block = Block::<OpTransactionSigned> {
+        header,
+        body: BlockBody::<OpTransactionSigned>::default(),
+    };
     client.add_block(block.hash_slow(), block);
     let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
         .no_shanghai()
@@ -265,6 +276,7 @@ pub fn world_chain_validator(
     let root_validator = WorldChainRootValidator::new(client, TEST_WORLD_ID).unwrap();
     WorldChainTransactionValidator::new(
         validator,
+        OpEvmConfig::new(Arc::new(OpChainSpec::new(ChainSpec::default()))),
         root_validator,
         30,
         PBH_TEST_ENTRYPOINT,

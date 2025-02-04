@@ -59,6 +59,7 @@ type NodeHelperType = NodeAdapter<
                         NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                     WorldChainPooledTransaction,
+                    OpEvmConfig,
                 >,
             >,
             WorldChainOrdering<WorldChainPooledTransaction>,

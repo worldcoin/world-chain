@@ -7,6 +7,7 @@ use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_node::OpEvmConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use tracing::{debug, info};
@@ -74,6 +75,7 @@ where
                     .expect("failed to initialize root validator");
             WorldChainTransactionValidator::new(
                 op_tx_validator,
+                OpEvmConfig::new(ctx.chain_spec()),
                 root_validator,
                 self.num_pbh_txs,
                 self.pbh_entrypoint,

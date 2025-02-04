@@ -6,32 +6,35 @@ use crate::bindings::IPBHEntryPoint;
 use crate::error::WorldChainTransactionPoolError;
 use crate::inspector::CallTracer;
 use crate::tx::WorldChainPoolTransactionError;
-use alloy_consensus::Transaction;
+use alloy_consensus::Header;
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reth::api::ConfigureEvm;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::State;
-use reth::revm::EvmBuilder;
+use reth::revm::{Evm, EvmBuilder};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
 };
+use reth_evm::EvmEnv;
 use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_node::OpEvmConfig;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProvider, StateProviderFactory};
-use revm_primitives::{AuthorizationList, BlockEnv, OptimismFields, TxEnv, U256};
+use revm_primitives::TxEnv;
 use semaphore::hash_to_field;
 use world_chain_builder_pbh::payload::PbhPayload;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S> = Pool<
     TransactionValidationTaskExecutor<
-        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
+        WorldChainTransactionValidator<Client, WorldChainPooledTransaction, OpEvmConfig>,
     >,
     WorldChainOrdering<WorldChainPooledTransaction>,
     S,
@@ -39,26 +42,29 @@ pub type WorldChainTransactionPool<Client, S> = Pool<
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WorldChainTransactionValidator<Client, Tx>
+pub struct WorldChainTransactionValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
     inner: OpTransactionValidator<Client, Tx>,
+    evm_config: EvmConfig,
     root_validator: WorldChainRootValidator<Client>,
     num_pbh_txs: u8,
     pbh_validator: Address,
     pbh_signature_aggregator: Address,
 }
 
-impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
+impl<Client, Tx, EvmConfig> WorldChainTransactionValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
         inner: OpTransactionValidator<Client, Tx>,
+        evm_config: EvmConfig,
         root_validator: WorldChainRootValidator<Client>,
         num_pbh_txs: u8,
         pbh_validator: Address,
@@ -66,6 +72,7 @@ where
     ) -> Self {
         Self {
             inner,
+            evm_config,
             root_validator,
             num_pbh_txs,
             pbh_validator,
@@ -187,16 +194,17 @@ where
     }
 }
 
-impl<'a, Client, Tx> WorldChainTransactionValidator<Client, Tx>
+impl<'a, Client, Tx, EvmConfig> WorldChainTransactionValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     fn evm(
         &self,
-        tx: Tx,
+        tx: &Tx,
     ) -> Result<
-        reth::revm::Evm<'_, CallTracer, State<StateProviderDatabase<Box<dyn StateProvider>>>>,
+        Evm<'_, CallTracer, State<StateProviderDatabase<Box<dyn StateProvider>>>>,
         WorldChainTransactionPoolError,
     > {
         let state_provider = self.inner.client().state_by_block_id(BlockId::latest())?;
@@ -205,69 +213,41 @@ where
             .with_database(state)
             .with_bundle_update()
             .build();
-        Ok(EvmBuilder::default()
+        let evm_env = self.evm_env()?;
+
+        let mut evm = EvmBuilder::default()
             .with_db(db)
-            .with_block_env(self.block_env()?)
-            .with_tx_env(self.tx_env(&tx))
             .with_external_context(CallTracer::new())
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             .append_handler_register(reth::revm::inspector_handle_register)
-            .build())
+            .build();
+
+        *evm.tx_mut() = self.tx_env(tx);
+
+        Ok(evm)
     }
 
-    fn block_env(&self) -> Result<BlockEnv, WorldChainTransactionPoolError> {
+    fn evm_env(&self) -> Result<EvmEnv, WorldChainTransactionPoolError> {
         let block = self
             .inner
             .client()
             .block_by_id(BlockId::latest())?
             .unwrap_or_default();
-        Ok(BlockEnv {
-            number: U256::from(block.number),
-            basefee: block.base_fee_per_gas.map(U256::from).unwrap_or_default(),
-            timestamp: U256::from(block.timestamp),
-            coinbase: block.beneficiary,
-            difficulty: block.difficulty,
-            gas_limit: U256::from(block.gas_limit),
-            prevrandao: Some(block.mix_hash),
-            blob_excess_gas_and_price: None, // EIP-4844 Is not supported
-        })
+        Ok(self.evm_config.cfg_and_block_env(&block.header))
     }
 
     fn tx_env(&self, tx: &Tx) -> TxEnv {
-        let transaction = tx.clone();
-        let consensus = transaction.into_consensus();
-        TxEnv {
-            transact_to: match tx.to() {
-                Some(to) => revm_primitives::TxKind::Call(to),
-                None => revm_primitives::TxKind::Create,
-            },
-            caller: tx.sender(),
-            gas_limit: consensus.gas_limit(),
-            gas_price: consensus.gas_price().map(U256::from).unwrap_or_default(),
-            value: consensus.value(),
-            data: consensus.input().clone(),
-            nonce: Some(consensus.nonce()),
-            chain_id: tx.chain_id(),
-            access_list: consensus
-                .access_list()
-                .map(|list| list.0.clone())
-                .unwrap_or_default(),
-            gas_priority_fee: consensus.max_priority_fee_per_gas().map(U256::from),
-            blob_hashes: consensus
-                .blob_versioned_hashes()
-                .unwrap_or_default()
-                .to_vec(),
-            max_fee_per_blob_gas: consensus.max_fee_per_blob_gas().map(U256::from),
-            authorization_list: Some(AuthorizationList::Signed(
-                consensus.authorization_list().unwrap_or_default().to_vec(),
-            )),
-            optimism: OptimismFields::default(),
-        }
+        self.evm_config
+            .tx_env(tx.clone().into_consensus().tx(), tx.clone().sender())
     }
 }
-impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
+impl<Client, Tx, EvmConfig> TransactionValidator
+    for WorldChainTransactionValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     type Transaction = Tx;
 
@@ -280,17 +260,16 @@ where
             return self.inner.validate_one(origin, transaction.clone());
         }
 
-        let mut evm = match self.evm(transaction.clone()) {
+        let mut evm = match self.evm(&transaction) {
             Ok(evm) => evm,
             Err(err) => {
                 return WorldChainPoolTransactionError::EvmError(err.to_string())
                     .to_outcome(transaction.clone())
             }
         };
-
         let _ = evm.transact();
-        let context = evm.context.external;
-        if !context.is_valid(self.pbh_validator) {
+        let ctx = evm.context.external;
+        if !ctx.is_valid(self.pbh_validator) {
             return WorldChainPoolTransactionError::MalformedCallTrace.to_outcome(transaction);
         }
 
@@ -329,6 +308,7 @@ pub mod tests {
     use ethers_core::rand::{Rng, SeedableRng};
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
+    use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_builder_pbh::date_marker::DateMarker;
@@ -342,7 +322,7 @@ pub mod tests {
     use crate::tx::WorldChainPooledTransaction;
 
     async fn setup() -> Pool<
-        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>,
+        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig>,
         WorldChainOrdering<WorldChainPooledTransaction>,
         InMemoryBlobStore,
     > {

@@ -17,7 +17,10 @@ use reth_chain_state::{
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
+use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::OpEvmConfig;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
     SealedHeader, TransactionMeta, TransactionSigned,
@@ -619,25 +622,30 @@ impl ForkChoiceSubscriptions for WorldChainNoopProvider {
     }
 }
 
-pub struct WorldChainNoopValidator<Client, Tx>
+pub struct WorldChainNoopValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
-    _inner: WorldChainTransactionValidator<Client, Tx>,
+    _inner: WorldChainTransactionValidator<Client, Tx, EvmConfig>,
 }
 
-impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction> {
+impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction, OpEvmConfig> {
     pub fn new(
-        inner: WorldChainTransactionValidator<WorldChainNoopProvider, WorldChainPooledTransaction>,
+        inner: WorldChainTransactionValidator<
+            WorldChainNoopProvider,
+            WorldChainPooledTransaction,
+            OpEvmConfig,
+        >,
     ) -> Self {
         Self { _inner: inner }
     }
 }
 
-impl<Client, Tx> TransactionValidator for WorldChainNoopValidator<Client, Tx>
+impl<Client, Tx, EvmConfig> TransactionValidator for WorldChainNoopValidator<Client, Tx, EvmConfig>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
     Tx: WorldChainPoolTransaction,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     type Transaction = Tx;
 
