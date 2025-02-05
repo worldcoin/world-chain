@@ -1,11 +1,13 @@
 use alloy_consensus::TxEip1559;
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
+use alloy_primitives::aliases::U48;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
+use alloy_signer::SignerSync;
 use alloy_signer_local::coins_bip39::English;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::SolValue;
+use alloy_sol_types::{sol, SolValue};
 use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth::chainspec::MAINNET;
@@ -14,7 +16,7 @@ use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
 use reth_optimism_node::txpool::{OpPooledTransaction, OpTransactionValidator};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
-use revm_primitives::TxKind;
+use revm_primitives::{bytes, fixed_bytes, keccak256, FixedBytes, TxKind};
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
@@ -24,7 +26,7 @@ use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IMulticall3;
-use crate::bindings::IPBHEntryPoint::{self};
+use crate::bindings::IPBHEntryPoint::{self, PBHPayload};
 use crate::mock::MockEthProvider;
 use crate::root::WorldChainRootValidator;
 use crate::tx::WorldChainPooledTransaction;
@@ -32,12 +34,33 @@ use crate::validator::WorldChainTransactionValidator;
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
+pub const DEVNET_ENTRYPOINT: Address = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
+
 pub const PBH_TEST_SIGNATURE_AGGREGATOR: Address =
     address!("5FC8d32690cc91D4c39d9d3abcBD16989F875707");
 
 pub const PBH_TEST_ENTRYPOINT: Address = address!("Dc64a140Aa3E981100a9becA4E685f962f0cF6C9");
 
 pub const TEST_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
+
+sol! {
+    struct EncodedSafeOpStruct {
+        bytes32 typeHash;
+        address safe;
+        uint256 nonce;
+        bytes32 initCodeHash;
+        bytes32 callDataHash;
+        uint128 verificationGasLimit;
+        uint128 callGasLimit;
+        uint256 preVerificationGas;
+        uint128 maxPriorityFeePerGas;
+        uint128 maxFeePerGas;
+        bytes32 paymasterAndDataHash;
+        uint48 validAfter;
+        uint48 validUntil;
+        address entryPoint;
+    }
+}
 
 pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
     let mut tree = LazyPoseidonTree::new(TREE_DEPTH, Field::ZERO);
@@ -156,15 +179,39 @@ pub fn user_op(
     acc: u32,
     #[builder(into, default = U256::ZERO)] nonce: U256,
     #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
+    #[builder(default = Bytes::default())] init_code: Bytes,
+    #[builder(default = bytes!("7bb3742800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))]
+    // abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0))
+    calldata: Bytes,
+    #[builder(default = fixed_bytes!("0000000000000000000000000000ffd300000000000000000000000000000000"))]
+    account_gas_limits: FixedBytes<32>,
+    #[builder(default = U256::from(21000))] pre_verification_gas: U256,
+    #[builder(default = fixed_bytes!("0000000000000000000000000000000100000000000000000000000000000001"))]
+    gas_fees: FixedBytes<32>,
+    #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
     let sender = account(acc);
-
-    let user_op = PackedUserOperation {
+    let signer = signer(acc);
+    let mut user_op = PackedUserOperation {
         sender,
         nonce,
-        ..Default::default()
+        initCode: init_code,
+        callData: calldata,
+        accountGasLimits: account_gas_limits,
+        preVerificationGas: pre_verification_gas,
+        gasFees: gas_fees,
+        paymasterAndData: paymaster_and_data,
+        signature: bytes!("000000000000000000000000"),
     };
 
+    let mut uo_sig = Vec::with_capacity(429);
+    uo_sig.extend_from_slice(&user_op.signature.as_ref());
+    let operation_hash = get_safe_op_hash(user_op.clone());
+    let ecdsa_signature: [u8; 65] = signer
+        .sign_message_sync(&operation_hash.0)
+        .expect("Failed to sign operation hash")
+        .into();
+    uo_sig.extend_from_slice(&ecdsa_signature);
     let signal = crate::eip4337::hash_user_op(&user_op);
 
     let root = TREE.root();
@@ -180,7 +227,14 @@ pub fn user_op(
         proof,
     };
 
+    uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+    user_op.signature = Bytes::from(uo_sig);
     (user_op, payload)
+}
+
+pub fn get_safe_op_hash(user_op: PackedUserOperation) -> FixedBytes<32> {
+    let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
+    keccak256(&encoded_safe_struct.abi_encode())
 }
 
 pub fn pbh_bundle(
@@ -249,6 +303,73 @@ pub fn pbh_multicall(
     };
 
     IPBHEntryPoint::pbhMulticallCall { calls, payload }
+}
+
+impl From<PackedUserOperation> for EncodedSafeOpStruct {
+    fn from(value: PackedUserOperation) -> Self {
+        Self {
+            typeHash: fixed_bytes!(
+                "c03dfc11d8b10bf9cf703d558958c8c42777f785d998c62060d85a4f0ef6ea7f"
+            ),
+            safe: value.sender,
+            nonce: value.nonce,
+            initCodeHash: keccak256(&value.initCode),
+            callDataHash: keccak256(&value.callData),
+            verificationGasLimit: (U256::from_be_bytes(value.accountGasLimits.into())
+                >> U256::from(128))
+            .to(),
+            callGasLimit: (U256::from_be_bytes(value.accountGasLimits.into())
+                & U256::from_str_radix("0xffffffffffffffff", 16).unwrap())
+            .to(),
+            preVerificationGas: value.preVerificationGas,
+            maxPriorityFeePerGas: (U256::from_be_bytes(value.gasFees.into()) >> U256::from(128))
+                .to(),
+            maxFeePerGas: (U256::from_be_bytes(value.gasFees.into())
+                & U256::from_str_radix("0xffffffffffffffff", 16).unwrap())
+            .to(),
+            paymasterAndDataHash: keccak256(&value.paymasterAndData),
+            validUntil: U48::ZERO,
+            validAfter: U48::ZERO,
+            entryPoint: DEVNET_ENTRYPOINT,
+        }
+    }
+}
+
+impl From<PbhPayload> for PBHPayload {
+    fn from(val: PbhPayload) -> Self {
+        let mut p0 = [0; 32];
+        val.proof.0 .0 .0.to_big_endian(&mut p0);
+        let mut p1 = [0; 32];
+        val.proof.0 .0 .1.to_big_endian(&mut p1);
+        let mut p2 = [0; 32];
+        val.proof.0 .1 .0[0].to_big_endian(&mut p2);
+        let mut p3 = [0; 32];
+        val.proof.0 .1 .0[1].to_big_endian(&mut p3);
+        let mut p4 = [0; 32];
+        val.proof.0 .1 .1[0].to_big_endian(&mut p4);
+        let mut p5 = [0; 32];
+        val.proof.0 .1 .1[1].to_big_endian(&mut p5);
+        let mut p6 = [0; 32];
+        val.proof.0 .2 .0.to_big_endian(&mut p6);
+        let mut p7 = [0; 32];
+        val.proof.0 .2 .1.to_big_endian(&mut p7);
+
+        Self {
+            root: val.root,
+            pbhExternalNullifier: val.external_nullifier.to_word(),
+            nullifierHash: val.nullifier_hash,
+            proof: [
+                U256::from_be_bytes(p0),
+                U256::from_be_bytes(p1),
+                U256::from_be_bytes(p2),
+                U256::from_be_bytes(p3),
+                U256::from_be_bytes(p4),
+                U256::from_be_bytes(p5),
+                U256::from_be_bytes(p6),
+                U256::from_be_bytes(p7),
+            ],
+        }
+    }
 }
 
 pub fn world_chain_validator(

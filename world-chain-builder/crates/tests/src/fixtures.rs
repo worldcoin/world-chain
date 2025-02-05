@@ -1,5 +1,6 @@
 use alloy_network::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes};
+use alloy_rpc_types_eth::UserOperation;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
 use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx, DEV_CHAIN_ID};
@@ -8,6 +9,7 @@ use world_chain_builder_pool::test_utils::signer;
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct TransactionFixtures {
     pub pbh: Vec<Bytes>,
+    pub pbh_user_operations: Vec<UserOperation>,
     pub eip1559: Vec<Bytes>,
 }
 
