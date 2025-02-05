@@ -4,7 +4,7 @@ use revm_primitives::{Address, Bytes};
 
 /// Inspector that traces calls into the PBHEntryPoint.
 /// If a tx calls into the PBHEntryPoint from an address that is not the
-/// transaction's caller, the transaction is marked as as invalid.
+/// tx origin, the tx is marked as as invalid.
 pub struct PBHCallTracer {
     pub pbh_entry_point: Address,
 }
