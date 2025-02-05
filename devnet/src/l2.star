@@ -56,6 +56,11 @@ def launch_l2(
         name="mempool_config.json",
     )
 
+    rundler_chain_spec = plan.upload_files(
+        src=rundler_static.RUNDLER_CHAIN_SPEC_FILE_PATH,
+        name="chain_spec.json",
+    )
+
 
     all_l2_participants = participant_network.launch_participant_network(
         plan,
@@ -63,6 +68,7 @@ def launch_l2(
         jwt_file,
         entrypoint_config_file,
         mempool_config_file,
+        rundler_chain_spec,
         network_params,
         el_cl_data,
         gs_private_keys,

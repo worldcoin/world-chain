@@ -13,6 +13,7 @@ def launch_participant_network(
     jwt_file,
     entrypoint_config_file,
     mempool_config_file,
+    chain_spec,
     network_params,
     el_cl_data,
     gs_private_keys,
@@ -81,6 +82,7 @@ def launch_participant_network(
         all_el_contexts[0],
         entrypoint_config_file,
         mempool_config_file,
+        chain_spec,
         el_cl_data
     )
     

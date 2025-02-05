@@ -10,3 +10,8 @@ ENTRYPOINT_CONFIG_FILE_PATH = (
 MEMPOOL_CONFIG_FILE_PATH = (
     STATIC_FILES_DIRPATH + "/rundler/mempool_config.json"
 )
+
+# Rundler Chain Spec
+RUNDLER_CHAIN_SPEC_FILE_PATH = (
+    STATIC_FILES_DIRPATH + "/rundler/chain_spec.json"
+)

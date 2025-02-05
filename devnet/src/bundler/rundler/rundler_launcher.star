@@ -38,6 +38,7 @@ def launch(
     el_context,
     entrypoint_config_file,
     mempool_config_file,
+    chain_spec_file,
     el_cl_genesis_data,
 ):
     rundler_service_name = "{0}".format(service_name)
@@ -49,6 +50,7 @@ def launch(
         el_context,
         entrypoint_config_file,
         mempool_config_file,
+        chain_spec_file,
         el_cl_genesis_data
     )
 
@@ -68,10 +70,12 @@ def get_rundler_config(
     el_context,
     entrypoint_config_file,
     mempool_config_file,
+    chain_spec_file,
     el_cl_genesis_data,
 ):
     cmd = [
         "node",
+        "--chain_spec={0}".format(rundler_constants.CHAIN_SPEC_MOUNT_PATH),
         "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
         "--network={0}".format("dev"),
@@ -91,6 +95,7 @@ def get_rundler_config(
     files = {
         rundler_constants.MEMPOOL_CONFIG_MOUNT: mempool_config_file,
         rundler_constants.ENTRYPOINT_CONFIG_MOUNT: entrypoint_config_file,
+        rundler_constants.CHAIN_SPEC_MOUNT: chain_spec_file,
         ethereum_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS: el_cl_genesis_data,
     }
 
