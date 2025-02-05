@@ -41,7 +41,7 @@ use reth_provider::{
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
+use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
@@ -744,10 +744,13 @@ where
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
+        // TODO:
+        let pbh_entry_point = Address::default();
+        let mut pbh_call_tracer = PBHCallTracer::new(pbh_entry_point);
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
-            PBHCallTracer::new(),
+            &mut pbh_call_tracer,
         );
 
         let mut invalid_txs = vec![];
