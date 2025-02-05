@@ -18,6 +18,10 @@ DEFAULT_ENGINE_IMAGES = {
     "rollup-boost": "leytont/rollup-boost:latest",
 }
 
+DEFAULT_BUNDLER_IMAGES = {
+    "rundler": "leytont/rundler:latest",
+}
+
 DEFAULT_CL_IMAGES = {
     "op-node": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop",
     "hildr": "ghcr.io/optimism-java/hildr:latest",

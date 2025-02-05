@@ -5,6 +5,7 @@ input_parser = import_module("./package_io/input_parser.star")
 static_files = import_module(
     "github.com/ethpandaops/ethereum-package/src/static_files/static_files.star"
 )
+static = import_module("./static/static_files.star")
 
 
 def launch_l2(
@@ -45,10 +46,23 @@ def launch_l2(
         name="op_jwt_file{0}".format(l2_services_suffix),
     )
 
+    entrypoint_config_file = plan.upload_files(
+        src=static_files.ENTRYPOINT_CONFIG_FILEPATH,
+        name="entrypoint_config",
+    )
+
+    mempool_config_file = plan.upload_files(
+        src=static_files.MEMPOOL_CONFIG_FILEPATH,
+        name="mempool_config",
+    )
+
+
     all_l2_participants = participant_network.launch_participant_network(
         plan,
         args_with_right_defaults.participants,
         jwt_file,
+        entrypoint_config_file,
+        mempool_config_file,
         network_params,
         el_cl_data,
         gs_private_keys,

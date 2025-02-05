@@ -38,7 +38,7 @@ world-chain-builder-pool = { path = "crates/world/pool" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
-reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4"}
+reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
@@ -137,7 +137,7 @@ clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
-tracing-subscriber = {version = "0.3.18", features = ["env-filter"]}
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
 derive_more = "1"
 dotenvy = "0.15.7"

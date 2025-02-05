@@ -5,12 +5,14 @@ op_batcher_launcher = import_module("./batcher/op-batcher/op_batcher_launcher.st
 op_proposer_launcher = import_module(
     "github.com/ethpandaops/optimism-package/src/proposer/op-proposer/op_proposer_launcher.star@914a80895376625c8866943b517df47ce4c28170"
 )
-
+rundler_launcher = import_module("./bundler/rundler/rundler_launcher.star")
 
 def launch_participant_network(
     plan,
     participants,
     jwt_file,
+    entrypoint_config_file,
+    mempool_config_file,
     network_params,
     el_cl_data,
     gs_private_keys,
@@ -50,8 +52,6 @@ def launch_participant_network(
 
         all_participants.append(participant_entry)
 
-    plan.print("Point rollup-boost at the op-batcher {0}".format(all_cl_contexts[0]))
-
     op_batcher_launcher.launch(
         plan,
         "op-batcher{0}".format(l2_services_suffix),
@@ -71,5 +71,8 @@ def launch_participant_network(
         gs_private_keys["GS_PROPOSER_PRIVATE_KEY"],
         l2oo_address,
     )
+
+    # Launch Rundler
+    plan.print("Launching Rundler")
 
     return all_participants
