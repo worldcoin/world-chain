@@ -74,5 +74,12 @@ def launch_participant_network(
 
     # Launch Rundler
     plan.print("Launching Rundler")
-
+    rundler_launcher.launch(
+        plan,
+        "rundler{0}".format(l2_services_suffix),
+        input_parser.DEFAULT_BUNDLER_IMAGES["rundler"],
+        all_el_contexts[0],
+        entrypoint_config_file,
+        mempool_config_file,
+    )
     return all_participants

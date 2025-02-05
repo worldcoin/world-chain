@@ -2,26 +2,24 @@ shared_utils = import_module(
     "github.com/ethpandaops/ethereum-package/src/shared_utils/shared_utils.star"
 )
 
-constants = import_module(
+ethereum_constants = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/constants.star"
+)
+
+rundler_constants = import_module(
+    "../../package_io/constants.star"
 )
 
 #
 #  ---------------------------------- Rundler client -------------------------------------
-# The Docker container runs as the "op-batcher" user so we can't write to root
-BATCHER_DATA_DIRPATH_ON_SERVICE_CONTAINER = "/data/op-batcher/op-batcher-data"
 
-# Port IDs
-BATCHER_HTTP_PORT_ID = "http"
+RUNDLER_HTTP_PORT_ID = 8453
+DISCOVERY_PORT_NUM = 30303
 
-# Port nums
-BATCHER_HTTP_PORT_NUM = 8548
-
-
-def get_used_ports():
+def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
-        BATCHER_HTTP_PORT_ID: shared_utils.new_port_spec(
-            BATCHER_HTTP_PORT_NUM,
+        RPC_PORT_ID: shared_utils.new_port_spec(
+            RUNDLER_HTTP_PORT_ID,
             shared_utils.TCP_PROTOCOL,
             shared_utils.HTTP_APPLICATION_PROTOCOL,
         ),
@@ -37,63 +35,64 @@ def launch(
     service_name,
     image,
     el_context,
-    cl_context,
-    l1_config_env_vars,
-    gs_batcher_private_key,
+    entrypoint_config_file,
+    mempool_config_file,
 ):
-    batcher_service_name = "{0}".format(service_name)
+    rundler_service_name = "{0}".format(service_name)
 
-    config = get_batcher_config(
+    config = get_rundler_config(
         plan,
         image,
         service_name,
         el_context,
-        cl_context,
-        l1_config_env_vars,
-        gs_batcher_private_key,
+        entrypoint_config_file,
+        mempool_config_file,
     )
 
-    batcher_service = plan.add_service(service_name, config)
+    rundler_service = plan.add_service(service_name, config)
 
-    batcher_http_port = batcher_service.ports[BATCHER_HTTP_PORT_ID]
-    batcher_http_url = "http://{0}:{1}".format(
-        batcher_service.ip_address, batcher_http_port.number
+    rundler_http_url = "http://{0}:{1}".format(
+        rundler_service.ip_address, RUNDLER_HTTP_PORT_ID
     )
 
     return "op_batcher"
 
 
-def get_batcher_config(
+def get_rundler_config(
     plan,
     image,
     service_name,
     el_context,
-    cl_context,
-    l1_config_env_vars,
-    gs_batcher_private_key,
+    entrypoint_config_file,
+    mempool_config_file,
 ):
     cmd = [
-        "op-batcher",
-        "--l2-eth-rpc=" + el_context.rpc_http_url,
-        "--rollup-rpc=" + cl_context.beacon_http_url,
-        "--poll-interval=1s",
-        "--sub-safety-margin=6",
-        "--num-confirmations=1",
-        "--safe-abort-nonce-too-low-count=3",
-        "--resubmission-timeout=30s",
-        "--rpc.addr=0.0.0.0",
-        "--rpc.port=" + str(BATCHER_HTTP_PORT_NUM),
-        "--rpc.enable-admin",
-        "--max-channel-duration=1",
-        "--l1-eth-rpc=" + l1_config_env_vars["L1_RPC_URL"],
-        "--private-key=" + gs_batcher_private_key,
-        "--data-availability-type=blobs",
+        "node",
+        "--node_http={0}".format(RUNDLER_HTTP_PORT_ID),
+        "--chain_spec", # TODO
+        "--builder.dropped_status_unsupported={0}".format("true"),
+        "--builder.submit.url={0}".format(el_context.rpc_http_url),
+        "--chain.da.gas.oracle={0}".format("LOCAL_BEDROCK"),
+        "--unsafe={0}".format("true"),
+        "--da_gas_tracking_enabled={0}".format("true"),
+        "--entry_point_builders_path={0}".format(rundler_constants.ENTRYPOINT_CONFIG_MOUNT_PATH),
+        "--mempool_config_path={0}".format(rundler_constants.MEMPOOL_CONFIG_MOUNT_PATH),
+        "--min_stake_value={0}".format("1"),
+        "--min_unstake_delay={0}".format("0"),
+        "--disable_entry_point_v0_6={0}".format("true"),
+        "--num_builders_v0_7={0}".format("2"),
     ]
+
+    files = {
+        rundler_constants.CONFIG_MOUNT_PATH: entrypoint_config_file,
+        rundler_constants.CONFIG_MOUNT_PATH: mempool_config_file,
+    }
 
     ports = get_used_ports()
     return ServiceConfig(
         image=image,
         ports=ports,
         cmd=cmd,
-        private_ip_address_placeholder=constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
+        files=files,
+        private_ip_address_placeholder=ethereum_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
     )

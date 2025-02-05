@@ -1,0 +1,3 @@
+CONFIG_MOUNT_PATH = "/config"
+MEMPOOL_CONFIG_MOUNT_PATH = CONFIG_MOUNT_PATH + "/mempool_config.json"
+ENTRYPOINT_CONFIG_MOUNT_PATH = CONFIG_MOUNT_PATH + "/entrypoint_config.json"
