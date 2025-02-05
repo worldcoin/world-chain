@@ -1,5 +1,5 @@
 use reth::revm::{Database, Inspector};
-use revm::interpreter::{self, CallOutcome, Gas, InstructionResult, InterpreterResult};
+use revm::interpreter::{CallOutcome, Gas, InstructionResult, InterpreterResult};
 use revm_primitives::{Address, Bytes};
 
 /// Simple inspector that keeps track of the call stack

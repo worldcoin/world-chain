@@ -39,9 +39,9 @@ use reth_provider::{
     StateProofProvider, StateProviderFactory, StateRootProvider,
 };
 use reth_transaction_pool::error::InvalidPoolTransactionError;
-use reth_transaction_pool::{BestTransactions, PoolTransaction, ValidPoolTransaction};
+use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
+use revm_primitives::{Address, Bytes, EVMError, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
@@ -759,7 +759,7 @@ where
             let pooled_tx = &tx.transaction;
             let consensus_tx = tx.to_consensus();
             if info.is_tx_over_limits(
-                &consensus_tx.tx(),
+                consensus_tx.tx(),
                 block_gas_limit,
                 tx_da_limit,
                 block_da_limit,
