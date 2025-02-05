@@ -74,17 +74,17 @@ def get_rundler_config(
         "node",
         "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
-        "--chain_spec={0}".format(ethereum_constants.GENESIS_CONFIG_MOUNT_PATH_ON_CONTAINER + "/genesis.json"),
-        "--builder.dropped_status_unsupported={0}".format("true"),
-        "--builder.submit.url={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
-        "--chain.da.gas.oracle={0}".format("LOCAL_BEDROCK"),
-        "--unsafe={0}".format("true"),
-        "--da_gas_tracking_enabled={0}".format("true"),
+        "--network={0}".format("dev"),
+        "--builder.dropped_status_unsupported",
+        "--builder.submit_url={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
+        # "--chain.da.gas.oracle={0}".format("LOCAL_BEDROCK"), # TODO: Ask Dan C. about this
+        "--unsafe",
+        "--da_gas_tracking_enabled",
         "--entry_point_builders_path={0}".format(rundler_constants.ENTRYPOINT_CONFIG_MOUNT_PATH),
         "--mempool_config_path={0}".format(rundler_constants.MEMPOOL_CONFIG_MOUNT_PATH),
         "--min_stake_value={0}".format("1"),
         "--min_unstake_delay={0}".format("0"),
-        "--disable_entry_point_v0_6={0}".format("true"),
+        "--disable_entry_point_v0_6",
         "--num_builders_v0_7={0}".format("2"),
     ]
 

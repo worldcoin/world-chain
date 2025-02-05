@@ -21,6 +21,8 @@ use crate::run_command;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
+// TODO: `eth_sendUserOperation` test cases
+
 /// Sends a high volume of transactions to the builder concurrently.
 pub async fn load_test<T, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
 where
