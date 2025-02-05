@@ -1,8 +1,8 @@
 use alloy_network::eip2718::Encodable2718;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
-use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext, DEV_CHAIN_ID};
+use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx, DEV_CHAIN_ID};
 use world_chain_builder_pool::test_utils::signer;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -16,16 +16,9 @@ pub async fn generate_fixture(size: u32) -> TransactionFixtures {
     let mut test_fixture = TransactionFixtures::default();
     for i in 1..=5 {
         for j in 0..size {
-            test_fixture.pbh.push(
-                PBHTransactionTestContext::raw_pbh_tx_bytes(
-                    i,
-                    j as u8,
-                    j as u64,
-                    U256::from(j),
-                    DEV_CHAIN_ID,
-                )
-                .await,
-            );
+            test_fixture
+                .pbh
+                .push(raw_pbh_multicall_bytes(i, j as u8, j as u64, DEV_CHAIN_ID).await);
         }
     }
 
