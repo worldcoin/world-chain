@@ -2,7 +2,9 @@ use reth::revm::{Database, Inspector};
 use revm::interpreter::{CallOutcome, Gas, InstructionResult, InterpreterResult};
 use revm_primitives::{Address, Bytes};
 
-/// Simple inspector that keeps track of the call stack
+/// Inspector that traces calls into the PBHEntryPoint.
+/// If a tx calls into the PBHEntryPoint from an address that is not the
+/// transaction's caller, the transaction is marked as as invalid.
 pub struct PBHCallTracer {
     pub pbh_entry_point: Address,
 }
@@ -16,17 +18,20 @@ impl PBHCallTracer {
 impl<DB: Database> Inspector<DB> for PBHCallTracer {
     fn call(
         &mut self,
-        _context: &mut reth::revm::EvmContext<DB>,
+        context: &mut reth::revm::EvmContext<DB>,
         inputs: &mut reth::revm::interpreter::CallInputs,
     ) -> Option<reth::revm::interpreter::CallOutcome> {
+        // Check if the target address is the PBHEntryPoint. If the caller is not the tx origin, mark the tx as invalid.
         if inputs.target_address == self.pbh_entry_point {
-            let interpreter_res = InterpreterResult::new(
-                InstructionResult::InvalidEXTCALLTarget,
-                Bytes::default(),
-                Gas::default(),
-            );
+            if inputs.caller != context.env.tx.caller {
+                let interpreter_res = InterpreterResult::new(
+                    InstructionResult::InvalidEXTCALLTarget,
+                    Bytes::default(),
+                    Gas::default(),
+                );
 
-            return Some(CallOutcome::new(interpreter_res, 0..0));
+                return Some(CallOutcome::new(interpreter_res, 0..0));
+            }
         }
 
         None
