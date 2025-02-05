@@ -81,5 +81,7 @@ def launch_participant_network(
         all_el_contexts[0],
         entrypoint_config_file,
         mempool_config_file,
+        el_cl_data
     )
+    
     return all_participants

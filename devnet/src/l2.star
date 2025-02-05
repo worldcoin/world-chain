@@ -5,7 +5,7 @@ input_parser = import_module("./package_io/input_parser.star")
 static_files = import_module(
     "github.com/ethpandaops/ethereum-package/src/static_files/static_files.star"
 )
-static = import_module("./static/static_files.star")
+rundler_static = import_module("./static/static_files.star")
 
 
 def launch_l2(
@@ -47,13 +47,13 @@ def launch_l2(
     )
 
     entrypoint_config_file = plan.upload_files(
-        src=static_files.ENTRYPOINT_CONFIG_FILEPATH,
-        name="entrypoint_config",
+        src=rundler_static.ENTRYPOINT_CONFIG_FILE_PATH,
+        name="entrypoint_config.json",
     )
 
     mempool_config_file = plan.upload_files(
-        src=static_files.MEMPOOL_CONFIG_FILEPATH,
-        name="mempool_config",
+        src=rundler_static.MEMPOOL_CONFIG_FILE_PATH,
+        name="mempool_config.json",
     )
 
 

@@ -15,6 +15,7 @@ rundler_constants = import_module(
 
 RUNDLER_HTTP_PORT_ID = 8453
 DISCOVERY_PORT_NUM = 30303
+RPC_PORT_ID = "http"
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -37,6 +38,7 @@ def launch(
     el_context,
     entrypoint_config_file,
     mempool_config_file,
+    el_cl_genesis_data,
 ):
     rundler_service_name = "{0}".format(service_name)
 
@@ -47,6 +49,7 @@ def launch(
         el_context,
         entrypoint_config_file,
         mempool_config_file,
+        el_cl_genesis_data
     )
 
     rundler_service = plan.add_service(service_name, config)
@@ -65,13 +68,15 @@ def get_rundler_config(
     el_context,
     entrypoint_config_file,
     mempool_config_file,
+    el_cl_genesis_data,
 ):
     cmd = [
         "node",
-        "--node_http={0}".format(RUNDLER_HTTP_PORT_ID),
-        "--chain_spec", # TODO
+        "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
+        "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
+        "--chain_spec={0}".format(ethereum_constants.GENESIS_CONFIG_MOUNT_PATH_ON_CONTAINER + "/genesis.json"),
         "--builder.dropped_status_unsupported={0}".format("true"),
-        "--builder.submit.url={0}".format(el_context.rpc_http_url),
+        "--builder.submit.url={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--chain.da.gas.oracle={0}".format("LOCAL_BEDROCK"),
         "--unsafe={0}".format("true"),
         "--da_gas_tracking_enabled={0}".format("true"),
@@ -84,8 +89,9 @@ def get_rundler_config(
     ]
 
     files = {
-        rundler_constants.CONFIG_MOUNT_PATH: entrypoint_config_file,
-        rundler_constants.CONFIG_MOUNT_PATH: mempool_config_file,
+        rundler_constants.MEMPOOL_CONFIG_MOUNT: mempool_config_file,
+        rundler_constants.ENTRYPOINT_CONFIG_MOUNT: entrypoint_config_file,
+        ethereum_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS: el_cl_genesis_data,
     }
 
     ports = get_used_ports()
