@@ -19,6 +19,7 @@ use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_trie_db::MerklePatriciaTrie;
+use revm_primitives::Address;
 use world_chain_builder_pool::builder::WorldChainPoolBuilder;
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
 
@@ -97,6 +98,7 @@ impl WorldChainBuilder {
             .payload(WorldChainPayloadBuilder::new(
                 compute_pending_block,
                 verified_blockspace_capacity,
+                pbh_entrypoint,
             ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
@@ -171,14 +173,20 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub best_transactions: Txs,
     // TODO:
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
 }
 
 impl WorldChainPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag.
-    pub const fn new(compute_pending_block: bool, verified_blockspace_capacity: u8) -> Self {
+    pub const fn new(
+        compute_pending_block: bool,
+        verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+    ) -> Self {
         Self {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
             best_transactions: (),
         }
     }
@@ -197,12 +205,14 @@ where
         let Self {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
             ..
         } = self;
 
         WorldChainPayloadBuilder {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
             best_transactions,
         }
     }
@@ -230,6 +240,7 @@ where
         let payload_builder = world_chain_builder_payload::builder::WorldChainPayloadBuilder::new(
             evm_config,
             self.verified_blockspace_capacity,
+            self.pbh_entry_point,
         )
         .with_transactions(self.best_transactions)
         .set_compute_pending_block(self.compute_pending_block);

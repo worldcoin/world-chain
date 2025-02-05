@@ -54,26 +54,38 @@ use crate::inspector::PBHCallTracer;
 pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
     pub inner: OpPayloadBuilder<EvmConfig, Tx>,
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
 }
 
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    pub fn new(evm_config: EvmConfig, verified_blockspace_capacity: u8) -> Self {
-        Self::with_builder_config(evm_config, Default::default(), verified_blockspace_capacity)
+    pub fn new(
+        evm_config: EvmConfig,
+        verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+    ) -> Self {
+        Self::with_builder_config(
+            evm_config,
+            Default::default(),
+            verified_blockspace_capacity,
+            pbh_entry_point,
+        )
     }
 
     pub const fn with_builder_config(
         evm_config: EvmConfig,
         builder_config: OpBuilderConfig,
         verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(evm_config, builder_config);
 
         Self {
             inner,
             verified_blockspace_capacity,
+            pbh_entry_point,
         }
     }
 }
@@ -92,6 +104,7 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
         let Self {
             inner,
             verified_blockspace_capacity,
+            pbh_entry_point,
         } = self;
 
         let OpPayloadBuilder {
@@ -109,6 +122,7 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
                 config,
             },
             verified_blockspace_capacity,
+            pbh_entry_point,
         }
     }
 
@@ -171,6 +185,7 @@ where
                 best_payload,
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
             client,
         };
 
@@ -246,6 +261,7 @@ where
                 best_payload: Default::default(),
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
             client,
         };
 
@@ -576,6 +592,7 @@ where
 pub struct WorldChainPayloadBuilderCtx<EvmConfig, Client> {
     pub inner: OpPayloadBuilderCtx<EvmConfig>,
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
     pub client: Client,
 }
 
@@ -744,9 +761,8 @@ where
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
-        // TODO:
         let pbh_entry_point = Address::default();
-        let mut pbh_call_tracer = PBHCallTracer::new(pbh_entry_point);
+        let mut pbh_call_tracer = PBHCallTracer::new(self.pbh_entry_point);
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
