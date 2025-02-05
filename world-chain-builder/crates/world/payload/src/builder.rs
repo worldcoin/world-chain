@@ -41,7 +41,7 @@ use reth_provider::{
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{Address, Bytes, EVMError, ResultAndState, B256, U256};
+use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
@@ -859,15 +859,20 @@ where
                 Err(err) => {
                     match err {
                         EVMError::Transaction(err) => {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(
-                                &tx,
-                                InvalidPoolTransactionError::Other(Box::new(
-                                    WorldChainPoolTransactionError::from(err),
-                                )),
-                            );
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                                best_txs.mark_invalid(
+                                    &tx,
+                                    InvalidPoolTransactionError::Other(Box::new(
+                                        WorldChainPoolTransactionError::from(err),
+                                    )),
+                                );
+                            }
 
                             continue;
                         }
