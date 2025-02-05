@@ -99,6 +99,7 @@ impl WorldChainBuilder {
                 compute_pending_block,
                 verified_blockspace_capacity,
                 pbh_entrypoint,
+                signature_aggregator,
             ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
@@ -174,6 +175,7 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     // TODO:
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
 }
 
 impl WorldChainPayloadBuilder {
@@ -182,11 +184,13 @@ impl WorldChainPayloadBuilder {
         compute_pending_block: bool,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
+        pbh_signature_aggregator: Address,
     ) -> Self {
         Self {
             compute_pending_block,
             verified_blockspace_capacity,
             pbh_entry_point,
+            pbh_signature_aggregator,
             best_transactions: (),
         }
     }
@@ -206,6 +210,7 @@ where
             compute_pending_block,
             verified_blockspace_capacity,
             pbh_entry_point,
+            pbh_signature_aggregator,
             ..
         } = self;
 
@@ -214,6 +219,7 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             best_transactions,
+            pbh_signature_aggregator,
         }
     }
 
@@ -241,6 +247,7 @@ where
             evm_config,
             self.verified_blockspace_capacity,
             self.pbh_entry_point,
+            self.pbh_signature_aggregator,
         )
         .with_transactions(self.best_transactions)
         .set_compute_pending_block(self.compute_pending_block);
