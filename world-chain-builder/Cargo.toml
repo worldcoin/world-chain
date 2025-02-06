@@ -123,6 +123,9 @@ revm-primitives = { version = "15.1.0", default-features = false }
 jsonrpsee = { version = "0.24", features = ["server", "client", "macros"] }
 jsonrpsee-types = "0.24"
 
+# rundler
+rundler-types = { git = "https://github.com/alchemyplatform/rundler.git", version = "0.4.0"}
+
 # 3rd party
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

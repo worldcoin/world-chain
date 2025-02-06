@@ -3,6 +3,7 @@ use world_chain_builder_pbh::{
     external_nullifier::ExternalNullifier,
     payload::{PbhPayload, Proof},
 };
+use serde::{Deserialize, Serialize};
 use IPBHEntryPoint::PBHPayload;
 
 sol! {
@@ -16,7 +17,7 @@ sol! {
     }
 
     contract IEntryPoint {
-        #[derive(Default)]
+        #[derive(Default, Serialize, Deserialize, Debug)]
         struct PackedUserOperation {
             address sender;
             uint256 nonce;

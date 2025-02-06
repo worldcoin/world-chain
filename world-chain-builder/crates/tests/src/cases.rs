@@ -8,20 +8,35 @@ use alloy_primitives::Bytes;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
+use alloy_rpc_types_eth::PackedUserOperation;
 use alloy_transport::Transport;
 use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use rundler_types::v0_7::UserOperation;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
+use world_chain_builder_pool::test_utils::PBH_TEST_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
-// TODO: `eth_sendUserOperation` test cases
+// `eth_sendUserOperation` test cases
+pub async fn user_ops_test<T, P>(
+    bundler_provider: Arc<P>,
+    user_operations: Vec<PackedUserOperation>,
+) -> Result<()>
+where
+    T: Transport + Clone,
+    P: Provider<T>,
+{
+    let uo = &user_operations[0];
+
+    Ok(())
+}
 
 /// Sends a high volume of transactions to the builder concurrently.
 pub async fn load_test<T, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
@@ -35,6 +50,7 @@ where
         .map(Ok)
         .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, tx)| {
             let builder_provider = builder_provider_clone.clone();
+
             async move {
                 let tx = builder_provider.send_raw_transaction(tx).await?;
                 let hash = *tx.tx_hash();

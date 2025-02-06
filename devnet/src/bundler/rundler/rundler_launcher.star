@@ -15,7 +15,7 @@ rundler_constants = import_module(
 
 RUNDLER_HTTP_PORT_ID = 8453
 DISCOVERY_PORT_NUM = 30303
-RPC_PORT_ID = "http"
+RPC_PORT_ID = "rpc"
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {

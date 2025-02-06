@@ -1,7 +1,7 @@
 use alloy_consensus::TxEip1559;
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
-use alloy_primitives::aliases::U48;
+use alloy_primitives::aliases::{U192, U48};
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer::SignerSync;
@@ -20,6 +20,7 @@ use revm_primitives::{bytes, fixed_bytes, keccak256, FixedBytes, TxKind};
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
+use std::str::FromStr;
 use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
@@ -33,6 +34,8 @@ use crate::tx::WorldChainPooledTransaction;
 use crate::validator::WorldChainTransactionValidator;
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
+
+pub const PBH_NONCE_KEY: U256 = U256::from_limbs([1123123123, 0, 0, 0]);
 
 pub const DEVNET_ENTRYPOINT: Address = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
 
@@ -191,10 +194,9 @@ pub fn user_op(
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
     let sender = account(acc);
-    let signer = signer(acc);
     let mut user_op = PackedUserOperation {
         sender,
-        nonce,
+        nonce: (PBH_NONCE_KEY << 64) | nonce,
         initCode: init_code,
         callData: calldata,
         accountGasLimits: account_gas_limits,
@@ -204,14 +206,14 @@ pub fn user_op(
         signature: bytes!("000000000000000000000000"),
     };
 
-    let mut uo_sig = Vec::with_capacity(429);
-    uo_sig.extend_from_slice(&user_op.signature.as_ref());
     let operation_hash = get_safe_op_hash(user_op.clone());
+
+    let signer = signer(acc);
     let ecdsa_signature: [u8; 65] = signer
         .sign_message_sync(&operation_hash.0)
         .expect("Failed to sign operation hash")
         .into();
-    uo_sig.extend_from_slice(&ecdsa_signature);
+
     let signal = crate::eip4337::hash_user_op(&user_op);
 
     let root = TREE.root();
@@ -227,8 +229,14 @@ pub fn user_op(
         proof,
     };
 
+    let mut uo_sig = Vec::with_capacity(429);
+
+    uo_sig.extend_from_slice(&user_op.signature.as_ref());
+    uo_sig.extend_from_slice(&ecdsa_signature);
     uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+
     user_op.signature = Bytes::from(uo_sig);
+
     (user_op, payload)
 }
 
@@ -319,13 +327,13 @@ impl From<PackedUserOperation> for EncodedSafeOpStruct {
                 >> U256::from(128))
             .to(),
             callGasLimit: (U256::from_be_bytes(value.accountGasLimits.into())
-                & U256::from_str_radix("0xffffffffffffffff", 16).unwrap())
+                & U256::from_str("0xffffffffffffffff").unwrap())
             .to(),
             preVerificationGas: value.preVerificationGas,
             maxPriorityFeePerGas: (U256::from_be_bytes(value.gasFees.into()) >> U256::from(128))
                 .to(),
             maxFeePerGas: (U256::from_be_bytes(value.gasFees.into())
-                & U256::from_str_radix("0xffffffffffffffff", 16).unwrap())
+                & U256::from_str("0xffffffffffffffff").unwrap())
             .to(),
             paymasterAndDataHash: keccak256(&value.paymasterAndData),
             validUntil: U48::ZERO,
@@ -368,6 +376,28 @@ impl From<PbhPayload> for PBHPayload {
                 U256::from_be_bytes(p6),
                 U256::from_be_bytes(p7),
             ],
+        }
+    }
+}
+
+impl Into<rundler_types::v0_7::UserOperation> for PackedUserOperation {
+    fn into(self) -> rundler_types::v0_7::UserOperation {
+        rundler_types::v0_7::UserOperation {
+            sender: self.sender,
+            nonce: self.nonce,
+            factory: None,
+            call_data: self.callData,
+            factory_data: None,
+            verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                >> U256::from(128)).to(),
+            call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                & U256::from_str("0xffffffffffffffff").unwrap()).to(),
+            pre_verification_gas: self.preVerificationGas,
+            max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
+                .to(),
+            max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
+                & U256::from_str("0xffffffffffffffff").unwrap()).to(),
+            signature: self.signature,
         }
     }
 }
