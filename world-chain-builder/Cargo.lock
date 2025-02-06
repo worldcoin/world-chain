@@ -13647,6 +13647,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "alloy-sol-types",
+ "color-eyre",
  "op-alloy-consensus",
  "reth",
  "reth-basic-payload-builder",

@@ -47,3 +47,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-sol-types.workspace = true
+eyre.workspace = true

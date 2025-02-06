@@ -47,9 +47,24 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use alloy_sol_types::sol;
-    use revm::db::{CacheDB, EmptyDB};
-    use revm_primitives::{AccountInfo, Address, Bytecode, Bytes};
+    use reth::chainspec::ChainSpec;
+    use reth_evm::{ConfigureEvm, Evm, EvmEnv};
+    use reth_optimism_chainspec::OpChainSpec;
+    use reth_optimism_node::OpEvmConfig;
+    use revm::{
+        db::{CacheDB, EmptyDB},
+        interpreter::InstructionResult,
+        Evm,
+    };
+    use revm_primitives::{AccountInfo, Address, Bytecode, Bytes, ResultAndState, TxEnv};
+    use world_chain_builder_pool::test_utils::{
+        PBH_TEST_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR,
+    };
+
+    use super::PBHCallTracer;
 
     sol! {
         #[sol(deployed_bytecode = "0x6080604052348015600e575f5ffd5b50600436106026575f3560e01c80636141dc4514602a575b5f5ffd5b00fea2646970667358221220917e21c9fc8f2dee4028f58077369f9d9ef7b24ebf15a19ca2704442c89c40d164736f6c634300081c0033")]
@@ -84,6 +99,21 @@ mod tests {
         db.insert_account_info(multicall3, info);
 
         (mock_pbh_entry_point, multicall3)
+    }
+
+    fn execute_tx(
+        db: &mut CacheDB<EmptyDB>,
+        tx: TxEnv,
+        pbh_entry_point: Address,
+        signature_aggregator: Address,
+    ) -> eyre::Result<ResultAndState> {
+        let chain_spec = Arc::new(OpChainSpec::new(ChainSpec::default()));
+
+        let pbh_tracer = PBHCallTracer::new(pbh_entry_point, signature_aggregator);
+        let evm_config = OpEvmConfig::new(chain_spec);
+        let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
+
+        Ok(evm.transact(tx)?)
     }
 
     #[test]
