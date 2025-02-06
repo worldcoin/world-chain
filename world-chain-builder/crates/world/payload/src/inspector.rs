@@ -50,7 +50,7 @@ mod tests {
     use std::{default, sync::Arc};
 
     use alloy_consensus::{serde_bincode_compat::TxLegacy, Transaction, TypedTransaction};
-    use alloy_network::{transaction::signer::TxSigner, TxSigner};
+    use alloy_network::TxSigner;
     use alloy_signer::Signer;
     use alloy_signer_local::{LocalSigner, PrivateKeySigner};
     use alloy_sol_types::{sol, SolCall};
@@ -111,7 +111,8 @@ mod tests {
 
     fn execute_tx(
         db: &mut CacheDB<EmptyDB>,
-        tx: Recovered<OpTransactionSigned>,
+        tx: OpTransactionSigned,
+        signer: Address,
         pbh_entry_point: Address,
         signature_aggregator: Address,
     ) -> eyre::Result<ResultAndState> {
@@ -125,17 +126,17 @@ mod tests {
             ..Default::default()
         };
 
-        db.insert_account_info(tx.signer(), info);
+        db.insert_account_info(signer, info);
 
         let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
 
-        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
+        let tx_env = evm_config.tx_env(&tx, signer);
 
         Ok(evm.transact(tx_env)?)
     }
 
-    #[test]
-    fn test_tx_origin_is_caller() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_tx_origin_is_caller() -> eyre::Result<()> {
         let mut db = CacheDB::default();
         let (mock_pbh_entry_point, _) = deploy_contracts(&mut db);
 
@@ -150,8 +151,20 @@ mod tests {
             .build_consensus_tx()
             .expect("Could not build tx");
 
-        let mut tx = tx_request.eip1559().expect("Could not build EIP-1559 tx");
-        signer.sign_transaction(tx);
+        let mut tx = tx_request
+            .eip1559()
+            .expect("Could not build EIP-1559 tx")
+            .to_owned();
+        let signature = signer.sign_transaction(&mut tx).await?;
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx), signature);
+
+        let result_and_state = execute_tx(
+            &mut db,
+            tx,
+            signer.address(),
+            mock_pbh_entry_point,
+            Address::random(),
+        )?;
 
         Ok(())
     }

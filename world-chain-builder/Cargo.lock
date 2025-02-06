@@ -13667,6 +13667,7 @@ dependencies = [
  "reth-transaction-pool",
  "revm",
  "revm-primitives",
+ "tokio",
  "tracing",
  "world-chain-builder-pool",
  "world-chain-builder-rpc",
