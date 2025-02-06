@@ -36,8 +36,6 @@ alloy-signer = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
-rundler-types = { workspace = true, optional = true }
-
 # 3rd party
 ethers-core.workspace = true
 tokio.workspace = true
@@ -66,7 +64,6 @@ test = [
     "dep:alloy-signer-local",
     "dep:alloy-signer",
     "dep:alloy-network",
-    "dep:rundler-types",
     "dep:bon",
 ]
 

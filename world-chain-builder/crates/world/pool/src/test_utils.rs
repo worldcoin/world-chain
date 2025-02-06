@@ -1,7 +1,7 @@
 use alloy_consensus::TxEip1559;
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
-use alloy_primitives::aliases::{U192, U48};
+use alloy_primitives::aliases::U48;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
 use alloy_rlp::Encodable;
 use alloy_signer::SignerSync;
@@ -188,14 +188,13 @@ pub fn user_op(
     calldata: Bytes,
     #[builder(default = fixed_bytes!("0000000000000000000000000000ffd300000000000000000000000000000000"))]
     account_gas_limits: FixedBytes<32>,
-    #[builder(default = U256::from(21000))] pre_verification_gas: U256,
+    #[builder(default = U256::from(50221))] pre_verification_gas: U256,
     #[builder(default = fixed_bytes!("0000000000000000000000000000000100000000000000000000000000000001"))]
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
-    let sender = account(acc);
     let mut user_op = PackedUserOperation {
-        sender,
+        sender: address!("A51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0"),
         nonce: (PBH_NONCE_KEY << 64) | nonce,
         initCode: init_code,
         callData: calldata,
@@ -380,24 +379,31 @@ impl From<PbhPayload> for PBHPayload {
     }
 }
 
-impl Into<rundler_types::v0_7::UserOperation> for PackedUserOperation {
-    fn into(self) -> rundler_types::v0_7::UserOperation {
-        rundler_types::v0_7::UserOperation {
+impl Into<alloy_rpc_types::PackedUserOperation> for PackedUserOperation {
+    fn into(self) -> alloy_rpc_types::PackedUserOperation {
+        alloy_rpc_types::PackedUserOperation {
             sender: self.sender,
             nonce: self.nonce,
             factory: None,
             call_data: self.callData,
             factory_data: None,
             verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
-                >> U256::from(128)).to(),
+                >> U256::from(128))
+            .to(),
             call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
-                & U256::from_str("0xffffffffffffffff").unwrap()).to(),
+                & U256::from_str("0xffffffffffffffff").unwrap())
+            .to(),
             pre_verification_gas: self.preVerificationGas,
             max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
                 .to(),
             max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
-                & U256::from_str("0xffffffffffffffff").unwrap()).to(),
+                & U256::from_str("0xffffffffffffffff").unwrap())
+            .to(),
             signature: self.signature,
+            paymaster: None,
+            paymaster_data: None,
+            paymaster_post_op_gas_limit: None,
+            paymaster_verification_gas_limit: None,
         }
     }
 }

@@ -163,9 +163,7 @@ contract DeployDevnet is Script {
 
             // Cast proxy to Safe for easier interaction
             Safe safe = Safe(payable(address(proxy)));
-
-            // Stake 0.1 ETH to the Safe
-            IEntryPoint(entryPoint).depositTo{value: 0.1 ether}(address(safe));
+            IEntryPoint(entryPoint).depositTo{value: 1 ether}(address(safe));
         }
     }
 

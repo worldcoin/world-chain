@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -5,19 +6,20 @@ use std::time::Instant;
 use alloy_network::Network;
 use alloy_primitives::hex;
 use alloy_primitives::Bytes;
+use alloy_primitives::B256;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use alloy_rpc_types_eth::PackedUserOperation;
 use alloy_transport::Transport;
 use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use rundler_types::v0_7::UserOperation;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
+use world_chain_builder_pool::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_builder_pool::test_utils::DEVNET_ENTRYPOINT;
 use world_chain_builder_pool::test_utils::PBH_TEST_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
@@ -33,8 +35,16 @@ where
     T: Transport + Clone,
     P: Provider<T>,
 {
-    let uo = &user_operations[0];
-
+    let uo: alloy_rpc_types_eth::PackedUserOperation = user_operations[0].clone().into();
+    info!(?uo, "Sending User Operation");
+    // TODO: Should this take Option<SignatureAggregator>?
+    let res: B256 = bundler_provider
+        .raw_request(
+            Cow::Borrowed("eth_sendUserOperation"),
+            (uo, DEVNET_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR),
+        )
+        .await?;
+    info!(?res, "User Operation Sent");
     Ok(())
 }
 

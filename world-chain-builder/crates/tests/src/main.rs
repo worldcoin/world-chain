@@ -46,8 +46,7 @@ async fn main() -> Result<()> {
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
     let builder_provider =
         Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
-    // let rundler_provider =
-    //     Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
+    let rundler_provider = Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
     let timeout = std::time::Duration::from_secs(30);
 
     info!("Waiting for the devnet to be ready");
@@ -61,11 +60,12 @@ async fn main() -> Result<()> {
 
     let fixture = TransactionFixtures::new().await;
     info!("Running load test");
-    cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
-    info!("Running Transact Conditional Test");
-    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
-    info!("Running fallback test");
-    cases::fallback_test(sequencer_provider.clone()).await?;
+    cases::user_ops_test(rundler_provider, fixture.pbh_user_operations).await?;
+    // cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
+    // info!("Running Transact Conditional Test");
+    // cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
+    // info!("Running fallback test");
+    // cases::fallback_test(sequencer_provider.clone()).await?;
     Ok(())
 }
 

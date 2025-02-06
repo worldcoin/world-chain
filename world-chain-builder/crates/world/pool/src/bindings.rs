@@ -1,9 +1,9 @@
 use alloy_sol_types::sol;
+use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::{
     external_nullifier::ExternalNullifier,
     payload::{PbhPayload, Proof},
 };
-use serde::{Deserialize, Serialize};
 use IPBHEntryPoint::PBHPayload;
 
 sol! {
