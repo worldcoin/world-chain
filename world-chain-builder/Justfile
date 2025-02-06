@@ -13,8 +13,8 @@ fmt-fix:
 fmt-check:
   cargo +nightly fmt --all -- --check
 
-e2e-test:
-    RUST_LOG=info cargo run -p tests --release 
+e2e-test *args='':
+    RUST_LOG=debug cargo run -p tests --release -- $@
 
 install *args='':
   cargo install --path crates/world/bin --locked $@

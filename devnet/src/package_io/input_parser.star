@@ -15,7 +15,7 @@ DEFAULT_EL_IMAGES = {
 }
 
 DEFAULT_ENGINE_IMAGES = {
-    "rollup-boost": "flashbots/rollup-boost:0.3rc4",
+    "rollup-boost": "leytont/rollup-boost:latest",
 }
 
 DEFAULT_CL_IMAGES = {
@@ -24,11 +24,11 @@ DEFAULT_CL_IMAGES = {
 }
 
 DEFAULT_BATCHER_IMAGES = {
-    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.9.4",
+    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:develop",
 }
 
 DEFAULT_PROPOSER_IMAGES = {
-    "op-proposer": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:develop",
+    "op-proposer": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:latest",
 }
 
 ATTR_TO_BE_SKIPPED_AT_ROOT = (
@@ -195,6 +195,7 @@ def default_op_contract_deployer_params():
     return {
         "image": "ethpandaops/optimism-contract-deployer:develop",
     }
+
 
 def default_ethereum_package_network_params():
     return {

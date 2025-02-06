@@ -139,7 +139,7 @@ where
     Client: BlockReaderIdExt + StateProviderFactory,
 {
     let latest = provider
-        .block_by_id(BlockId::pending())
+        .block_by_id(BlockId::latest())
         .map_err(|e| ErrorObject::owned(ErrorCode::InternalError.code(), e.to_string(), Some("")))?
         .ok_or(ErrorObjectOwned::from(ErrorCode::InternalError))?;
 

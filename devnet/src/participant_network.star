@@ -1,9 +1,7 @@
 el_cl_client_launcher = import_module("./el_cl_launcher.star")
 participant_module = import_module("./participant.star")
 input_parser = import_module("./package_io/input_parser.star")
-op_batcher_launcher = import_module(
-    "github.com/ethpandaops/optimism-package/src/batcher/op-batcher/op_batcher_launcher.star@914a80895376625c8866943b517df47ce4c28170"
-)
+op_batcher_launcher = import_module("./batcher/op-batcher/op_batcher_launcher.star")
 op_proposer_launcher = import_module(
     "github.com/ethpandaops/optimism-package/src/proposer/op-proposer/op_proposer_launcher.star@914a80895376625c8866943b517df47ce4c28170"
 )
@@ -21,7 +19,7 @@ def launch_participant_network(
     l2_services_suffix,
 ):
     num_participants = len(participants)
-    sequencer_enabled = True
+
     # First EL and sequencer CL
     all_el_contexts, all_cl_contexts = el_cl_client_launcher.launch(
         plan,
@@ -51,6 +49,8 @@ def launch_participant_network(
         )
 
         all_participants.append(participant_entry)
+
+    plan.print("Point rollup-boost at the op-batcher {0}".format(all_cl_contexts[0]))
 
     op_batcher_launcher.launch(
         plan,

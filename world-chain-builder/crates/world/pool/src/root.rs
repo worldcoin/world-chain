@@ -14,9 +14,9 @@ use super::error::WorldChainTransactionPoolError;
 /// The slot of the `_latestRoot` in the
 ///
 /// [WorldID contract](https://github.com/worldcoin/world-id-state-bridge/blob/729d2346a3bb6bac003284bdcefc0cf12ece3f7d/src/abstract/WorldIDBridge.sol#L30)
-pub const LATEST_ROOT_SLOT: U256 = U256::from_limbs([2, 0, 0, 0]);
+pub const LATEST_ROOT_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
 /// Root Expiration Period
-pub const ROOT_EXPIRATION_WINDOW: u64 = 60 * 60; // 1 hour
+pub const ROOT_EXPIRATION_WINDOW: u64 = 60 * 60 * 24 * 7; // 1 Week
 
 /// A provider for managing and validating World Chain roots.
 #[derive(Debug, Clone)]
@@ -233,11 +233,11 @@ mod tests {
         add_block_with_root_with_timestamp(&validator, timestamp, root_1);
         assert!(validator.validate_root(root_1));
         let root_2 = Field::from(2u64);
-        add_block_with_root_with_timestamp(&validator, timestamp + 3601, root_2);
+        add_block_with_root_with_timestamp(&validator, timestamp + 604800 + 1, root_2);
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));
         let root_3 = Field::from(3u64);
-        add_block_with_root_with_timestamp(&validator, timestamp + 3600 + 3600, root_3);
+        add_block_with_root_with_timestamp(&validator, timestamp + 604800 + 604800, root_3);
         assert!(validator.validate_root(root_3));
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));

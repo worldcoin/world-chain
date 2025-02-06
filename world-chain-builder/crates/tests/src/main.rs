@@ -12,10 +12,11 @@ use std::{
 };
 
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::BlockNumberOrTag;
+use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
+use clap::Parser;
 use eyre::eyre::{eyre, Result};
-use fixtures::generate_test_fixture;
+use fixtures::generate_fixture;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
@@ -23,15 +24,23 @@ use tracing::info;
 pub mod cases;
 pub mod fixtures;
 
+#[derive(Parser)]
+pub struct Args {
+    #[clap(short, long, default_value_t = false)]
+    pub no_deploy: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info");
     }
 
-    tracing_subscriber::fmt::init();
-
-    let (builder_rpc, sequencer_rpc) = start_devnet().await?;
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    let args = Args::parse();
+    let (builder_rpc, sequencer_rpc) = start_devnet(args).await?;
 
     let sequencer_provider =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
@@ -49,26 +58,39 @@ async fn main() -> Result<()> {
     };
     f.await;
 
-    info!("Generating test fixtures");
-    let fixture = generate_test_fixture().await;
-
-    info!("Running block building test");
-    cases::assert_build(builder_provider.clone(), fixture).await?;
+    let fixture = generate_fixture(255).await;
+    info!("Running load test");
+    cases::load_test(builder_provider.clone(), fixture.pbh).await?;
+    info!("Running Transact Conditional Test");
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     info!("Running fallback test");
-    cases::assert_fallback(sequencer_provider.clone()).await?;
-
+    cases::fallback_test(sequencer_provider.clone()).await?;
     Ok(())
 }
 
-async fn start_devnet() -> Result<(String, String)> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .unwrap()
-        .canonicalize()?;
+async fn start_devnet(args: Args) -> Result<(String, String)> {
+    if !args.no_deploy {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .canonicalize()?;
 
-    run_command(&"just", &["devnet-up"], path).await?;
+        run_command(&"just", &["devnet-up"], path).await?;
+    }
 
+    let (builder_socket, sequencer_socket) = get_endpoints().await?;
+
+    info!(
+        builder_rpc = %builder_socket,
+        sequencer_rpc = %sequencer_socket,
+        "Devnet is ready"
+    );
+
+    Ok((builder_socket, sequencer_socket))
+}
+
+async fn get_endpoints() -> Result<(String, String)> {
     let builder_socket = run_command(
         "kurtosis",
         &[
@@ -99,12 +121,6 @@ async fn start_devnet() -> Result<(String, String)> {
         sequencer_socket.split("http://").collect::<Vec<&str>>()[1]
     );
 
-    info!(
-        builder_rpc = %builder_socket,
-        sequencer_rpc = %sequencer_socket,
-        "Devnet is ready"
-    );
-
     Ok((builder_socket, sequencer_socket))
 }
 
@@ -116,7 +132,7 @@ where
     let start = Instant::now();
     loop {
         if provider
-            .get_block_by_number(BlockNumberOrTag::Latest, false)
+            .get_block_by_number(BlockNumberOrTag::Latest, BlockTransactionsKind::Hashes)
             .await
             .is_ok()
         {
