@@ -50,7 +50,7 @@ mod tests {
     use std::{default, sync::Arc};
 
     use alloy_consensus::{serde_bincode_compat::TxLegacy, Transaction, TypedTransaction};
-    use alloy_network::TxSigner;
+    use alloy_network::{TransactionBuilder, TxSigner};
     use alloy_signer::Signer;
     use alloy_signer_local::{LocalSigner, PrivateKeySigner};
     use alloy_sol_types::{sol, SolCall};
@@ -122,7 +122,7 @@ mod tests {
         let evm_config = OpEvmConfig::new(chain_spec);
 
         let info = AccountInfo {
-            balance: U256::from(tx.gas_limit()),
+            balance: U256::MAX,
             ..Default::default()
         };
 
@@ -141,24 +141,26 @@ mod tests {
         let (mock_pbh_entry_point, _) = deploy_contracts(&mut db);
 
         let data = Bytes::from(MockPbhEntryPoint::pbhCall::SIGNATURE.as_bytes());
-        let signer = PrivateKeySigner::random().with_chain_id(Some(10));
+        let signer = PrivateKeySigner::random().with_chain_id(Some(1));
 
         let tx_request = TransactionRequest::default()
             .to(mock_pbh_entry_point)
             .input(TransactionInput::new(data))
             .nonce(0)
             .from(signer.address())
+            .max_priority_fee_per_gas(1)
+            .max_fee_per_gas(10)
             .gas_limit(250000)
             .build_consensus_tx()
             .expect("Could not build tx");
 
         let mut tx = tx_request
-            .legacy()
-            .expect("Could not build legacy tx")
+            .eip1559()
+            .expect("Could not build EIP-1559 tx")
             .to_owned();
 
         let signature = signer.sign_transaction(&mut tx).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Legacy(tx), signature);
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx), signature);
 
         let result_and_state = execute_tx(
             &mut db,
@@ -167,6 +169,8 @@ mod tests {
             mock_pbh_entry_point,
             Address::random(),
         )?;
+
+        dbg!(result_and_state);
 
         Ok(())
     }
