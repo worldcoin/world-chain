@@ -259,6 +259,15 @@ pub fn user_op(
     (user_op, payload)
 }
 
+// pub fn create_uo_signature(
+//     uo_hash: FixedBytes<32>,
+//     acc: u32,
+//     payload: PbhPayload,
+// ) -> Bytes {
+//     let mut uo_sig = Vec::with_capacity(429);
+//     uo_sig.extend_from_slice(bytes!("000000000000000000000000").as_ref());
+// }
+
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
     proofs: Vec<PbhPayload>,
@@ -495,5 +504,10 @@ mod tests {
             safe_op_hash,
             fixed_bytes!("0x6278d2de0a0ad2a362e7d421434ca04885bd291c965b311de6fb687d4e4c86b1")
         );
+    }
+
+    #[test]
+    fn test_user_op_signature() {
+        
     }
 }

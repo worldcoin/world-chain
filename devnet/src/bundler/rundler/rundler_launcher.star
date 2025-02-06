@@ -39,7 +39,6 @@ def launch(
     entrypoint_config_file,
     mempool_config_file,
     chain_spec_file,
-    el_cl_genesis_data,
 ):
     rundler_service_name = "{0}".format(service_name)
 
@@ -51,7 +50,6 @@ def launch(
         entrypoint_config_file,
         mempool_config_file,
         chain_spec_file,
-        el_cl_genesis_data
     )
 
     rundler_service = plan.add_service(service_name, config)
@@ -71,7 +69,6 @@ def get_rundler_config(
     entrypoint_config_file,
     mempool_config_file,
     chain_spec_file,
-    el_cl_genesis_data,
 ):
     cmd = [
         "node",
@@ -79,9 +76,7 @@ def get_rundler_config(
         "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
-        "--network={0}".format("dev"),
         "--builder.dropped_status_unsupported",
-        "--builder.submit_url={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--unsafe",
         "--da_gas_tracking_enabled",
         "--entry_point_builders_path={0}".format(rundler_constants.ENTRYPOINT_CONFIG_MOUNT_PATH),
@@ -89,14 +84,13 @@ def get_rundler_config(
         "--min_stake_value={0}".format("1"),
         "--min_unstake_delay={0}".format("0"),
         "--disable_entry_point_v0_6",
-        "--num_builders_v0_7={0}".format("2"),
+        "--enabled_aggregators=PBH",
     ]
 
     files = {
         rundler_constants.MEMPOOL_CONFIG_MOUNT: mempool_config_file,
         rundler_constants.ENTRYPOINT_CONFIG_MOUNT: entrypoint_config_file,
         rundler_constants.CHAIN_SPEC_MOUNT: chain_spec_file,
-        ethereum_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS: el_cl_genesis_data,
     }
 
     ports = get_used_ports()

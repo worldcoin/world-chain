@@ -14,7 +14,7 @@
     "calldata_non_zero_byte_gas": 16,
     "da_pre_verification_gas": false,
     "da_gas_oracle_type": "LOCAL_BEDROCK",
-    "da_gas_oracle_contract_address": "0x0000000000000000000000000000000000000000",
+    "da_gas_oracle_contract_address": "0x420000000000000000000000000000000000000F",
     "include_da_gas_in_gas_limit": false,
     "eip1559_enabled": true,
     "priority_fee_oracle_type": "PROVIDER",

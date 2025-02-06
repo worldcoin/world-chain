@@ -83,7 +83,6 @@ def launch_participant_network(
         entrypoint_config_file,
         mempool_config_file,
         chain_spec,
-        el_cl_data
     )
     
     return all_participants
