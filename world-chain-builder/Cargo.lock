@@ -13646,6 +13646,7 @@ dependencies = [
  "alloy-eips 0.9.2",
  "alloy-rlp",
  "alloy-rpc-types-debug",
+ "alloy-sol-types",
  "op-alloy-consensus",
  "reth",
  "reth-basic-payload-builder",

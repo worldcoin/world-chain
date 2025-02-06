@@ -43,3 +43,7 @@ alloy-rlp.workspace = true
 
 # misc
 tracing.workspace = true
+
+
+[dev-dependencies]
+alloy-sol-types.workspace = true
