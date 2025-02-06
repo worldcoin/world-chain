@@ -146,17 +146,19 @@ mod tests {
         let tx_request = TransactionRequest::default()
             .to(mock_pbh_entry_point)
             .input(TransactionInput::new(data))
+            .nonce(0)
             .from(signer.address())
             .gas_limit(250000)
             .build_consensus_tx()
             .expect("Could not build tx");
 
         let mut tx = tx_request
-            .eip1559()
-            .expect("Could not build EIP-1559 tx")
+            .legacy()
+            .expect("Could not build legacy tx")
             .to_owned();
+
         let signature = signer.sign_transaction(&mut tx).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx), signature);
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Legacy(tx), signature);
 
         let result_and_state = execute_tx(
             &mut db,
