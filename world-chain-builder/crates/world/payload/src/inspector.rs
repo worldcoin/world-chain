@@ -44,3 +44,22 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_tx_origin_is_caller() {
+        todo!()
+    }
+
+    #[test]
+    fn test_signature_aggregator_is_caller() {
+        todo!()
+    }
+
+    #[test]
+    fn test_invalid_caller() {
+        todo!()
+    }
+}
