@@ -13644,8 +13644,11 @@ version = "0.1.0"
 dependencies = [
  "alloy-consensus 0.9.2",
  "alloy-eips 0.9.2",
+ "alloy-network 0.9.2",
  "alloy-rlp",
  "alloy-rpc-types-debug",
+ "alloy-signer 0.9.2",
+ "alloy-signer-local",
  "alloy-sol-types",
  "color-eyre",
  "op-alloy-consensus",

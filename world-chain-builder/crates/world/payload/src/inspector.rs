@@ -47,21 +47,29 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{default, sync::Arc};
 
-    use alloy_sol_types::sol;
-    use reth::chainspec::ChainSpec;
-    use reth_evm::{ConfigureEvm, Evm, EvmEnv};
+    use alloy_consensus::{serde_bincode_compat::TxLegacy, Transaction, TypedTransaction};
+    use alloy_network::{transaction::signer::TxSigner, TxSigner};
+    use alloy_signer::Signer;
+    use alloy_signer_local::{LocalSigner, PrivateKeySigner};
+    use alloy_sol_types::{sol, SolCall};
+    use op_alloy_consensus::OpTypedTransaction;
+    use reth::{
+        chainspec::ChainSpec,
+        rpc::types::{TransactionInput, TransactionRequest},
+    };
+    use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv};
     use reth_optimism_chainspec::OpChainSpec;
     use reth_optimism_node::OpEvmConfig;
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives::Recovered;
     use revm::{
         db::{CacheDB, EmptyDB},
         interpreter::InstructionResult,
-        Evm,
     };
-    use revm_primitives::{AccountInfo, Address, Bytecode, Bytes, ResultAndState, TxEnv};
-    use world_chain_builder_pool::test_utils::{
-        PBH_TEST_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR,
+    use revm_primitives::{
+        AccountInfo, Address, Bytecode, Bytes, ResultAndState, TransactTo, TxEnv, TxKind, U256,
     };
 
     use super::PBHCallTracer;
@@ -103,7 +111,7 @@ mod tests {
 
     fn execute_tx(
         db: &mut CacheDB<EmptyDB>,
-        tx: TxEnv,
+        tx: Recovered<OpTransactionSigned>,
         pbh_entry_point: Address,
         signature_aggregator: Address,
     ) -> eyre::Result<ResultAndState> {
@@ -111,15 +119,41 @@ mod tests {
 
         let pbh_tracer = PBHCallTracer::new(pbh_entry_point, signature_aggregator);
         let evm_config = OpEvmConfig::new(chain_spec);
+
+        let info = AccountInfo {
+            balance: U256::from(tx.gas_limit()),
+            ..Default::default()
+        };
+
+        db.insert_account_info(tx.signer(), info);
+
         let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
 
-        Ok(evm.transact(tx)?)
+        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
+
+        Ok(evm.transact(tx_env)?)
     }
 
     #[test]
-    fn test_tx_origin_is_caller() {
+    fn test_tx_origin_is_caller() -> eyre::Result<()> {
         let mut db = CacheDB::default();
         let (mock_pbh_entry_point, _) = deploy_contracts(&mut db);
+
+        let data = Bytes::from(MockPbhEntryPoint::pbhCall::SIGNATURE.as_bytes());
+        let signer = PrivateKeySigner::random().with_chain_id(Some(10));
+
+        let tx_request = TransactionRequest::default()
+            .to(mock_pbh_entry_point)
+            .input(TransactionInput::new(data))
+            .from(signer.address())
+            .gas_limit(250000)
+            .build_consensus_tx()
+            .expect("Could not build tx");
+
+        let mut tx = tx_request.eip1559().expect("Could not build EIP-1559 tx");
+        signer.sign_transaction(tx);
+
+        Ok(())
     }
 
     #[test]
