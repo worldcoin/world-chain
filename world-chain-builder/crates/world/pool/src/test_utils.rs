@@ -35,6 +35,26 @@ use crate::validator::WorldChainTransactionValidator;
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
+pub const TEST_SAFES: [Address; 6] = [
+    address!("26479c9A59462f08f663281df6098dF7e7398363"),
+    address!("CaD130298688716cDd16511C18DD88CAc327B3cA"),
+    address!("4DFE55bC8eEa517efdbb6B2d056135b350b79ca2"),
+    address!("e27eA3E8D654a0348DE1B42983F75c9594CdB2a2"),
+    address!("220e1F32E1a76093C34388D4EeEB5fc0cAc73Ffb"),
+    address!("e98F083C8C5e43593A517dA7b6b83Cb64F93c740"),
+];
+
+pub const TEST_MODULES: [Address; 6] = [
+    address!("8A791620dd6260079BF849Dc5567aDC3F2FdC318"),
+    address!("A51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0"),
+    address!("0B306BF915C4d645ff596e518fAf3F9669b97016"),
+    address!("68B1D87F95878fE05B998F19b66F4baba5De1aed"),
+    address!("59b670e9fA9D0A427751Af201D676719a970857b"),
+    address!("a85233C63b9Ee964Add6F2cffe00Fd84eb32338f"),
+];
+
+pub const DEV_CHAIN_ID: u64 = 2151908;
+
 pub const PBH_NONCE_KEY: U256 = U256::from_limbs([1123123123, 0, 0, 0]);
 
 pub const DEVNET_ENTRYPOINT: Address = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
@@ -186,15 +206,15 @@ pub fn user_op(
     #[builder(default = bytes!("7bb3742800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))]
     // abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0))
     calldata: Bytes,
-    #[builder(default = fixed_bytes!("0000000000000000000000000000ffd300000000000000000000000000000000"))]
+    #[builder(default = fixed_bytes!("0000000000000000000000000000ffd30000000000000000000000000000C350"))]
     account_gas_limits: FixedBytes<32>,
-    #[builder(default = U256::from(50221))] pre_verification_gas: U256,
-    #[builder(default = fixed_bytes!("0000000000000000000000000000000100000000000000000000000000000001"))]
+    #[builder(default = U256::from(60232))] pre_verification_gas: U256,
+    #[builder(default = fixed_bytes!("00000000000000000000000000000001000000000000000000000000157353A9"))]
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
     let mut user_op = PackedUserOperation {
-        sender: address!("A51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0"),
+        sender: TEST_SAFES[acc as usize],
         nonce: (PBH_NONCE_KEY << 64) | nonce,
         initCode: init_code,
         callData: calldata,
@@ -204,8 +224,8 @@ pub fn user_op(
         paymasterAndData: paymaster_and_data,
         signature: bytes!("000000000000000000000000"),
     };
-
-    let operation_hash = get_safe_op_hash(user_op.clone());
+    let module = TEST_MODULES[acc as usize];
+    let operation_hash = get_operation_hash(user_op.clone(), module, DEV_CHAIN_ID);
 
     let signer = signer(acc);
     let ecdsa_signature: [u8; 65] = signer
@@ -237,11 +257,6 @@ pub fn user_op(
     user_op.signature = Bytes::from(uo_sig);
 
     (user_op, payload)
-}
-
-pub fn get_safe_op_hash(user_op: PackedUserOperation) -> FixedBytes<32> {
-    let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
-    keccak256(&encoded_safe_struct.abi_encode())
 }
 
 pub fn pbh_bundle(
@@ -310,6 +325,15 @@ pub fn pbh_multicall(
     };
 
     IPBHEntryPoint::pbhMulticallCall { calls, payload }
+}
+
+
+pub fn get_operation_hash(user_op: PackedUserOperation, module: Address, chain_id: u64) -> FixedBytes<32> {
+    let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
+    let safe_struct_hash = keccak256(&encoded_safe_struct.abi_encode());
+    let domain_separator = keccak256(&(fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218"), chain_id, module).abi_encode());
+    let operation_data = (fixed_bytes!("19"), fixed_bytes!("01"), domain_separator, safe_struct_hash).abi_encode_packed();
+    keccak256(&operation_data)
 }
 
 impl From<PackedUserOperation> for EncodedSafeOpStruct {
@@ -428,7 +452,6 @@ pub fn world_chain_validator(
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
-
     use super::*;
 
     #[test_case(0, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")]
@@ -450,5 +473,27 @@ mod tests {
     #[test]
     fn treeroot() {
         println!("Tree Root: {:?}", tree_root());
+    }
+
+    #[test]
+    fn test_get_safe_op_hash() {
+        let uo = PackedUserOperation {
+            sender: address!("c96D03586112D52b5738acA1dc6A535E4ff88aA8"),
+            nonce: U256::from(1) << 64,
+            initCode: Bytes::default(),
+            callData: Bytes::default(),
+            accountGasLimits: fixed_bytes!("0000000000000000000000000000ffd300000000000000000000000000000000"),
+            preVerificationGas: U256::from(21000),
+            gasFees: fixed_bytes!("0000000000000000000000000000000100000000000000000000000000000001"),
+            paymasterAndData: Bytes::default(),
+            signature: bytes!("000000000000000000000000"),
+        };
+
+        let safe_op_hash = get_operation_hash(uo, address!("f05f1C282f8D16fe0E582e4B7478E50E7201b481"), 1);
+
+        assert_eq!(
+            safe_op_hash,
+            fixed_bytes!("0x6278d2de0a0ad2a362e7d421434ca04885bd291c965b311de6fb687d4e4c86b1")
+        );
     }
 }

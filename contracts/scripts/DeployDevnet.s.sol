@@ -163,6 +163,7 @@ contract DeployDevnet is Script {
 
             // Cast proxy to Safe for easier interaction
             Safe safe = Safe(payable(address(proxy)));
+            console.log("Safe Proxy Deployed at: ", address(safe));
             IEntryPoint(entryPoint).depositTo{value: 1 ether}(address(safe));
         }
     }
