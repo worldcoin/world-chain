@@ -38,7 +38,7 @@ world-chain-builder-pool = { path = "crates/world/pool" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
-reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4"}
+reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "b97d9b4" }

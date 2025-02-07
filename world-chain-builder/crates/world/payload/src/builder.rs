@@ -41,37 +41,56 @@ use reth_provider::{
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
+use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
+
+use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
     pub inner: OpPayloadBuilder<EvmConfig, Tx>,
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
 }
 
 impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
-    pub fn new(evm_config: EvmConfig, verified_blockspace_capacity: u8) -> Self {
-        Self::with_builder_config(evm_config, Default::default(), verified_blockspace_capacity)
+    pub fn new(
+        evm_config: EvmConfig,
+        verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+        pbh_signature_aggregator: Address,
+    ) -> Self {
+        Self::with_builder_config(
+            evm_config,
+            Default::default(),
+            verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
+        )
     }
 
     pub const fn with_builder_config(
         evm_config: EvmConfig,
         builder_config: OpBuilderConfig,
         verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+        pbh_signature_aggregator: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(evm_config, builder_config);
 
         Self {
             inner,
             verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
         }
     }
 }
@@ -90,6 +109,8 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
         let Self {
             inner,
             verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
         } = self;
 
         let OpPayloadBuilder {
@@ -107,6 +128,8 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
                 config,
             },
             verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
         }
     }
 
@@ -169,6 +192,8 @@ where
                 best_payload,
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
             client,
         };
 
@@ -244,6 +269,8 @@ where
                 best_payload: Default::default(),
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
             client,
         };
 
@@ -574,6 +601,8 @@ where
 pub struct WorldChainPayloadBuilderCtx<EvmConfig, Client> {
     pub inner: OpPayloadBuilderCtx<EvmConfig>,
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
     pub client: Client,
 }
 
@@ -742,10 +771,13 @@ where
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
-        let mut evm = self
-            .inner
-            .evm_config
-            .evm_with_env(&mut *db, self.inner.evm_env.clone());
+        let mut pbh_call_tracer =
+            PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
+            &mut *db,
+            self.inner.evm_env.clone(),
+            &mut pbh_call_tracer,
+        );
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
@@ -753,7 +785,7 @@ where
             let pooled_tx = &tx.transaction;
             let consensus_tx = tx.to_consensus();
             if info.is_tx_over_limits(
-                &consensus_tx.tx(),
+                consensus_tx.tx(),
                 block_gas_limit,
                 tx_da_limit,
                 block_da_limit,
@@ -770,6 +802,7 @@ where
                 );
                 continue;
             }
+
             if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(
@@ -844,6 +877,18 @@ where
 
                             continue;
                         }
+
+                        EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
+                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                            best_txs.mark_invalid(
+                                &tx,
+                                InvalidPoolTransactionError::Other(Box::new(
+                                    WorldChainPoolTransactionError::PBHCallTracerError,
+                                )),
+                            );
+                            continue;
+                        }
+
                         err => {
                             // this is an error that we should treat as fatal for this attempt
                             return Err(PayloadBuilderError::EvmExecutionError(err));
