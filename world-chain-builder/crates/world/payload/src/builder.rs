@@ -47,7 +47,7 @@ use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
-use crate::inspector::PBHCallTracer;
+use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -802,6 +802,7 @@ where
                 );
                 continue;
             }
+
             if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(
@@ -876,6 +877,20 @@ where
 
                             continue;
                         }
+
+                        EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                            best_txs.mark_invalid(
+                                &tx,
+                                InvalidPoolTransactionError::Other(Box::new(
+                                    WorldChainPoolTransactionError::PBHCallTracerError,
+                                )),
+                            );
+                            continue;
+                        }
+
                         err => {
                             // this is an error that we should treat as fatal for this attempt
                             return Err(PayloadBuilderError::EvmExecutionError(err));

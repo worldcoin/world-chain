@@ -1,12 +1,22 @@
+use std::collections::HashSet;
+
 use reth::revm::{Database, Inspector};
 use revm::interpreter::{CallOutcome, Gas, InstructionResult, InterpreterResult};
-use revm_primitives::{Address, Bytes};
+use revm_primitives::{Address, Bytes, InvalidTransaction};
 
+pub const PBH_CALL_TRACER_ERROR: &str = "Invalid PBH caller";
 /// Inspector that traces calls into the `PBHEntryPoint`.
-/// If a tx calls into the `PBHEntryPoint` from an address that is not the
-/// tx origin or the `PBHSignatureAggregator`, the tx is marked as as invalid.
+///
+/// This inspector checks if a transaction calls into the `PBHEntryPoint` from an address that is
+/// neither the transaction origin nor the `PBHSignatureAggregator`. If such a call is detected,
+/// the transaction is marked as invalid and stored in `invalid_txs`.
+#[derive(Debug)]
 pub struct PBHCallTracer {
+    /// The address of the `PBHEntryPoint` contract.
+    /// Calls to this contract are monitored to enforce caller restrictions.
     pub pbh_entry_point: Address,
+    /// The address of the `PBHSignatureAggregator`.
+    /// This address is allowed to make calls to the `PBHEntryPoint`.
     pub pbh_signature_aggregator: Address,
 }
 
@@ -31,13 +41,17 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
             if inputs.caller != context.env.tx.caller
                 && inputs.caller != self.pbh_signature_aggregator
             {
-                let interpreter_res = InterpreterResult::new(
+                context.error = Err(revm_primitives::EVMError::Custom(
+                    PBH_CALL_TRACER_ERROR.to_string(),
+                ));
+
+                let res = InterpreterResult::new(
                     InstructionResult::InvalidEXTCALLTarget,
                     Bytes::default(),
-                    Gas::default(),
+                    Gas::new(context.env.tx.gas_limit),
                 );
 
-                return Some(CallOutcome::new(interpreter_res, 0..0));
+                return Some(CallOutcome::new(res, 0..0));
             }
         }
 
@@ -47,33 +61,27 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
 
 #[cfg(test)]
 mod tests {
-    use std::{default, sync::Arc};
+    use std::{convert::Infallible, sync::Arc};
 
-    use alloy_consensus::{serde_bincode_compat::TxLegacy, Transaction, TypedTransaction};
-    use alloy_network::{TransactionBuilder, TxSigner};
+    use alloy_network::TxSigner;
     use alloy_signer::Signer;
-    use alloy_signer_local::{LocalSigner, PrivateKeySigner};
+    use alloy_signer_local::PrivateKeySigner;
     use alloy_sol_types::{sol, SolCall};
     use op_alloy_consensus::OpTypedTransaction;
     use reth::{
         chainspec::ChainSpec,
-        core::rpc::result,
         rpc::types::{TransactionInput, TransactionRequest},
     };
     use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv};
     use reth_optimism_chainspec::OpChainSpec;
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::Recovered;
-    use revm::{
-        db::{CacheDB, EmptyDB},
-        interpreter::InstructionResult,
-        DatabaseCommit,
-    };
+    use revm::db::{CacheDB, EmptyDB};
     use revm_primitives::{
-        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, TransactTo, TxEnv,
-        TxKind, U256,
+        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, U256,
     };
+
+    use crate::inspector::PBH_CALL_TRACER_ERROR;
 
     use super::PBHCallTracer;
 
@@ -110,30 +118,25 @@ mod tests {
         (mock_pbh_entry_point, multicall3)
     }
 
-    fn execute_tx(
+    fn execute_with_pbh_tracer(
         db: &mut CacheDB<EmptyDB>,
         tx: OpTransactionSigned,
         signer: Address,
-        pbh_entry_point: Address,
-        signature_aggregator: Address,
-    ) -> eyre::Result<ResultAndState> {
-        let chain_spec = Arc::new(OpChainSpec::new(ChainSpec::default()));
-
-        let pbh_tracer = PBHCallTracer::new(pbh_entry_point, signature_aggregator);
-        let evm_config = OpEvmConfig::new(chain_spec);
-
+        pbh_tracer: &mut PBHCallTracer,
+    ) -> Result<ResultAndState, revm_primitives::EVMError<Infallible>> {
         let info = AccountInfo {
             balance: U256::MAX,
             ..Default::default()
         };
-
         db.insert_account_info(signer, info);
 
-        let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
+        let chain_spec = Arc::new(OpChainSpec::new(ChainSpec::default()));
+        let evm_config = OpEvmConfig::new(chain_spec);
 
+        let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
         let tx_env = evm_config.tx_env(&tx, signer);
 
-        Ok(evm.transact(tx_env)?)
+        evm.transact(tx_env)
     }
 
     #[tokio::test]
@@ -144,6 +147,7 @@ mod tests {
         let data = Bytes::from(MockPbhEntryPoint::pbhCall::SELECTOR);
         let signer = PrivateKeySigner::random().with_chain_id(Some(1));
 
+        // Create a transaction to call into the mock pbh entrypoint
         let tx_request = TransactionRequest::default()
             .to(mock_pbh_entry_point)
             .input(TransactionInput::new(data))
@@ -155,21 +159,66 @@ mod tests {
             .build_consensus_tx()
             .expect("Could not build tx");
 
-        let mut tx = tx_request
+        let mut tx_1559 = tx_request
             .eip1559()
             .expect("Could not build EIP-1559 tx")
             .to_owned();
 
-        let signature = signer.sign_transaction(&mut tx).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx), signature);
+        let signature = signer.sign_transaction(&mut tx_1559).await?;
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
 
-        let result_and_state = execute_tx(
-            &mut db,
-            tx,
-            signer.address(),
-            mock_pbh_entry_point,
-            Address::random(),
-        )?;
+        let mut pbh_tracer = PBHCallTracer::new(mock_pbh_entry_point, Address::random());
+        let result_and_state =
+            execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
+
+        assert!(matches!(
+            result_and_state.result,
+            ExecutionResult::Success { .. }
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_signature_aggregator_is_caller() -> eyre::Result<()> {
+        let mut db = CacheDB::default();
+        let (mock_pbh_entry_point, multicall) = deploy_contracts(&mut db);
+
+        let pbh_call = MockPbhEntryPoint::pbhCall {}.abi_encode();
+        let multicall_data = Bytes::from(
+            Multicall3::aggregateCall {
+                calls: vec![Multicall3::Call {
+                    target: mock_pbh_entry_point,
+                    callData: pbh_call.into(),
+                }],
+            }
+            .abi_encode(),
+        );
+
+        let signer = PrivateKeySigner::random().with_chain_id(Some(1));
+
+        // Create a tx targeting into the multicall, which will call into the pbh entry point
+        let tx_request = TransactionRequest::default()
+            .to(multicall)
+            .input(TransactionInput::new(multicall_data))
+            .nonce(0)
+            .from(signer.address())
+            .max_priority_fee_per_gas(1)
+            .max_fee_per_gas(10)
+            .gas_limit(250000)
+            .build_consensus_tx()
+            .expect("Could not build tx");
+
+        let mut tx_1559 = tx_request
+            .eip1559()
+            .expect("Could not build EIP-1559 tx")
+            .to_owned();
+
+        let signature = signer.sign_transaction(&mut tx_1559).await?;
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
+
+        let mut pbh_tracer = PBHCallTracer::new(mock_pbh_entry_point, multicall);
+        let result_and_state =
+            execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
 
         assert!(matches!(
             result_and_state.result,
@@ -179,15 +228,55 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_signature_aggregator_is_caller() {
+    #[tokio::test]
+    async fn test_invalid_caller() -> eyre::Result<()> {
         let mut db = CacheDB::default();
-        let (mock_pbh_entry_point, _) = deploy_contracts(&mut db);
-    }
+        let (mock_pbh_entry_point, multicall) = deploy_contracts(&mut db);
 
-    #[test]
-    fn test_invalid_caller() {
-        let mut db = CacheDB::default();
-        let (mock_pbh_entry_point, _) = deploy_contracts(&mut db);
+        let pbh_call = MockPbhEntryPoint::pbhCall {}.abi_encode();
+        let multicall_data = Bytes::from(
+            Multicall3::aggregateCall {
+                calls: vec![Multicall3::Call {
+                    target: mock_pbh_entry_point,
+                    callData: pbh_call.into(),
+                }],
+            }
+            .abi_encode(),
+        );
+
+        let signer = PrivateKeySigner::random().with_chain_id(Some(1));
+
+        // Create a tx targeting into the multicall, which will call into the pbh entry point
+        let tx_request = TransactionRequest::default()
+            .to(multicall)
+            .input(TransactionInput::new(multicall_data))
+            .nonce(0)
+            .from(signer.address())
+            .max_priority_fee_per_gas(1)
+            .max_fee_per_gas(10)
+            .gas_limit(250000)
+            .build_consensus_tx()
+            .expect("Could not build tx");
+
+        let mut tx_1559 = tx_request
+            .eip1559()
+            .expect("Could not build EIP-1559 tx")
+            .to_owned();
+
+        let signature = signer.sign_transaction(&mut tx_1559).await?;
+        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
+
+        // Specify a random address as the signature aggregator, disallowing the multicall to call into the pbh entry point
+        let mut pbh_tracer = PBHCallTracer::new(mock_pbh_entry_point, Address::random());
+        let res = execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer);
+
+        let expected_err =
+            revm_primitives::EVMError::<Infallible>::Custom(PBH_CALL_TRACER_ERROR.to_string());
+
+        assert_eq!(res.err().unwrap(), expected_err);
+
+        // TODO: asser that no state changes occured during the call
+
+        Ok(())
     }
 }
