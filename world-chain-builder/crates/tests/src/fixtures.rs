@@ -3,10 +3,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
 use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx, DEV_CHAIN_ID};
-use world_chain_builder_pool::{
-    bindings::IEntryPoint::PackedUserOperation,
-    test_utils::{signer, user_op},
-};
+use world_chain_builder_test_utils::{bindings::IEntryPoint::PackedUserOperation, utils::{signer, user_op}};
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct TransactionFixtures {

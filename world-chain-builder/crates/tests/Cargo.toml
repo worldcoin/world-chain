@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 world-chain-builder-node = { workspace = true, features = ["test"]}
 world-chain-builder-pool = { workspace = true, features = ["test"]}
+world-chain-builder-test-utils.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true

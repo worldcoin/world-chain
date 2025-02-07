@@ -37,6 +37,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::TxKind;
+use world_chain_builder_test_utils::{utils::{pbh_bundle, pbh_multicall, signer, user_op}, PBH_DEV_ENTRYPOINT};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::PathBuf,
@@ -48,7 +49,6 @@ use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
 use world_chain_builder_pool::{
-    test_utils::{pbh_bundle, pbh_multicall, signer, user_op, PBH_TEST_ENTRYPOINT},
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
@@ -80,7 +80,7 @@ pub async fn raw_pbh_bundle_bytes(
         chain_id,
         Some(Bytes::from(encoded)),
         tx_nonce,
-        PBH_TEST_ENTRYPOINT,
+        PBH_DEV_ENTRYPOINT,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();
@@ -109,7 +109,7 @@ pub async fn raw_pbh_multicall_bytes(
         chain_id,
         Some(Bytes::from(encoded)),
         tx_nonce,
-        PBH_TEST_ENTRYPOINT,
+        PBH_DEV_ENTRYPOINT,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();

@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 world-chain-builder-pbh.workspace = true
+world-chain-builder-test-utils = { workspace = true, optional = true }
 
 reth.workspace = true
 reth-db.workspace = true
@@ -16,7 +17,6 @@ reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-eth-wire-types.workspace = true
-reth-e2e-test-utils = { workspace = true, optional = true }
 reth-trie-db = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-stages-types = { workspace = true, optional = true }
@@ -31,9 +31,6 @@ alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
-alloy-signer-local = { workspace = true, optional = true }
-alloy-signer = { workspace = true, optional = true }
-alloy-network = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
 # 3rd party
@@ -44,7 +41,6 @@ eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
-bon = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true
 
@@ -57,14 +53,10 @@ chrono.workspace = true
 [features]
 default = []
 test = [
-    "dep:reth-e2e-test-utils",
-    "dep:reth-trie-db",
-    "dep:reth-stages-types",
-    "dep:reth-trie",
-    "dep:alloy-signer-local",
-    "dep:alloy-signer",
-    "dep:alloy-network",
-    "dep:bon",
+    "world-chain-builder-test-utils",
+    "reth-trie-db",
+    "reth-trie",
+    "reth-stages-types",
 ]
 
 [lints]

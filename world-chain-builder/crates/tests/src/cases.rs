@@ -22,9 +22,9 @@ use serde::Serialize;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
-use world_chain_builder_pool::bindings::IEntryPoint::PackedUserOperation;
-use world_chain_builder_pool::test_utils::DEVNET_ENTRYPOINT;
-use world_chain_builder_pool::test_utils::PBH_TEST_SIGNATURE_AGGREGATOR;
+use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
+use world_chain_builder_test_utils::PBH_DEV_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
 
@@ -68,7 +68,7 @@ where
                 let res: B256 = bundler_provider
                     .raw_request(
                         Cow::Borrowed("eth_sendUserOperation"),
-                        (uo, DEVNET_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR),
+                        (uo, DEVNET_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR),
                     )
                     .await?;
 

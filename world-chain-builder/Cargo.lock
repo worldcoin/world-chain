@@ -11380,6 +11380,7 @@ dependencies = [
  "tracing-subscriber 0.3.19",
  "world-chain-builder-node",
  "world-chain-builder-pool",
+ "world-chain-builder-test-utils",
 ]
 
 [[package]]
@@ -13465,6 +13466,7 @@ dependencies = [
  "world-chain-builder-pbh",
  "world-chain-builder-pool",
  "world-chain-builder-rpc",
+ "world-chain-builder-test-utils",
 ]
 
 [[package]]
@@ -13525,14 +13527,11 @@ version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
- "alloy-signer",
  "alloy-signer-local",
  "alloy-sol-types",
- "bon",
  "chrono",
  "color-eyre",
  "ethers-core 2.0.14 (git+https://github.com/gakonst/ethers-rs)",
@@ -13560,6 +13559,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder-pbh",
+ "world-chain-builder-test-utils",
 ]
 
 [[package]]
@@ -13581,6 +13581,30 @@ dependencies = [
  "serde_json",
  "tracing",
  "world-chain-builder-pool",
+]
+
+[[package]]
+name = "world-chain-builder-test-utils"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "alloy-signer",
+ "alloy-signer-local",
+ "alloy-sol-types",
+ "bon",
+ "op-alloy-consensus",
+ "reth-optimism-node",
+ "reth-optimism-primitives",
+ "reth-primitives",
+ "semaphore",
+ "serde",
+ "test-case",
+ "world-chain-builder-pbh",
 ]
 
 [[package]]

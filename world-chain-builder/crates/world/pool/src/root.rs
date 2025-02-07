@@ -185,15 +185,14 @@ where
 mod tests {
     use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-
-    use crate::test_utils::TEST_WORLD_ID;
+    use world_chain_builder_test_utils::DEV_WORLD_ID;
 
     use super::*;
     use alloy_consensus::Block as AlloyBlock;
 
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();
-        let root_validator = WorldChainRootValidator::new(client, TEST_WORLD_ID)?;
+        let root_validator = WorldChainRootValidator::new(client, DEV_WORLD_ID)?;
         Ok(root_validator)
     }
 
@@ -212,7 +211,7 @@ mod tests {
             ..Default::default()
         };
         validator.cache.read().client().add_account(
-            TEST_WORLD_ID,
+            DEV_WORLD_ID,
             ExtendedAccount::new(0, U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );

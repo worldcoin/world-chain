@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 world-chain-builder-payload.workspace = true
 world-chain-builder-pool.workspace = true
+world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 
 reth.workspace = true
@@ -69,7 +70,7 @@ chrono.workspace = true
 [features]
 default = []
 test = [
-    "world-chain-builder-pool/test",
+    "world-chain-builder-test-utils",
     "world-chain-builder-pbh",
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
