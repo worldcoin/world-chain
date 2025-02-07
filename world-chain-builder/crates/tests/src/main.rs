@@ -59,13 +59,19 @@ async fn main() -> Result<()> {
     f.await;
 
     let fixture = TransactionFixtures::new().await;
+    info!("Running Rundler Ops test");
+    cases::user_ops_test(
+        rundler_provider,
+        builder_provider.clone(),
+        fixture.pbh_user_operations,
+    )
+    .await?;
     info!("Running load test");
-    cases::user_ops_test(rundler_provider, fixture.pbh_user_operations).await?;
-    // cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
-    // info!("Running Transact Conditional Test");
-    // cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
-    // info!("Running fallback test");
-    // cases::fallback_test(sequencer_provider.clone()).await?;
+    cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
+    info!("Running Transact Conditional Test");
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
+    info!("Running fallback test");
+    cases::fallback_test(sequencer_provider.clone()).await?;
     Ok(())
 }
 

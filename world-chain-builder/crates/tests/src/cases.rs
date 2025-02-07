@@ -5,8 +5,10 @@ use std::time::Instant;
 
 use alloy_network::Network;
 use alloy_primitives::hex;
+use alloy_primitives::Address;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
+use alloy_primitives::U256;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
@@ -15,6 +17,8 @@ use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use serde::Deserialize;
+use serde::Serialize;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
@@ -26,25 +30,88 @@ use crate::run_command;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
-// `eth_sendUserOperation` test cases
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcUserOperationByHash {
+    /// The full user operation
+    pub user_operation: alloy_rpc_types_eth::PackedUserOperation,
+    /// The entry point address this operation was sent to
+    pub entry_point: Address,
+    /// The number of the block this operation was included in
+    pub block_number: Option<U256>,
+    /// The hash of the block this operation was included in
+    pub block_hash: Option<B256>,
+    /// The hash of the transaction this operation was included in
+    pub transaction_hash: Option<B256>,
+}
+
+/// `eth_sendUserOperation` test cases
 pub async fn user_ops_test<T, P>(
     bundler_provider: Arc<P>,
+    builder_provider: Arc<P>,
     user_operations: Vec<PackedUserOperation>,
 ) -> Result<()>
 where
     T: Transport + Clone,
     P: Provider<T>,
 {
-    let uo: alloy_rpc_types_eth::PackedUserOperation = user_operations[0].clone().into();
-    info!(?uo, "Sending User Operation");
-    // TODO: Should this take Option<SignatureAggregator>?
-    let res: B256 = bundler_provider
-        .raw_request(
-            Cow::Borrowed("eth_sendUserOperation"),
-            (uo, DEVNET_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR),
-        )
+    let start = Instant::now();
+    let bundler_provider = bundler_provider.clone();
+    let builder_provider = builder_provider.clone();
+    stream::iter(user_operations.iter().enumerate())
+        .map(Ok)
+        .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, uo)| {
+            let bundler_provider = bundler_provider.clone();
+            let builder_provider = builder_provider.clone();
+            async move {
+                let uo: alloy_rpc_types_eth::PackedUserOperation = uo.clone().into();
+                let res: B256 = bundler_provider
+                    .raw_request(
+                        Cow::Borrowed("eth_sendUserOperation"),
+                        (uo, DEVNET_ENTRYPOINT, PBH_TEST_SIGNATURE_AGGREGATOR),
+                    )
+                    .await?;
+
+                debug!(target: "tests::user_ops_test", %index, ?res, "User Operation Sent");
+
+                // Fetch the Transaction by hash
+                let max_retries = 10;
+                let mut tries = 0;
+                loop {
+                    if tries >= max_retries {
+                        panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                    }
+                    // Check if the User Operation has been included in a Transaction
+                    let resp: RpcUserOperationByHash = bundler_provider
+                        .raw_request(
+                            Cow::Borrowed("eth_getUserOperationByHash"),
+                            (res.clone(),),
+                        )
+                        .await?;
+
+                    if let Some(transaction_hash) = resp.transaction_hash {
+                        debug!(target: "tests::user_ops_test", %index, ?transaction_hash, "User Operation Included in Transaction");
+                        // Fetch the Transaction Receipt from the builder
+                        let receipt = builder_provider.get_transaction_by_hash(transaction_hash).await?;
+
+                        assert!(receipt.is_some_and(|receipt| {
+                            debug!(target: "tests::user_ops_test", %index, ?receipt, "Transaction Receipt Received");
+                            true
+                        }));
+
+                        break;
+                    }
+
+                    tries += 1;
+                    sleep(Duration::from_secs(2)).await;
+                }
+                Ok::<(), eyre::Report>(())
+            }
+        })
         .await?;
-    info!(?res, "User Operation Sent");
+
+    info!(duration = %start.elapsed().as_secs_f64(), total = %user_operations.len(), "All PBH UserOperations Processed");
+
     Ok(())
 }
 
@@ -64,10 +131,10 @@ where
             async move {
                 let tx = builder_provider.send_raw_transaction(tx).await?;
                 let hash = *tx.tx_hash();
-                debug!(hash = ?hash, index = index, "Transaction Sent");
                 let receipt = tx.get_receipt().await;
                 assert!(receipt.is_ok());
                 debug!(
+                    target: "tests::load_test",
                     receipt = ?receipt.unwrap(),
                     hash = ?hash,
                     index = index,
@@ -79,7 +146,7 @@ where
         })
         .await?;
 
-    info!(duration = %start.elapsed().as_secs_f64(), total = %transactions.len(), "All PBH Transactions Processed");
+    info!(target: "tests::load_test", duration = %start.elapsed().as_secs_f64(), total = %transactions.len(), "All PBH Transactions Processed");
 
     Ok(())
 }

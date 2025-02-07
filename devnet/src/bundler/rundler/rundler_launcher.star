@@ -58,7 +58,7 @@ def launch(
         rundler_service.ip_address, RUNDLER_HTTP_PORT_ID
     )
 
-    return "op_batcher"
+    return "rundler"
 
 
 def get_rundler_config(
