@@ -46,7 +46,7 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
                 let res = InterpreterResult::new(
                     InstructionResult::InvalidEXTCALLTarget,
                     Bytes::default(),
-                    Gas::new(context.env.tx.gas_limit),
+                    Gas::new(0),
                 );
 
                 return Some(CallOutcome::new(res, 0..0));
