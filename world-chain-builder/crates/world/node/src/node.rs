@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use eyre::eyre::Result;
 use reth::api::{ConfigureEvm, HeaderTy, TxTy};
 use reth::builder::components::{ComponentsBuilder, PayloadServiceBuilder};
@@ -97,6 +98,8 @@ impl WorldChainBuilder {
             .payload(WorldChainPayloadBuilder::new(
                 compute_pending_block,
                 verified_blockspace_capacity,
+                pbh_entrypoint,
+                signature_aggregator,
             ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
@@ -171,14 +174,23 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub best_transactions: Txs,
     // TODO:
     pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
 }
 
 impl WorldChainPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag.
-    pub const fn new(compute_pending_block: bool, verified_blockspace_capacity: u8) -> Self {
+    pub const fn new(
+        compute_pending_block: bool,
+        verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+        pbh_signature_aggregator: Address,
+    ) -> Self {
         Self {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
             best_transactions: (),
         }
     }
@@ -197,13 +209,17 @@ where
         let Self {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
             ..
         } = self;
 
         WorldChainPayloadBuilder {
             compute_pending_block,
             verified_blockspace_capacity,
+            pbh_entry_point,
             best_transactions,
+            pbh_signature_aggregator,
         }
     }
 
@@ -230,6 +246,8 @@ where
         let payload_builder = world_chain_builder_payload::builder::WorldChainPayloadBuilder::new(
             evm_config,
             self.verified_blockspace_capacity,
+            self.pbh_entry_point,
+            self.pbh_signature_aggregator,
         )
         .with_transactions(self.best_transactions)
         .set_compute_pending_block(self.compute_pending_block);

@@ -35,6 +35,8 @@ pub enum WorldChainPoolTransactionError {
     MissingPbhPayload,
     #[error("InvalidSignatureAggregator")]
     InvalidSignatureAggregator,
+    #[error("PBH call tracer error")]
+    PBHCallTracerError,
 }
 
 impl WorldChainPoolTransactionError {

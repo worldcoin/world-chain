@@ -31,7 +31,7 @@ contract PBHSafe4337Module is Safe4337Module {
 
     /// @notice The PBH Nonce Key.
     /// @dev This key is used to identify a PBH user operation.
-    uint192 public immutable PBH_NONCE_KEY;
+    uint32 public immutable PBH_NONCE_KEY;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
@@ -50,7 +50,7 @@ contract PBHSafe4337Module is Safe4337Module {
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
 
-    constructor(address entryPoint, address _pbhSignatureAggregator, uint192 _pbhNonceKey) Safe4337Module(entryPoint) {
+    constructor(address entryPoint, address _pbhSignatureAggregator, uint32 _pbhNonceKey) Safe4337Module(entryPoint) {
         require(_pbhSignatureAggregator != address(0), AddressZero());
         require(entryPoint != address(0), AddressZero());
         require(_pbhNonceKey != 0, UninitializedNonceKey());
@@ -86,7 +86,7 @@ contract PBHSafe4337Module is Safe4337Module {
         // If it is a PBH transaction, we need to handle two cases with the signature:
         // 1. The bundler simulates the call with the proof appended
         // 2. UserOp execution without proof appended
-        bool isPBH = (key == PBH_NONCE_KEY);
+        bool isPBH = (key & 0xffffffff) == PBH_NONCE_KEY;
 
         uint256 threshold = ISafe(payable(userOp.sender)).getThreshold();
 
