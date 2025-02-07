@@ -879,8 +879,6 @@ where
                         }
 
                         EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(
                                 &tx,
