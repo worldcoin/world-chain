@@ -63,7 +63,7 @@ contract TestSetup is Test {
     address public constant nullAddress = address(0);
     address public constant MULTICALL3 = 0xcA11bde05977b3631167028862bE2a173976CA11;
 
-    uint192 public constant PBH_NONCE_KEY = 1123123123;
+    uint32 public constant PBH_NONCE_KEY = 1123123123;
 
     uint8 public constant MAX_NUM_PBH_PER_MONTH = 30;
     uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;

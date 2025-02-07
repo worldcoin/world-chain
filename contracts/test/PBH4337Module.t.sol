@@ -29,7 +29,7 @@ contract PBHSafe4337ModuleTest is Test {
     uint256 public ownerKey;
 
     address public constant PBH_SIGNATURE_AGGREGATOR = address(0x123);
-    uint192 public constant PBH_NONCE_KEY = 1123123123;
+    uint32 public constant PBH_NONCE_KEY = 1123123123;
 
     function setUp() public {
         // Create single EOA owner
