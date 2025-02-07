@@ -1,8 +1,6 @@
-use std::collections::HashSet;
-
 use reth::revm::{Database, Inspector};
 use revm::interpreter::{CallOutcome, Gas, InstructionResult, InterpreterResult};
-use revm_primitives::{Address, Bytes, InvalidTransaction};
+use revm_primitives::{Address, Bytes};
 
 pub const PBH_CALL_TRACER_ERROR: &str = "Invalid PBH caller";
 /// Inspector that traces calls into the `PBHEntryPoint`.
