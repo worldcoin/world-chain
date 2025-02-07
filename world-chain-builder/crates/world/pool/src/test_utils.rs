@@ -206,7 +206,7 @@ pub fn user_op(
     #[builder(default = bytes!("7bb3742800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))]
     // abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0))
     calldata: Bytes,
-    #[builder(default = fixed_bytes!("0000000000000000000000000000ffd30000000000000000000000000000C350"))]
+    #[builder(default = fixed_bytes!("000000000000000000000000000fffd30000000000000000000000000000C350"))]
     account_gas_limits: FixedBytes<32>,
     #[builder(default = U256::from(60232))] pre_verification_gas: U256,
     #[builder(default = fixed_bytes!("00000000000000000000000000000001000000000000000000000000257353A9"))]
@@ -228,10 +228,9 @@ pub fn user_op(
     let operation_hash = get_operation_hash(user_op.clone(), module, DEV_CHAIN_ID);
 
     let signer = signer(acc);
-    let ecdsa_signature: [u8; 65] = signer
+    let signature = signer
         .sign_message_sync(&operation_hash.0)
-        .expect("Failed to sign operation hash")
-        .into();
+        .expect("Failed to sign operation hash");
 
     let signal = crate::eip4337::hash_user_op(&user_op);
 
@@ -249,24 +248,20 @@ pub fn user_op(
     };
 
     let mut uo_sig = Vec::with_capacity(429);
-
-    uo_sig.extend_from_slice(&user_op.signature.as_ref());
-    uo_sig.extend_from_slice(&ecdsa_signature);
+    uo_sig.extend_from_slice(
+        &(
+            fixed_bytes!("000000000000000000000000"),
+            signature.r(),
+            signature.s(),
+            fixed_bytes!("1F"), // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L326
+        )
+            .abi_encode_packed(),
+    );
     uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
 
     user_op.signature = Bytes::from(uo_sig);
-
     (user_op, payload)
 }
-
-// pub fn create_uo_signature(
-//     uo_hash: FixedBytes<32>,
-//     acc: u32,
-//     payload: PbhPayload,
-// ) -> Bytes {
-//     let mut uo_sig = Vec::with_capacity(429);
-//     uo_sig.extend_from_slice(bytes!("000000000000000000000000").as_ref());
-// }
 
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
@@ -336,12 +331,28 @@ pub fn pbh_multicall(
     IPBHEntryPoint::pbhMulticallCall { calls, payload }
 }
 
-
-pub fn get_operation_hash(user_op: PackedUserOperation, module: Address, chain_id: u64) -> FixedBytes<32> {
+pub fn get_operation_hash(
+    user_op: PackedUserOperation,
+    module: Address,
+    chain_id: u64,
+) -> FixedBytes<32> {
     let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
     let safe_struct_hash = keccak256(&encoded_safe_struct.abi_encode());
-    let domain_separator = keccak256(&(fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218"), chain_id, module).abi_encode());
-    let operation_data = (fixed_bytes!("19"), fixed_bytes!("01"), domain_separator, safe_struct_hash).abi_encode_packed();
+    let domain_separator = keccak256(
+        &(
+            fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218"),
+            chain_id,
+            module,
+        )
+            .abi_encode(),
+    );
+    let operation_data = (
+        fixed_bytes!("19"),
+        fixed_bytes!("01"),
+        domain_separator,
+        safe_struct_hash,
+    )
+        .abi_encode_packed();
     keccak256(&operation_data)
 }
 
@@ -359,13 +370,13 @@ impl From<PackedUserOperation> for EncodedSafeOpStruct {
                 >> U256::from(128))
             .to(),
             callGasLimit: (U256::from_be_bytes(value.accountGasLimits.into())
-                & U256::from_str("0xffffffffffffffff").unwrap())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
             preVerificationGas: value.preVerificationGas,
             maxPriorityFeePerGas: (U256::from_be_bytes(value.gasFees.into()) >> U256::from(128))
                 .to(),
             maxFeePerGas: (U256::from_be_bytes(value.gasFees.into())
-                & U256::from_str("0xffffffffffffffff").unwrap())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
             paymasterAndDataHash: keccak256(&value.paymasterAndData),
             validUntil: U48::ZERO,
@@ -424,13 +435,13 @@ impl Into<alloy_rpc_types::PackedUserOperation> for PackedUserOperation {
                 >> U256::from(128))
             .to(),
             call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
-                & U256::from_str("0xffffffffffffffff").unwrap())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
             pre_verification_gas: self.preVerificationGas,
             max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
                 .to(),
             max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
-                & U256::from_str("0xffffffffffffffff").unwrap())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
             signature: self.signature,
             paymaster: None,
@@ -460,8 +471,8 @@ pub fn world_chain_validator(
 }
 #[cfg(test)]
 mod tests {
-    use test_case::test_case;
     use super::*;
+    use test_case::test_case;
 
     #[test_case(0, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")]
     #[test_case(1, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")]
@@ -491,14 +502,19 @@ mod tests {
             nonce: U256::from(1) << 64,
             initCode: Bytes::default(),
             callData: Bytes::default(),
-            accountGasLimits: fixed_bytes!("0000000000000000000000000000ffd300000000000000000000000000000000"),
+            accountGasLimits: fixed_bytes!(
+                "0000000000000000000000000000ffd300000000000000000000000000000000"
+            ),
             preVerificationGas: U256::from(21000),
-            gasFees: fixed_bytes!("0000000000000000000000000000000100000000000000000000000000000001"),
+            gasFees: fixed_bytes!(
+                "0000000000000000000000000000000100000000000000000000000000000001"
+            ),
             paymasterAndData: Bytes::default(),
             signature: bytes!("000000000000000000000000"),
         };
 
-        let safe_op_hash = get_operation_hash(uo, address!("f05f1C282f8D16fe0E582e4B7478E50E7201b481"), 1);
+        let safe_op_hash =
+            get_operation_hash(uo, address!("f05f1C282f8D16fe0E582e4B7478E50E7201b481"), 1);
 
         assert_eq!(
             safe_op_hash,
@@ -508,6 +524,8 @@ mod tests {
 
     #[test]
     fn test_user_op_signature() {
-        
+        let uo = user_op().acc(2).nonce(U256::from(0)).call().0;
+        println!("{}", uo.signature.length());
+        println!("User Op: {:?}", uo);
     }
 }

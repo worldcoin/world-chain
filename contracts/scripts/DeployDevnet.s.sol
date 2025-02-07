@@ -16,6 +16,7 @@ import {SafeProxy} from "@safe-global/safe-contracts/contracts/proxies/SafeProxy
 import {Enum} from "@safe-global/safe-contracts/contracts/common/Enum.sol";
 import {SafeModuleSetup} from "@4337/SafeModuleSetup.sol";
 import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
+import {Mock4337Module} from "../test/mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 
 contract DeployDevnet is Script {
@@ -117,8 +118,9 @@ contract DeployDevnet is Script {
         for (uint256 i = 0; i < signers.length; i++) {
             uint256 ownerKey = signers[i];
             address owner = vm.addr(ownerKey);
-
-            PBHSafe4337Module module = new PBHSafe4337Module(
+            console.log("Owner Key", ownerKey);
+            console.log("Owner", owner);
+            Mock4337Module module = new Mock4337Module(
                 entryPoint,
                 pbhSignatureAggregator,
                 PBH_NONCE_KEY
@@ -163,6 +165,7 @@ contract DeployDevnet is Script {
 
             // Cast proxy to Safe for easier interaction
             Safe safe = Safe(payable(address(proxy)));
+            require(safe.isOwner(owner), "Owner not added to Safe");
             console.log("Safe Proxy Deployed at: ", address(safe));
             IEntryPoint(entryPoint).depositTo{value: 1 ether}(address(safe));
         }
