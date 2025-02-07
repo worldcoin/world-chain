@@ -20,7 +20,7 @@ concurrency:
 jobs:
   sync:
     name: sync (${{ matrix.chain.bin }})
-    runs-on: ubuntu-22.04-32core
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1

@@ -10,13 +10,12 @@ import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 
-contract DeployDevnet is Script {
+contract Deploy is Script {
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
 
-    address internal constant WORLD_ID = address(0);
-    address internal constant MULTICALL3_ADDRESS = 0xcA11bde05977b3631167028862bE2a173976CA11;
+    address internal constant WORLD_ID = 0x047eE5313F98E26Cc8177fA38877cB36292D2364;
     address internal constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     uint256 internal constant MAX_PBH_GAS_LIMIT = 10500000; // 10.5M 70% of 15M
     uint8 internal constant PBH_NONCE_LIMIT = 30;
@@ -39,7 +38,7 @@ contract DeployDevnet is Script {
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
             (
-                IWorldID(WORLD_ID),
+                IWorldID(address(0)),
                 IEntryPoint(ENTRY_POINT),
                 PBH_NONCE_LIMIT,
                 MULTICALL3_ADDRESS,

@@ -100,7 +100,7 @@ jobs:
           kurtosis engine status
           kurtosis enclave ls || ( kurtosis engine restart && kurtosis enclave ls )
 
-      - name: Setup Devnet
+      - name: E2E Tests
         run: |
           eval $(minikube -p minikube docker-env)
           just e2e-test
