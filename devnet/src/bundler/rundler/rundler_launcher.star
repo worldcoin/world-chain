@@ -85,6 +85,7 @@ def get_rundler_config(
         "--min_unstake_delay={0}".format("0"),
         "--disable_entry_point_v0_6",
         "--enabled_aggregators=PBH",
+        "--pool.same_sender_mempool_count=255"
     ]
 
     files = {

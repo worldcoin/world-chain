@@ -56,24 +56,25 @@ where
     P: Provider<T>,
 {
     let start = Instant::now();
-    let bundler_provider = bundler_provider.clone();
-    let builder_provider = builder_provider.clone();
-    stream::iter(user_operations.iter().enumerate())
+    let mut hashes = Vec::new();
+    for (index, uo) in user_operations.iter().enumerate() {
+        let uo: alloy_rpc_types_eth::PackedUserOperation = uo.clone().into();
+        let res: B256 = bundler_provider
+            .raw_request(
+                Cow::Borrowed("eth_sendUserOperation"),
+                (uo, DEVNET_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR),
+            )
+            .await?;
+        debug!(target: "tests::user_ops_test", %index, ?res, "User Operation Sent");
+
+        hashes.push(res);
+    }
+    stream::iter(hashes.iter().enumerate())
         .map(Ok)
-        .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, uo)| {
+        .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, hash)| {
             let bundler_provider = bundler_provider.clone();
             let builder_provider = builder_provider.clone();
             async move {
-                let uo: alloy_rpc_types_eth::PackedUserOperation = uo.clone().into();
-                let res: B256 = bundler_provider
-                    .raw_request(
-                        Cow::Borrowed("eth_sendUserOperation"),
-                        (uo, DEVNET_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR),
-                    )
-                    .await?;
-
-                debug!(target: "tests::user_ops_test", %index, ?res, "User Operation Sent");
-
                 // Fetch the Transaction by hash
                 let max_retries = 10;
                 let mut tries = 0;
@@ -85,7 +86,7 @@ where
                     let resp: RpcUserOperationByHash = bundler_provider
                         .raw_request(
                             Cow::Borrowed("eth_getUserOperationByHash"),
-                            (res.clone(),),
+                            (hash.clone(),),
                         )
                         .await?;
 

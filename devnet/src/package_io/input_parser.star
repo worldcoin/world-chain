@@ -23,12 +23,12 @@ DEFAULT_BUNDLER_IMAGES = {
 }
 
 DEFAULT_CL_IMAGES = {
-    "op-node": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop",
+    "op-node": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:latest",
     "hildr": "ghcr.io/optimism-java/hildr:latest",
 }
 
 DEFAULT_BATCHER_IMAGES = {
-    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:develop",
+    "op-batcher": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:latest",
 }
 
 DEFAULT_PROPOSER_IMAGES = {
