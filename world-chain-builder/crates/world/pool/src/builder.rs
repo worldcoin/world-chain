@@ -23,31 +23,14 @@ use crate::validator::WorldChainTransactionValidator;
 /// config.
 #[derive(Debug, Clone)]
 pub struct WorldChainPoolBuilder {
-    pub config: WorldChainPoolBuilderConfig,
-    pub pool_config_overrides: PoolBuilderConfigOverrides,
-}
-
-impl WorldChainPoolBuilder {
-    pub fn new(
-        config: WorldChainPoolBuilderConfig,
-        pool_config_overrides: PoolBuilderConfigOverrides,
-    ) -> Self {
-        Self {
-            config,
-            pool_config_overrides,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct WorldChainPoolBuilderConfig {
     pub num_pbh_txs: u8,
     pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
     pub world_id: Address,
+    pub pool_config_overrides: PoolBuilderConfigOverrides,
 }
 
-impl WorldChainPoolBuilderConfig {
+impl WorldChainPoolBuilder {
     pub fn new(
         num_pbh_txs: u8,
         pbh_entrypoint: Address,
@@ -59,6 +42,17 @@ impl WorldChainPoolBuilderConfig {
             pbh_entrypoint,
             pbh_signature_aggregator,
             world_id,
+            pool_config_overrides: PoolBuilderConfigOverrides::default(),
+        }
+    }
+
+    pub fn with_pool_builder_config_overrides(
+        self,
+        pool_config_overrides: PoolBuilderConfigOverrides,
+    ) -> Self {
+        Self {
+            pool_config_overrides: pool_config_overrides,
+            ..self
         }
     }
 }

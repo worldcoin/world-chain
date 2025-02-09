@@ -1,7 +1,9 @@
 use alloy_primitives::Address;
 use eyre::eyre::Result;
 use reth::api::{ConfigureEvm, HeaderTy, TxTy};
-use reth::builder::components::{ComponentsBuilder, PayloadServiceBuilder};
+use reth::builder::components::{
+    ComponentsBuilder, PayloadServiceBuilder, PoolBuilderConfigOverrides,
+};
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
     NodeTypesWithEngine, PayloadBuilderConfig,
@@ -20,7 +22,7 @@ use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_trie_db::MerklePatriciaTrie;
-use world_chain_builder_pool::builder::WorldChainPoolBuilder;
+use world_chain_builder_pool::builder::{WorldChainPoolBuilder, WorldChainPoolBuilderConfig};
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
