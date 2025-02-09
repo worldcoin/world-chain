@@ -66,6 +66,7 @@ pub enum PbhValidationError {
 /// Contains the semaphore proof and relevent metadata
 /// required to to verify the pbh transaction.
 #[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+// TODO: update to PBHPayload
 pub struct PbhPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,

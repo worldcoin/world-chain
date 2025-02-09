@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
+use alloy_eips::Typed2718;
 use alloy_primitives::TxHash;
+use alloy_rlp::Bytes;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use op_alloy_consensus::OpTypedTransaction;
 use reth::transaction_pool::{
@@ -11,60 +13,99 @@ use reth::transaction_pool::{
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{transaction::TransactionConversionError, Recovered};
-use revm_primitives::{AccessList, Address, InvalidTransaction, KzgSettings, TxKind, B256, U256};
+use reth_primitives_traits::InMemorySize;
+use revm_primitives::{
+    AccessList, Address, InvalidTransaction, KzgSettings, SignedAuthorization, TxKind, B256, U256,
+};
 use thiserror::Error;
 use world_chain_builder_pbh::payload::PbhValidationError;
-
-pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn valid_pbh(&self) -> bool;
-    fn set_valid_pbh(&mut self);
-    fn conditional_options(&self) -> Option<&TransactionConditional>;
-}
-
-#[derive(Debug, Error)]
-pub enum WorldChainPoolTransactionError {
-    #[error("Conditional Validation Failed: {0}")]
-    ConditionalValidationFailed(B256),
-    #[error(transparent)]
-    InvalidTransaction(#[from] InvalidTransaction),
-    #[error(transparent)]
-    PbhValidationError(#[from] PbhValidationError),
-    #[error("Invalid calldata encoding")]
-    InvalidCalldata,
-    #[error("Missing PBH Payload")]
-    MissingPbhPayload,
-    #[error("InvalidSignatureAggregator")]
-    InvalidSignatureAggregator,
-    #[error("PBH call tracer error")]
-    PBHCallTracerError,
-}
-
-impl WorldChainPoolTransactionError {
-    pub fn to_outcome<T: PoolTransaction>(self, tx: T) -> TransactionValidationOutcome<T> {
-        TransactionValidationOutcome::Invalid(tx, self.into())
-    }
-}
-
-impl From<WorldChainPoolTransactionError> for InvalidPoolTransactionError {
-    fn from(val: WorldChainPoolTransactionError) -> Self {
-        InvalidPoolTransactionError::Other(Box::new(val))
-    }
-}
-
-//TODO: double check this?
-impl PoolTransactionError for WorldChainPoolTransactionError {
-    fn is_bad_transaction(&self) -> bool {
-        // TODO: double check if invalid transaction should be penalized, we could also make this a match statement
-        // If all errors should not be penalized, we can just return false
-        false
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
     pub inner: OpPooledTransaction,
     pub valid_pbh: bool,
-    pub conditional_options: Option<TransactionConditional>,
+}
+
+impl Typed2718 for WorldChainPooledTransaction {
+    fn ty(&self) -> u8 {
+        self.inner.ty()
+    }
+}
+
+impl alloy_consensus::Transaction for WorldChainPooledTransaction {
+    fn chain_id(&self) -> Option<u64> {
+        self.inner.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.inner.nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.inner.gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.inner.gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.inner.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.inner.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.inner.max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.inner.priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.inner.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.inner.is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.inner.kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.inner.is_create()
+    }
+
+    fn value(&self) -> U256 {
+        self.inner.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.inner.input()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.inner.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.inner.blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.inner.authorization_list()
+    }
+}
+
+pub trait WorldChainPoolTransaction: EthPoolTransaction {
+    fn valid_pbh(&self) -> bool;
+    fn set_valid_pbh(&mut self);
+    fn conditional_options(&self) -> Option<&TransactionConditional>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
@@ -73,7 +114,7 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     }
 
     fn conditional_options(&self) -> Option<&TransactionConditional> {
-        self.conditional_options.as_ref()
+        self.inner.conditional()
     }
 
     fn set_valid_pbh(&mut self) {
@@ -83,11 +124,7 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
 
 impl EthPoolTransaction for WorldChainPooledTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
-        self.inner.take_blob()
-    }
-
-    fn blob_count(&self) -> usize {
-        self.inner.blob_count()
+        EthBlobTransactionSidecar::None
     }
 
     fn try_into_pooled_eip4844(
@@ -110,15 +147,15 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         Err(BlobTransactionValidationError::NotBlobTransaction(
-            self.tx_type(),
+            self.ty(),
         ))
     }
+}
 
-    fn authorization_count(&self) -> usize {
-        match &self.inner.transaction.transaction {
-            OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
-            _ => 0,
-        }
+impl InMemorySize for WorldChainPooledTransaction {
+    // TODO: double check this
+    fn size(&self) -> usize {
+        self.inner.size()
     }
 }
 
@@ -127,7 +164,6 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
         Self {
             inner: tx,
             valid_pbh: false,
-            conditional_options: None,
         }
     }
 }
@@ -139,7 +175,6 @@ impl From<Recovered<op_alloy_consensus::OpPooledTransaction>> for WorldChainPool
         Self {
             inner,
             valid_pbh: false,
-            conditional_options: None,
         }
     }
 }
@@ -155,7 +190,6 @@ impl TryFrom<Recovered<OpTransactionSigned>> for WorldChainPooledTransaction {
         Ok(Self {
             inner: pooled.into(),
             valid_pbh: false,
-            conditional_options: None,
         })
     }
 }
@@ -287,5 +321,48 @@ impl PoolTransaction for WorldChainPooledTransaction {
     /// Returns `chain_id`
     fn chain_id(&self) -> Option<u64> {
         self.inner.chain_id()
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum WorldChainPoolTransactionError {
+    #[error("Conditional Validation Failed: {0}")]
+    ConditionalValidationFailed(B256),
+    #[error(transparent)]
+    InvalidTransaction(#[from] InvalidTransaction),
+    #[error(transparent)]
+    PbhValidationError(#[from] PbhValidationError),
+    #[error("Invalid calldata encoding")]
+    InvalidCalldata,
+    #[error("Missing PBH Payload")]
+    MissingPbhPayload,
+    #[error("InvalidSignatureAggregator")]
+    InvalidSignatureAggregator,
+    #[error("PBH call tracer error")]
+    PBHCallTracerError,
+}
+
+impl WorldChainPoolTransactionError {
+    pub fn to_outcome<T: PoolTransaction>(self, tx: T) -> TransactionValidationOutcome<T> {
+        TransactionValidationOutcome::Invalid(tx, self.into())
+    }
+}
+
+impl From<WorldChainPoolTransactionError> for InvalidPoolTransactionError {
+    fn from(val: WorldChainPoolTransactionError) -> Self {
+        InvalidPoolTransactionError::Other(Box::new(val))
+    }
+}
+
+//TODO: double check this?
+impl PoolTransactionError for WorldChainPoolTransactionError {
+    fn is_bad_transaction(&self) -> bool {
+        // TODO: double check if invalid transaction should be penalized, we could also make this a match statement
+        // If all errors should not be penalized, we can just return false
+        false
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        todo!("TODO:")
     }
 }
