@@ -158,49 +158,9 @@ impl InMemorySize for WorldChainPooledTransaction {
     }
 }
 
-impl From<OpPooledTransaction> for WorldChainPooledTransaction {
-    fn from(tx: OpPooledTransaction) -> Self {
-        Self {
-            inner: tx,
-            valid_pbh: false,
-        }
-    }
-}
-
-impl From<Recovered<op_alloy_consensus::OpPooledTransaction>> for WorldChainPooledTransaction {
-    fn from(tx: Recovered<op_alloy_consensus::OpPooledTransaction>) -> Self {
-        let inner = OpPooledTransaction::from(tx);
-
-        Self {
-            inner,
-            valid_pbh: false,
-        }
-    }
-}
-
-impl TryFrom<Recovered<OpTransactionSigned>> for WorldChainPooledTransaction {
-    type Error = TransactionConversionError;
-
-    fn try_from(value: Recovered<OpTransactionSigned>) -> Result<Self, Self::Error> {
-        let (tx, signer) = value.into_parts();
-        let pooled: Recovered<op_alloy_consensus::OpPooledTransaction> =
-            Recovered::new_unchecked(tx.try_into()?, signer);
-
-        Ok(Self {
-            inner: pooled.into(),
-            valid_pbh: false,
-        })
-    }
-}
-
-impl From<WorldChainPooledTransaction> for Recovered<OpTransactionSigned> {
-    fn from(val: WorldChainPooledTransaction) -> Self {
-        val.inner.into()
-    }
-}
-
 impl PoolTransaction for WorldChainPooledTransaction {
-    type TryFromConsensusError = <Self as TryFrom<Recovered<Self::Consensus>>>::Error;
+    type TryFromConsensusError =
+        <op_alloy_consensus::OpPooledTransaction as TryFrom<OpTransactionSigned>>::Error;
     type Consensus = OpTransactionSigned;
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
