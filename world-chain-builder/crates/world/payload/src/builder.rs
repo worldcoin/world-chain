@@ -23,7 +23,9 @@ use reth_evm::env::EvmEnv;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
+use reth_optimism_node::{
+    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes, OpReceiptBuilder,
+};
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
@@ -64,28 +66,43 @@ where
     N: NodePrimitives,
 {
     pub fn new(
+        pool: Pool,
+        client: Client,
         evm_config: EvmConfig,
+        receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
     ) -> Self {
         Self::with_builder_config(
+            pool,
+            client,
             evm_config,
-            Default::default(),
+            receipt_builder,
+            OpBuilderConfig::default(),
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
         )
     }
 
-    pub const fn with_builder_config(
+    pub fn with_builder_config(
+        pool: Pool,
+        client: Client,
         evm_config: EvmConfig,
-        builder_config: OpBuilderConfig,
+        receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        config: OpBuilderConfig,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
     ) -> Self {
-        let inner = OpPayloadBuilder::with_builder_config(evm_config, builder_config);
+        let inner = OpPayloadBuilder::with_builder_config(
+            pool,
+            client,
+            evm_config,
+            receipt_builder,
+            config,
+        );
 
         Self {
             inner,
