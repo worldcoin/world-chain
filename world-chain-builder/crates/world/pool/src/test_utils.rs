@@ -1,4 +1,4 @@
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
@@ -130,10 +130,12 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let op_tx: OpTypedTransaction = tx.into();
-    let tx_signed = OpTransactionSigned::new(op_tx, signature);
+    let op_tx: OpTypedTransaction = tx.clone().into();
+
+    // TODO: double check hash is correct hash
+    let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
     let pooled = OpPooledTransaction::new(
-        tx_signed.clone().into_ecrecovered_unchecked().unwrap(),
+        tx_signed.clone().into_recovered_unchecked().unwrap(),
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
@@ -145,7 +147,9 @@ pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let tx_signed = OpTransactionSigned::new(tx.into(), signature);
+
+    // TODO: double check hash is correct hash
+    let tx_signed = OpTransactionSigned::new(tx.clone().into(), signature, tx.signature_hash());
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);
     buff.into()
@@ -254,10 +258,11 @@ pub fn pbh_multicall(
 pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
+
     let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
         .no_shanghai()
         .no_cancun()
-        .build(client.clone(), InMemoryBlobStore::default());
+        .build(InMemoryBlobStore::default());
     let validator = OpTransactionValidator::new(validator).require_l1_data_gas_fee(false);
     let root_validator = WorldChainRootValidator::new(client, TEST_WORLD_ID).unwrap();
     WorldChainTransactionValidator::new(
