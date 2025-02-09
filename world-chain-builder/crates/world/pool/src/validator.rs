@@ -13,10 +13,11 @@ use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
 };
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
 use world_chain_builder_pbh::payload::PbhPayload;
 
@@ -44,7 +45,8 @@ where
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory
+    Client: ChainSpecProvider<ChainSpec: OpHardforks>
+        + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
@@ -181,7 +183,9 @@ where
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
