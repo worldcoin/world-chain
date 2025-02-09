@@ -20,7 +20,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, ConfigureEvmFor, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
@@ -30,7 +30,7 @@ use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
-use reth_optimism_payload_builder::OpPayloadAttributes;
+use reth_optimism_payload_builder::{OpPayloadAttributes, OpPayloadPrimitives};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{
     Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
@@ -41,7 +41,7 @@ use reth_provider::{
     StateProofProvider, StateProviderFactory, StateRootProvider,
 };
 use reth_transaction_pool::error::InvalidPoolTransactionError;
-use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
+use reth_transaction_pool::{BestTransactions, PoolTransaction, ValidPoolTransaction};
 use revm::Database;
 use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
 use tracing::{debug, trace, warn};
@@ -60,10 +60,10 @@ pub struct WorldChainPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, 
     pub pbh_signature_aggregator: Address,
 }
 
-impl<Pool, Client, EvmConfig, N> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N>
+impl<Pool, Client, EvmConfig, N: NodePrimitives>
+    WorldChainPayloadBuilder<Pool, Client, EvmConfig, N>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
-    N: NodePrimitives,
 {
     pub fn new(
         pool: Pool,
@@ -113,17 +113,19 @@ where
     }
 }
 
-impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
+impl<Pool, Client, EvmConfig, N: NodePrimitives>
+    WorldChainPayloadBuilder<Pool, Client, EvmConfig, N>
+{
     /// Sets the rollup's compute pending block configuration option.
     pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.inner.compute_pending_block = compute_pending_block;
         self
     }
 
-    pub fn with_transactions<T: OpPayloadTransactions>(
+    pub fn with_transactions<T>(
         self,
         best_transactions: T,
-    ) -> WorldChainPayloadBuilder<EvmConfig, T> {
+    ) -> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T> {
         let Self {
             inner,
             verified_blockspace_capacity,
@@ -135,6 +137,9 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
             compute_pending_block,
             evm_config,
             config,
+            pool,
+            client,
+            receipt_builder,
             ..
         } = inner;
 
@@ -142,8 +147,11 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
             inner: OpPayloadBuilder {
                 compute_pending_block,
                 evm_config,
-                best_transactions,
                 config,
+                pool,
+                client,
+                receipt_builder,
+                best_transactions,
             },
             verified_blockspace_capacity,
             pbh_entry_point,
@@ -162,10 +170,12 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
     }
 }
 
-impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
+impl<Pool, Client, EvmConfig, N, T> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-    Txs: OpPayloadTransactions,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    N: OpPayloadPrimitives,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -175,9 +185,10 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<Client, Pool>(
+    fn build_payload<'a, Txs>(
         &self,
-        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+        args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
+        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client:
@@ -246,16 +257,16 @@ where
 
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
+    pub fn evm_env(
         &self,
-        attributes: &OpPayloadBuilderAttributes,
+        attributes: &OpPayloadBuilderAttributes<N::SignedTx>,
         parent: &Header,
-    ) -> Result<EvmEnv, EvmConfig::Error> {
-        self.inner.cfg_and_block_env(attributes, parent)
+    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error> {
+        self.inner.evm_env(attributes, parent)
     }
 
     /// Computes the witness for the payload.
-    pub fn payload_witness<Client>(
+    pub fn payload_witness(
         &self,
         client: Client,
         parent: SealedHeader,
