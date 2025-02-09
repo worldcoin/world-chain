@@ -259,7 +259,7 @@ pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
 
-    let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+    let validator = EthTransactionValidatorBuilder::new(client.clone())
         .no_shanghai()
         .no_cancun()
         .build(InMemoryBlobStore::default());
