@@ -31,7 +31,7 @@ use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{
-    Block, BlockBody, Header, InvalidTransactionError, RecoveredBlock, SealedHeader,
+    Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_primitives_traits::Block as _;
 use reth_provider::{
@@ -51,16 +51,17 @@ use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
-    pub inner: OpPayloadBuilder<EvmConfig, Tx>,
+pub struct WorldChainPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()> {
+    pub inner: OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
 }
 
-impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig, N> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
+    N: NodePrimitives,
 {
     pub fn new(
         evm_config: EvmConfig,
