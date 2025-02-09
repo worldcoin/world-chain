@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use alloy_primitives::Address;
-use reth::builder::components::PoolBuilder;
+use reth::builder::components::{PoolBuilder, PoolBuilderConfigOverrides};
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
@@ -22,13 +23,31 @@ use crate::validator::WorldChainTransactionValidator;
 /// config.
 #[derive(Debug, Clone)]
 pub struct WorldChainPoolBuilder {
+    pub config: WorldChainPoolBuilderConfig,
+    pub pool_config_overrides: PoolBuilderConfigOverrides,
+}
+
+impl WorldChainPoolBuilder {
+    pub fn new(
+        config: WorldChainPoolBuilderConfig,
+        pool_config_overrides: PoolBuilderConfigOverrides,
+    ) -> Self {
+        Self {
+            config,
+            pool_config_overrides,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorldChainPoolBuilderConfig {
     pub num_pbh_txs: u8,
     pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
     pub world_id: Address,
 }
 
-impl WorldChainPoolBuilder {
+impl WorldChainPoolBuilderConfig {
     pub fn new(
         num_pbh_txs: u8,
         pbh_entrypoint: Address,
@@ -46,40 +65,47 @@ impl WorldChainPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    // Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+        let Self {
+            config,
+            pool_config_overrides,
+            ..
+        } = self;
+
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
-            ctx.chain_spec().inner.clone(),
-        ))
-        .with_head_timestamp(ctx.head().timestamp)
-        .kzg_settings(ctx.kzg_settings()?)
-        .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-        .build_with_tasks(
-            ctx.provider().clone(),
-            ctx.task_executor().clone(),
-            blob_store.clone(),
-        )
-        .map(|validator| {
-            let op_tx_validator = OpTransactionValidator::new(validator.clone())
-                // In --dev mode we can't require gas fees because we're unable to decode the L1
-                // block info
-                .require_l1_data_gas_fee(!ctx.config().dev.dev);
-            let root_validator =
-                WorldChainRootValidator::new(validator.client().clone(), self.world_id)
-                    .expect("failed to initialize root validator");
-            WorldChainTransactionValidator::new(
-                op_tx_validator,
-                root_validator,
-                self.num_pbh_txs,
-                self.pbh_entrypoint,
-                self.pbh_signature_aggregator,
+
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
+            .no_eip4844()
+            .with_head_timestamp(ctx.head().timestamp)
+            .kzg_settings(ctx.kzg_settings()?)
+            .with_additional_tasks(
+                pool_config_overrides
+                    .additional_validation_tasks
+                    .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
             )
-        });
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+            .map(|validator| {
+                let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                    // In --dev mode we can't require gas fees because we're unable to decode the L1
+                    // block info
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
+                let root_validator =
+                    WorldChainRootValidator::new(validator.client().clone(), config.world_id)
+                        .expect("failed to initialize root validator");
+                WorldChainTransactionValidator::new(
+                    op_tx_validator,
+                    root_validator,
+                    config.num_pbh_txs,
+                    config.pbh_entrypoint,
+                    config.pbh_signature_aggregator,
+                )
+            });
 
         let ordering = WorldChainOrdering::default();
 
