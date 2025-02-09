@@ -304,7 +304,7 @@ pub mod tests {
         let tx = test_utils::eip1559().to(account).call();
         let tx = test_utils::eth_tx(ACC, tx).await;
 
-        pool.add_external_transaction(tx.clone().into())
+        pool.add_external_transaction(tx.into())
             .await
             .expect("Failed to add transaction");
     }
@@ -323,7 +323,7 @@ pub mod tests {
             .await
             .expect("Failed to add transaction");
 
-        let res = pool.add_external_transaction(tx.clone().into()).await;
+        let res = pool.add_external_transaction(tx.into()).await;
 
         assert!(res.is_err());
     }

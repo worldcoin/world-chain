@@ -243,3 +243,12 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
         todo!("TODO:")
     }
 }
+
+impl From<OpPooledTransaction> for WorldChainPooledTransaction {
+    fn from(tx: OpPooledTransaction) -> Self {
+        Self {
+            inner: tx,
+            valid_pbh: false,
+        }
+    }
+}
