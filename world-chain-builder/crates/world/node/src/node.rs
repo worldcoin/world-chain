@@ -93,7 +93,7 @@ impl WorldChainNode {
             pbh_entrypoint,
             signature_aggregator,
             world_id,
-        } = self.args;
+        } = self.args.clone();
 
         let RollupArgs {
             disable_txpool_gossip,
@@ -410,7 +410,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
