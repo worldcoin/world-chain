@@ -181,7 +181,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives>
 
 impl<Pool, Client, EvmConfig, N, T> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
@@ -200,9 +200,7 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
-        >,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -323,7 +321,7 @@ impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
     N: OpPayloadPrimitives,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     EvmConfig: ConfigureEvmFor<N>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -409,14 +407,11 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
-        >,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
-        //StateProviderFactory + BlockReaderIdExt
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let Self { best } = self;
 
@@ -488,12 +483,10 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        // N::Block: Into<alloy_consensus::Block<N::_TX>>,
-        Txs: PayloadTransactions,
-        Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let ExecutedPayload {
             info,
@@ -631,12 +624,10 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
-        >,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider + StorageRootProvider,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let _ = self.execute(state, ctx, pool)?;
         let ExecutionWitnessRecord {
@@ -678,14 +669,13 @@ where
         info: &mut ExecutionInfo<N>,
         db: &mut State<DB>,
         mut best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>
-                             + WorldChainPoolTransaction,
+            Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>,
         >,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
