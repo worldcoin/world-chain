@@ -46,7 +46,7 @@ impl WorldChainPoolBuilder {
         }
     }
 
-    pub fn with_pool_builder_config_overrides(
+    pub fn with_pool_config_overrides(
         self,
         pool_config_overrides: PoolBuilderConfigOverrides,
     ) -> Self {
@@ -66,7 +66,10 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let Self {
-            config,
+            num_pbh_txs,
+            pbh_entrypoint,
+            pbh_signature_aggregator,
+            world_id,
             pool_config_overrides,
             ..
         } = self;
@@ -90,14 +93,14 @@ where
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
                 let root_validator =
-                    WorldChainRootValidator::new(validator.client().clone(), config.world_id)
+                    WorldChainRootValidator::new(validator.client().clone(), world_id)
                         .expect("failed to initialize root validator");
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
                     root_validator,
-                    config.num_pbh_txs,
-                    config.pbh_entrypoint,
-                    config.pbh_signature_aggregator,
+                    num_pbh_txs,
+                    pbh_entrypoint,
+                    pbh_signature_aggregator,
                 )
             });
 
