@@ -38,7 +38,7 @@ use reth_optimism_primitives::transaction::signed::OpTransaction;
 use reth_optimism_primitives::{
     OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
-use reth_payload_util::PayloadTransactions;
+use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
     Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -268,19 +268,14 @@ where
     /// Computes the witness for the payload.
     pub fn payload_witness(
         &self,
-        client: Client,
         parent: SealedHeader,
         attributes: OpPayloadAttributes,
-    ) -> Result<ExecutionWitness, PayloadBuilderError>
-    where
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-    {
+    ) -> Result<ExecutionWitness, PayloadBuilderError> {
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
         let evm_env = self
-            .cfg_and_block_env(&attributes, &parent)
+            .evm_env(&attributes, &parent)
             .map_err(PayloadBuilderError::other)?;
 
         let config = PayloadConfig {
@@ -291,30 +286,28 @@ where
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
-                chain_spec: client.chain_spec(),
+                chain_spec: self.inner.client.chain_spec(),
                 config,
                 evm_env,
                 cancel: Default::default(),
                 best_payload: Default::default(),
+                receipt_builder: self.inner.receipt_builder.clone(),
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
-            client,
         };
 
-        let client = ctx.client();
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self.inner.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder()
             .with_database(state)
             .with_bundle_update()
             .build();
 
-        let builder = WorldChainBuilder {
-            pool: NoopWorldChainTransactionPool::default(),
-            _best: (),
-        };
+        let builder =
+            WorldChainBuilder::new(|_| NoopPayloadTransactions::<Pool::Transaction>::default());
+
         builder.witness(&mut state, &ctx)
     }
 }
