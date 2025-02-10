@@ -130,7 +130,6 @@ impl WorldChainNode {
     }
 }
 
-// TODO:
 impl<N> Node<N> for WorldChainNode
 where
     N: FullNodeTypes<
@@ -176,6 +175,8 @@ impl NodeTypes for WorldChainNode {
 impl NodeTypesWithEngine for WorldChainNode {
     type Engine = OpEngineTypes;
 }
+
+// TODO: World Chain Addons?
 
 /// A basic World Chain transaction pool.
 ///

@@ -67,7 +67,7 @@ pub enum PbhValidationError {
 /// required to to verify the pbh transaction.
 #[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 // TODO: update to PBHPayload
-pub struct PbhPayload {
+pub struct PBHPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,
     /// A nullifier hash used to keep track of
@@ -81,7 +81,7 @@ pub struct PbhPayload {
     pub proof: Proof,
 }
 
-impl PbhPayload {
+impl PBHPayload {
     pub fn validate(
         &self,
         signal: U256,
@@ -152,7 +152,7 @@ mod test {
             ),
             (U256::from(7u64), U256::from(8u64)),
         ));
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             external_nullifier: ExternalNullifier::v1(1, 2024, 11),
             nullifier_hash: Field::from(10u64),
             root: Field::from(12u64),
@@ -161,13 +161,13 @@ mod test {
 
         let mut out = vec![];
         pbh_payload.encode(&mut out);
-        let decoded = PbhPayload::decode(&mut out.as_slice()).unwrap();
+        let decoded = PBHPayload::decode(&mut out.as_slice()).unwrap();
         assert_eq!(pbh_payload, decoded);
     }
 
     #[test]
     fn test_valid_root() -> eyre::Result<()> {
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             root: Field::from(1u64),
             ..Default::default()
         };
@@ -180,7 +180,7 @@ mod test {
 
     #[test]
     fn test_invalid_root() -> eyre::Result<()> {
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             root: Field::from(3u64),
             ..Default::default()
         };
@@ -199,7 +199,7 @@ mod test {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             external_nullifier,
             ..Default::default()
         };
@@ -216,7 +216,7 @@ mod test {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             external_nullifier,
             ..Default::default()
         };
@@ -236,7 +236,7 @@ mod test {
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
         let external_nullifier = ExternalNullifier::v1(1, 2025, 30);
-        let pbh_payload = PbhPayload {
+        let pbh_payload = PBHPayload {
             external_nullifier,
             ..Default::default()
         };

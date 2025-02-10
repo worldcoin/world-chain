@@ -29,6 +29,7 @@ use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
+use world_chain_builder_node::args::WorldChainArgs;
 use world_chain_builder_node::node::WorldChainNode;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
@@ -102,21 +103,20 @@ impl WorldChainBuilderTestContext {
 
         // is 0.0.0.0 by default
         node_config.network.addr = [127, 0, 0, 1].into();
-        let builder_args = ExtArgs {
-            builder_args: WorldChainBuilderArgs {
-                num_pbh_txs: 30,
-                verified_blockspace_capacity: 70,
-                pbh_entrypoint: PBH_TEST_ENTRYPOINT,
-                signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
-                world_id: TEST_WORLD_ID,
-            },
+        let builder_args = WorldChainArgs {
+            num_pbh_txs: 30,
+            verified_blockspace_capacity: 70,
+            pbh_entrypoint: PBH_TEST_ENTRYPOINT,
+            signature_aggregator: PBH_TEST_SIGNATURE_AGGREGATOR,
+            world_id: TEST_WORLD_ID,
+
             ..Default::default()
         };
 
-        let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
+        let world_chain_node = WorldChainNode::new(builder_args.clone());
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider<_>>()
+            .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
             .with_components(world_chain_node.components_builder())
             .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {

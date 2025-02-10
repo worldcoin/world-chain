@@ -1,9 +1,9 @@
 use alloy_sol_types::sol;
 use world_chain_builder_pbh::{
     external_nullifier::ExternalNullifier,
-    payload::{PbhPayload, Proof},
+    payload::{PBHPayload, Proof},
 };
-use IPBHEntryPoint::PBHPayload;
+use IPBHEntryPoint::PBHPayload as IPBHPayload;
 
 sol! {
     contract IMulticall3 {
@@ -58,8 +58,8 @@ sol! {
     }
 }
 
-impl From<PBHPayload> for PbhPayload {
-    fn from(val: PBHPayload) -> Self {
+impl From<IPBHPayload> for PBHPayload {
+    fn from(val: IPBHPayload) -> Self {
         let proof: [ethers_core::types::U256; 8] = val
             .proof
             .into_iter()
@@ -78,7 +78,7 @@ impl From<PBHPayload> for PbhPayload {
 
         let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
 
-        PbhPayload {
+        PBHPayload {
             external_nullifier: ExternalNullifier::from_word(val.pbhExternalNullifier),
             nullifier_hash: val.nullifierHash,
             root: val.root,

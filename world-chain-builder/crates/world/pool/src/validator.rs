@@ -19,7 +19,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
-use world_chain_builder_pbh::payload::PbhPayload;
+use world_chain_builder_pbh::payload::PBHPayload;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -94,7 +94,7 @@ where
         // Validate all proofs associated with each UserOp
         for aggregated_ops in calldata._0 {
             let mut buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PbhPayload>>::decode(&mut buff) {
+            let pbh_payloads = match <Vec<PBHPayload>>::decode(&mut buff) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx),
             };
@@ -149,7 +149,7 @@ where
             return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
         };
 
-        let pbh_payload: PbhPayload = calldata.payload.into();
+        let pbh_payload: PBHPayload = calldata.payload.into();
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 

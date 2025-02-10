@@ -20,7 +20,7 @@ use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
 use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
+use world_chain_builder_pbh::payload::{PBHPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IMulticall3;
@@ -160,7 +160,7 @@ pub fn user_op(
     acc: u32,
     #[builder(into, default = U256::ZERO)] nonce: U256,
     #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
-) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
+) -> (IEntryPoint::PackedUserOperation, PBHPayload) {
     let sender = account(acc);
 
     let user_op = PackedUserOperation {
@@ -177,7 +177,7 @@ pub fn user_op(
 
     let proof = Proof(proof);
 
-    let payload = PbhPayload {
+    let payload = PBHPayload {
         external_nullifier,
         nullifier_hash,
         root,
@@ -189,7 +189,7 @@ pub fn user_op(
 
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
-    proofs: Vec<PbhPayload>,
+    proofs: Vec<PBHPayload>,
 ) -> IPBHEntryPoint::handleAggregatedOpsCall {
     let mut signature_buff = Vec::new();
     proofs.encode(&mut signature_buff);
