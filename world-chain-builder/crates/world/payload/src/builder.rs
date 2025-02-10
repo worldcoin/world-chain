@@ -181,7 +181,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives>
 
 impl<Pool, Client, EvmConfig, N, T> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
@@ -200,8 +200,9 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions,
-        Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
+        Txs: PayloadTransactions<
+            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
+        >,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -312,7 +313,7 @@ where
         let builder =
             WorldChainBuilder::new(|_| NoopPayloadTransactions::<Pool::Transaction>::default());
 
-        builder.witness(&mut state, &ctx)
+        builder.witness(&mut state, &ctx, &self.inner.pool)
     }
 }
 
@@ -408,11 +409,13 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions<
+            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
+        >,
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
         //StateProviderFactory + BlockReaderIdExt
     {
         let Self { best } = self;
@@ -489,7 +492,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
     {
         let ExecutedPayload {
             info,
@@ -618,10 +621,11 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     }
 
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
-    pub fn witness<EvmConfig, N, DB, P>(
+    pub fn witness<EvmConfig, N, DB, P, Pool>(
         self,
         state: &mut State<DB>,
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
+        pool: &Pool,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
@@ -629,8 +633,9 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider + StorageRootProvider,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
     {
-        let _ = self.execute(state, ctx)?;
+        let _ = self.execute(state, ctx, pool)?;
         let ExecutionWitnessRecord {
             hashed_state,
             codes,
