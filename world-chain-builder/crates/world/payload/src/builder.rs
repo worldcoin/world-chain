@@ -79,6 +79,7 @@ where
         client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        compute_pending_block: bool,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
@@ -88,6 +89,7 @@ where
             client,
             evm_config,
             receipt_builder,
+            compute_pending_block,
             OpBuilderConfig::default(),
             verified_blockspace_capacity,
             pbh_entry_point,
@@ -100,6 +102,7 @@ where
         client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        compute_pending_block: bool,
         config: OpBuilderConfig,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
@@ -111,7 +114,8 @@ where
             evm_config,
             receipt_builder,
             config,
-        );
+        )
+        .set_compute_pending_block(compute_pending_block);
 
         Self {
             inner,
