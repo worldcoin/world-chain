@@ -3,8 +3,8 @@ use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
 use reth_provider::providers::BlockchainProvider;
-use world_chain_builder_node::args::ExtArgs;
-use world_chain_builder_node::node::WorldChainBuilder;
+use reth_tracing::tracing::info;
+use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::{sequencer::SequencerClient, EthApiExtServer, WorldChainEthApiExt};
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -26,34 +26,26 @@ fn main() {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info,reth=info");
     }
-    if let Err(err) =
-        Cli::<OpChainSpecParser, ExtArgs>::parse().run(|builder, builder_args| async move {
-            let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
-            let handle = builder
-                .with_types_and_provider::<WorldChainBuilder, BlockchainProvider<_>>()
-                .with_components(world_chain_node.components_builder())
-                .with_add_ons(world_chain_node.add_ons())
-                .extend_rpc_modules(move |ctx| {
-                    let provider = ctx.provider().clone();
-                    let pool = ctx.pool().clone();
-                    let sequencer_client = builder_args
-                        .rollup_args
-                        .sequencer_http
-                        .map(SequencerClient::new);
-                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
-                    ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                    Ok(())
-                })
-                .launch_with_fn(|builder| {
-                    let launcher = EngineNodeLauncher::new(
-                        builder.task_executor().clone(),
-                        builder.config().datadir(),
-                        TreeConfig::default(),
-                    );
-                    builder.launch_with(launcher)
-                })
-                .await?;
 
+    if let Err(err) =
+        Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
+            info!(target: "reth::cli", "Launching node");
+
+            let handle = builder
+                .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
+                // .extend_rpc_modules(move |ctx| {
+                //     let provider = ctx.provider().clone();
+                //     let pool = ctx.pool().clone();
+                //     let sequencer_client = builder_args
+                //         .rollup_args
+                //         .sequencer_http
+                //         .map(SequencerClient::new);
+                //     let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                //     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                //     Ok(())
+                // })
+                .launch_node(WorldChainNode::new(args))
+                .await?;
             handle.node_exit_future.await
         })
     {

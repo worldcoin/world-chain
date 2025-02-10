@@ -12,7 +12,9 @@ use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::{TransactionPool, TransactionValidationTaskExecutor};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_evm::ConfigureEvmFor;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
@@ -23,6 +25,7 @@ use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
+use reth_primitives::transaction::signature;
 use reth_provider::CanonStateSubscriptions;
 use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
@@ -91,6 +94,7 @@ impl WorldChainNode {
             signature_aggregator,
             world_id,
         } = self.args;
+
         let RollupArgs {
             disable_txpool_gossip,
             compute_pending_block,
@@ -107,7 +111,13 @@ impl WorldChainNode {
                 world_id,
             ))
             .payload(
-                OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
+                WorldChainPayloadBuilder::new(
+                    compute_pending_block,
+                    verified_blockspace_capacity,
+                    pbh_entrypoint,
+                    signature_aggregator,
+                )
+                .with_da_config(self.da_config.clone()),
             )
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
@@ -148,6 +158,41 @@ impl WorldChainPoolBuilder {
         }
     }
 }
+
+// impl<N> Node<N> for WorldChainNode
+// where
+//     N: FullNodeTypes<
+//         Types: NodeTypesWithEngine<
+//             Engine = OpEngineTypes,
+//             ChainSpec = OpChainSpec,
+//             Primitives = OpPrimitives,
+//             Storage = OpStorage,
+//         >,
+//     >,
+// {
+//     type ComponentsBuilder = ComponentsBuilder<
+//         N,
+//         WorldChainPoolBuilder,
+//         WorldChainPayloadBuilder,
+//         OpNetworkBuilder,
+//         OpExecutorBuilder,
+//         OpConsensusBuilder,
+//     >;
+
+//     type AddOns =
+//         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+
+//     fn components_builder(&self) -> Self::ComponentsBuilder {
+//         Self::components(self)
+//     }
+
+//     fn add_ons(&self) -> Self::AddOns {
+//         Self::AddOns::builder()
+//             .with_sequencer(self.args.sequencer_http.clone())
+//             .with_da_config(self.da_config.clone())
+//             .build()
+//     }
+// }
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
@@ -242,322 +287,156 @@ where
     }
 }
 
-// use super::args::{ExtArgs, WorldChainBuilderArgs};
+/// A basic World Chain payload service builder
+#[derive(Debug, Default, Clone)]
+pub struct WorldChainPayloadBuilder<Txs = ()> {
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    pub compute_pending_block: bool,
+    /// The type responsible for yielding the best transactions for the payload if mempool
+    /// transactions are allowed.
+    pub best_transactions: Txs,
+    /// This data availability configuration specifies constraints for the payload builder
+    /// when assembling payloads
+    pub da_config: OpDAConfig,
+    pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
+}
 
-// #[derive(Debug, Clone)]
-// pub struct WorldChainNode {
-//     /// Additional Optimism args
-//     pub args: ExtArgs,
-//     /// Data availability configuration for the OP builder.
-//     ///
-//     /// Used to throttle the size of the data availability payloads (configured by the batcher via
-//     /// the `miner_` api).
-//     ///
-//     /// By default no throttling is applied.
-//     pub da_config: OpDAConfig,
-// }
+impl WorldChainPayloadBuilder {
+    /// Create a new instance with the given `compute_pending_block` flag and data availability
+    /// config.
+    pub fn new(
+        compute_pending_block: bool,
+        verified_blockspace_capacity: u8,
+        pbh_entry_point: Address,
+        pbh_signature_aggregator: Address,
+    ) -> Self {
+        Self {
+            compute_pending_block,
+            verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
+            best_transactions: (),
+            da_config: OpDAConfig::default(),
+        }
+    }
 
-// impl WorldChainNode {
-//     pub fn new(args: ExtArgs) -> Result<Self> {
-//         Ok(Self {
-//             args,
-//             da_config: OpDAConfig::default(),
-//         })
-//     }
+    /// Configure the data availability configuration for the OP payload builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = da_config;
+        self
+    }
+}
 
-//     /// Configure the data availability configuration for the OP builder.
-//     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
-//         self.da_config = da_config;
-//         self
-//     }
+impl<Txs> WorldChainPayloadBuilder<Txs> {
+    /// Configures the type responsible for yielding the transactions that should be included in the
+    /// payload.
+    pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilder<T> {
+        let Self {
+            compute_pending_block,
+            da_config,
+            verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
+            ..
+        } = self;
 
-//     /// Returns the components for the given [`RollupArgs`].
-//     pub fn components<Node>(
-//         args: ExtArgs,
-//     ) -> ComponentsBuilder<
-//         Node,
-//         WorldChainPoolBuilder,
-//         WorldChainPayloadBuilder,
-//         OpNetworkBuilder,
-//         OpExecutorBuilder,
-//         OpConsensusBuilder,
-//     >
-//     where
-//         Node: FullNodeTypes<
-//             Types: NodeTypesWithEngine<
-//                 Engine = OpEngineTypes,
-//                 ChainSpec = OpChainSpec,
-//                 Primitives = OpPrimitives,
-//             >,
-//         >,
-//     {
-//         let WorldChainBuilderArgs {
-//             num_pbh_txs,
-//             verified_blockspace_capacity,
-//             pbh_entrypoint,
-//             signature_aggregator,
-//             world_id,
-//         } = args.builder_args;
+        WorldChainPayloadBuilder {
+            compute_pending_block,
+            da_config,
+            verified_blockspace_capacity,
+            pbh_entry_point,
+            pbh_signature_aggregator,
+            best_transactions,
+        }
+    }
 
-//         let RollupArgs {
-//             disable_txpool_gossip,
-//             compute_pending_block,
-//             discovery_v4,
-//             ..
-//         } = args.rollup_args;
+    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
+    /// given EVM config.
+    #[expect(clippy::type_complexity)]
+    pub fn build<Node, Evm, Pool>(
+        &self,
+        evm_config: Evm,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<
+        world_chain_builder_payload::builder::WorldChainPayloadBuilder<
+            Pool,
+            Node::Provider,
+            Evm,
+            PrimitivesTy<Node::Types>,
+            Txs,
+        >,
+    >
+    where
+        Node: FullNodeTypes<
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
+        >,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
+        Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+        Txs: OpPayloadTransactions<Pool::Transaction>,
+    {
+        let payload_builder =
+            world_chain_builder_payload::builder::WorldChainPayloadBuilder::with_builder_config(
+                pool,
+                ctx.provider().clone(),
+                evm_config,
+                BasicOpReceiptBuilder::default(),
+                OpBuilderConfig {
+                    da_config: self.da_config.clone(),
+                },
+                self.compute_pending_block,
+                self.verified_blockspace_capacity,
+                self.pbh_entry_point,
+                self.pbh_signature_aggregator,
+            )
+            .with_transactions(self.best_transactions.clone());
 
-//         ComponentsBuilder::default()
-//             .node_types::<Node>()
-//             .pool(WorldChainPoolBuilder::new(
-//                 num_pbh_txs,
-//                 pbh_entrypoint,
-//                 signature_aggregator,
-//                 world_id,
-//             ))
-//             .payload(WorldChainPayloadBuilder::new(
-//                 compute_pending_block,
-//                 verified_blockspace_capacity,
-//                 pbh_entrypoint,
-//                 signature_aggregator,
-//             ))
-//             .network(OpNetworkBuilder {
-//                 disable_txpool_gossip,
-//                 disable_discovery_v4: !discovery_v4,
-//             })
-//             .executor(OpExecutorBuilder::default())
-//             .consensus(OpConsensusBuilder::default())
-//     }
-// }
+        Ok(payload_builder)
+    }
+}
 
-// impl<N> Node<N> for WorldChainNode
-// where
-//     N: FullNodeTypes<
-//         Types: NodeTypesWithEngine<
-//             Engine = OpEngineTypes,
-//             ChainSpec = OpChainSpec,
-//             Primitives = OpPrimitives,
-//             Storage = OpStorage,
-//         >,
-//     >,
-// {
-//     type ComponentsBuilder = ComponentsBuilder<
-//         N,
-//         WorldChainPoolBuilder,
-//         WorldChainPayloadBuilder,
-//         OpNetworkBuilder,
-//         OpExecutorBuilder,
-//         OpConsensusBuilder,
-//     >;
+impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+where
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
+{
+    type PayloadBuilder = world_chain_builder_payload::builder::WorldChainPayloadBuilder<
+        Pool,
+        Node::Provider,
+        OpEvmConfig,
+        PrimitivesTy<Node::Types>,
+        Txs,
+    >;
 
-//     type AddOns =
-//         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
-
-//     fn components_builder(&self) -> Self::ComponentsBuilder {
-//         let Self { args, .. } = self;
-//         Self::components(args.clone())
-//     }
-
-//     fn add_ons(&self) -> Self::AddOns {
-//         let Self { args, da_config } = self;
-//         Self::AddOns::builder()
-//             .with_sequencer(args.rollup_args.sequencer_http.clone())
-//             .with_da_config(da_config.clone())
-//             .build()
-//     }
-// }
-
-// impl NodeTypes for WorldChainNode {
-//     type Storage = OpStorage;
-//     type Primitives = OpPrimitives;
-//     type ChainSpec = OpChainSpec;
-//     type StateCommitment = MerklePatriciaTrie;
-// }
-
-// impl NodeTypesWithEngine for WorldChainNode {
-//     type Engine = OpEngineTypes;
-// }
-// /// A basic optimism payload service builder
-// #[derive(Debug, Default, Clone)]
-// pub struct WorldChainPayloadBuilder<Txs = ()> {
-//     inner: reth_optimism_node::node::OpPayloadBuilder<Txs>,
-//     // TODO:
-//     pub verified_blockspace_capacity: u8,
-//     pub pbh_entry_point: Address,
-//     pub pbh_signature_aggregator: Address,
-// }
-
-// impl WorldChainPayloadBuilder {
-//     /// Create a new instance with the given `compute_pending_block` flag.
-//     pub fn new(
-//         compute_pending_block: bool,
-//         verified_blockspace_capacity: u8,
-//         pbh_entry_point: Address,
-//         pbh_signature_aggregator: Address,
-//     ) -> Self {
-//         Self {
-//             inner: OpPayloadBuilder::new(compute_pending_block),
-//             verified_blockspace_capacity,
-//             pbh_entry_point,
-//             pbh_signature_aggregator,
-//         }
-//     }
-// }
-
-// impl<Txs> WorldChainPayloadBuilder<Txs> {
-//     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
-//     /// given EVM config.
-//     #[expect(clippy::type_complexity)]
-//     pub fn build<Node, Evm, Pool>(
-//         &self,
-//         evm_config: Evm,
-//         ctx: &BuilderContext<Node>,
-//         pool: Pool,
-//     ) -> eyre::Result<
-//         world_chain_builder_payload::builder::WorldChainPayloadBuilder<
-//             Pool,
-//             Node::Provider,
-//             Evm,
-//             PrimitivesTy<Node::Types>,
-//             Txs,
-//         >,
-//     >
-//     where
-//         Node: FullNodeTypes<
-//             Types: NodeTypesWithEngine<
-//                 Engine = OpEngineTypes,
-//                 ChainSpec = OpChainSpec,
-//                 Primitives = OpPrimitives,
-//             >,
-//         >,
-//         Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
-//             + Unpin
-//             + 'static,
-//         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
-//         Txs: OpPayloadTransactions<Pool::Transaction>,
-//     {
-//         let payload_builder =
-//             world_chain_builder_payload::builder::WorldChainPayloadBuilder::with_builder_config(
-//                 pool,
-//                 ctx.provider().clone(),
-//                 evm_config,
-//                 BasicOpReceiptBuilder::default(),
-//                 OpBuilderConfig {
-//                     da_config: self.inner.da_config.clone(),
-//                 },
-//                 self.inner.compute_pending_block,
-//                 self.verified_blockspace_capacity,
-//                 self.pbh_entry_point,
-//                 self.pbh_signature_aggregator,
-//             )
-//             .with_transactions(self.inner.best_transactions.clone());
-
-//         Ok(payload_builder)
-//     }
-// }
-
-// impl<Txs> WorldChainPayloadBuilder<Txs> {
-//     /// Configures the type responsible for yielding the transactions that should be included in the
-//     /// payload.
-//     pub fn with_transactions(self, best_transactions: Txs) -> WorldChainPayloadBuilder<Txs> {
-//         let Self {
-//             inner,
-//             verified_blockspace_capacity,
-//             pbh_entry_point,
-//             pbh_signature_aggregator,
-//             ..
-//         } = self;
-
-//         let inner = inner.with_transactions(best_transactions);
-
-//         WorldChainPayloadBuilder {
-//             inner,
-//             verified_blockspace_capacity,
-//             pbh_entry_point,
-//             pbh_signature_aggregator,
-//         }
-//     }
-
-//     /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
-//     pub fn spawn<Node, Evm, Pool>(
-//         self,
-//         evm_config: Evm,
-//         ctx: &BuilderContext<Node>,
-//         pool: Pool,
-//     ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
-//     where
-//         Node: FullNodeTypes<
-//             Types: NodeTypesWithEngine<
-//                 Engine = OpEngineTypes,
-//                 ChainSpec = OpChainSpec,
-//                 Primitives = OpPrimitives,
-//             >,
-//         >,
-//         Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
-//             + Unpin
-//             + 'static,
-//         Evm: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
-//     {
-//         todo!("TODO:")
-//         // let payload_builder = world_chain_builder_payload::builder::WorldChainPayloadBuilder::new(
-//         //     evm_config,
-//         //     self.verified_blockspace_capacity,
-//         //     self.pbh_entry_point,
-//         //     self.pbh_signature_aggregator,
-//         // )
-//         // .with_transactions(self.best_transactions)
-//         // .set_compute_pending_block(self.compute_pending_block);
-
-//         // let conf = ctx.payload_builder_config();
-
-//         // let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-//         //     .interval(conf.interval())
-//         //     .deadline(conf.deadline())
-//         //     .max_payload_tasks(conf.max_payload_tasks());
-
-//         // let payload_generator = BasicPayloadJobGenerator::with_builder(
-//         //     ctx.provider().clone(),
-//         //     pool,
-//         //     ctx.task_executor().clone(),
-//         //     payload_job_config,
-//         //     payload_builder,
-//         // );
-//         // let (payload_service, payload_builder) =
-//         //     PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-//         // ctx.task_executor()
-//         //     .spawn_critical("payload builder service", Box::pin(payload_service));
-
-//         // Ok(payload_builder)
-//     }
-// }
-
-// impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
-// where
-//     Node: FullNodeTypes<
-//         Types: NodeTypesWithEngine<
-//             Engine = OpEngineTypes,
-//             ChainSpec = OpChainSpec,
-//             Primitives = OpPrimitives,
-//         >,
-//     >,
-//     Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
-//         + Unpin
-//         + 'static,
-//     Txs: OpPayloadTransactions<Pool::Transaction>,
-// {
-//     type PayloadBuilder = reth_optimism_payload_builder::OpPayloadBuilder<
-//         Pool,
-//         Node::Provider,
-//         OpEvmConfig,
-//         PrimitivesTy<Node::Types>,
-//         Txs,
-//     >;
-
-//     async fn build_payload_builder(
-//         &self,
-//         ctx: &BuilderContext<Node>,
-//         pool: Pool,
-//     ) -> eyre::Result<Self::PayloadBuilder> {
-//         self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
-//     }
-// }
+    async fn build_payload_builder(
+        &self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    }
+}

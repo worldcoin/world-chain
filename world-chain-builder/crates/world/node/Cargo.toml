@@ -24,10 +24,11 @@ reth-optimism-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-primitives = { workspace = true, optional = true }
-reth-optimism-evm = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
+reth-evm.workspace = true
+reth-optimism-evm.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-trie-db.workspace = true
