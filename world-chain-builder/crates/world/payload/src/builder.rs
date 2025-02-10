@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_consensus::{proofs, Eip658Value, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
@@ -18,7 +19,7 @@ use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour,
     PayloadBuilder, PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor, Evm};
 use reth_optimism_chainspec::OpChainSpec;
@@ -31,7 +32,9 @@ use reth_optimism_payload_builder::builder::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::{OpPayloadAttributes, OpPayloadPrimitives};
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{
+    OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
+};
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
     Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
@@ -416,25 +419,24 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         //StateProviderFactory + BlockReaderIdExt
     {
         let Self { best } = self;
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+
+        let op_ctx = ctx.inner;
+        debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
-        ctx.apply_pre_beacon_root_contract_call(state)?;
+        op_ctx.apply_pre_beacon_root_contract_call(state)?;
 
         // 2. ensure create2deployer is force deployed
-        ctx.ensure_create2_deployer(state)?;
+        op_ctx.ensure_create2_deployer(state)?;
 
         // 3. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(state)?;
+        let mut info = op_ctx.execute_sequencer_transactions(state)?;
 
         // 4. if mem pool transactions are requested we execute them
-        if !ctx.attributes().no_tx_pool {
-            //TODO: build pbh payload
-            let best_txs =
-                pool.best_transactions_with_attributes(ctx.best_transaction_attributes());
-
+        if !op_ctx.attributes().no_tx_pool {
+            let best_txs = best(ctx.best_transaction_attributes());
             if ctx
-                .execute_best_transactions::<_, Pool>(&mut info, state, &pool, best_txs)?
+                .execute_best_transactions(&mut info, state, best_txs)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -449,18 +451,31 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             }
         }
 
-        let withdrawals_root = ctx.commit_withdrawals(state)?;
-
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BuildOutcomeKind::Better {
-            payload: ExecutedPayload {
-                info,
-                withdrawals_root,
-            },
-        })
+        let withdrawals_root = if op_ctx.is_isthmus_active() {
+            // withdrawals root field in block header is used for storage root of L2 predeploy
+            // `l2tol1-message-passer`
+            Some(
+                state
+                    .database
+                    .as_ref()
+                    .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?,
+            )
+        } else if op_ctx.is_canyon_active() {
+            Some(EMPTY_WITHDRAWALS)
+        } else {
+            None
+        };
+
+        let payload = ExecutedPayload {
+            info,
+            withdrawals_root,
+        };
+
+        Ok(BuildOutcomeKind::Better { payload })
     }
 
     /// Builds the payload on top of the state.
@@ -485,7 +500,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
         };
 
-        let block_number = ctx.inner.block_number();
+        let op_ctx = ctx.inner;
+        let block_number = op_ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
             vec![info.receipts],
@@ -496,8 +512,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             .generic_receipts_root_slow(block_number, |receipts| {
                 calculate_receipt_root_no_memo_optimism(
                     receipts,
-                    &ctx.inner.chain_spec,
-                    ctx.inner.attributes().timestamp(),
+                    &op_ctx.chain_spec,
+                    op_ctx.attributes().timestamp(),
                 )
             })
             .expect("Number is in range");
@@ -513,7 +529,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                 .state_root_with_updates(hashed_state.clone())
                 .inspect_err(|err| {
                     warn!(target: "payload_builder",
-                    parent_header=%ctx.inner.parent().hash(),
+                    parent_header=%op_ctx.parent().hash(),
                         %err,
                         "failed to calculate state root for payload"
                     );
@@ -526,28 +542,31 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         // OP doesn't support blobs/EIP-4844.
         // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
         // Need [Some] or [None] based on hardfork to match block hash.
-        let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
-        let extra_data = ctx.extra_data()?;
+        let (excess_blob_gas, blob_gas_used) = op_ctx.blob_fields();
+        let extra_data = op_ctx.extra_data()?;
 
         let header = Header {
-            parent_hash: ctx.parent().hash(),
+            parent_hash: op_ctx.parent().hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: ctx.inner.evm_env.block_env.coinbase,
+            beneficiary: op_ctx.evm_env.block_env.coinbase,
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
             logs_bloom,
-            timestamp: ctx.attributes().payload_attributes.timestamp,
-            mix_hash: ctx.attributes().payload_attributes.prev_randao,
+            timestamp: op_ctx.attributes().payload_attributes.timestamp,
+            mix_hash: op_ctx.attributes().payload_attributes.prev_randao,
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(ctx.base_fee()),
-            number: ctx.parent().number + 1,
-            gas_limit: ctx.block_gas_limit(),
+            base_fee_per_gas: Some(op_ctx.base_fee()),
+            number: op_ctx.parent().number + 1,
+            gas_limit: op_ctx.block_gas_limit(),
             difficulty: U256::ZERO,
             gas_used: info.cumulative_gas_used,
             extra_data,
-            parent_beacon_block_root: ctx.attributes().payload_attributes.parent_beacon_block_root,
+            parent_beacon_block_root: op_ctx
+                .attributes()
+                .payload_attributes
+                .parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
@@ -559,32 +578,32 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             body: BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals: ctx.withdrawals().cloned(),
+                withdrawals: op_ctx.withdrawals().cloned(),
             },
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
+        debug!(target: "payload_builder", id=%op_ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         // create the executed block data
-        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                sealed_block.as_ref().clone(),
-                info.executed_senders,
-            )),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
+        let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    sealed_block.as_ref().clone(),
+                    info.executed_senders,
+                )),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(hashed_state),
+            },
             trie: Arc::new(trie_output),
         };
 
-        let no_tx_pool = ctx.attributes().no_tx_pool;
+        let no_tx_pool = op_ctx.attributes().no_tx_pool;
 
         let payload = OpBuiltPayload::new(
-            ctx.payload_id(),
+            op_ctx.payload_id(),
             sealed_block,
             info.total_fees,
-            ctx.inner.chain_spec.clone(),
-            ctx.inner.config.attributes,
             Some(executed),
         );
 
