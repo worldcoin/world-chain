@@ -2,9 +2,10 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_consensus::{proofs, Eip658Value, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{proofs, Eip658Value, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_eips::Typed2718;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -26,12 +27,14 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
     OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes, OpReceiptBuilder,
+    ReceiptBuilderCtx,
 };
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::{OpPayloadAttributes, OpPayloadPrimitives};
+use reth_optimism_primitives::transaction::signed::OpTransaction;
 use reth_optimism_primitives::{
     OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
@@ -47,7 +50,9 @@ use reth_provider::{
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, PoolTransaction, ValidPoolTransaction};
 use revm::Database;
-use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
+use revm_primitives::{
+    Address, Bytes, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, B256, U256,
+};
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
@@ -667,28 +672,24 @@ where
     /// Returns `Ok(Some(())` if the job was cancelled.
     pub fn execute_best_transactions<DB, Pool>(
         &self,
-        info: &mut ExecutionInfo,
+        info: &mut ExecutionInfo<N>,
         db: &mut State<DB>,
-        pool: &Pool,
-        mut best_txs: Box<
-            dyn BestTransactions<
-                Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>,
-            >,
+        mut best_txs: impl PayloadTransactions<
+            Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>
+                             + WorldChainPoolTransaction,
         >,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
     {
-        let block_gas_limit = self.block_gas_limit();
+        let block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
-        let base_fee = self.base_fee();
+        let base_fee = self.inner.base_fee();
 
         let mut pbh_call_tracer =
             PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
+
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
@@ -697,46 +698,35 @@ where
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
-        while let Some(tx) = best_txs.next() {
-            let pooled_tx = &tx.transaction;
-            let consensus_tx = tx.to_consensus();
-            if info.is_tx_over_limits(
-                consensus_tx.tx(),
-                block_gas_limit,
-                tx_da_limit,
-                block_da_limit,
-            ) {
+        while let Some(pooled_tx) = best_txs.next(()) {
+            let tx = pooled_tx.into_consensus();
+            if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(
-                    &tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        tx_da_limit.unwrap_or_default(),
-                        block_da_limit.unwrap_or_default(),
-                    ),
-                );
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
             if let Some(conditional_options) = pooled_tx.conditional_options() {
-                if validate_conditional_options(conditional_options, &self.client).is_err() {
-                    best_txs.mark_invalid(
-                        &tx,
-                        InvalidPoolTransactionError::Other(Box::new(
-                            WorldChainPoolTransactionError::ConditionalValidationFailed(*tx.hash()),
-                        )),
-                    );
-                    invalid_txs.push(*tx.hash());
-                    continue;
-                }
+                todo!("TODO:");
+                // if validate_conditional_options(conditional_options, &self.client).is_err() {
+                //     best_txs.mark_invalid(
+                //         &tx,
+                //         InvalidPoolTransactionError::Other(Box::new(
+                //             WorldChainPoolTransactionError::ConditionalValidationFailed(*tx.hash()),
+                //         )),
+                //     );
+                //     invalid_txs.push(*tx.hash());
+                continue;
+                // }
             }
 
             // If the transaction is verified, check if it can be added within the verified gas limit
-            if tx.transaction.valid_pbh()
+            if pooled_tx.valid_pbh()
                 && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
             {
-                best_txs.mark_invalid(&tx, InvalidPoolTransactionError::Underpriced);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
@@ -745,18 +735,13 @@ where
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(&tx, InvalidPoolTransactionError::Underpriced);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if tx.is_eip4844() || tx.tx_type() == OpTxType::Deposit as u8 {
-                best_txs.mark_invalid(
-                    &tx,
-                    InvalidPoolTransactionError::Consensus(
-                        InvalidTransactionError::TxTypeNotSupported,
-                    ),
-                );
+            if tx.is_eip4844() || tx.is_deposit() {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
@@ -766,10 +751,7 @@ where
             }
 
             // Configure the environment for the tx.
-            let tx_env = self
-                .inner
-                .evm_config
-                .tx_env(consensus_tx.tx(), consensus_tx.signer());
+            let tx_env = self.inner.evm_config.tx_env(tx.tx(), tx.signer());
 
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
@@ -783,12 +765,7 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(
-                                    &tx,
-                                    InvalidPoolTransactionError::Other(Box::new(
-                                        WorldChainPoolTransactionError::from(err),
-                                    )),
-                                );
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
                             continue;
@@ -796,12 +773,7 @@ where
 
                         EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(
-                                &tx,
-                                InvalidPoolTransactionError::Other(Box::new(
-                                    WorldChainPoolTransactionError::PBHCallTracerError,
-                                )),
-                            );
+                            best_txs.mark_invalid(tx.signer(), tx.nonce());
                             continue;
                         }
 
@@ -821,27 +793,11 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += consensus_tx.length() as u64;
-
-            let receipt = alloy_consensus::Receipt {
-                status: Eip658Value::Eip658(result.is_success()),
-                cumulative_gas_used: info.cumulative_gas_used,
-                logs: result.into_logs().into_iter().collect(),
-            };
+            info.cumulative_da_bytes_used += tx.length() as u64;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(match tx.tx_type() {
-                0 => OpReceipt::Legacy(receipt),
-                1 => OpReceipt::Eip2930(receipt),
-                2 => OpReceipt::Eip1559(receipt),
-                4 => OpReceipt::Eip7702(receipt),
-                126 => OpReceipt::Deposit(OpDepositReceipt {
-                    inner: receipt,
-                    deposit_nonce: None,
-                    deposit_receipt_version: None,
-                }),
-                _ => unreachable!(),
-            });
+            info.receipts
+                .push(self.build_receipt(info, result, None, &tx));
 
             // update add to total fees
             let miner_fee = tx
@@ -850,8 +806,8 @@ where
             info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
             // append sender and transaction to the respective lists
-            info.executed_senders.push(consensus_tx.signer());
-            info.executed_transactions.push(consensus_tx.into_tx());
+            info.executed_senders.push(tx.signer());
+            info.executed_transactions.push(tx.into_tx());
         }
 
         if !invalid_txs.is_empty() {
@@ -859,5 +815,45 @@ where
         }
 
         Ok(None)
+    }
+
+    /// Constructs a receipt for the given transaction.
+    // TODO: Update upstream to expose this function from OpPayloadBuilderCtx and remove this
+    pub fn build_receipt(
+        &self,
+        info: &ExecutionInfo<N>,
+        result: ExecutionResult,
+        deposit_nonce: Option<u64>,
+        tx: &N::SignedTx,
+    ) -> N::Receipt {
+        match self.inner.receipt_builder.build_receipt(ReceiptBuilderCtx {
+            tx,
+            result,
+            cumulative_gas_used: info.cumulative_gas_used,
+        }) {
+            Ok(receipt) => receipt,
+            Err(ctx) => {
+                let receipt = alloy_consensus::Receipt {
+                    // Success flag was added in `EIP-658: Embedding transaction status code
+                    // in receipts`.
+                    status: Eip658Value::Eip658(ctx.result.is_success()),
+                    cumulative_gas_used: ctx.cumulative_gas_used,
+                    logs: ctx.result.into_logs(),
+                };
+
+                self.inner
+                    .receipt_builder
+                    .build_deposit_receipt(OpDepositReceipt {
+                        inner: receipt,
+                        deposit_nonce,
+                        // The deposit receipt version was introduced in Canyon to indicate an
+                        // update to how receipt hashes should be computed
+                        // when set. The state transition process ensures
+                        // this is only set for post-Canyon deposit
+                        // transactions.
+                        deposit_receipt_version: self.inner.is_canyon_active().then_some(1),
+                    })
+            }
+        }
     }
 }
