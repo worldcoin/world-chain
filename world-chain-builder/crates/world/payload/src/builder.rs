@@ -623,17 +623,17 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     }
 
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
-    pub fn witness<EvmConfig, DB, P, Client>(
+    pub fn witness<EvmConfig, N, DB, P>(
         self,
         state: &mut State<DB>,
-        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
+        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
+        EvmConfig: ConfigureEvmFor<N>,
+        N: OpPayloadPrimitives,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateProofProvider,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        P: StateProofProvider + StorageRootProvider,
     {
         let _ = self.execute(state, ctx)?;
         let ExecutionWitnessRecord {
