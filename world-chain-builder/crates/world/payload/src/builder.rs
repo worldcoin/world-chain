@@ -570,14 +570,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         };
 
         // seal the block
-        let block = Block {
+        let block = N::Block::new(
             header,
-            body: BlockBody {
+            BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
                 withdrawals: op_ctx.withdrawals().cloned(),
             },
-        };
+        );
 
         let sealed_block = Arc::new(block.seal_slow());
         debug!(target: "payload_builder", id=%op_ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -751,32 +751,33 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                            }
+                    todo!("TODO:")
+                    // match err {
+                    //     EVMError::Transaction(err) => {
+                    //         if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                    //             // if the nonce is too low, we can skip this transaction
+                    //             trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                    //         } else {
+                    //             // if the transaction is invalid, we can skip it and all of its
+                    //             // descendants
+                    //             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                    //             best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    //         }
 
-                            continue;
-                        }
+                    //         continue;
+                    //     }
 
-                        EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
-                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(tx.signer(), tx.nonce());
-                            continue;
-                        }
+                    //     EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
+                    //         trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                    //         best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    //         continue;
+                    //     }
 
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
-                        }
-                    }
+                    //     err => {
+                    //         // this is an error that we should treat as fatal for this attempt
+                    //         return Err(PayloadBuilderError::EvmExecutionError(err));
+                    //     }
+                    // }
                 }
             };
 
