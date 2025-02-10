@@ -128,6 +128,42 @@ impl WorldChainNode {
     }
 }
 
+// TODO:
+impl<N> Node<N> for WorldChainNode
+where
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+        >,
+    >,
+{
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        WorldChainPoolBuilder,
+        WorldChainPayloadBuilder,
+        OpNetworkBuilder,
+        OpExecutorBuilder,
+        OpConsensusBuilder,
+    >;
+
+    type AddOns =
+        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
+        Self::components(self)
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        Self::AddOns::builder()
+            .with_sequencer(self.args.rollup_args.sequencer_http.clone())
+            .with_da_config(self.da_config.clone())
+            .build()
+    }
+}
+
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
@@ -158,41 +194,6 @@ impl WorldChainPoolBuilder {
         }
     }
 }
-
-// impl<N> Node<N> for WorldChainNode
-// where
-//     N: FullNodeTypes<
-//         Types: NodeTypesWithEngine<
-//             Engine = OpEngineTypes,
-//             ChainSpec = OpChainSpec,
-//             Primitives = OpPrimitives,
-//             Storage = OpStorage,
-//         >,
-//     >,
-// {
-//     type ComponentsBuilder = ComponentsBuilder<
-//         N,
-//         WorldChainPoolBuilder,
-//         WorldChainPayloadBuilder,
-//         OpNetworkBuilder,
-//         OpExecutorBuilder,
-//         OpConsensusBuilder,
-//     >;
-
-//     type AddOns =
-//         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
-
-//     fn components_builder(&self) -> Self::ComponentsBuilder {
-//         Self::components(self)
-//     }
-
-//     fn add_ons(&self) -> Self::AddOns {
-//         Self::AddOns::builder()
-//             .with_sequencer(self.args.sequencer_http.clone())
-//             .with_da_config(self.da_config.clone())
-//             .build()
-//     }
-// }
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
