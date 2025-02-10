@@ -313,30 +313,34 @@ where
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
-impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client>
-    for WorldChainPayloadBuilder<EvmConfig, Txs>
+impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
+    for WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 where
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + BlockReaderIdExt
         + Clone,
+    N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
     EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-    Txs: OpPayloadTransactions,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
-    type Attributes = OpPayloadBuilderAttributes;
-    type BuiltPayload = OpBuiltPayload;
+    type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
+    type BuiltPayload = OpBuiltPayload<N>;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
-        self.build_payload(args)
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let pool = self.inner.pool.clone();
+        self.build_payload(args, |attrs| {
+            self.inner.best_transactions.best_transactions(pool, attrs)
+        })
     }
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         // we want to await the job that's already in progress because that should be returned as
         // is, there's no benefit in racing another job
@@ -347,20 +351,19 @@ where
     // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
-    ) -> Result<OpBuiltPayload, PayloadBuilderError> {
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
-            client: client.clone(),
             config,
-            pool: NoopWorldChainTransactionPool::default(),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| {
+            NoopPayloadTransactions::<Pool::Transaction>::default()
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
