@@ -18,11 +18,17 @@ use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
     OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpStorage,
 };
+use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
+use reth_provider::CanonStateSubscriptions;
+use tracing::info;
+use world_chain_builder_pool::ordering::WorldChainOrdering;
+use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::args::WorldChainArgs;
@@ -105,34 +111,48 @@ impl WorldChainNode {
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Clone)]
-pub struct WorldChainPoolBuilder<T = WorldChainPooledTransaction> {
+pub struct WorldChainPoolBuilder {
+    pub num_pbh_txs: u8,
+    pub pbh_entrypoint: Address,
+    pub pbh_signature_aggregator: Address,
+    pub world_id: Address,
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
-    /// Marker for the pooled transaction type.
-    _pd: core::marker::PhantomData<T>,
 }
 
-impl<T> Default for WorldChainPoolBuilder<T> {
-    fn default() -> Self {
+impl WorldChainPoolBuilder {
+    pub fn new(
+        num_pbh_txs: u8,
+        pbh_entrypoint: Address,
+        pbh_signature_aggregator: Address,
+        world_id: Address,
+    ) -> Self {
         Self {
+            num_pbh_txs,
+            pbh_entrypoint,
+            pbh_signature_aggregator,
+            world_id,
             pool_config_overrides: Default::default(),
-            _pd: Default::default(),
         }
     }
 }
 
-impl<Node, T> PoolBuilder<Node> for WorldChainPoolBuilder<T>
+impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
 {
-    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore, T>;
+    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let Self {
+            num_pbh_txs,
+            pbh_entrypoint,
+            pbh_signature_aggregator,
+            world_id,
             pool_config_overrides,
             ..
         } = self;
+
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
@@ -147,15 +167,25 @@ where
             )
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
-                OpTransactionValidator::new(validator)
-                    // In --dev mode we can't require gas fees because we're unable to decode
-                    // the L1 block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
+                let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                    // In --dev mode we can't require gas fees because we're unable to decode the L1
+                    // block info
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
+                let root_validator =
+                    WorldChainRootValidator::new(validator.client().clone(), world_id)
+                        .expect("failed to initialize root validator");
+                WorldChainTransactionValidator::new(
+                    op_tx_validator,
+                    root_validator,
+                    num_pbh_txs,
+                    pbh_entrypoint,
+                    pbh_signature_aggregator,
+                )
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,
-            CoinbaseTipOrdering::default(),
+            WorldChainOrdering::default(),
             blob_store,
             pool_config_overrides.apply(ctx.pool_config()),
         );
@@ -168,7 +198,7 @@ where
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
             let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
             ctx.task_executor()
                 .spawn_critical_with_graceful_shutdown_signal(
@@ -196,7 +226,9 @@ where
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
 
-        Ok(transaction_pool)
+        // Ok(transaction_pool)
+
+        todo!();
     }
 }
 
