@@ -678,9 +678,13 @@ where
             Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>
                              + WorldChainPoolTransaction,
         >,
+        pool: Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
     {
         let block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
