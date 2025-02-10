@@ -181,7 +181,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives>
 
 impl<Pool, Client, EvmConfig, N, T> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
@@ -243,7 +243,7 @@ where
                 .with_bundle_update()
                 .build();
 
-            builder.build(db, ctx)
+            builder.build(db, ctx, self.inner.pool)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             let db = State::builder()
@@ -402,8 +402,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     pub fn execute<EvmConfig, N, DB, P, Pool>(
         self,
         state: &mut State<DB>,
-        pool: Pool,
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
+        pool: Pool,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
@@ -411,9 +411,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
         //StateProviderFactory + BlockReaderIdExt
     {
         let Self { best } = self;
@@ -477,22 +475,25 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     }
 
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, N, DB, P>(
+    pub fn build<EvmConfig, N, DB, P, Pool>(
         self,
         mut state: State<DB>,
         ctx: WorldChainPayloadBuilderCtx<EvmConfig, N>,
+        pool: Pool,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions,
+        Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     {
         let ExecutedPayload {
             info,
             withdrawals_root,
-        } = match self.execute(&mut state, &ctx)? {
+        } = match self.execute(&mut state, &ctx, pool)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
             BuildOutcomeKind::Cancelled => return Ok(BuildOutcomeKind::Cancelled),
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
@@ -675,9 +676,7 @@ where
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Pool: TransactionPool<Transaction: WorldChainPoolTransaction>,
     {
         let block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
