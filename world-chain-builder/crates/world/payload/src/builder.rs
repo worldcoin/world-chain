@@ -181,7 +181,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives>
 
 impl<Pool, Client, EvmConfig, N, T> WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
@@ -200,11 +200,7 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -233,33 +229,30 @@ where
             pbh_signature_aggregator: self.pbh_signature_aggregator,
         };
 
-        let builder = WorldChainBuilder {
-            pool,
-            _best: self.inner.best_transactions.clone(),
-        };
-
-        let client = ctx.client();
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let op_ctx = &ctx.inner;
+        let builder = WorldChainBuilder::new(best);
+        let state_provider = self
+            .inner
+            .client
+            .state_by_block_hash(op_ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
 
-        let build_outcome = if ctx.attributes().no_tx_pool {
+        if op_ctx.attributes().no_tx_pool {
             let db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
                 .build();
 
-            builder.build(db, ctx)?
+            builder.build(db, ctx)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             let db = State::builder()
                 .with_database(cached_reads.as_db_mut(state))
                 .with_bundle_update()
                 .build();
-
-            builder.build(db, ctx)?
-        };
-
-        Ok(build_outcome.with_cached_reads(cached_reads))
+            builder.build(db, ctx)
+        }
+        .map(|out| out.with_cached_reads(cached_reads))
     }
 
     /// Returns the configured [`EvmEnv`] for the targeted payload
@@ -439,7 +432,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 
         // 4. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
-            let best_txs = best(ctx.best_transaction_attributes());
+            let best_txs = best(ctx.inner.best_transaction_attributes());
             if ctx
                 .execute_best_transactions(&mut info, state, best_txs)?
                 .is_some()
