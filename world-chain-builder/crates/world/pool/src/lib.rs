@@ -21,10 +21,8 @@ pub mod mock;
 pub mod test_utils;
 
 /// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<
-        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
-    >,
+pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T>>,
     WorldChainOrdering<WorldChainPooledTransaction>,
     S,
 >;

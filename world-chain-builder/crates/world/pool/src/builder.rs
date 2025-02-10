@@ -59,7 +59,6 @@ impl WorldChainPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
-    // Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;

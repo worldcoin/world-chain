@@ -89,7 +89,6 @@ reth-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" 
 reth-node-core = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-tracing = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 
-
 # alloy op
 op-alloy-consensus = "0.10.0"
 op-alloy-rpc-types = "0.10.0"

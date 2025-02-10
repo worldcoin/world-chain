@@ -39,7 +39,7 @@ where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
-    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(

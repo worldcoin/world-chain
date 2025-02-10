@@ -24,7 +24,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
-use tracing::info;
+use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
@@ -83,7 +83,14 @@ impl WorldChainNode {
             >,
         >,
     {
-        let WorldChainArgs { rollup_args, .. } = self.args;
+        let WorldChainArgs {
+            rollup_args,
+            num_pbh_txs,
+            verified_blockspace_capacity,
+            pbh_entrypoint,
+            signature_aggregator,
+            world_id,
+        } = self.args;
         let RollupArgs {
             disable_txpool_gossip,
             compute_pending_block,
@@ -93,7 +100,12 @@ impl WorldChainNode {
 
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(WorldChainPoolBuilder::default())
+            .pool(WorldChainPoolBuilder::new(
+                num_pbh_txs,
+                pbh_entrypoint,
+                signature_aggregator,
+                world_id,
+            ))
             .payload(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             )
@@ -226,9 +238,7 @@ where
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
         }
 
-        // Ok(transaction_pool)
-
-        todo!();
+        Ok(transaction_pool)
     }
 }
 
