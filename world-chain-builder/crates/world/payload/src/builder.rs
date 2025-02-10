@@ -198,7 +198,7 @@ where
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
@@ -316,13 +316,10 @@ where
 impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
     for WorldChainPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 where
-    Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
-        + BlockReaderIdExt
-        + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
     N: OpPayloadPrimitives,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
+    EvmConfig: ConfigureEvmFor<N>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
