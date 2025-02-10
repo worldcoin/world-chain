@@ -21,15 +21,6 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
 use world_chain_builder_pbh::payload::PbhPayload;
 
-/// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<
-        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
-    >,
-    WorldChainOrdering<WorldChainPooledTransaction>,
-    S,
->;
-
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
 pub struct WorldChainTransactionValidator<Client, Tx>

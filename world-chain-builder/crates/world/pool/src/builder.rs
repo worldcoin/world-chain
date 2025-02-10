@@ -12,7 +12,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use tracing::{debug, info};
 
-use super::validator::WorldChainTransactionPool;
+use super::WorldChainTransactionPool;
 use crate::ordering::WorldChainOrdering;
 use crate::root::WorldChainRootValidator;
 use crate::validator::WorldChainTransactionValidator;
