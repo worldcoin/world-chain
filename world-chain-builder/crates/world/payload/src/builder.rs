@@ -200,7 +200,8 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions,
+        Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -243,14 +244,14 @@ where
                 .with_bundle_update()
                 .build();
 
-            builder.build(db, ctx, self.inner.pool)
+            builder.build(db, ctx, &self.inner.pool)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             let db = State::builder()
                 .with_database(cached_reads.as_db_mut(state))
                 .with_bundle_update()
                 .build();
-            builder.build(db, ctx)
+            builder.build(db, ctx, &self.inner.pool)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -403,7 +404,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         self,
         state: &mut State<DB>,
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
-        pool: Pool,
+        pool: &Pool,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
@@ -479,7 +480,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         self,
         mut state: State<DB>,
         ctx: WorldChainPayloadBuilderCtx<EvmConfig, N>,
-        pool: Pool,
+        pool: &Pool,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
@@ -672,7 +673,7 @@ where
             Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>
                              + WorldChainPoolTransaction,
         >,
-        pool: Pool,
+        pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
