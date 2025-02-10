@@ -488,6 +488,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
+        // N::Block: Into<alloy_consensus::Block<N::_TX>>,
         Txs: PayloadTransactions,
         Txs::Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
         DB: Database<Error = ProviderError> + AsRef<P>,
@@ -630,7 +631,9 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions<
+            Transaction: PoolTransaction<Consensus = N::SignedTx> + WorldChainPoolTransaction,
+        >,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider + StorageRootProvider,
         Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
