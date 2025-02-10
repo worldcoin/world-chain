@@ -20,7 +20,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, ConfigureEvmFor, Evm};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
@@ -32,13 +32,14 @@ use reth_optimism_payload_builder::builder::{
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::{OpPayloadAttributes, OpPayloadPrimitives};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_payload_util::PayloadTransactions;
 use reth_primitives::{
     Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    StateProofProvider, StateProviderFactory, StateRootProvider,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::error::InvalidPoolTransactionError;
 use reth_transaction_pool::{BestTransactions, PoolTransaction, ValidPoolTransaction};
@@ -198,12 +199,10 @@ where
         >,
     {
         let evm_env = self
-            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
+            .evm_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments {
-            client,
-            pool,
             mut cached_reads,
             config,
             cancel,
@@ -214,16 +213,16 @@ where
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
-                chain_spec: client.chain_spec(),
+                chain_spec: self.inner.client.chain_spec(),
                 config,
                 evm_env,
                 cancel,
                 best_payload,
+                receipt_builder: self.inner.receipt_builder.clone(),
             },
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
-            client,
         };
 
         let builder = WorldChainBuilder {
@@ -386,32 +385,37 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-#[derive(Debug)]
-pub struct WorldChainBuilder<Pool, Txs> {
-    /// The transaction pool
-    pool: Pool,
+#[derive(derive_more::Debug)]
+pub struct WorldChainBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    _best: Txs,
+    #[debug(skip)]
+    best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
 }
 
-impl<Pool, Txs> WorldChainBuilder<Pool, Txs>
-where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
-    Txs: OpPayloadTransactions,
-{
+impl<'a, Txs> WorldChainBuilder<'a, Txs> {
+    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+        Self {
+            best: Box::new(best),
+        }
+    }
+}
+
+impl<Txs> WorldChainBuilder<'_, Txs> {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, DB, Client>(
+    pub fn execute<EvmConfig, N, DB, P>(
         self,
         state: &mut State<DB>,
-        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
-    ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
+        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
+    ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-        DB: Database<Error = ProviderError>,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        N: OpPayloadPrimitives,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        EvmConfig: ConfigureEvmFor<N>,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StorageRootProvider,
+        //StateProviderFactory + BlockReaderIdExt
     {
-        let Self { pool, _best } = self;
+        let Self { best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -460,17 +464,17 @@ where
     }
 
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, DB, P, Client>(
+    pub fn build<EvmConfig, N, DB, P>(
         self,
         mut state: State<DB>,
-        ctx: WorldChainPayloadBuilderCtx<EvmConfig, Client>,
+        ctx: WorldChainPayloadBuilderCtx<EvmConfig, N>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
+        EvmConfig: ConfigureEvmFor<N>,
+        N: OpPayloadPrimitives,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider + HashedPostStateProvider,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
     {
         let ExecutedPayload {
             info,
@@ -481,10 +485,10 @@ where
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
         };
 
-        let block_number = ctx.block_number();
+        let block_number = ctx.inner.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            info.receipts.into(),
+            vec![info.receipts],
             block_number,
             Vec::new(),
         );
@@ -493,7 +497,7 @@ where
                 calculate_receipt_root_no_memo_optimism(
                     receipts,
                     &ctx.inner.chain_spec,
-                    ctx.attributes().timestamp(),
+                    ctx.inner.attributes().timestamp(),
                 )
             })
             .expect("Number is in range");
@@ -509,7 +513,7 @@ where
                 .state_root_with_updates(hashed_state.clone())
                 .inspect_err(|err| {
                     warn!(target: "payload_builder",
-                    parent_header=%ctx.parent().hash(),
+                    parent_header=%ctx.inner.parent().hash(),
                         %err,
                         "failed to calculate state root for payload"
                     );
@@ -627,125 +631,119 @@ where
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct WorldChainPayloadBuilderCtx<EvmConfig, Client> {
-    pub inner: OpPayloadBuilderCtx<EvmConfig>,
+pub struct WorldChainPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> {
+    pub inner: OpPayloadBuilderCtx<EvmConfig, N>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
-    pub client: Client,
 }
 
-impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client> {
-    /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader {
-        self.inner.parent()
-    }
+// impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> WorldChainPayloadBuilderCtx<EvmConfig, N> {
+//     /// Returns the parent block the payload will be build on.
+//     pub fn parent(&self) -> &SealedHeader {
+//         self.inner.parent()
+//     }
 
-    /// Returns the state provider client.
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
+//     /// Returns the builder attributes.
+//     pub const fn attributes(&self) -> &OpPayloadBuilderAttributes<N::SignedTx> {
+//         self.inner.attributes()
+//     }
 
-    /// Returns the builder attributes.
-    pub const fn attributes(&self) -> &OpPayloadBuilderAttributes {
-        self.inner.attributes()
-    }
+//     /// Returns the withdrawals if shanghai is active.
+//     pub fn withdrawals(&self) -> Option<&Withdrawals> {
+//         self.inner.withdrawals()
+//     }
 
-    /// Returns the withdrawals if shanghai is active.
-    pub fn withdrawals(&self) -> Option<&Withdrawals> {
-        self.inner.withdrawals()
-    }
+//     /// Returns the block gas limit to target.
+//     pub fn block_gas_limit(&self) -> u64 {
+//         self.inner.block_gas_limit()
+//     }
 
-    /// Returns the block gas limit to target.
-    pub fn block_gas_limit(&self) -> u64 {
-        self.inner.block_gas_limit()
-    }
+//     /// Returns the block number for the block.
+//     pub fn block_number(&self) -> u64 {
+//         self.inner.block_number()
+//     }
 
-    /// Returns the block number for the block.
-    pub fn block_number(&self) -> u64 {
-        self.inner.block_number()
-    }
+//     /// Returns the current base fee
+//     pub fn base_fee(&self) -> u64 {
+//         self.inner.base_fee()
+//     }
 
-    /// Returns the current base fee
-    pub fn base_fee(&self) -> u64 {
-        self.inner.base_fee()
-    }
+//     /// Returns the current blob gas price.
+//     pub fn get_blob_gasprice(&self) -> Option<u64> {
+//         self.inner.get_blob_gasprice()
+//     }
 
-    /// Returns the current blob gas price.
-    pub fn get_blob_gasprice(&self) -> Option<u64> {
-        self.inner.get_blob_gasprice()
-    }
+//     /// Returns the blob fields for the header.
+//     ///
+//     /// This will always return `Some(0)` after ecotone.
+//     pub fn blob_fields(&self) -> (Option<u64>, Option<u64>) {
+//         self.inner.blob_fields()
+//     }
 
-    /// Returns the blob fields for the header.
-    ///
-    /// This will always return `Some(0)` after ecotone.
-    pub fn blob_fields(&self) -> (Option<u64>, Option<u64>) {
-        self.inner.blob_fields()
-    }
+//     /// Returns the extra data for the block.
+//     ///
+//     /// After holocene this extracts the extradata from the paylpad
+//     pub fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
+//         self.inner.extra_data()
+//     }
 
-    /// Returns the extra data for the block.
-    ///
-    /// After holocene this extracts the extradata from the paylpad
-    pub fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        self.inner.extra_data()
-    }
+//     /// Returns the current fee settings for transactions from the mempool
+//     // TODO: PBH
+//     pub fn best_transaction_attributes(&self) -> BestTransactionsAttributes {
+//         BestTransactionsAttributes::new(self.base_fee(), self.get_blob_gasprice())
+//     }
 
-    /// Returns the current fee settings for transactions from the mempool
-    // TODO: PBH
-    pub fn best_transaction_attributes(&self) -> BestTransactionsAttributes {
-        BestTransactionsAttributes::new(self.base_fee(), self.get_blob_gasprice())
-    }
+//     /// Returns the unique id for this payload job.
+//     pub fn payload_id(&self) -> PayloadId {
+//         self.inner.payload_id()
+//     }
 
-    /// Returns the unique id for this payload job.
-    pub fn payload_id(&self) -> PayloadId {
-        self.inner.payload_id()
-    }
+//     /// Returns true if regolith is active for the payload.
+//     pub fn is_regolith_active(&self) -> bool {
+//         self.inner.is_regolith_active()
+//     }
 
-    /// Returns true if regolith is active for the payload.
-    pub fn is_regolith_active(&self) -> bool {
-        self.inner.is_regolith_active()
-    }
+//     /// Returns true if ecotone is active for the payload.
+//     pub fn is_ecotone_active(&self) -> bool {
+//         self.inner.is_ecotone_active()
+//     }
 
-    /// Returns true if ecotone is active for the payload.
-    pub fn is_ecotone_active(&self) -> bool {
-        self.inner.is_ecotone_active()
-    }
+//     /// Returns true if canyon is active for the payload.
+//     pub fn is_canyon_active(&self) -> bool {
+//         self.inner.is_canyon_active()
+//     }
 
-    /// Returns true if canyon is active for the payload.
-    pub fn is_canyon_active(&self) -> bool {
-        self.inner.is_canyon_active()
-    }
+//     /// Returns true if holocene is active for the payload.
+//     pub fn is_holocene_active(&self) -> bool {
+//         self.inner.is_holocene_active()
+//     }
 
-    /// Returns true if holocene is active for the payload.
-    pub fn is_holocene_active(&self) -> bool {
-        self.inner.is_holocene_active()
-    }
+//     /// Returns true if the fees are higher than the previous payload.
+//     pub fn is_better_payload(&self, total_fees: U256) -> bool {
+//         is_better_payload(self.inner.best_payload.as_ref(), total_fees)
+//     }
 
-    /// Returns true if the fees are higher than the previous payload.
-    pub fn is_better_payload(&self, total_fees: U256) -> bool {
-        is_better_payload(self.inner.best_payload.as_ref(), total_fees)
-    }
+//     /// Commits the withdrawals from the payload attributes to the state.
+//     pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
+//     where
+//         DB: Database<Error = ProviderError>,
+//     {
+//         self.inner.commit_withdrawals(db)
+//     }
 
-    /// Commits the withdrawals from the payload attributes to the state.
-    pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
-        self.inner.commit_withdrawals(db)
-    }
-
-    /// Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
-    /// blocks will always have at least a single transaction in them (the L1 info transaction),
-    /// so we can safely assume that this will always be triggered upon the transition and that
-    /// the above check for empty blocks will never be hit on OP chains.
-    pub fn ensure_create2_deployer<DB>(&self, db: &mut State<DB>) -> Result<(), PayloadBuilderError>
-    where
-        DB: Database,
-        DB::Error: Display,
-    {
-        self.inner.ensure_create2_deployer(db)
-    }
-}
+//     /// Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+//     /// blocks will always have at least a single transaction in them (the L1 info transaction),
+//     /// so we can safely assume that this will always be triggered upon the transition and that
+//     /// the above check for empty blocks will never be hit on OP chains.
+//     pub fn ensure_create2_deployer<DB>(&self, db: &mut State<DB>) -> Result<(), PayloadBuilderError>
+//     where
+//         DB: Database,
+//         DB::Error: Display,
+//     {
+//         self.inner.ensure_create2_deployer(db)
+//     }
+// }
 
 impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client>
 where

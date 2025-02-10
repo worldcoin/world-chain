@@ -139,7 +139,7 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
-derive_more = "1"
+derive_more = { version = "1", default-features = false, features = ["full"] }
 dotenvy = "0.15.7"
 tikv-jemallocator = { version = "0.6.0" }
 bytes = "1.7.2"
