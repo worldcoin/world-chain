@@ -298,7 +298,10 @@ where
             pbh_signature_aggregator: self.pbh_signature_aggregator,
         };
 
-        let state_provider = self.inner.client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self
+            .inner
+            .client
+            .state_by_block_hash(ctx.inner.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder()
             .with_database(state)
@@ -396,23 +399,27 @@ impl<'a, Txs> WorldChainBuilder<'a, Txs> {
 
 impl<Txs> WorldChainBuilder<'_, Txs> {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, N, DB, P>(
+    pub fn execute<EvmConfig, N, DB, P, Pool>(
         self,
         state: &mut State<DB>,
+        pool: Pool,
         ctx: &WorldChainPayloadBuilderCtx<EvmConfig, N>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions<Transaction: WorldChainPoolTransaction<Consensus = N::SignedTx>>,
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
         //StateProviderFactory + BlockReaderIdExt
     {
         let Self { best } = self;
 
-        let op_ctx = ctx.inner;
-        debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        let op_ctx = &ctx.inner;
+        debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.inner.parent().hash(), parent_number = ctx.inner.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
         op_ctx.apply_pre_beacon_root_contract_call(state)?;
@@ -427,14 +434,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         if !op_ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.inner.best_transaction_attributes());
             if ctx
-                .execute_best_transactions(&mut info, state, best_txs)?
+                .execute_best_transactions(&mut info, state, best_txs, pool)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
-            if !ctx.is_better_payload(info.total_fees) {
+            if !ctx.inner.is_better_payload(info.total_fees) {
                 // can skip building the block
                 return Ok(BuildOutcomeKind::Aborted {
                     fees: info.total_fees,
@@ -474,7 +481,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         self,
         mut state: State<DB>,
         ctx: WorldChainPayloadBuilderCtx<EvmConfig, N>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
