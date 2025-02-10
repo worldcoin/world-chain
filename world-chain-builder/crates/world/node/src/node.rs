@@ -22,7 +22,7 @@ use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_trie_db::MerklePatriciaTrie;
-use world_chain_builder_pool::builder::{WorldChainPoolBuilder, WorldChainPoolBuilderConfig};
+use world_chain_builder_pool::builder::WorldChainPoolBuilder;
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
 
 use super::args::{ExtArgs, WorldChainBuilderArgs};
@@ -198,16 +198,10 @@ impl WorldChainPayloadBuilder {
     }
 }
 
-impl<Txs> WorldChainPayloadBuilder<Txs>
-where
-    Txs: OpPayloadTransactions,
-{
+impl<Txs> WorldChainPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T: OpPayloadTransactions>(
-        self,
-        best_transactions: T,
-    ) -> WorldChainPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilder<T> {
         let Self {
             compute_pending_block,
             verified_blockspace_capacity,

@@ -703,27 +703,27 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.conditional_options() {
-                todo!("TODO:");
-                // if validate_conditional_options(conditional_options, &self.client).is_err() {
-                //     best_txs.mark_invalid(
-                //         &tx,
-                //         InvalidPoolTransactionError::Other(Box::new(
-                //             WorldChainPoolTransactionError::ConditionalValidationFailed(*tx.hash()),
-                //         )),
-                //     );
-                //     invalid_txs.push(*tx.hash());
-                continue;
-                // }
-            }
+            // if let Some(conditional_options) = pooled_tx.conditional_options() {
+            //     todo!("TODO:");
+            //     // if validate_conditional_options(conditional_options, &self.client).is_err() {
+            //     //     best_txs.mark_invalid(
+            //     //         &tx,
+            //     //         InvalidPoolTransactionError::Other(Box::new(
+            //     //             WorldChainPoolTransactionError::ConditionalValidationFailed(*tx.hash()),
+            //     //         )),
+            //     //     );
+            //     //     invalid_txs.push(*tx.hash());
+            //     continue;
+            //     // }
+            // }
 
-            // If the transaction is verified, check if it can be added within the verified gas limit
-            if pooled_tx.valid_pbh()
-                && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
-            {
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
-            }
+            // // If the transaction is verified, check if it can be added within the verified gas limit
+            // if pooled_tx.valid_pbh()
+            //     && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
+            // {
+            //     best_txs.mark_invalid(tx.signer(), tx.nonce());
+            //     continue;
+            // }
 
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
