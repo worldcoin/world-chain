@@ -1,9 +1,10 @@
 use alloy_primitives::Address;
 use eyre::eyre::Result;
-use reth::api::{ConfigureEvm, HeaderTy, PrimitivesTy, TxTy};
+use reth::api::{ConfigureEvm, FullNodeComponents, HeaderTy, PrimitivesTy, TxTy};
 use reth::builder::components::{
     ComponentsBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
 };
+use reth::builder::rpc::RpcAddOns;
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
     NodeTypesWithEngine, PayloadBuilderConfig,
@@ -18,15 +19,16 @@ use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpStorage,
+    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    OpPayloadBuilder, OpStorage,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::transaction::signature;
 use reth_provider::CanonStateSubscriptions;
+use reth_trie_db::MerklePatriciaTrie;
 use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
@@ -162,6 +164,17 @@ where
             .with_da_config(self.da_config.clone())
             .build()
     }
+}
+
+impl NodeTypes for WorldChainNode {
+    type Primitives = OpPrimitives;
+    type ChainSpec = OpChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
+    type Storage = OpStorage;
+}
+
+impl NodeTypesWithEngine for WorldChainNode {
+    type Engine = OpEngineTypes;
 }
 
 /// A basic World Chain transaction pool.

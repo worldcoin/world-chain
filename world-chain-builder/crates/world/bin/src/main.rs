@@ -31,21 +31,22 @@ fn main() {
         Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
 
-            let handle = builder
-                .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
-                // .extend_rpc_modules(move |ctx| {
-                //     let provider = ctx.provider().clone();
-                //     let pool = ctx.pool().clone();
-                //     let sequencer_client = builder_args
-                //         .rollup_args
-                //         .sequencer_http
-                //         .map(SequencerClient::new);
-                //     let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
-                //     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                //     Ok(())
-                // })
-                .launch_node(WorldChainNode::new(args))
-                .await?;
+            // let handle = builder
+            //     .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
+            //     .extend_rpc_modules(move |ctx| {
+            //         let provider = ctx.provider().clone();
+            //         let pool = ctx.pool().clone();
+            //         let sequencer_client =
+            //             args.rollup_args.sequencer_http.map(SequencerClient::new);
+            //         let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
+            //         ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+            //         Ok(())
+            //     })
+            //     .launch_node(WorldChainNode::new(args))
+            // .await?;
+
+            let handle = builder.launch_node(WorldChainNode::new(args)).await?;
+
             handle.node_exit_future.await
         })
     {

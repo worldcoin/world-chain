@@ -8,6 +8,7 @@ use reth::builder::components::Components;
 use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth::chainspec::ChainSpec;
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -28,6 +29,7 @@ use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
+use world_chain_builder_node::node::WorldChainNode;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::test_utils::{
@@ -37,14 +39,12 @@ use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 
-use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
-use world_chain_builder_node::node::WorldChainBuilder;
 use world_chain_builder_node::test_utils::{tx, PBHTransactionTestContext};
 
 type NodeTypesAdapter = FullNodeTypesAdapter<
-    WorldChainBuilder,
+    WorldChainNode,
     Arc<TempDatabase<DatabaseEnv>>,
-    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>>,
+    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>>,
 >;
 
 type NodeHelperType = NodeAdapter<
@@ -56,7 +56,7 @@ type NodeHelperType = NodeAdapter<
             TransactionValidationTaskExecutor<
                 WorldChainTransactionValidator<
                     BlockchainProvider<
-                        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
+                        NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                     WorldChainPooledTransaction,
                 >,
@@ -66,7 +66,7 @@ type NodeHelperType = NodeAdapter<
         >,
         OpEvmConfig,
         BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
-        Arc<OpBeaconConsensus>,
+        Arc<OpBeaconConsensus<ChainSpec>>,
     >,
 >;
 
