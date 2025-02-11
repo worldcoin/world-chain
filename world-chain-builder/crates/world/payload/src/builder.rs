@@ -286,7 +286,6 @@ where
         attributes: &OpPayloadBuilderAttributes<OpTransactionSigned>,
         parent: &Header,
     ) -> Result<EvmEnv, EIP1559ParamError> {
-        // TODO:
         self.inner.evm_env(attributes, parent)
     }
 

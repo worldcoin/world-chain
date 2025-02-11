@@ -23,6 +23,7 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
 use reth_transaction_pool::blobstore::InMemoryBlobStore;
@@ -64,7 +65,7 @@ type NodeHelperType = NodeAdapter<
                 >,
             >,
             WorldChainOrdering<WorldChainPooledTransaction>,
-            InMemoryBlobStore,
+            DiskFileBlobStore,
         >,
         OpEvmConfig,
         BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
@@ -73,7 +74,7 @@ type NodeHelperType = NodeAdapter<
             BlockchainProvider<
                 NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
             >,
-            InMemoryBlobStore,
+            DiskFileBlobStore,
         >,
     >,
 >;
@@ -300,7 +301,9 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 }
 
 /// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes(
+    timestamp: u64,
+) -> OpPayloadBuilderAttributes<OpTransactionSigned> {
     let attributes = EthPayloadBuilderAttributes {
         timestamp,
         prev_randao: B256::ZERO,
