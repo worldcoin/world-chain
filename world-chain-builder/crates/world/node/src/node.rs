@@ -26,8 +26,10 @@ use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
-use reth_optimism_primitives::OpPrimitives;
-use reth_provider::CanonStateSubscriptions;
+use reth_optimism_primitives::{OpBlock, OpPrimitives};
+use reth_primitives_traits::Block;
+use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory};
+use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
 use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
@@ -377,19 +379,13 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
     /// given EVM config.
     #[expect(clippy::type_complexity)]
-    pub fn build<Node, Evm, Pool>(
+    pub fn build<Node, S>(
         &self,
-        evm_config: Evm,
+        evm_config: OpEvmConfig,
         ctx: &BuilderContext<Node>,
-        pool: Pool,
+        pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<
-        world_chain_builder_payload::builder::WorldChainPayloadBuilder<
-            Pool,
-            Node::Provider,
-            Evm,
-            PrimitivesTy<Node::Types>,
-            Txs,
-        >,
+        world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>,
     >
     where
         Node: FullNodeTypes<
@@ -399,11 +395,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
-        Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
-        Txs: OpPayloadTransactions<Pool::Transaction>,
+        S: BlobStore + Clone,
+        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
         let payload_builder =
             world_chain_builder_payload::builder::WorldChainPayloadBuilder::with_builder_config(
@@ -425,7 +418,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for WorldChainPayloadBuilder<Txs>
+impl<Node, S, Txs> PayloadServiceBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
+    for WorldChainPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
@@ -434,23 +428,17 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
-    Txs: OpPayloadTransactions<Pool::Transaction>,
+    Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
+    S: BlobStore + Clone,
+    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
-    type PayloadBuilder = world_chain_builder_payload::builder::WorldChainPayloadBuilder<
-        Pool,
-        Node::Provider,
-        OpEvmConfig,
-        PrimitivesTy<Node::Types>,
-        Txs,
-    >;
+    type PayloadBuilder =
+        world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>;
 
     async fn build_payload_builder(
         &self,
         ctx: &BuilderContext<Node>,
-        pool: Pool,
+        pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<Self::PayloadBuilder> {
         self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
