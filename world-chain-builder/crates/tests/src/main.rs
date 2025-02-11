@@ -23,7 +23,6 @@ use tracing::info;
 
 pub mod cases;
 pub mod fixtures;
-pub mod types;
 
 #[derive(Parser)]
 pub struct Args {

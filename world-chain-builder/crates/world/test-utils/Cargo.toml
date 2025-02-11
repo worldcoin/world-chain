@@ -16,7 +16,6 @@ reth-optimism-primitives.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true

@@ -19,11 +19,11 @@ use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
 use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_builder_test_utils::utils::RpcUserOperationByHash;
+use world_chain_builder_test_utils::utils::RpcUserOperationV0_7;
 use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
-use world_chain_builder_test_utils::PBH_DEV_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
-use crate::types::RpcUserOperationByHash;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
@@ -41,11 +41,11 @@ where
     let start = Instant::now();
     let mut hashes = Vec::new();
     for (index, uo) in user_operations.iter().enumerate() {
-        let uo: alloy_rpc_types_eth::PackedUserOperation = uo.clone().into();
+        let uo: RpcUserOperationV0_7 = uo.clone().into();
         let res: B256 = bundler_provider
             .raw_request(
                 Cow::Borrowed("eth_sendUserOperation"),
-                (uo, DEVNET_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR),
+                (uo, DEVNET_ENTRYPOINT),
             )
             .await?;
         debug!(target: "tests::user_ops_test", %index, ?res, "User Operation Sent");
