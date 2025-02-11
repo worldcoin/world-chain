@@ -242,6 +242,10 @@ contract PBHSignatureAggregatorTest is TestSetup {
         assertEq(decodedProofs[1].proof[7], proof.proof[7], "Proof should match");
     }
 
+    function test_validateUserOperation() public {
+
+    }
+
     function testFuzz_ValidateUserOpSignature(
         uint256 root,
         uint256 pbhExternalNullifier,

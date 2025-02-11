@@ -5,10 +5,8 @@ use std::time::Instant;
 
 use alloy_network::Network;
 use alloy_primitives::hex;
-use alloy_primitives::Address;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
-use alloy_primitives::U256;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
@@ -17,8 +15,6 @@ use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use serde::Deserialize;
-use serde::Serialize;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
@@ -27,23 +23,10 @@ use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
 use world_chain_builder_test_utils::PBH_DEV_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
+use crate::types::RpcUserOperationByHash;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RpcUserOperationByHash {
-    /// The full user operation
-    pub user_operation: alloy_rpc_types_eth::PackedUserOperation,
-    /// The entry point address this operation was sent to
-    pub entry_point: Address,
-    /// The number of the block this operation was included in
-    pub block_number: Option<U256>,
-    /// The hash of the block this operation was included in
-    pub block_hash: Option<B256>,
-    /// The hash of the transaction this operation was included in
-    pub transaction_hash: Option<B256>,
-}
 
 /// `eth_sendUserOperation` test cases
 pub async fn user_ops_test<T, P>(

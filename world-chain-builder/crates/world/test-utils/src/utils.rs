@@ -212,6 +212,8 @@ pub fn user_op(
     uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
 
     user_op.signature = Bytes::from(uo_sig);
+
+    println!("UserOp: {:?}", user_op);
     (user_op, payload)
 }
 
