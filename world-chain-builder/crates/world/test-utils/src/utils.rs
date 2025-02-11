@@ -153,7 +153,7 @@ pub fn user_op(
     #[builder(default = fixed_bytes!("000000000000000000000000000fffd30000000000000000000000000000C350"))]
     account_gas_limits: FixedBytes<32>,
     #[builder(default = U256::from(60232))] pre_verification_gas: U256,
-    #[builder(default = fixed_bytes!("00000000000000000000000000000001000000000000000000000000257353A9"))]
+    #[builder(default = fixed_bytes!("0000000000000000000000003B9ACA0000000000000000000000000053140B60"))]
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
@@ -192,18 +192,20 @@ pub fn user_op(
     };
 
     let mut uo_sig = Vec::with_capacity(429);
-    println!("Signature: {:?}", signature);
-    let y_parity = if signature.v() as u8 == 0 {
+
+    // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
+    let v: FixedBytes<1> = if signature.v() as u8 == 0 {
         fixed_bytes!("1F") // 31
     } else {
         fixed_bytes!("20") // 32
     };
+
     uo_sig.extend_from_slice(
         &(
             fixed_bytes!("000000000000000000000000"),
             signature.r(),
             signature.s(),
-            y_parity,
+            v,
         )
             .abi_encode_packed(),
     );

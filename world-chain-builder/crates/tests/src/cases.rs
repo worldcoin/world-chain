@@ -55,6 +55,7 @@ where
     T: Transport + Clone,
     P: Provider<T>,
 {
+    let user_operations = &user_operations[..100];
     let start = Instant::now();
     let mut hashes = Vec::new();
     for (index, uo) in user_operations.iter().enumerate() {
