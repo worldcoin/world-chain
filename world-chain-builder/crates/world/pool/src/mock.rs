@@ -5,6 +5,7 @@ use std::{
 };
 
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
+use alloy_genesis::Genesis;
 use alloy_primitives::{
     keccak256,
     map::{B256HashMap, HashMap},
@@ -24,6 +25,7 @@ use reth_db::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
@@ -56,9 +58,17 @@ pub struct MockEthProvider<T = OpTransactionSigned> {
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
-    pub chain_spec: Arc<ChainSpec>,
+    pub chain_spec: Arc<OpChainSpec>,
     /// Local state roots
     pub state_roots: Arc<Mutex<Vec<B256>>>,
+}
+
+impl ChainSpecProvider for MockEthProvider {
+    type ChainSpec = OpChainSpec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
+        self.chain_spec.clone()
+    }
 }
 
 impl Default for MockEthProvider {
@@ -67,7 +77,7 @@ impl Default for MockEthProvider {
             blocks: Default::default(),
             headers: Default::default(),
             accounts: Default::default(),
-            chain_spec: Arc::new(ChainSpecBuilder::mainnet().build()),
+            chain_spec: Arc::new(OpChainSpec::from_genesis(Genesis::default())),
             state_roots: Default::default(),
         }
     }
@@ -256,14 +266,6 @@ impl HeaderProvider for MockEthProvider {
             .map(SealedHeader::seal_slow)
             .take_while(|h| predicate(h))
             .collect())
-    }
-}
-
-impl ChainSpecProvider for MockEthProvider {
-    type ChainSpec = ChainSpec;
-
-    fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.chain_spec.clone()
     }
 }
 

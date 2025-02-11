@@ -11,6 +11,9 @@ use std::{
     time::{self, Duration, Instant},
 };
 
+use alloy_network::Network;
+use alloy_provider::network::Ethereum;
+use alloy_provider::RootProvider;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::Transport;
@@ -20,7 +23,6 @@ use fixtures::generate_fixture;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
-
 pub mod cases;
 pub mod fixtures;
 
@@ -42,9 +44,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let (builder_rpc, sequencer_rpc) = start_devnet(args).await?;
 
-    let sequencer_provider =
+    let sequencer_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
-    let builder_provider =
+    let builder_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
 
     let timeout = std::time::Duration::from_secs(30);
@@ -124,10 +126,10 @@ async fn get_endpoints() -> Result<(String, String)> {
     Ok((builder_socket, sequencer_socket))
 }
 
-async fn wait<T, P>(provider: P, timeout: time::Duration)
+async fn wait<N, P>(provider: P, timeout: time::Duration)
 where
-    T: Transport + Clone,
-    P: Provider<T>,
+    N: Network,
+    P: Provider<N>,
 {
     let start = Instant::now();
     loop {

@@ -1,4 +1,4 @@
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{address, Address, Bytes, ChainId, U256};
@@ -20,7 +20,7 @@ use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
 use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
+use world_chain_builder_pbh::payload::{PBHPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IMulticall3;
@@ -130,10 +130,12 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let op_tx: OpTypedTransaction = tx.into();
-    let tx_signed = OpTransactionSigned::new(op_tx, signature);
+    let op_tx: OpTypedTransaction = tx.clone().into();
+
+    // TODO: double check hash is correct hash
+    let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
     let pooled = OpPooledTransaction::new(
-        tx_signed.clone().into_ecrecovered_unchecked().unwrap(),
+        tx_signed.clone().into_recovered_unchecked().unwrap(),
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
@@ -145,7 +147,9 @@ pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let tx_signed = OpTransactionSigned::new(tx.into(), signature);
+
+    // TODO: double check hash is correct hash
+    let tx_signed = OpTransactionSigned::new(tx.clone().into(), signature, tx.signature_hash());
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);
     buff.into()
@@ -156,7 +160,7 @@ pub fn user_op(
     acc: u32,
     #[builder(into, default = U256::ZERO)] nonce: U256,
     #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
-) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
+) -> (IEntryPoint::PackedUserOperation, PBHPayload) {
     let sender = account(acc);
 
     let user_op = PackedUserOperation {
@@ -173,7 +177,7 @@ pub fn user_op(
 
     let proof = Proof(proof);
 
-    let payload = PbhPayload {
+    let payload = PBHPayload {
         external_nullifier,
         nullifier_hash,
         root,
@@ -185,7 +189,7 @@ pub fn user_op(
 
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
-    proofs: Vec<PbhPayload>,
+    proofs: Vec<PBHPayload>,
 ) -> IPBHEntryPoint::handleAggregatedOpsCall {
     let mut signature_buff = Vec::new();
     proofs.encode(&mut signature_buff);
@@ -254,10 +258,11 @@ pub fn pbh_multicall(
 pub fn world_chain_validator(
 ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
-    let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+
+    let validator = EthTransactionValidatorBuilder::new(client.clone())
         .no_shanghai()
         .no_cancun()
-        .build(client.clone(), InMemoryBlobStore::default());
+        .build(InMemoryBlobStore::default());
     let validator = OpTransactionValidator::new(validator).require_l1_data_gas_fee(false);
     let root_validator = WorldChainRootValidator::new(client, TEST_WORLD_ID).unwrap();
     WorldChainTransactionValidator::new(

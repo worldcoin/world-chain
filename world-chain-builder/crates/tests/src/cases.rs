@@ -3,6 +3,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use alloy_network::Network;
+use alloy_network::ReceiptResponse;
 use alloy_primitives::hex;
 use alloy_primitives::Bytes;
 use alloy_provider::PendingTransactionBuilder;
@@ -22,10 +23,10 @@ use crate::run_command;
 const CONCURRENCY_LIMIT: usize = 50;
 
 /// Sends a high volume of transactions to the builder concurrently.
-pub async fn load_test<T, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
+pub async fn load_test<N, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
 where
-    T: Transport + Clone,
-    P: Provider<T>,
+    N: Network,
+    P: Provider<N>,
 {
     let start = Instant::now();
     let builder_provider_clone = builder_provider.clone();
@@ -57,10 +58,10 @@ where
 }
 
 /// Asserts that the chain continues to advance in the case when the world-chain-builder service is MIA.
-pub async fn fallback_test<T, P>(sequencer_provider: P) -> Result<()>
+pub async fn fallback_test<N, P>(sequencer_provider: P) -> Result<()>
 where
-    T: Transport + Clone,
-    P: Provider<T>,
+    N: Network,
+    P: Provider<N>,
 {
     run_command(
         "kurtosis",
@@ -99,13 +100,13 @@ where
 }
 
 /// `eth_sendRawTransactionConditional` test cases
-pub async fn transact_conditional_test<T, P>(
+pub async fn transact_conditional_test<N, P>(
     builder_provider: Arc<P>,
     transactions: &[Bytes],
 ) -> Result<()>
 where
-    T: Transport + Clone,
-    P: Provider<T>,
+    N: Network,
+    P: Provider<N>,
 {
     let tx = &transactions[0];
     let latest = builder_provider.get_block_number().await?;
@@ -122,7 +123,7 @@ where
     let receipt = builder.get_receipt().await;
     assert!(receipt.is_ok());
     info!(
-        block = %receipt.unwrap().block_number.unwrap_or_default(),
+        block = %receipt.unwrap().block_number().unwrap_or_default(),
         block_number_min = %latest,
         block_number_max = %latest + 2,
         hash = ?hash,
@@ -145,15 +146,14 @@ where
     Ok(())
 }
 
-async fn send_raw_transaction_conditional<T, N, P>(
+async fn send_raw_transaction_conditional<N, P>(
     tx: Bytes,
     conditions: TransactionConditional,
     provider: Arc<P>,
-) -> Result<PendingTransactionBuilder<T, N>>
+) -> Result<PendingTransactionBuilder<N>>
 where
     N: Network,
-    T: Transport + Clone,
-    P: Provider<T, N>,
+    P: Provider<N>,
 {
     let rlp_hex = hex::encode_prefixed(tx);
     let tx_hash = provider

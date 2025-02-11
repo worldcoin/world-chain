@@ -1,21 +1,14 @@
 use alloy_primitives::Address;
 use clap::value_parser;
 use reth_optimism_node::args::RollupArgs;
-/// Parameters for rollup configuration
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
-pub struct ExtArgs {
+#[command(next_help_heading = "PBH Builder")]
+pub struct WorldChainArgs {
     /// op rollup args
     #[command(flatten)]
     pub rollup_args: RollupArgs,
 
-    /// builder args
-    #[command(flatten)]
-    pub builder_args: WorldChainBuilderArgs,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
-#[command(next_help_heading = "PBH Builder")]
-pub struct WorldChainBuilderArgs {
     /// Sets the number of allowed PBH transactions per month
     #[arg(long = "builder.num_pbh_txs", default_value = "30")]
     pub num_pbh_txs: u8,

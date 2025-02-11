@@ -11,7 +11,7 @@ use jsonrpsee::{
 use reth::{
     api::Block,
     rpc::{
-        api::eth::{AsEthApiError, FromEthApiError, FromEvmError},
+        api::eth::{AsEthApiError, FromEthApiError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
     },
     transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
@@ -29,7 +29,6 @@ pub trait EthTransactionsExt {
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError
-        + FromEvmError
         + Error
         + Send
         + Sync;
@@ -61,7 +60,7 @@ where
         let recovered = recover_raw_transaction(&tx)?;
         let mut pool_transaction: WorldChainPooledTransaction =
             OpPooledTransaction::from_pooled(recovered).into();
-        pool_transaction.conditional_options = Some(options.clone());
+        pool_transaction.inner = pool_transaction.inner.with_conditional(options.clone());
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self

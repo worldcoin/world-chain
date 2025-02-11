@@ -24,7 +24,9 @@ reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-optimism-forks.workspace = true
 
+alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
