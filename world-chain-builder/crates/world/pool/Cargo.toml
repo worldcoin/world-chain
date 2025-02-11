@@ -21,12 +21,10 @@ reth-trie-db = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-stages-types = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
-reth-optimism-chainspec.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
 
-alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
@@ -41,7 +39,6 @@ op-alloy-consensus.workspace = true
 ethers-core.workspace = true
 tokio.workspace = true
 semaphore.workspace = true
-eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
