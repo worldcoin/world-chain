@@ -92,13 +92,29 @@ def get_config(
         builder_context.engine_rpc_port_num,
     )
 
+    BUILDER_HTTP_ENDPOINT = "http://{0}:{1}".format(
+        builder_context.ip_addr,
+        builder_context.rpc_port_num,
+    )
+
+    L2_HTTP_ENDPOINT = "http://{0}:{1}".format(
+        sequencer_context.ip_addr,
+        sequencer_context.rpc_port_num,
+    )
+
     used_ports = get_used_ports(DISCOVERY_PORT_NUM)
 
     public_ports = {}
+
     cmd = [
-        "--jwt-path=" + constants.JWT_MOUNT_PATH_ON_CONTAINER,
-        "--l2-url={0}".format(L2_EXECUTION_ENGINE_ENDPOINT),
-        "--builder-url={0}".format(BUILDER_EXECUTION_ENGINE_ENDPOINT),
+        "--builder-auth-jwt-path=" + constants.JWT_MOUNT_PATH_ON_CONTAINER,
+        "--builder-http-url={0}".format(BUILDER_HTTP_ENDPOINT),
+        "--builder-auth-url={0}".format(BUILDER_EXECUTION_ENGINE_ENDPOINT),
+        "--builder-timeout=1000",
+        "--l2-http-url={0}".format(L2_HTTP_ENDPOINT),
+        "--l2-auth-url={0}".format(L2_EXECUTION_ENGINE_ENDPOINT),
+        "--l2-timeout=1000",
+        "--l2-auth-jwt-path=" + constants.JWT_MOUNT_PATH_ON_CONTAINER,
         "--rpc-port={0}".format(RPC_PORT_NUM),
         "--boost-sync",
         "--log-level=debug",

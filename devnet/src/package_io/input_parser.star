@@ -39,7 +39,7 @@ DEFAULT_PROPOSER_IMAGES = {
 }
 
 DEFAULT_SIDECAR_IMAGES = {
-    "rollup-boost": "flashbots/rollup-boost:latest",
+    "rollup-boost": "ghcr.io/worldcoin/rollup-boost:sha-1dfd71e",
 }
 
 DEFAULT_DA_SERVER_PARAMS = {
