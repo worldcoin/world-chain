@@ -35,22 +35,21 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
     ) -> Option<reth::revm::interpreter::CallOutcome> {
         // Check if the target address is the `PBHEntryPoint`. If the caller is not the tx origin
         // or the `PBHSignatureAggregator`, mark the tx as invalid.
-        if inputs.target_address == self.pbh_entry_point {
-            if inputs.caller != context.env.tx.caller
-                && inputs.caller != self.pbh_signature_aggregator
-            {
-                context.error = Err(revm_primitives::EVMError::Custom(
-                    PBH_CALL_TRACER_ERROR.to_string(),
-                ));
+        if inputs.target_address == self.pbh_entry_point
+            && inputs.caller != context.env.tx.caller
+            && inputs.caller != self.pbh_signature_aggregator
+        {
+            context.error = Err(revm_primitives::EVMError::Custom(
+                PBH_CALL_TRACER_ERROR.to_string(),
+            ));
 
-                let res = InterpreterResult::new(
-                    InstructionResult::InvalidEXTCALLTarget,
-                    Bytes::default(),
-                    Gas::new(0),
-                );
+            let res = InterpreterResult::new(
+                InstructionResult::InvalidEXTCALLTarget,
+                Bytes::default(),
+                Gas::new(0),
+            );
 
-                return Some(CallOutcome::new(res, 0..0));
-            }
+            return Some(CallOutcome::new(res, 0..0));
         }
 
         None

@@ -1,7 +1,6 @@
 //! World Chain transaction pool types
-use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
-use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use super::tx::WorldChainPoolTransaction;
 use crate::bindings::IPBHEntryPoint;
 use crate::tx::WorldChainPoolTransactionError;
 use alloy_primitives::Address;
@@ -10,8 +9,7 @@ use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
-    Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;

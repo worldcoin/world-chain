@@ -1,28 +1,24 @@
-use std::fmt::Display;
-use std::sync::Arc;
-
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_consensus::{proofs, Eip658Value, Transaction, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Typed2718;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt, OpTxType};
+use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt};
 use reth::api::PayloadBuilderError;
-use reth::payload::{PayloadBuilderAttributes, PayloadId};
+use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::witness::ExecutionWitnessRecord;
 use reth::revm::{DatabaseCommit, State};
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour,
-    PayloadBuilder, PayloadConfig,
+    BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
 };
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor, Evm};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
@@ -33,32 +29,25 @@ use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
-use reth_optimism_payload_builder::{OpPayloadAttributes, OpPayloadPrimitives};
-use reth_optimism_primitives::transaction::signed::OpTransaction;
+use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{
     OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{
-    Block, BlockBody, Header, InvalidTransactionError, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_primitives::{Block, BlockBody, Header, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider,
-    ProviderError, StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider,
-    StorageRootProvider,
+    BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
-use reth_transaction_pool::error::InvalidPoolTransactionError;
-use reth_transaction_pool::{BestTransactions, BlobStore, PoolTransaction, ValidPoolTransaction};
+use reth_transaction_pool::{BlobStore, PoolTransaction};
 use revm::Database;
 use revm_primitives::{
-    Address, Bytes, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, B256, U256,
+    Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
-use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
-use world_chain_builder_pool::tx::{
-    WorldChainPoolTransaction, WorldChainPoolTransactionError, WorldChainPooledTransaction,
-};
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 

@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
 use alloy_primitives::Address;
 use reth::builder::components::{PoolBuilder, PoolBuilderConfigOverrides};
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpPrimitives;
@@ -51,7 +48,7 @@ impl WorldChainPoolBuilder {
         pool_config_overrides: PoolBuilderConfigOverrides,
     ) -> Self {
         Self {
-            pool_config_overrides: pool_config_overrides,
+            pool_config_overrides,
             ..self
         }
     }

@@ -1,40 +1,32 @@
 use alloy_primitives::Address;
-use eyre::eyre::Result;
-use reth::api::{ConfigureEvm, FullNodeComponents, HeaderTy, PrimitivesTy, TxTy};
 use reth::builder::components::{
     ComponentsBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
 };
-use reth::builder::rpc::RpcAddOns;
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
-    NodeTypesWithEngine, PayloadBuilderConfig,
+    NodeTypesWithEngine,
 };
-use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::{TransactionPool, TransactionValidationTaskExecutor};
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_evm::ConfigureEvmFor;
+use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpPayloadBuilder, OpStorage,
+    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpStorage,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
-use reth_primitives_traits::Block;
 use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
 use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
-use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
@@ -378,7 +370,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
 
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
     /// given EVM config.
-    #[expect(clippy::type_complexity)]
     pub fn build<Node, S>(
         &self,
         evm_config: OpEvmConfig,

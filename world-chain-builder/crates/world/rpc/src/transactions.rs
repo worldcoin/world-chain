@@ -11,7 +11,7 @@ use jsonrpsee::{
 use reth::{
     api::Block,
     rpc::{
-        api::eth::{AsEthApiError, FromEthApiError, FromEvmError},
+        api::eth::{AsEthApiError, FromEthApiError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
     },
     transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},

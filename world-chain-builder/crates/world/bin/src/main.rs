@@ -1,11 +1,8 @@
 use clap::Parser;
-use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
-use reth_provider::providers::BlockchainProvider;
 use reth_tracing::tracing::info;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
-use world_chain_builder_rpc::{sequencer::SequencerClient, EthApiExtServer, WorldChainEthApiExt};
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
