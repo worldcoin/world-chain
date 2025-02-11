@@ -153,7 +153,7 @@ pub fn user_op(
     #[builder(default = fixed_bytes!("000000000000000000000000000fffd30000000000000000000000000000C350"))]
     account_gas_limits: FixedBytes<32>,
     #[builder(default = U256::from(60232))] pre_verification_gas: U256,
-    #[builder(default = fixed_bytes!("0000000000000000000000003B9ACA0000000000000000000000000053140B60"))]
+    #[builder(default = fixed_bytes!("0000000000000000000000003B9ACA0000000000000000000000000073140B60"))]
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {

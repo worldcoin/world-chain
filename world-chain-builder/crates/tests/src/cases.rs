@@ -27,7 +27,6 @@ use crate::types::RpcUserOperationByHash;
 
 const CONCURRENCY_LIMIT: usize = 50;
 
-
 /// `eth_sendUserOperation` test cases
 pub async fn user_ops_test<T, P>(
     bundler_provider: Arc<P>,

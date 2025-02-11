@@ -19,7 +19,7 @@ DEFAULT_CL_IMAGES = {
 }
 
 DEFAULT_BUNDLER_IMAGES = {
-    "rundler": "leytont/rundler:latest",
+    "rundler": "leytont/rundler:logging",
 }
 
 DEFAULT_BATCHER_IMAGES = {

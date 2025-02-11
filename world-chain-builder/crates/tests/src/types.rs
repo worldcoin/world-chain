@@ -84,7 +84,6 @@ pub struct RpcUserOperationV0_6 {
     aggregator: Option<Address>,
 }
 
-
 /// User operation definition for RPC inputs
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
