@@ -29,7 +29,6 @@ pub trait EthTransactionsExt {
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError
-        // + FromEvmError
         + Error
         + Send
         + Sync;
