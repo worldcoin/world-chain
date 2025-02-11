@@ -176,7 +176,6 @@ pub fn user_op(
     let signature = signer
         .sign_message_sync(&operation_hash.0)
         .expect("Failed to sign operation hash");
-
     let signal = hash_user_op(&user_op);
 
     let root = TREE.root();
@@ -193,12 +192,18 @@ pub fn user_op(
     };
 
     let mut uo_sig = Vec::with_capacity(429);
+    println!("Signature: {:?}", signature);
+    let y_parity = if signature.v() as u8 == 0 {
+        fixed_bytes!("1F") // 31
+    } else {
+        fixed_bytes!("20") // 32
+    };
     uo_sig.extend_from_slice(
         &(
             fixed_bytes!("000000000000000000000000"),
             signature.r(),
             signature.s(),
-            fixed_bytes!("1F"), // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L326
+            y_parity,
         )
             .abi_encode_packed(),
     );
@@ -427,7 +432,10 @@ mod tests {
     #[test]
     fn treeroot() {
         assert_eq!(
-            U256::from_str("2331208655746773478043068354535648778756593025616855591272936751328757051821").unwrap(),
+            U256::from_str(
+                "2331208655746773478043068354535648778756593025616855591272936751328757051821"
+            )
+            .unwrap(),
             tree_root()
         )
     }

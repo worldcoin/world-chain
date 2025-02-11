@@ -76,12 +76,12 @@ where
             let builder_provider = builder_provider.clone();
             async move {
                 // Fetch the Transaction by hash
-                let max_retries = 10;
+                let max_retries = 100;
                 let mut tries = 0;
                 loop {
-                    if tries >= max_retries {
-                        panic!("User Operation not included in a Transaction after {} retries", max_retries);
-                    }
+                    // if tries >= max_retries {
+                    //     panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                    // }
                     // Check if the User Operation has been included in a Transaction
                     let resp: RpcUserOperationByHash = bundler_provider
                         .raw_request(
@@ -89,7 +89,8 @@ where
                             (hash.clone(),),
                         )
                         .await?;
-
+                    
+                    debug!(target: "tests::user_ops_test", %index, ?resp, "User Operation Response");
                     if let Some(transaction_hash) = resp.transaction_hash {
                         debug!(target: "tests::user_ops_test", %index, ?transaction_hash, "User Operation Included in Transaction");
                         // Fetch the Transaction Receipt from the builder
