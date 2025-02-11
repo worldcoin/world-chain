@@ -25,6 +25,7 @@ use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
+use reth_transaction_pool::blobstore::InMemoryBlobStore;
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -63,11 +64,17 @@ type NodeHelperType = NodeAdapter<
                 >,
             >,
             WorldChainOrdering<WorldChainPooledTransaction>,
-            DiskFileBlobStore,
+            InMemoryBlobStore,
         >,
         OpEvmConfig,
         BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
-        Arc<OpBeaconConsensus<ChainSpec>>,
+        Arc<OpBeaconConsensus<OpChainSpec>>,
+        world_chain_builder_payload::builder::WorldChainPayloadBuilder<
+            BlockchainProvider<
+                NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
+            >,
+            InMemoryBlobStore,
+        >,
     >,
 >;
 

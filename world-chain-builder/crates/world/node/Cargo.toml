@@ -25,7 +25,8 @@ reth-basic-payload-builder.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-primitives = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
-reth-primitives-traits = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
+
 reth-provider.workspace = true
 reth-evm.workspace = true
 reth-optimism-evm.workspace = true
@@ -79,7 +80,6 @@ test = [
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
     "dep:reth-primitives",
-    "dep:reth-primitives-traits",
     "dep:reth-prune-types",
     "dep:reth-trie",
     "dep:reth-db",
