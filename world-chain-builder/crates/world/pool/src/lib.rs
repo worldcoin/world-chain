@@ -6,7 +6,6 @@ use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
 pub mod bindings;
-pub mod builder;
 pub mod eip4337;
 pub mod error;
 pub mod noop;
