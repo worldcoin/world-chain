@@ -12,7 +12,6 @@ ethereum_package_el_admin_node_info = import_module(
 ethereum_package_node_metrics = import_module(
     "github.com/ethpandaops/ethereum-package/src/node_metrics_info.star"
 )
-
 ethereum_package_input_parser = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/input_parser.star"
 )
@@ -23,7 +22,6 @@ ethereum_package_constants = import_module(
 
 constants = import_module("../../package_io/constants.star")
 observability = import_module("../../observability/observability.star")
-interop_constants = import_module("../../interop/constants.star")
 util = import_module("../../util.star")
 
 RPC_PORT_NUM = 8545
@@ -43,12 +41,8 @@ UDP_DISCOVERY_PORT_ID = "udp-discovery"
 ENGINE_RPC_PORT_ID = "engine-rpc"
 ENGINE_WS_PORT_ID = "engineWs"
 
-
-# TODO(old) Scale this dynamically based on CPUs available and Geth nodes mining
-NUM_MINING_THREADS = 1
-
 # The dirpath of the execution data directory on the client container
-EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER = "/data/geth/execution-data"
+EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER = "/data/op-erigon/execution-data"
 
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
@@ -84,9 +78,6 @@ VERBOSITY_LEVELS = {
     ethereum_package_constants.GLOBAL_LOG_LEVEL.debug: "4",
     ethereum_package_constants.GLOBAL_LOG_LEVEL.trace: "5",
 }
-
-BUILDER_IMAGE_STR = "builder"
-SUAVE_ENABLED_GETH_IMAGE_STR = "suave"
 
 
 def launch(
@@ -124,7 +115,6 @@ def launch(
         sequencer_enabled,
         sequencer_context,
         observability_helper,
-        interop_params,
     )
 
     service = plan.add_service(service_name, config)
@@ -138,14 +128,14 @@ def launch(
     metrics_info = observability.new_metrics_info(observability_helper, service)
 
     return ethereum_package_el_context.new_el_context(
-        client_name="op-geth",
+        client_name="op-erigon",
         enode=enode,
         ip_addr=service.ip_address,
         rpc_port_num=RPC_PORT_NUM,
         ws_port_num=WS_PORT_NUM,
         engine_rpc_port_num=ENGINE_RPC_PORT_NUM,
-        rpc_http_url=http_url,
         enr=enr,
+        rpc_http_url=http_url,
         service_name=service_name,
         el_metrics_info=[metrics_info],
     )
@@ -165,7 +155,6 @@ def get_config(
     sequencer_enabled,
     sequencer_context,
     observability_helper,
-    interop_params,
 ):
     discovery_port = DISCOVERY_PORT_NUM
     ports = dict(get_used_ports(discovery_port))
@@ -173,31 +162,23 @@ def get_config(
     subcommand_strs = []
 
     cmd = [
-        "geth",
-        "--networkid={0}".format(launcher.network_id),
-        # "--verbosity=" + verbosity_level,
+        "erigon",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
-        "--gcmode=archive",
-        "--state.scheme=hash",
+        "--networkid={0}".format(launcher.network_id),
         "--http",
         "--http.addr=0.0.0.0",
         "--http.vhosts=*",
         "--http.corsdomain=*",
         "--http.api=admin,engine,net,eth,web3,debug,miner",
         "--ws",
-        "--ws.addr=0.0.0.0",
         "--ws.port={0}".format(WS_PORT_NUM),
-        "--ws.api=admin,engine,net,eth,web3,debug,miner",
-        "--ws.origins=*",
         "--allow-insecure-unlock",
         "--authrpc.port={0}".format(ENGINE_RPC_PORT_NUM),
         "--authrpc.addr=0.0.0.0",
         "--authrpc.vhosts=*",
         "--authrpc.jwtsecret=" + ethereum_package_constants.JWT_MOUNT_PATH_ON_CONTAINER,
-        "--syncmode=full",
         "--nat=extip:" + ethereum_package_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
         "--rpc.allow-unprotected-txs",
-        "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
     ]
 
@@ -207,19 +188,18 @@ def get_config(
         ethereum_package_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS: launcher.deployment_output,
         ethereum_package_constants.JWT_MOUNTPOINT_ON_CLIENTS: launcher.jwt_file,
     }
-
     if persistent:
         files[EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER] = Directory(
             persistent_key="data-{0}".format(service_name),
             size=int(participant.el_volume_size)
             if int(participant.el_volume_size) > 0
             else constants.VOLUME_SIZE[launcher.network][
-                constants.EL_TYPE.op_geth + "_volume_size"
+                constants.EL_TYPE.op_erigon + "_volume_size"
             ],
         )
 
     if launcher.network not in ethereum_package_constants.PUBLIC_NETWORKS:
-        init_datadir_cmd_str = "geth init --datadir={0} --state.scheme=hash {1}".format(
+        init_datadir_cmd_str = "erigon init --datadir={0} {1}".format(
             EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
             "{0}/genesis-{1}.json".format(
                 ethereum_package_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS,
@@ -244,9 +224,6 @@ def get_config(
 
         observability.expose_metrics_port(ports)
 
-    if interop_params.enabled:
-        env_vars["GETH_ROLLUP_INTEROPRPC"] = interop_constants.SUPERVISOR_ENDPOINT
-
     if not sequencer_enabled:
         cmd.append("--rollup.sequencerhttp={0}".format(sequencer_context.rpc_http_url))
 
@@ -269,9 +246,6 @@ def get_config(
     subcommand_strs.append(" ".join(cmd))
     command_str = " && ".join(subcommand_strs)
 
-    plan.print(">>>", participant.el_image)
-    plan.print(">>>", util.label_from_image(participant.el_image))
-
     config_args = {
         "image": participant.el_image,
         "ports": ports,
@@ -281,7 +255,7 @@ def get_config(
         "private_ip_address_placeholder": ethereum_package_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
         "env_vars": env_vars,
         "labels": ethereum_package_shared_utils.label_maker(
-            client=constants.EL_TYPE.op_geth,
+            client=constants.EL_TYPE.op_erigon,
             client_type=constants.CLIENT_TYPES.el,
             image=util.label_from_image(participant.el_image),
             connected_client=cl_client_name,
@@ -289,6 +263,7 @@ def get_config(
         ),
         "tolerations": tolerations,
         "node_selectors": node_selectors,
+        "user": User(uid=0, gid=0),
     }
 
     # configure resources
@@ -305,7 +280,12 @@ def get_config(
     return ServiceConfig(**config_args)
 
 
-def new_op_geth_launcher(deployment_output, jwt_file, network, network_id):
+def new_op_erigon_launcher(
+    deployment_output,
+    jwt_file,
+    network,
+    network_id,
+):
     return struct(
         deployment_output=deployment_output,
         jwt_file=jwt_file,

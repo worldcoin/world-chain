@@ -1,6 +1,6 @@
 #!/bin/bash
 # NOTE: This script should be run through `just devnet-up` rather than directly.
-kurtosis_port=$(kurtosis port print world-chain wc-admin-world-chain-builder rpc)
+kurtosis_port=$(kurtosis port print world-chain op-el-builder-1-world-chain-builder-op-node-op-kurtosis rpc)
 BUILDER_SOCKET=$(echo "$kurtosis_port" | grep -o 'http://127.0.0.1:[0-9]*')
 CHAIN_ID="2151908"
 

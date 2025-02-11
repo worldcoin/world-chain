@@ -1,14 +1,13 @@
-shared_utils = import_module(
+ethereum_package_shared_utils = import_module(
     "github.com/ethpandaops/ethereum-package/src/shared_utils/shared_utils.star"
-)
-constants = import_module(
-    "github.com/ethpandaops/ethereum-package/src/package_io/constants.star"
 )
 
 postgres = import_module("github.com/kurtosis-tech/postgres-package/main.star")
 
-IMAGE_NAME_BLOCKSCOUT = "blockscout/blockscout-optimism:6.6.0"
-IMAGE_NAME_BLOCKSCOUT_VERIF = "ghcr.io/blockscout/smart-contract-verifier:v1.7.0"
+util = import_module("../util.star")
+
+IMAGE_NAME_BLOCKSCOUT = "blockscout/blockscout-optimism:6.8.0"
+IMAGE_NAME_BLOCKSCOUT_VERIF = "ghcr.io/blockscout/smart-contract-verifier:v1.9.0"
 
 SERVICE_NAME_BLOCKSCOUT = "op-blockscout"
 
@@ -27,18 +26,18 @@ BLOCKSCOUT_VERIF_MIN_MEMORY = 10
 BLOCKSCOUT_VERIF_MAX_MEMORY = 1024
 
 USED_PORTS = {
-    HTTP_PORT_ID: shared_utils.new_port_spec(
+    HTTP_PORT_ID: ethereum_package_shared_utils.new_port_spec(
         HTTP_PORT_NUMBER,
-        shared_utils.TCP_PROTOCOL,
-        shared_utils.HTTP_APPLICATION_PROTOCOL,
+        ethereum_package_shared_utils.TCP_PROTOCOL,
+        ethereum_package_shared_utils.HTTP_APPLICATION_PROTOCOL,
     )
 }
 
 VERIF_USED_PORTS = {
-    HTTP_PORT_ID: shared_utils.new_port_spec(
+    HTTP_PORT_ID: ethereum_package_shared_utils.new_port_spec(
         HTTP_PORT_NUMBER_VERIF,
-        shared_utils.TCP_PROTOCOL,
-        shared_utils.HTTP_APPLICATION_PROTOCOL,
+        ethereum_package_shared_utils.TCP_PROTOCOL,
+        ethereum_package_shared_utils.HTTP_APPLICATION_PROTOCOL,
     )
 }
 
@@ -46,12 +45,20 @@ VERIF_USED_PORTS = {
 def launch_blockscout(
     plan,
     l2_services_suffix,
-    l1_el_context,
+    l1_rpc_url,
     l2_el_context,
-    l2oo_address,
     l2_network_name,
-    additional_env_vars,
+    deployment_output,
+    network_id,
 ):
+    rollup_filename = "rollup-{0}".format(network_id)
+    portal_address = util.read_network_config_value(
+        plan, deployment_output, rollup_filename, ".deposit_contract_address"
+    )
+    l1_deposit_start_block = util.read_network_config_value(
+        plan, deployment_output, rollup_filename, ".genesis.l1.number"
+    )
+
     postgres_output = postgres.run(
         plan,
         service_name="{0}-postgres{1}".format(
@@ -66,18 +73,24 @@ def launch_blockscout(
         SERVICE_NAME_BLOCKSCOUT, l2_services_suffix
     )
     verif_service = plan.add_service(verif_service_name, config_verif)
-    verif_url = "http://{}:{}/api".format(
+    verif_url = "http://{}:{}".format(
         verif_service.hostname, verif_service.ports["http"].number
     )
 
     config_backend = get_config_backend(
         postgres_output,
-        l1_el_context,
+        l1_rpc_url,
         l2_el_context,
         verif_url,
-        l2oo_address,
         l2_network_name,
-        additional_env_vars,
+        {
+            "INDEXER_OPTIMISM_L1_PORTAL_CONTRACT": portal_address,
+            "INDEXER_OPTIMISM_L1_DEPOSITS_START_BLOCK": l1_deposit_start_block,
+            "INDEXER_OPTIMISM_L1_WITHDRAWALS_START_BLOCK": l1_deposit_start_block,
+            "INDEXER_OPTIMISM_L1_BATCH_START_BLOCK": l1_deposit_start_block,
+            # The L2OO is no longer deployed
+            "INDEXER_OPTIMISM_L1_OUTPUT_ORACLE_CONTRACT": "0x0000000000000000000000000000000000000000",
+        },
     )
     blockscout_service = plan.add_service(
         "{0}{1}".format(SERVICE_NAME_BLOCKSCOUT, l2_services_suffix), config_backend
@@ -109,10 +122,9 @@ def get_config_verif():
 
 def get_config_backend(
     postgres_output,
-    l1_el_context,
+    l1_rpc_url,
     l2_el_context,
     verif_url,
-    l2oo_address,
     l2_network_name,
     additional_env_vars,
 ):
@@ -127,7 +139,7 @@ def get_config_backend(
 
     optimism_env_vars = {
         "CHAIN_TYPE": "optimism",
-        "INDEXER_OPTIMISM_L1_RPC": l1_el_context.rpc_http_url,
+        "INDEXER_OPTIMISM_L1_RPC": l1_rpc_url,
         # "INDEXER_OPTIMISM_L1_PORTAL_CONTRACT": "",
         # "INDEXER_OPTIMISM_L1_BATCH_START_BLOCK": "",
         "INDEXER_OPTIMISM_L1_BATCH_INBOX": "0xff00000000000000000000000000000000042069",

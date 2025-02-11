@@ -15,15 +15,14 @@ ethereum_package_input_parser = import_module(
 )
 
 constants = import_module("../../package_io/constants.star")
+observability = import_module("../../observability/observability.star")
 
 util = import_module("../../util.star")
-observability = import_module("../../observability/observability.star")
-interop_constants = import_module("../../interop/constants.star")
 
 #  ---------------------------------- Beacon client -------------------------------------
 
-# The Docker container runs as the "op-node" user so we can't write to root
-BEACON_DATA_DIRPATH_ON_SERVICE_CONTAINER = "/data/op-node/op-node-beacon-data"
+# The Docker container runs as the "hildr" user so we can't write to root
+BEACON_DATA_DIRPATH_ON_SERVICE_CONTAINER = "/data/hildr/hildr-beacon-data"
 # Port IDs
 BEACON_TCP_DISCOVERY_PORT_ID = "tcp-discovery"
 BEACON_UDP_DISCOVERY_PORT_ID = "udp-discovery"
@@ -32,6 +31,8 @@ BEACON_HTTP_PORT_ID = "http"
 # Port nums
 BEACON_DISCOVERY_PORT_NUM = 9003
 BEACON_HTTP_PORT_NUM = 8547
+
+METRICS_PATH = "/metrics"
 
 
 def get_used_ports(discovery_port):
@@ -79,17 +80,17 @@ def launch(
     interop_params,
     da_server_context,
 ):
-    beacon_node_identity_recipe = PostHttpRequestRecipe(
-        endpoint="/",
-        content_type="application/json",
-        body='{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}',
-        port_id=BEACON_HTTP_PORT_ID,
-        extract={
-            "enr": ".result.ENR",
-            "multiaddr": ".result.addresses[0]",
-            "peer_id": ".result.peerID",
-        },
-    )
+    # beacon_node_identity_recipe = PostHttpRequestRecipe(
+    #     endpoint="/",
+    #     content_type="application/json",
+    #     body='{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}',
+    #     port_id=BEACON_HTTP_PORT_ID,
+    #     extract={
+    #         "enr": ".result.ENR",
+    #         "multiaddr": ".result.addresses[0]",
+    #         "peer_id": ".result.peerID",
+    #     },
+    # )
 
     log_level = ethereum_package_input_parser.get_client_log_level_or_default(
         participant.cl_log_level, global_log_level, VERBOSITY_LEVELS
@@ -107,10 +108,8 @@ def launch(
         el_context,
         existing_cl_clients,
         l1_config_env_vars,
-        beacon_node_identity_recipe,
         sequencer_enabled,
         observability_helper,
-        interop_params,
         da_server_context,
     )
 
@@ -121,26 +120,26 @@ def launch(
         beacon_service.ip_address, beacon_http_port.number
     )
 
-    metrics_info = observability.new_metrics_info(observability_helper, beacon_service)
-
-    response = plan.request(
-        recipe=beacon_node_identity_recipe, service_name=service_name
+    metrics_info = observability.new_metrics_info(
+        observability_helper, beacon_service, METRICS_PATH
     )
 
-    beacon_node_enr = response["extract.enr"]
-    beacon_multiaddr = response["extract.multiaddr"]
-    beacon_peer_id = response["extract.peer_id"]
+    # response = plan.request(
+    #     recipe=beacon_node_identity_recipe, service_name=service_name
+    # )
+
+    # beacon_node_enr = response["extract.enr"]
+    # beacon_multiaddr = response["extract.multiaddr"]
+    # beacon_peer_id = response["extract.peer_id"]
 
     return ethereum_package_cl_context.new_cl_context(
-        client_name="op-node",
-        enr=beacon_node_enr,
+        client_name="hildr",
+        enr="",  # beacon_node_enr,
         ip_addr=beacon_service.ip_address,
         http_port=beacon_http_port.number,
         beacon_http_url=beacon_http_url,
         cl_nodes_metrics_info=[metrics_info],
         beacon_service_name=service_name,
-        multiaddr=beacon_multiaddr,
-        peer_id=beacon_peer_id,
     )
 
 
@@ -156,45 +155,40 @@ def get_beacon_config(
     el_context,
     existing_cl_clients,
     l1_config_env_vars,
-    beacon_node_identity_recipe,
     sequencer_enabled,
     observability_helper,
-    interop_params,
     da_server_context,
 ):
-    ports = dict(get_used_ports(BEACON_DISCOVERY_PORT_NUM))
-
     EXECUTION_ENGINE_ENDPOINT = "http://{0}:{1}".format(
         el_context.ip_addr,
         el_context.engine_rpc_port_num,
     )
+    EXECUTION_RPC_ENDPOINT = "http://{0}:{1}".format(
+        el_context.ip_addr,
+        el_context.rpc_port_num,
+    )
+
+    ports = dict(get_used_ports(BEACON_DISCOVERY_PORT_NUM))
 
     cmd = [
-        "op-node",
-        "--l2={0}".format(EXECUTION_ENGINE_ENDPOINT),
-        "--l2.jwt-secret=" + ethereum_package_constants.JWT_MOUNT_PATH_ON_CONTAINER,
-        "--verifier.l1-confs=1",
-        "--rollup.config="
+        "--devnet",
+        "--jwt-file=" + ethereum_package_constants.JWT_MOUNT_PATH_ON_CONTAINER,
+        "--l1-beacon-url={0}".format(l1_config_env_vars["CL_RPC_URL"]),
+        "--l1-rpc-url={0}".format(l1_config_env_vars["L1_RPC_URL"]),
+        "--l1-ws-rpc-url={0}".format(l1_config_env_vars["L1_WS_URL"]),
+        "--l2-engine-url={0}".format(EXECUTION_ENGINE_ENDPOINT),
+        "--l2-rpc-url={0}".format(EXECUTION_RPC_ENDPOINT),
+        "--rpc-addr=0.0.0.0",
+        "--rpc-port={0}".format(BEACON_HTTP_PORT_NUM),
+        "--sync-mode=full",
+        "--network="
         + "{0}/rollup-{1}.json".format(
             ethereum_package_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS,
             launcher.network_params.network_id,
         ),
-        "--rpc.addr=0.0.0.0",
-        "--rpc.port={0}".format(BEACON_HTTP_PORT_NUM),
-        "--rpc.enable-admin",
-        "--l1={0}".format(l1_config_env_vars["L1_RPC_URL"]),
-        "--l1.rpckind={0}".format(l1_config_env_vars["L1_RPC_KIND"]),
-        "--l1.beacon={0}".format(l1_config_env_vars["CL_RPC_URL"]),
-        "--p2p.advertise.ip="
-        + ethereum_package_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
-        "--p2p.advertise.tcp={0}".format(BEACON_DISCOVERY_PORT_NUM),
-        "--p2p.advertise.udp={0}".format(BEACON_DISCOVERY_PORT_NUM),
-        "--p2p.listen.ip=0.0.0.0",
-        "--p2p.listen.tcp={0}".format(BEACON_DISCOVERY_PORT_NUM),
-        "--p2p.listen.udp={0}".format(BEACON_DISCOVERY_PORT_NUM),
-        "--safedb.path={0}".format(BEACON_DATA_DIRPATH_ON_SERVICE_CONTAINER),
-        "--altda.enabled=" + str(da_server_context.enabled),
-        "--altda.da-server=" + da_server_context.http_url,
+        # TODO: support altda flags once they are implemented.
+        # See https://github.com/optimism-java/hildr/issues/134
+        # eg: "--altda.enabled=" + str(da_server_context.enabled),
     ]
 
     # configure files
@@ -203,7 +197,6 @@ def get_beacon_config(
         ethereum_package_constants.GENESIS_DATA_MOUNTPOINT_ON_CLIENTS: launcher.deployment_output,
         ethereum_package_constants.JWT_MOUNTPOINT_ON_CLIENTS: launcher.jwt_file,
     }
-
     if persistent:
         files[BEACON_DATA_DIRPATH_ON_SERVICE_CONTAINER] = Directory(
             persistent_key="data-{0}".format(service_name),
@@ -222,47 +215,26 @@ def get_beacon_config(
 
     if observability_helper.enabled:
         cmd += [
-            "--metrics.enabled=true",
-            "--metrics.addr=0.0.0.0",
-            "--metrics.port={0}".format(observability.METRICS_PORT_NUM),
+            "--metrics-enable",
+            "--metrics-port={0}".format(observability.METRICS_PORT_NUM),
         ]
 
         observability.expose_metrics_port(ports)
 
-    if interop_params.enabled:
-        ports[
-            interop_constants.INTEROP_WS_PORT_ID
-        ] = ethereum_package_shared_utils.new_port_spec(
-            interop_constants.INTEROP_WS_PORT_NUM,
-            ethereum_package_shared_utils.TCP_PROTOCOL,
-        )
-
-        env_vars.update(
-            {
-                # "OP_NODE_INTEROP_SUPERVISOR": interop_constants.SUPERVISOR_ENDPOINT,
-                "OP_NODE_INTEROP_RPC_ADDR": "0.0.0.0",
-                "OP_NODE_INTEROP_RPC_PORT": str(interop_constants.INTEROP_WS_PORT_NUM),
-                "OP_NODE_INTEROP_JWT_SECRET": ethereum_package_constants.JWT_MOUNT_PATH_ON_CONTAINER,
-            }
-        )
-
     if sequencer_enabled:
-        sequencer_private_key = util.read_network_config_value(
-            plan,
-            launcher.deployment_output,
-            "sequencer-{0}".format(launcher.network_params.network_id),
-            ".privateKey",
-        )
+        # sequencer private key can't be used by hildr yet
+        # sequencer_private_key = util.read_network_config_value(
+        #     plan,
+        #     launcher.deployment_output,
+        #     "sequencer-{0}".format(launcher.network_params.network_id),
+        #     ".privateKey",
+        # )
 
-        cmd += [
-            "--p2p.sequencer.key=" + sequencer_private_key,
-            "--sequencer.enabled",
-            "--sequencer.l1-confs=2",
-        ]
+        cmd.append("--sequencer-enable")
 
-    if len(existing_cl_clients) > 0:
+    if len(existing_cl_clients) == 1:
         cmd.append(
-            "--p2p.bootnodes="
+            "--disc-boot-nodes="
             + ",".join(
                 [
                     ctx.enr
@@ -289,13 +261,6 @@ def get_beacon_config(
             connected_client=el_context.client_name,
             extra_labels=participant.cl_extra_labels,
         ),
-        "ready_conditions": ReadyCondition(
-            recipe=beacon_node_identity_recipe,
-            field="code",
-            assertion="==",
-            target_value=200,
-            timeout="1m",
-        ),
         "tolerations": tolerations,
         "node_selectors": node_selectors,
     }
@@ -314,7 +279,7 @@ def get_beacon_config(
     return ServiceConfig(**config_args)
 
 
-def new_op_node_launcher(deployment_output, jwt_file, network_params):
+def new_hildr_launcher(deployment_output, jwt_file, network_params):
     return struct(
         deployment_output=deployment_output,
         jwt_file=jwt_file,
