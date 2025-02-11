@@ -119,7 +119,13 @@ async fn get_endpoints() -> Result<(String, String, String)> {
 
     let sequencer_socket = run_command(
         "kurtosis",
-        &["port", "print", "world-chain", "op-el-1-op-geth-op-node-op-kurtosis", "rpc"],
+        &[
+            "port",
+            "print",
+            "world-chain",
+            "op-el-1-op-geth-op-node-op-kurtosis",
+            "rpc",
+        ],
         env!("CARGO_MANIFEST_DIR"),
     )
     .await?;

@@ -76,8 +76,8 @@ where
             let builder_provider = builder_provider.clone();
             async move {
                 // Fetch the Transaction by hash
-                let max_retries = 100;
-                let mut tries = 0;
+                // let max_retries = 100;
+                // let mut tries = 0;
                 loop {
                     // if tries >= max_retries {
                     //     panic!("User Operation not included in a Transaction after {} retries", max_retries);
@@ -89,7 +89,7 @@ where
                             (hash.clone(),),
                         )
                         .await?;
-                    
+
                     debug!(target: "tests::user_ops_test", %index, ?resp, "User Operation Response");
                     if let Some(transaction_hash) = resp.transaction_hash {
                         debug!(target: "tests::user_ops_test", %index, ?transaction_hash, "User Operation Included in Transaction");
@@ -104,7 +104,7 @@ where
                         break;
                     }
 
-                    tries += 1;
+                    // tries += 1;
                     sleep(Duration::from_secs(2)).await;
                 }
                 Ok::<(), eyre::Report>(())

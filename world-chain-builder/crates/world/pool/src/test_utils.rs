@@ -2,7 +2,9 @@ use reth::chainspec::MAINNET;
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
 use reth_optimism_node::txpool::OpTransactionValidator;
-use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
+use world_chain_builder_test_utils::{
+    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+};
 
 use crate::mock::MockEthProvider;
 use crate::root::WorldChainRootValidator;
