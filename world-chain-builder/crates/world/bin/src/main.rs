@@ -1,9 +1,16 @@
+use std::sync::Arc;
+
 use clap::Parser;
+use reth_node_builder::Node;
+use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
+use reth_provider::providers::BlockchainProvider;
 use reth_tracing::tracing::info;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
-
+use world_chain_builder_rpc::EthApiExtServer;
+use world_chain_builder_rpc::SequencerClient;
+use world_chain_builder_rpc::WorldChainEthApiExt;
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -27,23 +34,25 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
+            let node = WorldChainNode::new(args.clone());
 
-            // let handle = builder
-            //     .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
-            //     .extend_rpc_modules(move |ctx| {
-            //         let provider = ctx.provider().clone();
-            //         let pool = ctx.pool().clone();
-            //         let sequencer_client =
-            //             args.rollup_args.sequencer_http.map(SequencerClient::new);
-            //         let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
-            //         ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-            //         Ok(())
-            //     })
-            //     .launch_node(WorldChainNode::new(args))
-            // .await?;
+            let builder = builder
+                .with_types_and_provider::<WorldChainNode, BlockchainProvider<
+                    NodeTypesWithDBAdapter<WorldChainNode, Arc<reth_db::DatabaseEnv>>,
+                >>()
+                .with_components(node.components())
+                .with_add_ons(node.add_ons())
+                .extend_rpc_modules(move |ctx| {
+                    let provider = ctx.provider().clone();
+                    let pool = ctx.pool().clone();
+                    let sequencer_client =
+                        args.rollup_args.sequencer_http.map(SequencerClient::new);
+                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                    ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                    Ok(())
+                });
 
-            let handle = builder.launch_node(WorldChainNode::new(args)).await?;
-
+            let handle = builder.launch().await?;
             handle.node_exit_future.await
         })
     {
