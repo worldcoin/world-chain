@@ -59,12 +59,12 @@ where
             let builder_provider = builder_provider.clone();
             async move {
                 // Fetch the Transaction by hash
-                // let max_retries = 100;
-                // let mut tries = 0;
+                let max_retries = 100;
+                let mut tries = 0;
                 loop {
-                    // if tries >= max_retries {
-                    //     panic!("User Operation not included in a Transaction after {} retries", max_retries);
-                    // }
+                    if tries >= max_retries {
+                        panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                    }
                     // Check if the User Operation has been included in a Transaction
                     let resp: RpcUserOperationByHash = bundler_provider
                         .raw_request(
@@ -87,7 +87,7 @@ where
                         break;
                     }
 
-                    // tries += 1;
+                    tries += 1;
                     sleep(Duration::from_secs(2)).await;
                 }
                 Ok::<(), eyre::Report>(())
