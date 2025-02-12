@@ -56,6 +56,7 @@ reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
+reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "46d3b6a" }

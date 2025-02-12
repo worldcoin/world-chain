@@ -1,28 +1,44 @@
 use alloy_primitives::Address;
+use reth::api::{FullNodeComponents, NodeAddOns};
 use reth::builder::components::{
     ComponentsBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
 };
+use reth::builder::rpc::{RethRpcAddOns, RpcHandle};
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
     NodeTypesWithEngine,
 };
+use reth::rpc::api::eth::FromEvmError;
+use reth::rpc::builder::RethRpcModule;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_node_api::AddOnsContext;
+use reth_node_builder::rpc::EngineValidatorAddOn;
+use reth_node_builder::rpc::EngineValidatorBuilder;
+use reth_node_builder::rpc::RpcAddOns;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
+use reth_optimism_node::engine::OpEngineValidator;
 use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpStorage,
+    OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder, OpStorage,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
+use reth_optimism_rpc::miner::MinerApiExtServer;
+use reth_optimism_rpc::miner::OpMinerExtApi;
+use reth_optimism_rpc::witness::DebugExecutionWitnessApiServer;
+use reth_optimism_rpc::witness::OpDebugWitnessApi;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError, SequencerClient};
 use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
+use revm_primitives::TxEnv;
 use tracing::{debug, info};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
@@ -144,8 +160,9 @@ where
         OpConsensusBuilder,
     >;
 
-    type AddOns =
-        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+    type AddOns = WorldChainAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components(self)
@@ -159,6 +176,178 @@ where
     }
 }
 
+/// Add-ons w.r.t. optimism.
+#[derive(Debug)]
+pub struct WorldChainAddOns<N: FullNodeComponents> {
+    /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
+    /// and eth-api.
+    pub rpc_add_ons: RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>,
+    /// Data availability configuration for the OP builder.
+    pub da_config: OpDAConfig,
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default
+    for WorldChainAddOns<N>
+{
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> WorldChainAddOns<N> {
+    /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
+    pub fn builder() -> WorldChainAddOnsBuilder {
+        WorldChainAddOnsBuilder::default()
+    }
+}
+
+impl<N> NodeAddOns<N> for WorldChainAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+    >,
+    OpEthApiError: FromEvmError<N::Evm>,
+{
+    type Handle = RpcHandle<N, OpEthApi<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        let Self {
+            rpc_add_ons,
+            da_config,
+        } = self;
+
+        let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            BasicOpReceiptBuilder::default(),
+        );
+        // install additional OP specific rpc methods
+        let debug_ext = OpDebugWitnessApi::new(
+            ctx.node.provider().clone(),
+            Box::new(ctx.node.task_executor().clone()),
+            builder,
+        );
+        let miner_ext = OpMinerExtApi::new(da_config);
+
+        rpc_add_ons
+            .launch_add_ons_with(ctx, move |modules, auth_modules| {
+                debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
+                modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
+
+                // extend the miner namespace if configured in the regular http server
+                modules.merge_if_module_configured(
+                    RethRpcModule::Miner,
+                    miner_ext.clone().into_rpc(),
+                )?;
+
+                // install the miner extension in the authenticated if configured
+                if modules.module_config().contains_any(&RethRpcModule::Miner) {
+                    debug!(target: "reth::cli", "Installing miner DA rpc enddpoint");
+                    auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
+                }
+                Ok(())
+            })
+            .await
+    }
+}
+
+impl<N> RethRpcAddOns<N> for WorldChainAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
+    >,
+    OpEthApiError: FromEvmError<N::Evm>,
+{
+    type EthApi = OpEthApi<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.rpc_add_ons.hooks_mut()
+    }
+}
+
+impl<N> EngineValidatorAddOn<N> for WorldChainAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Engine = OpEngineTypes,
+        >,
+    >,
+{
+    type Validator = OpEngineValidator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+/// A regular optimism evm and executor builder.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct WorldChainAddOnsBuilder {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    /// Data availability configuration for the OP builder.
+    da_config: Option<OpDAConfig>,
+}
+
+impl WorldChainAddOnsBuilder {
+    /// With a [`SequencerClient`].
+    pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
+        self.sequencer_client = sequencer_client.map(SequencerClient::new);
+        self
+    }
+
+    /// Configure the data availability configuration for the OP builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = Some(da_config);
+        self
+    }
+}
+
+impl WorldChainAddOnsBuilder {
+    /// Builds an instance of [`OpAddOns`].
+    pub fn build<N>(self) -> WorldChainAddOns<N>
+    where
+        N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
+    {
+        let Self {
+            sequencer_client,
+            da_config,
+        } = self;
+
+        WorldChainAddOns {
+            rpc_add_ons: RpcAddOns::new(
+                move |ctx| {
+                    OpEthApi::<N>::builder()
+                        .with_sequencer(sequencer_client)
+                        .build(ctx)
+                },
+                Default::default(),
+            ),
+            da_config: da_config.unwrap_or_default(),
+        }
+    }
+}
+
 impl NodeTypes for WorldChainNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
@@ -169,9 +358,6 @@ impl NodeTypes for WorldChainNode {
 impl NodeTypesWithEngine for WorldChainNode {
     type Engine = OpEngineTypes;
 }
-
-// TODO: World Chain Addons?
-
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
