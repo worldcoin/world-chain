@@ -20,7 +20,7 @@ use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};
 use std::sync::LazyLock;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PBHPayload, Proof, TREE_DEPTH};
+use world_chain_builder_pbh::{PBHPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IMulticall3;

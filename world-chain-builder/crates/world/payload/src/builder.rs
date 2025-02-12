@@ -49,7 +49,7 @@ use std::sync::Arc;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
-use world_chain_builder_rpc::transactions::validate_conditional_options;
+use world_chain_builder_rpc::api_ext::validate_conditional_options;
 
 use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 

@@ -1,8 +1,5 @@
 use alloy_sol_types::sol;
-use world_chain_builder_pbh::{
-    external_nullifier::ExternalNullifier,
-    payload::{PBHPayload, Proof},
-};
+use world_chain_builder_pbh::{external_nullifier::ExternalNullifier, PBHPayload, Proof};
 use IPBHEntryPoint::PBHPayload as IPBHPayload;
 
 sol! {

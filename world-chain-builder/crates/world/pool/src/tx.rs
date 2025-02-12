@@ -16,7 +16,7 @@ use revm_primitives::{
     AccessList, Address, InvalidTransaction, KzgSettings, SignedAuthorization, TxKind, B256, U256,
 };
 use thiserror::Error;
-use world_chain_builder_pbh::payload::PbhValidationError;
+use world_chain_builder_pbh::PBHValidationError;
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
@@ -207,7 +207,7 @@ pub enum WorldChainPoolTransactionError {
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransaction),
     #[error(transparent)]
-    PbhValidationError(#[from] PbhValidationError),
+    PBHValidationError(#[from] PBHValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
     #[error("Missing PBH Payload")]

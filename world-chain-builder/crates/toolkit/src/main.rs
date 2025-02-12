@@ -9,7 +9,7 @@ use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::PBHPayload;
+use world_chain_builder_pbh::PBHPayload;
 
 mod cli;
 
@@ -69,7 +69,7 @@ async fn main() -> eyre::Result<()> {
                 external_nullifier: external_nullifier,
                 nullifier_hash,
                 root: inclusion_proof.root,
-                proof: world_chain_builder_pbh::payload::Proof(semaphore_proof),
+                proof: world_chain_builder_pbh::Proof(semaphore_proof),
             };
 
             let encoded = alloy_rlp::encode(proof);

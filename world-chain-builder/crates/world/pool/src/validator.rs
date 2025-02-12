@@ -17,7 +17,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
-use world_chain_builder_pbh::payload::PBHPayload;
+use world_chain_builder_pbh::PBHPayload;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -155,7 +155,7 @@ where
         if let Err(err) =
             pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
         {
-            return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
+            return WorldChainPoolTransactionError::PBHValidationError(err).to_outcome(tx);
         }
 
         if let TransactionValidationOutcome::Valid {
