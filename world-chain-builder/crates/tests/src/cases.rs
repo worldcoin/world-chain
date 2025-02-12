@@ -9,7 +9,6 @@ use alloy_primitives::Bytes;
 use alloy_provider::PendingTransactionBuilder;
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use alloy_transport::Transport;
 use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
