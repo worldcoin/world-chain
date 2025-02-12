@@ -171,6 +171,16 @@ where
 
         tx_outcome
     }
+
+    fn validate_pbh_sidecar(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        // TODO:
+
+        todo!()
+    }
 }
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
@@ -187,7 +197,9 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if transaction.to().unwrap_or_default() != self.pbh_validator {
+        if transaction.pbh_sidecar().is_some() {
+            return self.validate_pbh_sidecar(origin, transaction);
+        } else if transaction.to().unwrap_or_default() != self.pbh_validator {
             return self.inner.validate_one(origin, transaction.clone());
         }
 
