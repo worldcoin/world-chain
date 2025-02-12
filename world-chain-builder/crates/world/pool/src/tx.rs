@@ -156,7 +156,6 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 }
 
 impl InMemorySize for WorldChainPooledTransaction {
-    // TODO: double check this
     fn size(&self) -> usize {
         self.inner.size()
     }

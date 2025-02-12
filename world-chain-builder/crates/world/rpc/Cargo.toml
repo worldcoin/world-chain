@@ -25,6 +25,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
+alloy-rlp.workspace = true
 
 op-alloy-consensus.workspace = true
 

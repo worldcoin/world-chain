@@ -1,8 +1,10 @@
 use std::error::Error;
 
+use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockId;
+use alloy_eips::{eip2718::Eip2718Result, BlockId, Decodable2718, Encodable2718, Typed2718};
 use alloy_primitives::{map::HashMap, StorageKey, TxHash};
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee::{
     core::{async_trait, RpcResult},
@@ -28,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::PBHSidecar;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 
-use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
+pub const PBH_TX_TYPE: u8 = 0xE0;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WorldChainTxEnvelope {
@@ -36,31 +38,83 @@ pub struct WorldChainTxEnvelope {
     pbh_sidecar: Option<PBHSidecar>,
 }
 
-impl SignedTransaction for WorldChainTxEnvelope {
-    fn tx_hash(&self) -> &TxHash {
-        todo!()
+impl Encodable for WorldChainTxEnvelope {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.network_encode(out)
     }
 
-    fn signature(&self) -> &PrimitiveSignature {
-        todo!()
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        todo!()
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        todo!()
+    fn length(&self) -> usize {
+        self.network_len()
     }
 }
 
-impl InMemorySize for WorldChainTxEnvelope {
-    fn size(&self) -> usize {
-        todo!("TODO:")
-        // self.inner.size()
+impl Decodable for WorldChainTxEnvelope {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
+    }
+}
+
+impl Encodable2718 for WorldChainTxEnvelope {
+    fn type_flag(&self) -> Option<u8> {
+        if self.pbh_sidecar.is_some() {
+            Some(PBH_TX_TYPE)
+        } else {
+            self.inner.type_flag()
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        if self.pbh_sidecar.is_some() {
+            todo!("TODO:")
+        } else {
+            self.inner.encode_2718_len()
+        }
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        if self.pbh_sidecar.is_some() {
+            todo!("TODO:")
+        } else {
+            self.inner.encode_2718(out)
+        }
+    }
+
+    fn trie_hash(&self) -> B256 {
+        self.inner.trie_hash()
+    }
+}
+
+impl Decodable2718 for WorldChainTxEnvelope {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        if ty == PBH_TX_TYPE {
+            todo!("TODO:")
+        } else {
+            let inner = OpTxEnvelope::typed_decode(ty, buf)?;
+
+            Ok(Self {
+                inner,
+                pbh_sidecar: None,
+            })
+        }
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let inner = OpTxEnvelope::fallback_decode(buf)?;
+
+        Ok(Self {
+            inner,
+            pbh_sidecar: None,
+        })
+    }
+}
+
+impl Typed2718 for WorldChainTxEnvelope {
+    fn ty(&self) -> u8 {
+        if self.pbh_sidecar.is_some() {
+            PBH_TX_TYPE
+        } else {
+            self.inner.ty()
+        }
     }
 }
 
@@ -195,6 +249,11 @@ where
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         // TODO: recover into world chain pool transaction, note that these txs will not get peered unless network primitives are configured
+        // let mut data: &[u8] = &tx;
+        // let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
+        //     .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+
+        // TODO: into worldchainpooledtransaction
 
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction: WorldChainPooledTransaction =
