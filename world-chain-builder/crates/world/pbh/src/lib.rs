@@ -22,6 +22,17 @@ pub enum PBHSidecar {
     PBHBundle(Vec<PBHPayload>),
 }
 
+impl PBHSidecar {
+    pub fn external_nullifiers(&self) -> Vec<&ExternalNullifier> {
+        match self {
+            PBHSidecar::PBHPayload(payload) => vec![&payload.external_nullifier],
+            PBHSidecar::PBHBundle(payloads) => {
+                payloads.iter().map(|p| &p.external_nullifier).collect()
+            }
+        }
+    }
+}
+
 /// The payload of a PBH transaction
 ///
 /// Contains the semaphore proof and relevent metadata

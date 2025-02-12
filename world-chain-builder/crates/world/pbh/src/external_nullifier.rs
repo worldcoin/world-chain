@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::date_marker::DateMarker;
 
 #[derive(
-    Display, Default, Deserialize, Serialize, EnumString, Debug, Clone, Copy, PartialEq, Eq,
+    Display, Default, Deserialize, Serialize, Hash, EnumString, Debug, Clone, Copy, PartialEq, Eq,
 )]
 #[strum(serialize_all = "snake_case")]
 #[repr(u8)]
@@ -19,7 +19,7 @@ pub enum Prefix {
     V1 = 1,
 }
 
-#[derive(Builder, Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Builder, Debug, Default, Hash, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalNullifier {
     #[builder(default = Prefix::V1)]
     pub version: Prefix,

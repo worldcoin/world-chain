@@ -45,6 +45,7 @@ use revm::Database;
 use revm_primitives::{
     Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
@@ -732,6 +733,7 @@ where
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
+        let mut pbh_nullifiers = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -750,14 +752,31 @@ where
                 }
             }
 
-            // TODO: check if pbh sidecar contains any used nullifier hashes in the current block
+            // Check if any of the PBH Payloads already spent
+            if let Some(pbh_sidecar) = pooled_tx.pbh_sidecar() {
+                // Check if the current tx would exceed PBH block capacity usage
+                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue;
+                }
 
-            // If the transaction is verified, check if it can be added within the verified gas limit
-            if pooled_tx.pbh_sidecar().is_some()
-                && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
-            {
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
+                // Ensure the PBHSidecar does not contain used nullifier hashes
+                let mut invalid_sidecar = false;
+                for nullifier in pbh_sidecar.external_nullifiers() {
+                    // NOTE: we could also check this onchain since the state is committed after each tx,
+                    // NOTE: however we still need to accumulate the nullifier hashes to post
+                    if !pbh_nullifiers.insert(nullifier.clone()) {
+                        invalid_sidecar = true;
+                        break;
+                    }
+
+                    // TODO: check if any of the nullifiers are onchain
+                }
+
+                if invalid_sidecar {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue;
+                }
             }
 
             // ensure we still have capacity for this transaction
@@ -839,6 +858,8 @@ where
             info.executed_senders.push(tx.signer());
             info.executed_transactions.push(tx.into_tx());
         }
+
+        // TODO: backrun the block and post the nullifier hashes contained in the PBH Sidecars
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
