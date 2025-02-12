@@ -77,7 +77,7 @@ pub async fn raw_pbh_bundle_bytes(
         .external_nullifier(ext_nullifier)
         .call();
 
-    let data = pbh_bundle(vec![uo], vec![proof]);
+    let data = pbh_bundle(vec![uo], vec![proof.into()]);
     let encoded = data.abi_encode();
     let tx = tx(
         chain_id,

@@ -46,52 +46,6 @@ impl ExternalNullifier {
         DateMarker::new(self.year as i32, self.month as u32)
     }
 
-    pub fn be_bytes(&self) -> [u8; 32] {
-        let year_bytes = self.year.to_be_bytes();
-
-        let mut bytes = [0; 32];
-
-        bytes[4] = year_bytes[1];
-        bytes[3] = year_bytes[0];
-        bytes[2] = self.month;
-        bytes[1] = self.nonce;
-        bytes[0] = self.version as u8;
-
-        bytes
-    }
-
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self::try_from_bytes(bytes).expect("Invalid version")
-    }
-
-    pub fn try_from_bytes(bytes: [u8; 32]) -> Result<Self, ExternalNullifierError> {
-        let version = if bytes[0] == Prefix::V1 as u8 {
-            Prefix::V1
-        } else {
-            return Err(ExternalNullifierError::InvalidVersion);
-        };
-
-        let mut year_bytes = [0; 2];
-        year_bytes[1] = bytes[4];
-        year_bytes[0] = bytes[3];
-        let year = u16::from_be_bytes(year_bytes);
-
-        let month = bytes[2];
-
-        if month > 12 {
-            return Err(ExternalNullifierError::InvalidMonth(month));
-        }
-
-        let nonce = bytes[1];
-
-        Ok(Self {
-            version,
-            year,
-            month,
-            nonce,
-        })
-    }
-
     pub fn to_word(&self) -> U256 {
         let year = U256::from(self.year);
         let month = U256::from(self.month);
@@ -115,12 +69,6 @@ impl ExternalNullifier {
             month,
             nonce,
         }
-    }
-
-    pub fn try_from_word(word: U256) -> Result<Self, ExternalNullifierError> {
-        let bytes = word.to_be_bytes();
-
-        Self::try_from_bytes(bytes)
     }
 }
 
@@ -148,25 +96,20 @@ impl FromStr for ExternalNullifier {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let word: U256 = s.parse()?;
-
-        Self::try_from_word(word)
+        Ok(Self::from_word(word))
     }
 }
 
 impl Decodable for ExternalNullifier {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let word = U256::decode(buf)?;
-
-        // TODO: How to retrieve this error value? Maybe just log?
-        Self::try_from_word(word)
-            .map_err(|_err| alloy_rlp::Error::Custom("Invalid external nullifier version"))
+        Ok(Self::from_word(word))
     }
 }
 
 impl Encodable for ExternalNullifier {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         let word = self.to_word();
-
         word.encode(out);
     }
 }

@@ -12,7 +12,6 @@ world-chain-builder-pbh.workspace = true
 world-chain-builder-test-utils = { workspace = true, optional = true }
 
 reth.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-db.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
@@ -22,23 +21,28 @@ reth-trie-db = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-stages-types = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
+reth-optimism-chainspec = { workspace = true, optional = true }
+reth-e2e-test-utils = { workspace = true, optional = true }
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
 
 alloy-consensus.workspace = true
 alloy-genesis = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
+alloy-network = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
 # 3rd party
 ethers-core.workspace = true
 tokio.workspace = true
 semaphore.workspace = true
+eyre = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
@@ -56,10 +60,15 @@ eyre.workspace = true
 default = []
 test = [
     "world-chain-builder-test-utils",
-    "dep:alloy-genesis",
+    "dep:reth-e2e-test-utils",
+    "dep:reth-optimism-chainspec",
     "dep:reth-trie-db",
     "dep:reth-trie",
     "dep:reth-stages-types",
+    "dep:alloy-signer-local",
+    "dep:alloy-network",
+    "dep:alloy-genesis",
+    "dep:eyre",
 ]
 
 [lints]

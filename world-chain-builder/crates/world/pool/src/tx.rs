@@ -8,7 +8,7 @@ use reth::transaction_pool::{
     error::{InvalidPoolTransactionError, PoolTransactionError},
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
 };
-use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_node::txpool::{conditional::MaybeConditionalTransaction, OpPooledTransaction};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::Recovered;
 use reth_primitives_traits::InMemorySize;
@@ -154,6 +154,20 @@ impl InMemorySize for WorldChainPooledTransaction {
     // TODO: double check this
     fn size(&self) -> usize {
         self.inner.size()
+    }
+}
+
+impl MaybeConditionalTransaction for WorldChainPooledTransaction {
+    fn set_conditional(&mut self, conditional: TransactionConditional) {
+        self.inner.set_conditional(conditional)
+    }
+
+    fn with_conditional(mut self, conditional: TransactionConditional) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_conditional(conditional);
+        self
     }
 }
 

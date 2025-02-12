@@ -6,8 +6,10 @@ use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
     NodeTypesWithEngine,
 };
+
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
+
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
@@ -20,6 +22,7 @@ use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
+
 use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
@@ -169,9 +172,6 @@ impl NodeTypes for WorldChainNode {
 impl NodeTypesWithEngine for WorldChainNode {
     type Engine = OpEngineTypes;
 }
-
-// TODO: World Chain Addons?
-
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's

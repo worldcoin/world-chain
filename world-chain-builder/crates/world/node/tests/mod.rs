@@ -41,7 +41,7 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, raw_pbh_multicall_bytes, tx};
+use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx};
 
 type NodeTypesAdapter = FullNodeTypesAdapter<
     WorldChainNode,

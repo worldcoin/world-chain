@@ -5,7 +5,6 @@ use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
 use alloy_primitives::{B256, U128, U64, U8};
-use alloy_rlp::Encodable;
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;
@@ -221,15 +220,12 @@ pub fn user_op(
 
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
-    proofs: Vec<PbhPayload>,
+    proofs: Vec<PBHPayload>,
 ) -> IPBHEntryPoint::handleAggregatedOpsCall {
-    let mut signature_buff = Vec::new();
-    proofs.encode(&mut signature_buff);
-
     IPBHEntryPoint::handleAggregatedOpsCall {
         _0: vec![UserOpsPerAggregator {
             userOps: user_ops,
-            signature: signature_buff.into(),
+            signature: proofs.abi_encode().into(),
             aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         }],
         _1: PBH_DEV_ENTRYPOINT,

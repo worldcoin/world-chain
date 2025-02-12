@@ -70,10 +70,7 @@ where
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
@@ -137,10 +134,7 @@ where
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
-            valid @ TransactionValidationOutcome::Valid { .. } => valid,
-            other => return other,
-        };
+        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
 
         // Decode the calldata and extract the PBH payload
         let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
@@ -333,7 +327,7 @@ pub mod tests {
                 0,
             ))
             .call();
-        let bundle = pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
         let calldata = bundle.abi_encode();
 
         let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
@@ -456,7 +450,7 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 
@@ -492,7 +486,7 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 
@@ -525,7 +519,7 @@ pub mod tests {
             ))
             .call();
 
-        let bundle = pbh_bundle(vec![user_op], vec![proof]);
+        let bundle = pbh_bundle(vec![user_op], vec![proof.into()]);
 
         let calldata = bundle.abi_encode();
 

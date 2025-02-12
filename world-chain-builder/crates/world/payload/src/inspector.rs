@@ -79,8 +79,7 @@ mod tests {
         Database,
     };
     use revm_primitives::{
-        AccountInfo, Address, Bytecode, Bytes, ExecutionResult,
-        ResultAndState, U256,
+        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, U256,
     };
 
     use crate::inspector::PBH_CALL_TRACER_ERROR;

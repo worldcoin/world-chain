@@ -75,6 +75,7 @@ impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,
@@ -98,6 +99,7 @@ where
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_builder_config(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,
@@ -684,7 +686,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client> {
-    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpPrimitives>,
+    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec, OpPrimitives>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,

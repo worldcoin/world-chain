@@ -26,7 +26,6 @@ reth-optimism-payload-builder.workspace = true
 reth-primitives = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
-
 reth-provider.workspace = true
 reth-optimism-evm.workspace = true
 reth-prune-types = { workspace = true, optional = true }
@@ -38,7 +37,6 @@ alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true, optional = true }
-
 revm-primitives = { workspace = true, optional = true }
 
 tokio = { workspace = true, optional = true }
@@ -83,10 +81,10 @@ test = [
     "dep:reth-prune-types",
     "dep:reth-trie",
     "dep:reth-db",
-    "dep:revm-primitives",
     "dep:alloy-rpc-types",
     "dep:alloy-sol-types",
     "dep:alloy-eips",
+    "dep:revm-primitives",
     "dep:futures",
     "dep:chrono",
     "dep:tokio",
