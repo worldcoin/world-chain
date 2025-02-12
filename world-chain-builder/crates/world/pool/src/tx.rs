@@ -29,22 +29,22 @@ pub struct WorldChainPooledTransaction {
 }
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn valid_pbh(&self) -> bool;
-    fn set_valid_pbh(&mut self);
+    fn pbh_sidecar(&self) -> Option<&PBHSidecar>;
+    fn set_pbh_sidecar(&mut self, sidecar: PBHSidecar);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn valid_pbh(&self) -> bool {
-        self.valid_pbh
+    fn pbh_sidecar(&self) -> Option<&PBHSidecar> {
+        self.pbh_sidecar.as_ref()
     }
 
     fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.inner.conditional()
     }
 
-    fn set_valid_pbh(&mut self) {
-        self.valid_pbh = true;
+    fn set_pbh_sidecar(&mut self, sidecar: PBHSidecar) {
+        self.pbh_sidecar = Some(sidecar);
     }
 }
 

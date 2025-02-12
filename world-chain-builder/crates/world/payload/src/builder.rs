@@ -750,8 +750,10 @@ where
                 }
             }
 
+            // TODO: check if pbh sidecar contains any used nullifier hashes in the current block
+
             // If the transaction is verified, check if it can be added within the verified gas limit
-            if pooled_tx.valid_pbh()
+            if pooled_tx.pbh_sidecar().is_some()
                 && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
             {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());

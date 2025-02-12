@@ -17,7 +17,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
-use world_chain_builder_pbh::PBHPayload;
+use world_chain_builder_pbh::{PBHPayload, PBHSidecar};
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -90,6 +90,7 @@ where
         }
 
         // Validate all proofs associated with each UserOp
+        let mut pbh_bundle = vec![];
         for aggregated_ops in calldata._0 {
             let mut buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PBHPayload>>::decode(&mut buff) {
@@ -115,6 +116,8 @@ where
             {
                 return err.to_outcome(tx);
             }
+
+            pbh_bundle.extend(pbh_payloads);
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -122,7 +125,7 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_valid_pbh();
+            tx.set_pbh_sidecar(PBHSidecar::PBHBundle(pbh_bundle));
         }
 
         tx_outcome
@@ -163,7 +166,7 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_valid_pbh();
+            tx.set_pbh_sidecar(PBHSidecar::PBHPayload(pbh_payload));
         }
 
         tx_outcome
