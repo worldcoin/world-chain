@@ -21,18 +21,14 @@ reth-db = { workspace = true, optional = true }
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
-reth-basic-payload-builder.workspace = true
 reth-optimism-payload-builder.workspace = true
-reth-primitives = { workspace = true, optional = true }
-reth-node-builder.workspace = true
-reth-node-api.workspace = true
 reth-optimism-forks.workspace = true
-reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-evm.workspace = true
 reth-optimism-evm.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
+reth-primitives = { workspace = true, optional = true }
+reth-primitives-traits = { workspace = true, optional = true }
 reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-e2e-test-utils = { workspace = true, optional = true }
@@ -40,7 +36,7 @@ alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true, optional = true }
-revm-primitives.workspace = true
+revm-primitives = { workspace = true, optional = true }
 
 tokio = { workspace = true, optional = true }
 eyre.workspace = true
@@ -80,12 +76,14 @@ test = [
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
     "dep:reth-primitives",
+    "dep:reth-primitives-traits",
     "dep:reth-prune-types",
     "dep:reth-trie",
     "dep:reth-db",
     "dep:alloy-rpc-types",
     "dep:alloy-sol-types",
     "dep:alloy-eips",
+    "dep:revm-primitives",
     "dep:futures",
     "dep:chrono",
     "dep:tokio",
