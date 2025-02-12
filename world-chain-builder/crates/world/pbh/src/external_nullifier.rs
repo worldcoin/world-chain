@@ -106,7 +106,15 @@ impl ExternalNullifier {
     }
 
     pub fn from_word(word: U256) -> Self {
-        Self::try_from_word(word).expect("Invalid version")
+        let year: u16 = (word >> U256::from(24)).to();
+        let month: u8 = ((word >> U256::from(16)) & U256::from(0xFF)).to();
+        let nonce: u8 = ((word >> U256::from(8)) & U256::from(0xFF)).to();
+        Self {
+            version: Prefix::V1,
+            year,
+            month,
+            nonce,
+        }
     }
 
     pub fn try_from_word(word: U256) -> Result<Self, ExternalNullifierError> {

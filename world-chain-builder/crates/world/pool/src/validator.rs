@@ -3,11 +3,11 @@ use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
 use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use crate::bindings::IPBHEntryPoint;
+use crate::bindings::IPBHEntryPoint::PBHPayload;
 use crate::tx::WorldChainPoolTransactionError;
 use alloy_primitives::Address;
-use alloy_rlp::Decodable;
 use alloy_sol_types::{SolCall, SolValue};
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -100,8 +100,8 @@ where
 
         // Validate all proofs associated with each UserOp
         for aggregated_ops in calldata._0 {
-            let mut buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PbhPayload>>::decode(&mut buff) {
+            let buff = aggregated_ops.signature.as_ref();
+            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx),
             };
@@ -112,12 +112,12 @@ where
 
             let valid_roots = self.root_validator.roots();
             if let Err(err) = pbh_payloads
-                .par_iter()
+                .into_par_iter()
                 .zip(aggregated_ops.userOps)
                 .try_for_each(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
 
-                    payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
+                    PbhPayload::from(payload).validate(signal, &valid_roots, self.num_pbh_txs)?;
 
                     Ok::<(), WorldChainPoolTransactionError>(())
                 })
