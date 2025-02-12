@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
 use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::WorldChainNode;
+use world_chain_builder_node::node::{WorldChainAddOns, WorldChainNode};
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::test_utils::{
@@ -79,7 +79,7 @@ type NodeHelperType = NodeAdapter<
     >,
 >;
 
-type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType>>;
+type Adapter = NodeTestContext<NodeHelperType, WorldChainAddOns<NodeHelperType>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
