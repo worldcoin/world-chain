@@ -58,7 +58,7 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, hash::Hash, sync::Arc};
+    use std::{convert::Infallible, sync::Arc};
 
     use alloy_consensus::SignableTransaction;
     use alloy_network::TxSigner;
@@ -79,8 +79,7 @@ mod tests {
         Database,
     };
     use revm_primitives::{
-        alloy_primitives::Keccak256, AccountInfo, Address, Bytecode, Bytes, ExecutionResult,
-        ResultAndState, U256,
+        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, U256,
     };
 
     use crate::inspector::PBH_CALL_TRACER_ERROR;

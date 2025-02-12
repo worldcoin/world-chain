@@ -8,7 +8,6 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
 use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
-use reth::chainspec::MAINNET;
 use reth::transaction_pool::blobstore::InMemoryBlobStore;
 use reth::transaction_pool::validate::EthTransactionValidatorBuilder;
 use reth_optimism_node::txpool::{OpPooledTransaction, OpTransactionValidator};

@@ -8,7 +8,6 @@ use reth::builder::components::Components;
 use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
-use reth::chainspec::ChainSpec;
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -26,13 +25,12 @@ use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
-use reth_transaction_pool::blobstore::InMemoryBlobStore;
 use revm_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
 use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::{WorldChainAddOns, WorldChainNode};
+use world_chain_builder_node::node::WorldChainNode;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::test_utils::{
@@ -79,7 +77,7 @@ type NodeHelperType = NodeAdapter<
     >,
 >;
 
-type Adapter = NodeTestContext<NodeHelperType, WorldChainAddOns<NodeHelperType>>;
+type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
