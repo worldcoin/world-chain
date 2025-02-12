@@ -11,16 +11,17 @@ use std::{
     time::{self, Duration, Instant},
 };
 
+use alloy_network::Network;
+use alloy_provider::network::Ethereum;
+use alloy_provider::RootProvider;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
-use alloy_transport::Transport;
 use clap::Parser;
 use eyre::eyre::{eyre, Result};
 use fixtures::TransactionFixtures;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
-
 pub mod cases;
 pub mod fixtures;
 
@@ -42,11 +43,12 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let (builder_rpc, sequencer_rpc, rundler) = start_devnet(args).await?;
 
-    let sequencer_provider =
+    let sequencer_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
-    let builder_provider =
+    let builder_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
-    let rundler_provider = Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
+    let rundler_provider: Arc<RootProvider<Ethereum>> =
+        Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
     let timeout = std::time::Duration::from_secs(30);
 
     info!("Waiting for the devnet to be ready");
@@ -145,10 +147,10 @@ async fn get_endpoints() -> Result<(String, String, String)> {
     Ok((builder_socket, sequencer_socket, rundler_socket))
 }
 
-async fn wait<T, P>(provider: P, timeout: time::Duration)
+async fn wait<N, P>(provider: P, timeout: time::Duration)
 where
-    T: Transport + Clone,
-    P: Provider<T>,
+    N: Network,
+    P: Provider<N>,
 {
     let start = Instant::now();
     loop {

@@ -9,7 +9,7 @@ use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::PbhPayload;
+use world_chain_builder_pbh::payload::PBHPayload;
 
 mod cli;
 
@@ -65,7 +65,7 @@ async fn main() -> eyre::Result<()> {
             let nullifier_hash =
                 semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
 
-            let proof = PbhPayload {
+            let proof = PBHPayload {
                 external_nullifier: external_nullifier,
                 nullifier_hash,
                 root: inclusion_proof.root,

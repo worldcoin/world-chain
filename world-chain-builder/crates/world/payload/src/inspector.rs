@@ -35,22 +35,21 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
     ) -> Option<reth::revm::interpreter::CallOutcome> {
         // Check if the target address is the `PBHEntryPoint`. If the caller is not the tx origin
         // or the `PBHSignatureAggregator`, mark the tx as invalid.
-        if inputs.target_address == self.pbh_entry_point {
-            if inputs.caller != context.env.tx.caller
-                && inputs.caller != self.pbh_signature_aggregator
-            {
-                context.error = Err(revm_primitives::EVMError::Custom(
-                    PBH_CALL_TRACER_ERROR.to_string(),
-                ));
+        if inputs.target_address == self.pbh_entry_point
+            && inputs.caller != context.env.tx.caller
+            && inputs.caller != self.pbh_signature_aggregator
+        {
+            context.error = Err(revm_primitives::EVMError::Custom(
+                PBH_CALL_TRACER_ERROR.to_string(),
+            ));
 
-                let res = InterpreterResult::new(
-                    InstructionResult::InvalidEXTCALLTarget,
-                    Bytes::default(),
-                    Gas::new(0),
-                );
+            let res = InterpreterResult::new(
+                InstructionResult::InvalidEXTCALLTarget,
+                Bytes::default(),
+                Gas::new(0),
+            );
 
-                return Some(CallOutcome::new(res, 0..0));
-            }
+            return Some(CallOutcome::new(res, 0..0));
         }
 
         None
@@ -61,6 +60,7 @@ impl<DB: Database> Inspector<DB> for PBHCallTracer {
 mod tests {
     use std::{convert::Infallible, sync::Arc};
 
+    use alloy_consensus::SignableTransaction;
     use alloy_network::TxSigner;
     use alloy_signer::Signer;
     use alloy_signer_local::PrivateKeySigner;
@@ -79,7 +79,8 @@ mod tests {
         Database,
     };
     use revm_primitives::{
-        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, U256,
+        AccountInfo, Address, Bytecode, Bytes, ExecutionResult,
+        ResultAndState, U256,
     };
 
     use crate::inspector::PBH_CALL_TRACER_ERROR;
@@ -170,7 +171,11 @@ mod tests {
             .to_owned();
 
         let signature = signer.sign_transaction(&mut tx_1559).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
+        let tx = OpTransactionSigned::new(
+            OpTypedTransaction::Eip1559(tx_1559.clone()),
+            signature,
+            tx_1559.signature_hash(),
+        );
 
         let slot = U256::from(0);
         let pre_state = db.storage(mock_pbh_entry_point, slot).unwrap();
@@ -227,7 +232,11 @@ mod tests {
             .to_owned();
 
         let signature = signer.sign_transaction(&mut tx_1559).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
+        let tx = OpTransactionSigned::new(
+            OpTypedTransaction::Eip1559(tx_1559.clone()),
+            signature,
+            tx_1559.signature_hash(),
+        );
 
         let slot = U256::from(0);
         let pre_state = db.storage(mock_pbh_entry_point, slot).unwrap();
@@ -284,7 +293,11 @@ mod tests {
             .to_owned();
 
         let signature = signer.sign_transaction(&mut tx_1559).await?;
-        let tx = OpTransactionSigned::new(OpTypedTransaction::Eip1559(tx_1559), signature);
+        let tx = OpTransactionSigned::new(
+            OpTypedTransaction::Eip1559(tx_1559.clone()),
+            signature,
+            tx_1559.signature_hash(),
+        );
 
         let slot = U256::from(0);
         let pre_state = db.storage(mock_pbh_entry_point, slot).unwrap();

@@ -21,8 +21,8 @@ Upon receiving the PBH transaction envelope, the World Chain Builder first valid
 Below is a quick look at the `PbhTxEnvelope` in its entirety.
 
 ```
-PbhTxEnvelope = { Tx, PbhPayload }
-PbhPayload = { externalNullifier, nullifierHash, root, proof }
+PbhTxEnvelope = { Tx, PBHPayload }
+PBHPayload = { externalNullifier, nullifierHash, root, proof }
 ```
 - `Tx`: Any valid Ethereum typed transaction.
 - `externalNullifier`: String identifier used to ensure the uniqueness and proper sequencing of PBH transactions formatted as: `vv-mmyyyy-nn`.

@@ -1,90 +1,122 @@
-use std::fmt::Display;
-use std::sync::Arc;
-
-use alloy_consensus::{proofs, Eip658Value, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::eip4895::Withdrawals;
+use alloy_consensus::constants::EMPTY_WITHDRAWALS;
+use alloy_consensus::{proofs, Eip658Value, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_eips::Typed2718;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::{OpDepositReceipt, OpTxType};
+use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt};
 use reth::api::PayloadBuilderError;
-use reth::payload::{PayloadBuilderAttributes, PayloadId};
+use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::witness::ExecutionWitnessRecord;
 use reth::revm::{DatabaseCommit, State};
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour,
-    PayloadBuilder, PayloadConfig,
+    BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes};
+use reth_optimism_node::{
+    OpBuiltPayload, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes, OpReceiptBuilder,
+    ReceiptBuilderCtx,
+};
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::OpPayloadAttributes;
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives::{
-    Block, BlockBody, Header, InvalidTransactionError, RecoveredBlock, SealedHeader,
+use reth_optimism_primitives::{
+    OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
+use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
+use reth_primitives::{Block, BlockBody, Header, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    StateProofProvider, StateProviderFactory, StateRootProvider,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
-use reth_transaction_pool::error::InvalidPoolTransactionError;
-use reth_transaction_pool::{BestTransactions, ValidPoolTransaction};
+use reth_transaction_pool::{BlobStore, PoolTransaction};
 use revm::Database;
-use revm_primitives::{Address, Bytes, EVMError, InvalidTransaction, ResultAndState, B256, U256};
+use revm_primitives::{
+    Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
+};
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
-use world_chain_builder_pool::noop::NoopWorldChainTransactionPool;
-use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilder<EvmConfig, Tx = ()> {
-    pub inner: OpPayloadBuilder<EvmConfig, Tx>,
+pub struct WorldChainPayloadBuilder<Client, S, Txs = ()>
+where
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+{
+    pub inner: OpPayloadBuilder<
+        WorldChainTransactionPool<Client, S>,
+        Client,
+        OpEvmConfig,
+        OpPrimitives,
+        Txs,
+    >,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
 }
 
-impl<EvmConfig> WorldChainPayloadBuilder<EvmConfig>
+impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
 {
     pub fn new(
-        evm_config: EvmConfig,
+        pool: WorldChainTransactionPool<Client, S>,
+        client: Client,
+        evm_config: OpEvmConfig,
+        receipt_builder: impl OpReceiptBuilder<OpTransactionSigned, Receipt = OpReceipt>,
+        compute_pending_block: bool,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
     ) -> Self {
         Self::with_builder_config(
+            pool,
+            client,
             evm_config,
-            Default::default(),
+            receipt_builder,
+            OpBuilderConfig::default(),
+            compute_pending_block,
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
         )
     }
 
-    pub const fn with_builder_config(
-        evm_config: EvmConfig,
-        builder_config: OpBuilderConfig,
+    pub fn with_builder_config(
+        pool: WorldChainTransactionPool<Client, S>,
+        client: Client,
+        evm_config: OpEvmConfig,
+        receipt_builder: impl OpReceiptBuilder<OpTransactionSigned, Receipt = OpReceipt>,
+        config: OpBuilderConfig,
+        compute_pending_block: bool,
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
     ) -> Self {
-        let inner = OpPayloadBuilder::with_builder_config(evm_config, builder_config);
+        let inner = OpPayloadBuilder::with_builder_config(
+            pool,
+            client,
+            evm_config,
+            receipt_builder,
+            config,
+        )
+        .set_compute_pending_block(compute_pending_block);
 
         Self {
             inner,
@@ -95,17 +127,20 @@ where
     }
 }
 
-impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
+impl<Client, S> WorldChainPayloadBuilder<Client, S>
+where
+    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+{
     /// Sets the rollup's compute pending block configuration option.
     pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.inner.compute_pending_block = compute_pending_block;
         self
     }
 
-    pub fn with_transactions<T: OpPayloadTransactions>(
+    pub fn with_transactions<T>(
         self,
         best_transactions: T,
-    ) -> WorldChainPayloadBuilder<EvmConfig, T> {
+    ) -> WorldChainPayloadBuilder<Client, S, T> {
         let Self {
             inner,
             verified_blockspace_capacity,
@@ -117,6 +152,9 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
             compute_pending_block,
             evm_config,
             config,
+            pool,
+            client,
+            receipt_builder,
             ..
         } = inner;
 
@@ -124,8 +162,11 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
             inner: OpPayloadBuilder {
                 compute_pending_block,
                 evm_config,
-                best_transactions,
                 config,
+                pool,
+                client,
+                receipt_builder,
+                best_transactions,
             },
             verified_blockspace_capacity,
             pbh_entry_point,
@@ -144,10 +185,15 @@ impl<EvmConfig, Tx> WorldChainPayloadBuilder<EvmConfig, Tx> {
     }
 }
 
-impl<EvmConfig, Txs> WorldChainPayloadBuilder<EvmConfig, Txs>
+impl<Client, S, T> WorldChainPayloadBuilder<Client, S, T>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-    Txs: OpPayloadTransactions,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone
+        + 'static,
+
+    S: BlobStore + Clone,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -157,24 +203,21 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<Client, Pool>(
+    fn build_payload<'a, Txs>(
         &self,
-        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+        args: BuildArguments<OpPayloadBuilderAttributes<OpTransactionSigned>, OpBuiltPayload>,
+        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-        Pool: TransactionPool<
+        Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
         let evm_env = self
-            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
+            .evm_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments {
-            client,
-            pool,
             mut cached_reads,
             config,
             cancel,
@@ -185,136 +228,135 @@ where
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
-                chain_spec: client.chain_spec(),
+                chain_spec: self.inner.client.chain_spec(),
+
                 config,
                 evm_env,
                 cancel,
                 best_payload,
+                receipt_builder: self.inner.receipt_builder.clone(),
             },
+            client: self.inner.client.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
-            client,
         };
 
-        let builder = WorldChainBuilder {
-            pool,
-            _best: self.inner.best_transactions.clone(),
-        };
-
-        let client = ctx.client();
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let op_ctx = &ctx.inner;
+        let builder = WorldChainBuilder::new(best);
+        let state_provider = self
+            .inner
+            .client
+            .state_by_block_hash(op_ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
 
-        let build_outcome = if ctx.attributes().no_tx_pool {
+        if op_ctx.attributes().no_tx_pool {
             let db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
                 .build();
 
-            builder.build(db, ctx)?
+            builder.build(db, ctx, &self.inner.pool)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             let db = State::builder()
                 .with_database(cached_reads.as_db_mut(state))
                 .with_bundle_update()
                 .build();
-
-            builder.build(db, ctx)?
-        };
-
-        Ok(build_outcome.with_cached_reads(cached_reads))
+            builder.build(db, ctx, &self.inner.pool)
+        }
+        .map(|out| out.with_cached_reads(cached_reads))
     }
 
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
+    pub fn evm_env(
         &self,
-        attributes: &OpPayloadBuilderAttributes,
+        attributes: &OpPayloadBuilderAttributes<OpTransactionSigned>,
         parent: &Header,
-    ) -> Result<EvmEnv, EvmConfig::Error> {
-        self.inner.cfg_and_block_env(attributes, parent)
+    ) -> Result<EvmEnv, EIP1559ParamError> {
+        self.inner.evm_env(attributes, parent)
     }
 
     /// Computes the witness for the payload.
-    pub fn payload_witness<Client>(
+    pub fn payload_witness(
         &self,
-        client: Client,
         parent: SealedHeader,
         attributes: OpPayloadAttributes,
-    ) -> Result<ExecutionWitness, PayloadBuilderError>
-    where
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
-    {
+    ) -> Result<ExecutionWitness, PayloadBuilderError> {
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
         let evm_env = self
-            .cfg_and_block_env(&attributes, &parent)
+            .evm_env(&attributes, &parent)
             .map_err(PayloadBuilderError::other)?;
 
         let config = PayloadConfig {
             parent_header: Arc::new(parent),
             attributes,
         };
+
+        let client = self.inner.client.clone();
         let ctx = WorldChainPayloadBuilderCtx {
             inner: OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
-                chain_spec: client.chain_spec(),
+                chain_spec: self.inner.client.chain_spec(),
                 config,
                 evm_env,
                 cancel: Default::default(),
                 best_payload: Default::default(),
+                receipt_builder: self.inner.receipt_builder.clone(),
             },
+            client,
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
-            client,
         };
 
-        let client = ctx.client();
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self
+            .inner
+            .client
+            .state_by_block_hash(ctx.inner.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder()
             .with_database(state)
             .with_bundle_update()
             .build();
 
-        let builder = WorldChainBuilder {
-            pool: NoopWorldChainTransactionPool::default(),
-            _best: (),
-        };
-        builder.witness(&mut state, &ctx)
+        let builder: WorldChainBuilder<'_, NoopPayloadTransactions<WorldChainPooledTransaction>> =
+            WorldChainBuilder::new(|_| NoopPayloadTransactions::default());
+
+        builder.witness(&mut state, &ctx, &self.inner.pool)
     }
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`WorldChainPayloadBuilder`].
-impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client>
-    for WorldChainPayloadBuilder<EvmConfig, Txs>
+impl<Client, S: BlobStore + Clone, Txs> PayloadBuilder for WorldChainPayloadBuilder<Client, S, Txs>
 where
     Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
-        + BlockReaderIdExt
-        + Clone,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-    Txs: OpPayloadTransactions,
+        + Clone
+        + 'static,
+    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
-    type Attributes = OpPayloadBuilderAttributes;
+    type Attributes = OpPayloadBuilderAttributes<OpTransactionSigned>;
     type BuiltPayload = OpBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
-        self.build_payload(args)
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let pool = self.inner.pool.clone();
+        self.build_payload(args, |attrs| {
+            self.inner.best_transactions.best_transactions(pool, attrs)
+        })
     }
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         // we want to await the job that's already in progress because that should be returned as
         // is, there's no benefit in racing another job
@@ -325,20 +367,19 @@ where
     // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
-    ) -> Result<OpBuiltPayload, PayloadBuilderError> {
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
-            client: client.clone(),
             config,
-            pool: NoopWorldChainTransactionPool::default(),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| {
+            NoopPayloadTransactions::<WorldChainPooledTransaction>::default()
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -357,58 +398,69 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-#[derive(Debug)]
-pub struct WorldChainBuilder<Pool, Txs> {
-    /// The transaction pool
-    pool: Pool,
+#[derive(derive_more::Debug)]
+pub struct WorldChainBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    _best: Txs,
+    #[debug(skip)]
+    best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
 }
 
-impl<Pool, Txs> WorldChainBuilder<Pool, Txs>
-where
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
-    Txs: OpPayloadTransactions,
-{
+impl<'a, Txs> WorldChainBuilder<'a, Txs> {
+    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+        Self {
+            best: Box::new(best),
+        }
+    }
+}
+
+impl<Txs> WorldChainBuilder<'_, Txs> {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, DB, Client>(
+    pub fn execute<DB, P, Pool, Client>(
         self,
         state: &mut State<DB>,
-        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
-    ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
+        ctx: &WorldChainPayloadBuilderCtx<Client>,
+        pool: &Pool,
+    ) -> Result<BuildOutcomeKind<ExecutedPayload<OpPrimitives>>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-        DB: Database<Error = ProviderError>,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        Txs: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StorageRootProvider,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
+        Client: StateProviderFactory
+            + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + Clone,
     {
-        let Self { pool, _best } = self;
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        let Self { best } = self;
+
+        let op_ctx = &ctx.inner;
+        debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.inner.parent().hash(), parent_number = ctx.inner.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
-        ctx.apply_pre_beacon_root_contract_call(state)?;
+        op_ctx.apply_pre_beacon_root_contract_call(state)?;
 
         // 2. ensure create2deployer is force deployed
-        ctx.ensure_create2_deployer(state)?;
+        op_ctx.ensure_create2_deployer(state)?;
 
         // 3. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(state)?;
+        let mut info = op_ctx.execute_sequencer_transactions(state)?;
 
         // 4. if mem pool transactions are requested we execute them
-        if !ctx.attributes().no_tx_pool {
-            //TODO: build pbh payload
-            let best_txs =
-                pool.best_transactions_with_attributes(ctx.best_transaction_attributes());
-
+        if !op_ctx.attributes().no_tx_pool {
+            let best_txs = best(ctx.inner.best_transaction_attributes());
             if ctx
-                .execute_best_transactions::<_, Pool>(&mut info, state, &pool, best_txs)?
+                .execute_best_transactions(&mut info, state, best_txs, pool)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
-            if !ctx.is_better_payload(info.total_fees) {
+            if !ctx.inner.is_better_payload(info.total_fees) {
                 // can skip building the block
                 return Ok(BuildOutcomeKind::Aborted {
                     fees: info.total_fees,
@@ -416,46 +468,68 @@ where
             }
         }
 
-        let withdrawals_root = ctx.commit_withdrawals(state)?;
-
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BuildOutcomeKind::Better {
-            payload: ExecutedPayload {
-                info,
-                withdrawals_root,
-            },
-        })
+        let withdrawals_root = if op_ctx.is_isthmus_active() {
+            // withdrawals root field in block header is used for storage root of L2 predeploy
+            // `l2tol1-message-passer`
+            Some(
+                state
+                    .database
+                    .as_ref()
+                    .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?,
+            )
+        } else if op_ctx.is_canyon_active() {
+            Some(EMPTY_WITHDRAWALS)
+        } else {
+            None
+        };
+
+        let payload = ExecutedPayload {
+            info,
+            withdrawals_root,
+        };
+
+        Ok(BuildOutcomeKind::Better { payload })
     }
 
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, DB, P, Client>(
+    pub fn build<DB, P, Pool, Client>(
         self,
         mut state: State<DB>,
-        ctx: WorldChainPayloadBuilderCtx<EvmConfig, Client>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+        ctx: WorldChainPayloadBuilderCtx<Client>,
+        pool: &Pool,
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
+        Txs: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider + HashedPostStateProvider,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
+        Client: StateProviderFactory
+            + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + Clone,
     {
         let ExecutedPayload {
             info,
             withdrawals_root,
-        } = match self.execute(&mut state, &ctx)? {
+        } = match self.execute(&mut state, &ctx, pool)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
             BuildOutcomeKind::Cancelled => return Ok(BuildOutcomeKind::Cancelled),
             BuildOutcomeKind::Aborted { fees } => return Ok(BuildOutcomeKind::Aborted { fees }),
         };
 
-        let block_number = ctx.block_number();
+        let op_ctx = ctx.inner;
+        let block_number = op_ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            info.receipts.into(),
+            vec![info.receipts],
             block_number,
             Vec::new(),
         );
@@ -463,8 +537,8 @@ where
             .generic_receipts_root_slow(block_number, |receipts| {
                 calculate_receipt_root_no_memo_optimism(
                     receipts,
-                    &ctx.inner.chain_spec,
-                    ctx.attributes().timestamp(),
+                    &op_ctx.chain_spec,
+                    op_ctx.attributes().timestamp(),
                 )
             })
             .expect("Number is in range");
@@ -480,7 +554,7 @@ where
                 .state_root_with_updates(hashed_state.clone())
                 .inspect_err(|err| {
                     warn!(target: "payload_builder",
-                    parent_header=%ctx.parent().hash(),
+                    parent_header=%op_ctx.parent().hash(),
                         %err,
                         "failed to calculate state root for payload"
                     );
@@ -493,65 +567,68 @@ where
         // OP doesn't support blobs/EIP-4844.
         // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
         // Need [Some] or [None] based on hardfork to match block hash.
-        let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
-        let extra_data = ctx.extra_data()?;
+        let (excess_blob_gas, blob_gas_used) = op_ctx.blob_fields();
+        let extra_data = op_ctx.extra_data()?;
 
         let header = Header {
-            parent_hash: ctx.parent().hash(),
+            parent_hash: op_ctx.parent().hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: ctx.inner.evm_env.block_env.coinbase,
+            beneficiary: op_ctx.evm_env.block_env.coinbase,
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
             logs_bloom,
-            timestamp: ctx.attributes().payload_attributes.timestamp,
-            mix_hash: ctx.attributes().payload_attributes.prev_randao,
+            timestamp: op_ctx.attributes().payload_attributes.timestamp,
+            mix_hash: op_ctx.attributes().payload_attributes.prev_randao,
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(ctx.base_fee()),
-            number: ctx.parent().number + 1,
-            gas_limit: ctx.block_gas_limit(),
+            base_fee_per_gas: Some(op_ctx.base_fee()),
+            number: op_ctx.parent().number + 1,
+            gas_limit: op_ctx.block_gas_limit(),
             difficulty: U256::ZERO,
             gas_used: info.cumulative_gas_used,
             extra_data,
-            parent_beacon_block_root: ctx.attributes().payload_attributes.parent_beacon_block_root,
+            parent_beacon_block_root: op_ctx
+                .attributes()
+                .payload_attributes
+                .parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
         };
 
         // seal the block
-        let block = Block {
+        let block = OpBlock::new(
             header,
-            body: BlockBody {
+            BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals: ctx.withdrawals().cloned(),
+                withdrawals: op_ctx.withdrawals().cloned(),
             },
-        };
+        );
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
+        debug!(target: "payload_builder", id=%op_ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         // create the executed block data
-        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                sealed_block.as_ref().clone(),
-                info.executed_senders,
-            )),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
+        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    sealed_block.as_ref().clone(),
+                    info.executed_senders,
+                )),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(hashed_state),
+            },
             trie: Arc::new(trie_output),
         };
 
-        let no_tx_pool = ctx.attributes().no_tx_pool;
+        let no_tx_pool = op_ctx.attributes().no_tx_pool;
 
         let payload = OpBuiltPayload::new(
-            ctx.payload_id(),
+            op_ctx.payload_id(),
             sealed_block,
             info.total_fees,
-            ctx.inner.chain_spec.clone(),
-            ctx.inner.config.attributes,
             Some(executed),
         );
 
@@ -566,19 +643,27 @@ where
     }
 
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
-    pub fn witness<EvmConfig, DB, P, Client>(
+    pub fn witness<DB, P, Pool, Client>(
         self,
         state: &mut State<DB>,
-        ctx: &WorldChainPayloadBuilderCtx<EvmConfig, Client>,
+        ctx: &WorldChainPayloadBuilderCtx<Client>,
+        pool: &Pool,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
+        Txs: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateProofProvider,
-        Client:
-            StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+        P: StateProofProvider + StorageRootProvider,
+        Pool: TransactionPool<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
+        Client: StateProviderFactory
+            + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + Clone,
     {
-        let _ = self.execute(state, ctx)?;
+        let _ = self.execute(state, ctx, pool)?;
         let ExecutionWitnessRecord {
             hashed_state,
             codes,
@@ -598,167 +683,32 @@ where
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct WorldChainPayloadBuilderCtx<EvmConfig, Client> {
-    pub inner: OpPayloadBuilderCtx<EvmConfig>,
+pub struct WorldChainPayloadBuilderCtx<Client> {
+    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpPrimitives>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
 }
 
-impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client> {
-    /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader {
-        self.inner.parent()
-    }
-
-    /// Returns the state provider client.
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
-
-    /// Returns the builder attributes.
-    pub const fn attributes(&self) -> &OpPayloadBuilderAttributes {
-        self.inner.attributes()
-    }
-
-    /// Returns the withdrawals if shanghai is active.
-    pub fn withdrawals(&self) -> Option<&Withdrawals> {
-        self.inner.withdrawals()
-    }
-
-    /// Returns the block gas limit to target.
-    pub fn block_gas_limit(&self) -> u64 {
-        self.inner.block_gas_limit()
-    }
-
-    /// Returns the block number for the block.
-    pub fn block_number(&self) -> u64 {
-        self.inner.block_number()
-    }
-
-    /// Returns the current base fee
-    pub fn base_fee(&self) -> u64 {
-        self.inner.base_fee()
-    }
-
-    /// Returns the current blob gas price.
-    pub fn get_blob_gasprice(&self) -> Option<u64> {
-        self.inner.get_blob_gasprice()
-    }
-
-    /// Returns the blob fields for the header.
-    ///
-    /// This will always return `Some(0)` after ecotone.
-    pub fn blob_fields(&self) -> (Option<u64>, Option<u64>) {
-        self.inner.blob_fields()
-    }
-
-    /// Returns the extra data for the block.
-    ///
-    /// After holocene this extracts the extradata from the paylpad
-    pub fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        self.inner.extra_data()
-    }
-
-    /// Returns the current fee settings for transactions from the mempool
-    // TODO: PBH
-    pub fn best_transaction_attributes(&self) -> BestTransactionsAttributes {
-        BestTransactionsAttributes::new(self.base_fee(), self.get_blob_gasprice())
-    }
-
-    /// Returns the unique id for this payload job.
-    pub fn payload_id(&self) -> PayloadId {
-        self.inner.payload_id()
-    }
-
-    /// Returns true if regolith is active for the payload.
-    pub fn is_regolith_active(&self) -> bool {
-        self.inner.is_regolith_active()
-    }
-
-    /// Returns true if ecotone is active for the payload.
-    pub fn is_ecotone_active(&self) -> bool {
-        self.inner.is_ecotone_active()
-    }
-
-    /// Returns true if canyon is active for the payload.
-    pub fn is_canyon_active(&self) -> bool {
-        self.inner.is_canyon_active()
-    }
-
-    /// Returns true if holocene is active for the payload.
-    pub fn is_holocene_active(&self) -> bool {
-        self.inner.is_holocene_active()
-    }
-
-    /// Returns true if the fees are higher than the previous payload.
-    pub fn is_better_payload(&self, total_fees: U256) -> bool {
-        is_better_payload(self.inner.best_payload.as_ref(), total_fees)
-    }
-
-    /// Commits the withdrawals from the payload attributes to the state.
-    pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
-        self.inner.commit_withdrawals(db)
-    }
-
-    /// Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
-    /// blocks will always have at least a single transaction in them (the L1 info transaction),
-    /// so we can safely assume that this will always be triggered upon the transition and that
-    /// the above check for empty blocks will never be hit on OP chains.
-    pub fn ensure_create2_deployer<DB>(&self, db: &mut State<DB>) -> Result<(), PayloadBuilderError>
-    where
-        DB: Database,
-        DB::Error: Display,
-    {
-        self.inner.ensure_create2_deployer(db)
-    }
-}
-
-impl<EvmConfig, Client> WorldChainPayloadBuilderCtx<EvmConfig, Client>
+impl<Client> WorldChainPayloadBuilderCtx<Client>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + BlockReaderIdExt,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone,
 {
-    /// apply eip-4788 pre block contract call
-    pub fn apply_pre_beacon_root_contract_call<DB>(
-        &self,
-        db: &mut DB,
-    ) -> Result<(), PayloadBuilderError>
-    where
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
-    {
-        self.inner.apply_pre_beacon_root_contract_call(db)
-    }
-
-    /// Executes all sequencer transactions that are included in the payload attributes.
-    pub fn execute_sequencer_transactions<DB>(
-        &self,
-        db: &mut State<DB>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
-        self.inner.execute_sequencer_transactions(db)
-    }
-
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
     pub fn execute_best_transactions<DB, Pool>(
         &self,
-        info: &mut ExecutionInfo,
+        info: &mut ExecutionInfo<OpPrimitives>,
         db: &mut State<DB>,
-        pool: &Pool,
-        mut best_txs: Box<
-            dyn BestTransactions<
-                Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>,
-            >,
+        mut best_txs: impl PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
+        pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -766,13 +716,14 @@ where
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        let block_gas_limit = self.block_gas_limit();
+        let block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
-        let base_fee = self.base_fee();
+        let base_fee = self.inner.base_fee();
 
         let mut pbh_call_tracer =
             PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
+
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
@@ -781,46 +732,29 @@ where
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
-        while let Some(tx) = best_txs.next() {
-            let pooled_tx = &tx.transaction;
-            let consensus_tx = tx.to_consensus();
-            if info.is_tx_over_limits(
-                consensus_tx.tx(),
-                block_gas_limit,
-                tx_da_limit,
-                block_da_limit,
-            ) {
+        while let Some(pooled_tx) = best_txs.next(()) {
+            let tx = pooled_tx.clone().into_consensus();
+            if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(
-                    &tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        tx_da_limit.unwrap_or_default(),
-                        block_da_limit.unwrap_or_default(),
-                    ),
-                );
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
             if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
-                    best_txs.mark_invalid(
-                        &tx,
-                        InvalidPoolTransactionError::Other(Box::new(
-                            WorldChainPoolTransactionError::ConditionalValidationFailed(*tx.hash()),
-                        )),
-                    );
-                    invalid_txs.push(*tx.hash());
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
             }
 
             // If the transaction is verified, check if it can be added within the verified gas limit
-            if tx.transaction.valid_pbh()
+            if pooled_tx.valid_pbh()
                 && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
             {
-                best_txs.mark_invalid(&tx, InvalidPoolTransactionError::Underpriced);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
@@ -829,18 +763,13 @@ where
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(&tx, InvalidPoolTransactionError::Underpriced);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if tx.is_eip4844() || tx.tx_type() == OpTxType::Deposit as u8 {
-                best_txs.mark_invalid(
-                    &tx,
-                    InvalidPoolTransactionError::Consensus(
-                        InvalidTransactionError::TxTypeNotSupported,
-                    ),
-                );
+            if tx.is_eip4844() || tx.is_deposit() {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
@@ -850,10 +779,7 @@ where
             }
 
             // Configure the environment for the tx.
-            let tx_env = self
-                .inner
-                .evm_config
-                .tx_env(consensus_tx.tx(), consensus_tx.signer());
+            let tx_env = self.inner.evm_config.tx_env(tx.tx(), tx.signer());
 
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
@@ -867,12 +793,7 @@ where
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(
-                                    &tx,
-                                    InvalidPoolTransactionError::Other(Box::new(
-                                        WorldChainPoolTransactionError::from(err),
-                                    )),
-                                );
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
                             continue;
@@ -880,18 +801,13 @@ where
 
                         EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(
-                                &tx,
-                                InvalidPoolTransactionError::Other(Box::new(
-                                    WorldChainPoolTransactionError::PBHCallTracerError,
-                                )),
-                            );
+                            best_txs.mark_invalid(tx.signer(), tx.nonce());
                             continue;
                         }
 
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                            return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                         }
                     }
                 }
@@ -905,27 +821,11 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += consensus_tx.length() as u64;
-
-            let receipt = alloy_consensus::Receipt {
-                status: Eip658Value::Eip658(result.is_success()),
-                cumulative_gas_used: info.cumulative_gas_used,
-                logs: result.into_logs().into_iter().collect(),
-            };
+            info.cumulative_da_bytes_used += tx.length() as u64;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(match tx.tx_type() {
-                0 => OpReceipt::Legacy(receipt),
-                1 => OpReceipt::Eip2930(receipt),
-                2 => OpReceipt::Eip1559(receipt),
-                4 => OpReceipt::Eip7702(receipt),
-                126 => OpReceipt::Deposit(OpDepositReceipt {
-                    inner: receipt,
-                    deposit_nonce: None,
-                    deposit_receipt_version: None,
-                }),
-                _ => unreachable!(),
-            });
+            info.receipts
+                .push(self.build_receipt(info, result, None, &tx));
 
             // update add to total fees
             let miner_fee = tx
@@ -934,8 +834,8 @@ where
             info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
             // append sender and transaction to the respective lists
-            info.executed_senders.push(consensus_tx.signer());
-            info.executed_transactions.push(consensus_tx.into_tx());
+            info.executed_senders.push(tx.signer());
+            info.executed_transactions.push(tx.into_tx());
         }
 
         if !invalid_txs.is_empty() {
@@ -943,5 +843,45 @@ where
         }
 
         Ok(None)
+    }
+
+    /// Constructs a receipt for the given transaction.
+    // TODO: Update upstream to expose this function from OpPayloadBuilderCtx and remove this
+    pub fn build_receipt(
+        &self,
+        info: &ExecutionInfo<OpPrimitives>,
+        result: ExecutionResult,
+        deposit_nonce: Option<u64>,
+        tx: &OpTransactionSigned,
+    ) -> OpReceipt {
+        match self.inner.receipt_builder.build_receipt(ReceiptBuilderCtx {
+            tx,
+            result,
+            cumulative_gas_used: info.cumulative_gas_used,
+        }) {
+            Ok(receipt) => receipt,
+            Err(ctx) => {
+                let receipt = alloy_consensus::Receipt {
+                    // Success flag was added in `EIP-658: Embedding transaction status code
+                    // in receipts`.
+                    status: Eip658Value::Eip658(ctx.result.is_success()),
+                    cumulative_gas_used: ctx.cumulative_gas_used,
+                    logs: ctx.result.into_logs(),
+                };
+
+                self.inner
+                    .receipt_builder
+                    .build_deposit_receipt(OpDepositReceipt {
+                        inner: receipt,
+                        deposit_nonce,
+                        // The deposit receipt version was introduced in Canyon to indicate an
+                        // update to how receipt hashes should be computed
+                        // when set. The state transition process ensures
+                        // this is only set for post-Canyon deposit
+                        // transactions.
+                        deposit_receipt_version: self.inner.is_canyon_active().then_some(1),
+                    })
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{
@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use std::{str::FromStr, sync::LazyLock};
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_pbh::payload::{PbhPayload, Proof, TREE_DEPTH};
+use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IPBHEntryPoint::{self, PBHPayload};
@@ -122,10 +122,10 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let op_tx: OpTypedTransaction = tx.into();
-    let tx_signed = OpTransactionSigned::new(op_tx, signature);
+    let op_tx: OpTypedTransaction = tx.clone().into();
+    let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
     let pooled = OpPooledTransaction::new(
-        tx_signed.clone().into_ecrecovered_unchecked().unwrap(),
+        tx_signed.clone().into_recovered_unchecked().unwrap(),
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
@@ -137,7 +137,7 @@ pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let tx_signed = OpTransactionSigned::new(tx.into(), signature);
+    let tx_signed = OpTransactionSigned::new(tx.clone().into(), signature, tx.signature_hash());
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);
     buff.into()
@@ -193,7 +193,7 @@ pub fn user_op(
         proof,
     };
 
-    let mut uo_sig = Vec::with_capacity(429);
+    let mut uo_sig = Vec::new();
 
     // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
     let v: FixedBytes<1> = if signature.v() as u8 == 0 {
@@ -211,6 +211,7 @@ pub fn user_op(
         )
             .abi_encode_packed(),
     );
+
     uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
 
     user_op.signature = Bytes::from(uo_sig);

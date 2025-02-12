@@ -22,12 +22,15 @@ use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
-use revm_primitives::{Address, FixedBytes, B256, U256};
+use revm_primitives::{Address, FixedBytes, B256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
+use world_chain_builder_node::args::WorldChainArgs;
+use world_chain_builder_node::node::WorldChainNode;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
@@ -38,14 +41,12 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::args::{ExtArgs, WorldChainBuilderArgs};
-use world_chain_builder_node::node::WorldChainBuilder;
-use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
+use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, raw_pbh_multicall_bytes, tx};
 
 type NodeTypesAdapter = FullNodeTypesAdapter<
-    WorldChainBuilder,
+    WorldChainNode,
     Arc<TempDatabase<DatabaseEnv>>,
-    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>>,
+    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>>,
 >;
 
 type NodeHelperType = NodeAdapter<
@@ -57,7 +58,7 @@ type NodeHelperType = NodeAdapter<
             TransactionValidationTaskExecutor<
                 WorldChainTransactionValidator<
                     BlockchainProvider<
-                        NodeTypesWithDBAdapter<WorldChainBuilder, Arc<TempDatabase<DatabaseEnv>>>,
+                        NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                     WorldChainPooledTransaction,
                 >,
@@ -67,7 +68,13 @@ type NodeHelperType = NodeAdapter<
         >,
         OpEvmConfig,
         BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
-        Arc<OpBeaconConsensus>,
+        Arc<OpBeaconConsensus<OpChainSpec>>,
+        world_chain_builder_payload::builder::WorldChainPayloadBuilder<
+            BlockchainProvider<
+                NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
+            >,
+            DiskFileBlobStore,
+        >,
     >,
 >;
 
@@ -103,21 +110,20 @@ impl WorldChainBuilderTestContext {
 
         // is 0.0.0.0 by default
         node_config.network.addr = [127, 0, 0, 1].into();
-        let builder_args = ExtArgs {
-            builder_args: WorldChainBuilderArgs {
-                num_pbh_txs: 30,
-                verified_blockspace_capacity: 70,
-                pbh_entrypoint: PBH_DEV_ENTRYPOINT,
-                signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-                world_id: DEV_WORLD_ID,
-            },
+        let builder_args = WorldChainArgs {
+            num_pbh_txs: 30,
+            verified_blockspace_capacity: 70,
+            pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+            world_id: DEV_WORLD_ID,
+
             ..Default::default()
         };
 
-        let world_chain_node = WorldChainBuilder::new(builder_args.clone())?;
+        let world_chain_node = WorldChainNode::new(builder_args.clone());
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainBuilder, BlockchainProvider<_>>()
+            .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
             .with_components(world_chain_node.components_builder())
             .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
@@ -158,7 +164,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     let mut pbh_tx_hashes = vec![];
     let signers = ctx.signers.clone();
     for signer in signers.into_iter() {
-        let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
+        let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -198,7 +204,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let mut pbh_tx_hashes = vec![];
     let signers = ctx.signers.clone();
     for signer in signers.into_iter().skip(1) {
-        let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
+        let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -235,7 +241,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     let ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
-    let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
+    let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
     assert!(dup_pbh_hash_res.is_err());
@@ -247,9 +253,9 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
-    let raw_tx_0 = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
+    let raw_tx_0 = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
     ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
-    let raw_tx_1 = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
+    let raw_tx_1 = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
 
     // Now that the nullifier has successfully been stored in
     // the `ExecutedPbhNullifierTable`, inserting a new tx with the
@@ -266,7 +272,9 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 }
 
 /// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes(
+    timestamp: u64,
+) -> OpPayloadBuilderAttributes<OpTransactionSigned> {
     let attributes = EthPayloadBuilderAttributes {
         timestamp,
         prev_randao: B256::ZERO,

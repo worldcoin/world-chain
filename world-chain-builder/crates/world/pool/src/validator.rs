@@ -1,7 +1,6 @@
 //! World Chain transaction pool types
-use super::ordering::WorldChainOrdering;
 use super::root::WorldChainRootValidator;
-use super::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use super::tx::WorldChainPoolTransaction;
 use crate::bindings::IPBHEntryPoint;
 use crate::bindings::IPBHEntryPoint::PBHPayload;
 use crate::tx::WorldChainPoolTransactionError;
@@ -10,24 +9,15 @@ use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
-    Pool, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
-use world_chain_builder_pbh::payload::PbhPayload;
-
-/// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<
-        WorldChainTransactionValidator<Client, WorldChainPooledTransaction>,
-    >,
-    WorldChainOrdering<WorldChainPooledTransaction>,
-    S,
->;
+use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -44,9 +34,10 @@ where
 
 impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory
+    Client: ChainSpecProvider<ChainSpec: OpHardforks>
+        + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
-    Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
@@ -181,7 +172,9 @@ where
 
 impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
@@ -302,7 +295,7 @@ pub mod tests {
         let tx = eip1559().to(account).call();
         let tx = eth_tx(ACC, tx).await;
 
-        pool.add_external_transaction(tx.clone().into())
+        pool.add_external_transaction(tx.into())
             .await
             .expect("Failed to add transaction");
     }
@@ -321,7 +314,7 @@ pub mod tests {
             .await
             .expect("Failed to add transaction");
 
-        let res = pool.add_external_transaction(tx.clone().into()).await;
+        let res = pool.add_external_transaction(tx.into()).await;
 
         assert!(res.is_err());
     }
