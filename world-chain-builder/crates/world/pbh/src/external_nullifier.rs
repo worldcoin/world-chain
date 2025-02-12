@@ -3,12 +3,15 @@ use std::str::FromStr;
 use alloy_primitives::{ruint, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bon::Builder;
+use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 use thiserror::Error;
 
 use crate::date_marker::DateMarker;
 
-#[derive(Display, Default, EnumString, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Display, Default, Deserialize, Serialize, EnumString, Debug, Clone, Copy, PartialEq, Eq,
+)]
 #[strum(serialize_all = "snake_case")]
 #[repr(u8)]
 pub enum Prefix {
@@ -16,7 +19,7 @@ pub enum Prefix {
     V1 = 1,
 }
 
-#[derive(Builder, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Builder, Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalNullifier {
     #[builder(default = Prefix::V1)]
     pub version: Prefix,

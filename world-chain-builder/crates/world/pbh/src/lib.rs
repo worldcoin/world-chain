@@ -16,6 +16,7 @@ pub const TREE_DEPTH: usize = 30;
 const LEN: usize = 256;
 
 // TODO: docs
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum PBHSidecar {
     PBHPayload(PBHPayload),
     PBHBundle(Vec<PBHPayload>),
@@ -25,7 +26,9 @@ pub enum PBHSidecar {
 ///
 /// Contains the semaphore proof and relevent metadata
 /// required to to verify the pbh transaction.
-#[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
+#[derive(
+    Default, Clone, Debug, Deserialize, Serialize, RlpEncodable, RlpDecodable, PartialEq, Eq,
+)]
 pub struct PBHPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,

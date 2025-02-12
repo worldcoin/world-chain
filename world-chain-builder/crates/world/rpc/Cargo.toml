@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 world-chain-builder-pool.workspace = true
+world-chain-builder-pbh.workspace = true
 
 reth.workspace = true
 
@@ -19,15 +20,17 @@ reth-provider.workspace = true
 revm-primitives.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-node.workspace = true
-alloy-consensus.workspace = true
 
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
+
+op-alloy-consensus.workspace = true
 
 jsonrpsee.workspace = true
 jsonrpsee-types.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
-
+serde.workspace = true

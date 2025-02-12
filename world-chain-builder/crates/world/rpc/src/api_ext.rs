@@ -2,14 +2,16 @@ use std::error::Error;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashMap, StorageKey};
+use alloy_primitives::{map::HashMap, StorageKey, TxHash};
 use alloy_rpc_types::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee::{
     core::{async_trait, RpcResult},
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
 };
+use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::Block,
+    core::primitives::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction},
     rpc::{
         api::eth::{AsEthApiError, FromEthApiError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
@@ -18,10 +20,123 @@ use reth::{
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
+use revm_primitives::{
+    map::FbBuildHasher, AccessList, Address, Bytes, FixedBytes, PrimitiveSignature,
+    SignedAuthorization, TxKind, B256, U256,
+};
+use serde::{Deserialize, Serialize};
+use world_chain_builder_pbh::PBHSidecar;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WorldChainTxEnvelope {
+    inner: OpTxEnvelope,
+    pbh_sidecar: Option<PBHSidecar>,
+}
+
+impl SignedTransaction for WorldChainTxEnvelope {
+    fn tx_hash(&self) -> &TxHash {
+        todo!()
+    }
+
+    fn signature(&self) -> &PrimitiveSignature {
+        todo!()
+    }
+
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        todo!()
+    }
+
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
+        todo!()
+    }
+}
+
+impl InMemorySize for WorldChainTxEnvelope {
+    fn size(&self) -> usize {
+        todo!("TODO:")
+        // self.inner.size()
+    }
+}
+
+impl alloy_consensus::Transaction for WorldChainTxEnvelope {
+    fn chain_id(&self) -> Option<u64> {
+        self.inner.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.inner.nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.inner.gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.inner.gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.inner.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.inner.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.inner.max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.inner.priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.inner.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.inner.is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.inner.kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.inner.is_create()
+    }
+
+    fn to(&self) -> Option<Address> {
+        self.inner.to()
+    }
+
+    fn value(&self) -> U256 {
+        self.inner.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.inner.input()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.inner.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.inner.blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.inner.authorization_list()
+    }
+}
 
 #[async_trait]
 pub trait EthTransactionsExt {
@@ -79,6 +194,8 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
+        // TODO: recover into world chain pool transaction, note that these txs will not get peered unless network primitives are configured
+
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction: WorldChainPooledTransaction =
             OpPooledTransaction::from_pooled(recovered).into();
