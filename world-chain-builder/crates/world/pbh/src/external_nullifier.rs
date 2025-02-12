@@ -93,9 +93,16 @@ impl ExternalNullifier {
     }
 
     pub fn to_word(&self) -> U256 {
-        let bytes = self.be_bytes();
+        let year = U256::from(self.year);
+        let month = U256::from(self.month);
+        let nonce = U256::from(self.nonce);
+        let version = U256::from(self.version as u8);
 
-        U256::from_be_bytes(bytes)
+        let year_shifted = year << 24;
+        let month_shifted = month << 16;
+        let nonce_shifted = nonce << 8;
+
+        year_shifted | month_shifted | nonce_shifted | version
     }
 
     pub fn from_word(word: U256) -> Self {

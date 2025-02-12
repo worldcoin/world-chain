@@ -11369,6 +11369,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types-eth",
  "alloy-transport",
+ "chrono",
  "clap 4.5.28",
  "color-eyre",
  "futures",
@@ -11379,6 +11380,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber 0.3.19",
  "world-chain-builder-node",
+ "world-chain-builder-pbh",
  "world-chain-builder-pool",
  "world-chain-builder-test-utils",
 ]

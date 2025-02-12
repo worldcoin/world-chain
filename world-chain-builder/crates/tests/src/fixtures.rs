@@ -1,8 +1,10 @@
 use alloy_network::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes};
+use chrono::Datelike;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
 use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx, DEV_CHAIN_ID};
+use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 use world_chain_builder_test_utils::{
     bindings::IEntryPoint::PackedUserOperation,
     utils::{signer, user_op},
@@ -23,8 +25,14 @@ impl TransactionFixtures {
         }
 
         let mut pbh_user_operations = Vec::new();
-        for _ in 0..255 {
-            pbh_user_operations.push(user_op().acc(2).call().0);
+        for i in 0..255 {
+            let dt = chrono::Utc::now();
+            let dt = dt.naive_local();
+            let month = dt.month() as u8;
+            let year = dt.year() as u16;
+
+            let ext_nullifier = ExternalNullifier::v1(month, year, i);
+            pbh_user_operations.push(user_op().acc(2).external_nullifier(ext_nullifier).call().0);
         }
 
         let mut eip1559 = Vec::new();
