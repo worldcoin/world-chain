@@ -13779,6 +13779,7 @@ dependencies = [
  "reqwest 0.12.12",
  "reth",
  "reth-optimism-node",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-provider",
  "revm-primitives",

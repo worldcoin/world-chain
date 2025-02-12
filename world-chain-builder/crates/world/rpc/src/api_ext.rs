@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::pooled, BlockHeader};
 use alloy_eips::{eip2718::Eip2718Result, BlockId, Decodable2718, Encodable2718, Typed2718};
 use alloy_primitives::{map::HashMap, StorageKey, TxHash};
 use alloy_rlp::{Decodable, Encodable};
@@ -14,6 +14,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::Block,
     core::primitives::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction},
+    primitives::{transaction::SignedTransactionIntoRecoveredExt, Recovered},
     rpc::{
         api::eth::{AsEthApiError, FromEthApiError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
@@ -21,6 +22,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{
     map::FbBuildHasher, AccessList, Address, Bytes, FixedBytes, PrimitiveSignature,
@@ -34,7 +36,7 @@ pub const PBH_TX_TYPE: u8 = 0xE0;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct WorldChainTxEnvelope {
-    inner: OpTxEnvelope,
+    inner: op_alloy_consensus::OpPooledTransaction,
     pbh_sidecar: Option<PBHSidecar>,
 }
 
@@ -89,7 +91,7 @@ impl Decodable2718 for WorldChainTxEnvelope {
         if ty == PBH_TX_TYPE {
             todo!("TODO:")
         } else {
-            let inner = OpTxEnvelope::typed_decode(ty, buf)?;
+            let inner = op_alloy_consensus::OpPooledTransaction::typed_decode(ty, buf)?;
 
             Ok(Self {
                 inner,
@@ -99,7 +101,7 @@ impl Decodable2718 for WorldChainTxEnvelope {
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let inner = OpTxEnvelope::fallback_decode(buf)?;
+        let inner = op_alloy_consensus::OpPooledTransaction::fallback_decode(buf)?;
 
         Ok(Self {
             inner,
@@ -226,15 +228,16 @@ where
     ) -> Result<B256, Self::Error> {
         validate_conditional_options(&options, self.provider()).map_err(Self::Error::other)?;
 
-        let recovered = recover_raw_transaction(&tx)?;
-        let mut pool_transaction: WorldChainPooledTransaction =
-            OpPooledTransaction::from_pooled(recovered).into();
-        pool_transaction.inner = pool_transaction.inner.with_conditional(options.clone());
+        let mut data: &[u8] = &tx;
+        let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
+            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+        let pooled_tx = WorldChainPooledTransaction::try_from(tx_envelope)
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
             .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .add_transaction(TransactionOrigin::Local, pooled_tx)
             .await
             .map_err(Self::Error::from_eth_err)?;
 
@@ -248,21 +251,16 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        // TODO: recover into world chain pool transaction, note that these txs will not get peered unless network primitives are configured
-        // let mut data: &[u8] = &tx;
-        // let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
-        //     .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
-
-        // TODO: into worldchainpooledtransaction
-
-        let recovered = recover_raw_transaction(&tx)?;
-        let pool_transaction: WorldChainPooledTransaction =
-            OpPooledTransaction::from_pooled(recovered).into();
+        let mut data: &[u8] = &tx;
+        let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
+            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+        let pooled_tx = WorldChainPooledTransaction::try_from(tx_envelope)
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
             .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .add_transaction(TransactionOrigin::Local, pooled_tx)
             .await
             .map_err(Self::Error::from_eth_err)?;
 
@@ -273,6 +271,19 @@ where
                     });
         }
         Ok(hash)
+    }
+}
+
+impl TryFrom<WorldChainTxEnvelope> for WorldChainPooledTransaction {
+    type Error = op_alloy_consensus::OpPooledTransaction;
+    fn try_from(tx: WorldChainTxEnvelope) -> Result<Self, Self::Error> {
+        let recovered = tx.inner.try_into_recovered()?;
+        let inner = OpPooledTransaction::from_pooled(recovered);
+        Ok(Self {
+            inner,
+            valid_pbh: false,
+            pbh_sidecar: tx.pbh_sidecar,
+        })
     }
 }
 
