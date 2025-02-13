@@ -37,27 +37,20 @@ where
     N: Network,
     P: Provider<N>,
 {
-    let user_operations = &user_operations[..100];
     let start = Instant::now();
-    let mut hashes = Vec::new();
-    for (index, uo) in user_operations.iter().enumerate() {
-        let uo: RpcUserOperationV0_7 = uo.clone().into();
-        let res: B256 = bundler_provider
-            .raw_request(
-                Cow::Borrowed("eth_sendUserOperation"),
-                (uo, DEVNET_ENTRYPOINT),
-            )
-            .await?;
-        debug!(target: "tests::user_ops_test", %index, ?res, "User Operation Sent");
-
-        hashes.push(res);
-    }
-    stream::iter(hashes.iter().enumerate())
+    stream::iter(user_operations.iter().enumerate())
         .map(Ok)
-        .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, hash)| {
+        .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, uo)| {
             let bundler_provider = bundler_provider.clone();
             let builder_provider = builder_provider.clone();
             async move {
+                let uo: RpcUserOperationV0_7 = uo.clone().into();
+                let hash: B256 = bundler_provider.raw_request(
+                    Cow::Borrowed("eth_sendUserOperation"),
+                    (uo, DEVNET_ENTRYPOINT),
+                )
+                .await?;
+
                 // Fetch the Transaction by hash
                 let max_retries = 100;
                 let mut tries = 0;
@@ -73,12 +66,10 @@ where
                         )
                         .await?;
 
-                    debug!(target: "tests::user_ops_test", %index, ?resp, "User Operation Response");
                     if let Some(transaction_hash) = resp.transaction_hash {
                         debug!(target: "tests::user_ops_test", %index, ?transaction_hash, "User Operation Included in Transaction");
                         // Fetch the Transaction Receipt from the builder
                         let receipt = builder_provider.get_transaction_by_hash(transaction_hash).await?;
-
                         assert!(receipt.is_some_and(|receipt| {
                             debug!(target: "tests::user_ops_test", %index, ?receipt, "Transaction Receipt Received");
                             true
