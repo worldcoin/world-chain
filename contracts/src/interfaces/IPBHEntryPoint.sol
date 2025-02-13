@@ -41,6 +41,10 @@ interface IPBHEntryPoint {
 
     function nullifierHashes(uint256) external view returns (bool);
 
+    function worldId() external view returns (IWorldID);
+
+    function numPbhPerMonth() external view returns (uint8);
+
     function setNumPbhPerMonth(uint8 _numPbhPerMonth) external;
 
     function setWorldId(address _worldId) external;
