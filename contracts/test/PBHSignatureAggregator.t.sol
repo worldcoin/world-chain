@@ -11,7 +11,6 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 import "@lib/PBHExternalNullifier.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 import {SafeModuleSignatures} from "@lib/SafeModuleSignatures.sol";
-import {Mock4337Module} from "./mocks/Mock4337Module.sol";
 
 /// @title PBHSignatureAggregator Tests
 /// @notice Contains tests for signature aggregation, extraction, and validation.
