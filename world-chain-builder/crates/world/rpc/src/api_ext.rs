@@ -1,15 +1,20 @@
 use std::error::Error;
 
-use alloy_consensus::BlockHeader;
-use alloy_eips::BlockId;
-use alloy_primitives::{map::HashMap, StorageKey};
+use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
+use alloy_consensus::{transaction::pooled, BlockHeader};
+use alloy_eips::{eip2718::Eip2718Result, BlockId, Decodable2718, Encodable2718, Typed2718};
+use alloy_primitives::{map::HashMap, StorageKey, TxHash};
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee::{
     core::{async_trait, RpcResult},
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
 };
+use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::Block,
+    core::primitives::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction},
+    primitives::{transaction::SignedTransactionIntoRecoveredExt, Recovered},
     rpc::{
         api::eth::{AsEthApiError, FromEthApiError},
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
@@ -17,11 +22,177 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
+use revm_primitives::{
+    map::FbBuildHasher, AccessList, Address, Bytes, FixedBytes, PrimitiveSignature,
+    SignedAuthorization, TxKind, B256, U256,
+};
+use serde::{Deserialize, Serialize};
+use world_chain_builder_pbh::PBHSidecar;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 
-use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
+pub const PBH_TX_TYPE: u8 = 0xE0;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WorldChainTxEnvelope {
+    inner: op_alloy_consensus::OpPooledTransaction,
+    pbh_sidecar: Option<PBHSidecar>,
+}
+
+impl Encodable for WorldChainTxEnvelope {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.network_encode(out)
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
+    }
+}
+
+impl Decodable for WorldChainTxEnvelope {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
+    }
+}
+
+impl Encodable2718 for WorldChainTxEnvelope {
+    fn type_flag(&self) -> Option<u8> {
+        if self.pbh_sidecar.is_some() {
+            Some(PBH_TX_TYPE)
+        } else {
+            self.inner.type_flag()
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        if self.pbh_sidecar.is_some() {
+            todo!("TODO:")
+        } else {
+            self.inner.encode_2718_len()
+        }
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        if self.pbh_sidecar.is_some() {
+            todo!("TODO:")
+        } else {
+            self.inner.encode_2718(out)
+        }
+    }
+
+    fn trie_hash(&self) -> B256 {
+        self.inner.trie_hash()
+    }
+}
+
+impl Decodable2718 for WorldChainTxEnvelope {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        if ty == PBH_TX_TYPE {
+            todo!("TODO:")
+        } else {
+            let inner = op_alloy_consensus::OpPooledTransaction::typed_decode(ty, buf)?;
+
+            Ok(Self {
+                inner,
+                pbh_sidecar: None,
+            })
+        }
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let inner = op_alloy_consensus::OpPooledTransaction::fallback_decode(buf)?;
+
+        Ok(Self {
+            inner,
+            pbh_sidecar: None,
+        })
+    }
+}
+
+impl Typed2718 for WorldChainTxEnvelope {
+    fn ty(&self) -> u8 {
+        if self.pbh_sidecar.is_some() {
+            PBH_TX_TYPE
+        } else {
+            self.inner.ty()
+        }
+    }
+}
+
+impl alloy_consensus::Transaction for WorldChainTxEnvelope {
+    fn chain_id(&self) -> Option<u64> {
+        self.inner.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.inner.nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.inner.gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.inner.gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.inner.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.inner.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.inner.max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.inner.priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.inner.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.inner.is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.inner.kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.inner.is_create()
+    }
+
+    fn to(&self) -> Option<Address> {
+        self.inner.to()
+    }
+
+    fn value(&self) -> U256 {
+        self.inner.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.inner.input()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.inner.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.inner.blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.inner.authorization_list()
+    }
+}
 
 #[async_trait]
 pub trait EthTransactionsExt {
@@ -57,15 +228,16 @@ where
     ) -> Result<B256, Self::Error> {
         validate_conditional_options(&options, self.provider()).map_err(Self::Error::other)?;
 
-        let recovered = recover_raw_transaction(&tx)?;
-        let mut pool_transaction: WorldChainPooledTransaction =
-            OpPooledTransaction::from_pooled(recovered).into();
-        pool_transaction.inner = pool_transaction.inner.with_conditional(options.clone());
+        let mut data: &[u8] = &tx;
+        let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
+            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+        let pooled_tx = WorldChainPooledTransaction::try_from(tx_envelope)
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
             .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .add_transaction(TransactionOrigin::Local, pooled_tx)
             .await
             .map_err(Self::Error::from_eth_err)?;
 
@@ -79,14 +251,16 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
-        let pool_transaction: WorldChainPooledTransaction =
-            OpPooledTransaction::from_pooled(recovered).into();
+        let mut data: &[u8] = &tx;
+        let tx_envelope = WorldChainTxEnvelope::decode_2718(&mut data)
+            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+        let pooled_tx = WorldChainPooledTransaction::try_from(tx_envelope)
+            .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
             .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .add_transaction(TransactionOrigin::Local, pooled_tx)
             .await
             .map_err(Self::Error::from_eth_err)?;
 
@@ -97,6 +271,19 @@ where
                     });
         }
         Ok(hash)
+    }
+}
+
+impl TryFrom<WorldChainTxEnvelope> for WorldChainPooledTransaction {
+    type Error = op_alloy_consensus::OpPooledTransaction;
+    fn try_from(tx: WorldChainTxEnvelope) -> Result<Self, Self::Error> {
+        let recovered = tx.inner.try_into_recovered()?;
+        let inner = OpPooledTransaction::from_pooled(recovered);
+        Ok(Self {
+            inner,
+            valid_pbh: false,
+            pbh_sidecar: tx.pbh_sidecar,
+        })
     }
 }
 

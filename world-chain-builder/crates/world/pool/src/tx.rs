@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
 use alloy_eips::Typed2718;
-use alloy_primitives::{Bytes, TxHash};
+use alloy_primitives::{Bytes, Signature, TxHash};
 use alloy_rpc_types::erc4337::TransactionConditional;
 use reth::transaction_pool::{
     error::{InvalidPoolTransactionError, PoolTransactionError},
@@ -11,40 +11,45 @@ use reth::transaction_pool::{
 use reth_optimism_node::txpool::{conditional::MaybeConditionalTransaction, OpPooledTransaction};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::Recovered;
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction};
 use revm_primitives::{
-    AccessList, Address, InvalidTransaction, KzgSettings, SignedAuthorization, TxKind, B256, U256,
+    AccessList, Address, InvalidTransaction, KzgSettings, PrimitiveSignature, SignedAuthorization,
+    TxKind, B256, U256,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use world_chain_builder_pbh::payload::PbhValidationError;
+use world_chain_builder_pbh::{PBHSidecar, PBHValidationError};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
     pub inner: OpPooledTransaction,
     pub valid_pbh: bool,
+    // TODO: update to prefer sidecar over validPBH
+    pub pbh_sidecar: Option<PBHSidecar>,
 }
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn valid_pbh(&self) -> bool;
-    fn set_valid_pbh(&mut self);
+    fn pbh_sidecar(&self) -> Option<&PBHSidecar>;
+    fn set_pbh_sidecar(&mut self, sidecar: PBHSidecar);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn valid_pbh(&self) -> bool {
-        self.valid_pbh
+    fn pbh_sidecar(&self) -> Option<&PBHSidecar> {
+        self.pbh_sidecar.as_ref()
     }
 
     fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.inner.conditional()
     }
 
-    fn set_valid_pbh(&mut self) {
-        self.valid_pbh = true;
+    fn set_pbh_sidecar(&mut self, sidecar: PBHSidecar) {
+        self.pbh_sidecar = Some(sidecar);
     }
 }
 
 impl Typed2718 for WorldChainPooledTransaction {
+    // TODO: update to include pbh sidecar variant
     fn ty(&self) -> u8 {
         self.inner.ty()
     }
@@ -151,7 +156,6 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 }
 
 impl InMemorySize for WorldChainPooledTransaction {
-    // TODO: double check this
     fn size(&self) -> usize {
         self.inner.size()
     }
@@ -190,6 +194,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
         Self {
             inner,
             valid_pbh: false,
+            pbh_sidecar: None,
         }
     }
 
@@ -221,7 +226,7 @@ pub enum WorldChainPoolTransactionError {
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransaction),
     #[error(transparent)]
-    PbhValidationError(#[from] PbhValidationError),
+    PBHValidationError(#[from] PBHValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
     #[error("Missing PBH Payload")]
@@ -262,6 +267,7 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
         Self {
             inner: tx,
             valid_pbh: false,
+            pbh_sidecar: None,
         }
     }
 }

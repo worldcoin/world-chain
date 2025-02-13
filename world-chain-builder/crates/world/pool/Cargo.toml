@@ -47,6 +47,7 @@ tracing.workspace = true
 parking_lot.workspace = true
 bon = { workspace = true, optional = true }
 rayon.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true

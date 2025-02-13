@@ -17,7 +17,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use semaphore::hash_to_field;
-use world_chain_builder_pbh::payload::PBHPayload;
+use world_chain_builder_pbh::{PBHPayload, PBHSidecar};
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -90,6 +90,7 @@ where
         }
 
         // Validate all proofs associated with each UserOp
+        let mut pbh_bundle = vec![];
         for aggregated_ops in calldata._0 {
             let mut buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PBHPayload>>::decode(&mut buff) {
@@ -115,6 +116,8 @@ where
             {
                 return err.to_outcome(tx);
             }
+
+            pbh_bundle.extend(pbh_payloads);
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -122,7 +125,7 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_valid_pbh();
+            tx.set_pbh_sidecar(PBHSidecar::PBHBundle(pbh_bundle));
         }
 
         tx_outcome
@@ -155,7 +158,7 @@ where
         if let Err(err) =
             pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
         {
-            return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
+            return WorldChainPoolTransactionError::PBHValidationError(err).to_outcome(tx);
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -163,10 +166,20 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_valid_pbh();
+            tx.set_pbh_sidecar(PBHSidecar::PBHPayload(pbh_payload));
         }
 
         tx_outcome
+    }
+
+    fn validate_pbh_sidecar(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        // TODO:
+
+        todo!()
     }
 }
 
@@ -184,7 +197,9 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if transaction.to().unwrap_or_default() != self.pbh_validator {
+        if transaction.pbh_sidecar().is_some() {
+            return self.validate_pbh_sidecar(origin, transaction);
+        } else if transaction.to().unwrap_or_default() != self.pbh_validator {
             return self.inner.validate_one(origin, transaction.clone());
         }
 
