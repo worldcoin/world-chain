@@ -90,7 +90,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     //////////////////////////////////////////////////////////////////////////////
 
     /// @notice Thrown when attempting to reuse a nullifier
-    error InvalidNullifier();
+    /// @param signalHash The signal hash associated with the PBH payload.
+    error InvalidNullifier(uint256 signalHash);
 
     /// @notice Error thrown when the address is 0
     error AddressZero();
@@ -112,6 +113,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
 
     /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations.
     error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
+
+    /// @notice Thrown when the external nullifier is invalid
+    /// @param signalHash The signal hash associated with the PBH payload.
+    /// @param reason The reason for the invalid external nullifier.
+    error InvalidExternalNullifier(uint256 signalHash, bytes reason);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
@@ -193,11 +199,14 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     function _verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload) internal view {
         // First, we make sure this nullifier has not been used before.
         if (nullifierHashes[pbhPayload.nullifierHash]) {
-            revert InvalidNullifier();
+            revert InvalidNullifier(signalHash);
         }
 
         // Verify the external nullifier
-        PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth);
+        try PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth) {}
+        catch (bytes memory reason) {
+            revert InvalidExternalNullifier(signalHash, reason);
+        }
 
         // If worldId address is set, proceed with on chain verification,
         // otherwise assume verification has been done off chain by the builder.
