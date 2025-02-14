@@ -114,11 +114,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Thrown when the length of PBHPayloads on the aggregated signature is not equivalent to the amount of UserOperations.
     error InvalidAggregatedSignature(uint256 payloadsLength, uint256 userOpsLength);
 
-    /// @notice Thrown when the external nullifier is invalid
-    /// @param signalHash The signal hash associated with the PBH payload.
-    /// @param reason The reason for the invalid external nullifier.
-    error InvalidExternalNullifier(uint256 signalHash, bytes reason);
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
