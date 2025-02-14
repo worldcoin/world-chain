@@ -80,6 +80,8 @@ contract PBHSignatureAggregator is IAggregator {
         uint256 signalHash = abi.encodePacked(userOp.sender, userOp.nonce, userOp.callData).hashToField();
 
         pbhEntryPoint.verifyPbh(signalHash, pbhPayload);
+
+        // If the worldID is not set, we need to verify the semaphore proof
         if (address(pbhEntryPoint.worldId()) == address(0)) {
             worldID.verifyProof(
                 pbhPayload.root, signalHash, pbhPayload.nullifierHash, pbhPayload.pbhExternalNullifier, pbhPayload.proof
