@@ -51,7 +51,9 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         bytes memory testCallData = hex"c0ffee";
         uint256 signalHash = abi.encodePacked(sender, pbhNonce, testCallData).hashToField();
-        vm.expectRevert(abi.encodeWithSelector(PBHEntryPointImplV1.InvalidNullifier.selector, signalHash));
+        vm.expectRevert(
+            abi.encodeWithSelector(PBHEntryPointImplV1.InvalidNullifier.selector, testPayload.nullifierHash, signalHash)
+        );
         pbhEntryPoint.verifyPbh(signalHash, testPayload);
     }
 
