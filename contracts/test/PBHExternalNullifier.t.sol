@@ -5,6 +5,12 @@ import "forge-std/Test.sol";
 import "@lib/PBHExternalNullifier.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 
+contract CallDepth1 {
+    function encodeRevertCallDepth1(uint8 pbhNonce, uint8 month, uint16 year) public pure {
+        PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
+    }
+}
+
 /// @title PBHExternalNullifier Tests
 /// @notice Contains tests for the PBHExternalNullifier library
 /// @author Worldcoin
@@ -16,8 +22,9 @@ contract PBHExternalNullifierTest is Test {
 
     function testFuzz_encode_RevertIf_InvalidMonth(uint8 pbhNonce, uint8 month, uint16 year) public {
         vm.assume(month == 0 || month > 12);
+        CallDepth1 callDepth1 = new CallDepth1();
         vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierMonth.selector);
-        PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
+        callDepth1.encodeRevertCallDepth1(pbhNonce, month, year);
     }
 
     function testFuzz_decode(uint8 pbhNonce, uint8 month, uint16 year) public {
