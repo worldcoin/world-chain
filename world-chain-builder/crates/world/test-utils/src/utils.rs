@@ -19,7 +19,7 @@ use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use std::{str::FromStr, sync::LazyLock};
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
@@ -180,8 +180,9 @@ pub fn user_op(
     let signal = hash_user_op(&user_op);
 
     let root = TREE.root();
-    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal);
-    let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
+    let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
+    let proof = semaphore_proof(acc, encoded_external_nullifier.0, signal);
+    let nullifier_hash = nullifier_hash(acc, encoded_external_nullifier.0);
 
     let proof = Proof(proof);
 
@@ -246,8 +247,9 @@ pub fn pbh_multicall(
         hash_to_field(&SolValue::abi_encode_packed(&(sender, calls.clone())));
 
     let root = TREE.root();
-    let proof = semaphore_proof(acc, external_nullifier.to_word(), signal_hash);
-    let nullifier_hash = nullifier_hash(acc, external_nullifier.to_word());
+    let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
+    let proof = semaphore_proof(acc, encoded_external_nullifier.0, signal_hash);
+    let nullifier_hash = nullifier_hash(acc, encoded_external_nullifier.0);
 
     let proof = [
         proof.0 .0,
@@ -275,7 +277,7 @@ pub fn pbh_multicall(
 
     let payload = IPBHEntryPoint::PBHPayload {
         root,
-        pbhExternalNullifier: external_nullifier.to_word(),
+        pbhExternalNullifier: EncodedExternalNullifier::from(external_nullifier).0,
         nullifierHash: nullifier_hash,
         proof,
     };
@@ -359,7 +361,7 @@ impl From<PbhPayload> for PBHPayload {
 
         Self {
             root: val.root,
-            pbhExternalNullifier: val.external_nullifier.to_word(),
+            pbhExternalNullifier: EncodedExternalNullifier::from(val.external_nullifier).0,
             nullifierHash: val.nullifier_hash,
             proof: [
                 U256::from_be_bytes(p0),

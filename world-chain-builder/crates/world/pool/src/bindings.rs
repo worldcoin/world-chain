@@ -1,7 +1,7 @@
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::{
-    external_nullifier::ExternalNullifier,
+    external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::{PBHPayload, Proof},
 };
 use IPBHEntryPoint::PBHPayload as IPBHPayload;
@@ -59,8 +59,10 @@ sol! {
     }
 }
 
-impl From<IPBHPayload> for PBHPayload {
-    fn from(val: IPBHPayload) -> Self {
+impl TryFrom<IPBHPayload> for PBHPayload {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(val: IPBHPayload) -> Result<Self, Self::Error> {
         let proof: [ethers_core::types::U256; 8] = val
             .proof
             .into_iter()
@@ -79,11 +81,13 @@ impl From<IPBHPayload> for PBHPayload {
 
         let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
 
-        PBHPayload {
-            external_nullifier: ExternalNullifier::from_word(val.pbhExternalNullifier),
+        Ok(PBHPayload {
+            external_nullifier: ExternalNullifier::try_from(EncodedExternalNullifier(
+                val.pbhExternalNullifier,
+            ))?,
             nullifier_hash: val.nullifierHash,
             root: val.root,
             proof,
-        }
+        })
     }
 }

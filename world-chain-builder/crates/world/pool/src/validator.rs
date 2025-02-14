@@ -104,9 +104,10 @@ where
                 .zip(aggregated_ops.userOps)
                 .try_for_each(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
-
-                    PbhPayload::from(payload).validate(signal, &valid_roots, self.num_pbh_txs)?;
-
+                    let Ok(payload) = PbhPayload::try_from(payload) else {
+                        return Err(WorldChainPoolTransactionError::InvalidCalldata);
+                    };
+                    payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
                     Ok::<(), WorldChainPoolTransactionError>(())
                 })
             {
@@ -141,7 +142,10 @@ where
             return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
         };
 
-        let pbh_payload: PbhPayload = calldata.payload.into();
+        let Ok(pbh_payload) = PbhPayload::try_from(calldata.payload) else {
+            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
+        };
+
         let signal_hash: alloy_primitives::Uint<256, 4> =
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 

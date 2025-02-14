@@ -8,7 +8,7 @@ use semaphore::poseidon_tree::Proof;
 use semaphore::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::date_marker::DateMarker;
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
 use world_chain_builder_pbh::payload::PBHPayload;
 
 mod cli;
@@ -53,7 +53,7 @@ async fn main() -> eyre::Result<()> {
 
             let external_nullifier =
                 ExternalNullifier::with_date_marker(date_marker, prove_args.pbh_nonce);
-            let external_nullifier_hash = external_nullifier.to_word();
+            let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
 
             let semaphore_proof = semaphore::protocol::generate_proof(
                 &identity,
