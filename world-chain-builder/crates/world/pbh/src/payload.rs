@@ -63,7 +63,7 @@ pub enum PbhValidationError {
 
 /// The payload of a PBH transaction
 ///
-/// Contains the semaphore proof and relevent metadata
+/// Contains the semaphore proof and relevant metadata
 /// required to to verify the pbh transaction.
 #[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 // TODO: update to PBHPayload
