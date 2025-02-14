@@ -9,6 +9,10 @@ contract CallDepth1 {
     function encodeRevertCallDepth1(uint8 pbhNonce, uint8 month, uint16 year) public pure {
         PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
     }
+
+    function verifyRevertCallDepth1(uint256 encoded, uint8 maxPbh, uint256 signalHash) public view {
+        PBHExternalNullifier.verify(encoded, maxPbh, signalHash);
+    }
 }
 
 /// @title PBHExternalNullifier Tests
@@ -50,13 +54,16 @@ contract PBHExternalNullifierTest is Test {
         vm.warp(timestamp);
 
         uint256 encoded = PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
-        PBHExternalNullifier.verify(encoded, maxPbh);
+        PBHExternalNullifier.verify(encoded, maxPbh, 0);
     }
 
     function testFuzz_verify_RevertIf_InvalidNullifierLeadingZeros(uint256 encoded) public {
         vm.assume(encoded > type(uint40).max);
-        vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierLeadingZeros.selector);
-        PBHExternalNullifier.verify(encoded, 30);
+        CallDepth1 callDepth1 = new CallDepth1();
+        vm.expectRevert(
+            abi.encodeWithSelector(PBHExternalNullifier.InvalidExternalNullifier.selector, encoded, 0, "Leading zeros")
+        );
+        callDepth1.verifyRevertCallDepth1(encoded, 30, 0);
     }
 
     function testFuzz_verify_RevertIf_InvalidExternalNullifierVersion(uint8 pbhVersion) public {
@@ -68,8 +75,13 @@ contract PBHExternalNullifierTest is Test {
         uint8 pbhNonce = 0;
         uint8 maxPbh = 30;
         uint256 encoded = PBHExternalNullifier.encode(pbhVersion, pbhNonce, month, year);
-        vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierVersion.selector);
-        PBHExternalNullifier.verify(encoded, maxPbh);
+        CallDepth1 callDepth1 = new CallDepth1();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PBHExternalNullifier.InvalidExternalNullifier.selector, encoded, 0, "Invalid Version"
+            )
+        );
+        callDepth1.verifyRevertCallDepth1(encoded, maxPbh, 0);
     }
 
     function testFuzz_verify_RevertIf_InvalidExternalNullifierYear(uint8 month, uint16 year) public {
@@ -83,8 +95,11 @@ contract PBHExternalNullifierTest is Test {
         uint8 pbhNonce = 0;
         uint8 maxPbh = 30;
         uint256 encoded = PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
-        vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierYear.selector);
-        PBHExternalNullifier.verify(encoded, maxPbh);
+        CallDepth1 callDepth1 = new CallDepth1();
+        vm.expectRevert(
+            abi.encodeWithSelector(PBHExternalNullifier.InvalidExternalNullifier.selector, encoded, 0, "Invalid Year")
+        );
+        callDepth1.verifyRevertCallDepth1(encoded, maxPbh, 0);
     }
 
     function testFuzz_verify_RevertIf_InvalidExternalNullifierMonth(uint8 month, uint16 year) public {
@@ -98,8 +113,11 @@ contract PBHExternalNullifierTest is Test {
         uint8 pbhNonce = 0;
         uint8 maxPbh = 30;
         uint256 encoded = PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
-        vm.expectRevert(PBHExternalNullifier.InvalidExternalNullifierMonth.selector);
-        PBHExternalNullifier.verify(encoded, maxPbh);
+        CallDepth1 callDepth1 = new CallDepth1();
+        vm.expectRevert(
+            abi.encodeWithSelector(PBHExternalNullifier.InvalidExternalNullifier.selector, encoded, 0, "Invalid Month")
+        );
+        callDepth1.verifyRevertCallDepth1(encoded, maxPbh, 0);
     }
 
     function testFuzz_verify_RevertIf_InvalidPbhNonce(uint8 pbhNonce, uint8 maxPbh) public {
@@ -109,7 +127,12 @@ contract PBHExternalNullifierTest is Test {
         uint16 year = uint16(BokkyPooBahsDateTimeLibrary.getYear(block.timestamp));
 
         uint256 encoded = PBHExternalNullifier.encode(PBHExternalNullifier.V1, pbhNonce, month, year);
-        vm.expectRevert(PBHExternalNullifier.InvalidPbhNonce.selector);
-        PBHExternalNullifier.verify(encoded, maxPbh);
+        CallDepth1 callDepth1 = new CallDepth1();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PBHExternalNullifier.InvalidExternalNullifier.selector, encoded, 0, "Invalid PBH Nonce"
+            )
+        );
+        callDepth1.verifyRevertCallDepth1(encoded, maxPbh, 0);
     }
 }

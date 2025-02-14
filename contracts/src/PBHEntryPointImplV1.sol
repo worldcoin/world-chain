@@ -203,10 +203,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         }
 
         // Verify the external nullifier
-        try PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth) {}
-        catch (bytes memory reason) {
-            revert InvalidExternalNullifier(signalHash, reason);
-        }
+        PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth, signalHash);
 
         // If worldId address is set, proceed with on chain verification,
         // otherwise assume verification has been done off chain by the builder.
