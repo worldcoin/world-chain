@@ -19,8 +19,5 @@ build: build-world-chain
 build-world-chain:
     docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
 
-fixtures:
-    chmod +x fixtures.sh && ./fixtures.sh
-
 fmt: 
     kurtosis lint --format

@@ -1,3 +1,7 @@
+# Taken from https://github.com/ethereum/hive and modified to support more cases for Ethereum / OP / Taiko networks
+
+# Usage: cat genesis.json | jq --from-file gen2spec.jq > chainspec.json
+
 # Removes all empty keys and values in input.
 def remove_empty:
   . | walk(
@@ -43,6 +47,13 @@ def infix_zeros_to_length(s;l):
 ;
 
 # This gives the consensus engine definition for the ethash engine.
+def ethash:
+  {
+    "Ethash": {}
+  }
+;
+
+# This gives the consensus engine definition for the op engine.
 def optimism:
   {
     "Optimism": {
@@ -51,7 +62,10 @@ def optimism:
           "bedrockBlockNumber": .config.londonBlock|to_hex,
           "canyonTimestamp": .config.shanghaiTime|to_hex,
           "ecotoneTimestamp": .config.cancunTime|to_hex,
-          "fjordTimestamp": .config.pragueTime|to_hex,
+          "fjordTimestamp": .config.fjordTime|to_hex,
+          "graniteTimestamp": .config.graniteTime|to_hex,
+          "holoceneTimestamp": .config.holoceneTime|to_hex,
+          "isthmusTimestamp": .config.isthmusTime|to_hex,
           "l1FeeRecipient": "0x420000000000000000000000000000000000001A",
           "l1BlockAddress": "0x4200000000000000000000000000000000000015",
           "canyonBaseFeeChangeDenominator": "250"
@@ -60,10 +74,26 @@ def optimism:
   }
 ;
 
+def taiko:
+  {
+    "Taiko": {}
+  }
+;
+
+def clique:
+  {
+    "clique": {
+        "params": {
+          "period": .config.clique.period,
+          "epoch": .config.clique.epoch,
+        }
+    }
+  }
+;
 
 {
   "version": "1",
-  "engine": optimism,
+  "engine": (if .config.optimism != null then optimism elif .config.taiko != null then taiko elif .config.clique != null then clique else ethash end),
   "params": {
     # Tangerine Whistle
     "eip150Transition": "0x0",
@@ -74,8 +104,8 @@ def optimism:
     "eip161dTransition": "0x0",
     "eip155Transition": "0x0",
     "maxCodeSizeTransition": "0x0",
-    "maxCodeSize": 24576,
-    "maximumExtraDataSize": "0x400",
+    "maxCodeSize": "0x6000",
+    "maximumExtraDataSize": "0x20",
 
     # Byzantium
     "eip140Transition": .config.byzantiumBlock|to_hex,
@@ -131,14 +161,27 @@ def optimism:
     "eip5656TransitionTimestamp": .config.cancunTime|to_hex,
     "eip6780TransitionTimestamp": .config.cancunTime|to_hex,
 
+    # OP forks
+    "rip7212TransitionTimestamp": .config.fjordTime|to_hex,
+    "opGraniteTransitionTimestamp": .config.graniteTime|to_hex,
+    "opHoloceneTransitionTimestamp": .config.holoceneTime|to_hex,
+    "opIsthmusTransitionTimestamp": .config.isthmusTime|to_hex,
+
     #Prague
-    "rip7212TransitionTimestamp": .config.pragueTime|to_hex,
+
+    # Fee collector
+    "feeCollector":  (if .config.optimism != null then "0x4200000000000000000000000000000000000019" elif .config.taiko != null then "0x\(.config.chainId)0000000000000000000000000000010001" else null end),
+    "eip1559FeeCollectorTransition": (if .config.optimism != null or .config.taiko != null then .config.londonBlock|to_hex else null end),
 
     # Other chain parameters
     "networkID": .config.chainId|to_hex,
     "chainID": .config.chainId|to_hex,
 
-    "terminalTotalDifficulty": .config.terminalTotalDifficulty|to_hex,
+    "terminalTotalDifficulty": (if .config.taiko != null then "0x0" else .config.terminalTotalDifficulty|to_hex end),
+
+    "eip1559BaseFeeMinValueTransition": .config.ontakeBlock|to_hex,
+    "eip1559BaseFeeMinValue": (if .config.ontakeBlock then "0x86ff51" else null end),
+    "ontakeTransition": .config.ontakeBlock|to_hex,
   },
   "genesis": {
     "seal": {
@@ -147,7 +190,7 @@ def optimism:
          "mixHash": .mixHash,
       },
     },
-    "difficulty": .difficulty,
+    "difficulty": (if .config.taiko != null then "0x0" else .difficulty|to_hex end),
     "author": .coinbase,
     "timestamp": .timestamp,
     "parentHash": .parentHash,
@@ -158,5 +201,5 @@ def optimism:
     "excessBlobGas": .excessBlobGas,
     "parentBeaconBlockRoot": .parentBeaconBlockRoot,
   },
-  "accounts": ((.alloc|with_entries(.key|="0x"+.))),
+  "accounts": ((.alloc|with_entries(.key|=(if startswith("0x") then . else "0x" + . end)))),
 }|remove_empty

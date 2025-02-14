@@ -16,7 +16,8 @@ members = [
     "crates/world/payload",
     "crates/world/rpc",
     "crates/world/pbh",
-    "crates/world/pool",
+    "crates/world/pool", 
+    "crates/world/test-utils",
 ]
 
 default-members = ["crates/world/bin"]
@@ -35,6 +36,7 @@ world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
+world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", tag = "v1.2.0" }

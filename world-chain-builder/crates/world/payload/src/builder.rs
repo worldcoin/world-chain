@@ -75,6 +75,7 @@ impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
     Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,
@@ -98,6 +99,7 @@ where
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_builder_config(
         pool: WorldChainTransactionPool<Client, S>,
         client: Client,

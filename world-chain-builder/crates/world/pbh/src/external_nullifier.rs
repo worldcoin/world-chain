@@ -28,6 +28,15 @@ pub struct ExternalNullifier {
     pub nonce: u8,
 }
 
+/// The encoding format is as follows:
+///      - Bits:40-255: Empty
+///      - Bits 32-39: Year
+///      - Bits 16-31: Month
+///      - Bits 8-15: Nonce
+///      - Bits 0-7: Version
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodedExternalNullifier(pub U256);
+
 impl ExternalNullifier {
     pub fn with_date_marker(marker: DateMarker, nonce: u8) -> Self {
         Self::v1(marker.month as u8, marker.year as u16, nonce)
@@ -45,74 +54,52 @@ impl ExternalNullifier {
     pub fn date_marker(&self) -> DateMarker {
         DateMarker::new(self.year as i32, self.month as u32)
     }
+}
 
-    pub fn be_bytes(&self) -> [u8; 32] {
-        let year_bytes = self.year.to_be_bytes();
-
-        let mut bytes = [0; 32];
-
-        bytes[4] = year_bytes[1];
-        bytes[3] = year_bytes[0];
-        bytes[2] = self.month;
-        bytes[1] = self.nonce;
-        bytes[0] = self.version as u8;
-
-        bytes
+impl From<ExternalNullifier> for EncodedExternalNullifier {
+    fn from(e: ExternalNullifier) -> Self {
+        EncodedExternalNullifier(U256::from(
+            (e.year as u64) << 24
+                | (e.month as u64) << 16
+                | (e.nonce as u64) << 8
+                | e.version as u64,
+        ))
     }
+}
 
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self::try_from_bytes(bytes).expect("Invalid version")
-    }
+impl TryFrom<EncodedExternalNullifier> for ExternalNullifier {
+    type Error = alloy_rlp::Error;
 
-    pub fn try_from_bytes(bytes: [u8; 32]) -> Result<Self, ExternalNullifierError> {
-        let version = if bytes[0] == Prefix::V1 as u8 {
-            Prefix::V1
-        } else {
-            return Err(ExternalNullifierError::InvalidVersion);
-        };
-
-        let mut year_bytes = [0; 2];
-        year_bytes[1] = bytes[4];
-        year_bytes[0] = bytes[3];
-        let year = u16::from_be_bytes(year_bytes);
-
-        let month = bytes[2];
-
-        if month > 12 {
-            return Err(ExternalNullifierError::InvalidMonth(month));
+    fn try_from(value: EncodedExternalNullifier) -> Result<Self, Self::Error> {
+        if value.0 > U256::from(1) << 40 {
+            return Err(alloy_rlp::Error::Custom("invalid external nullifier"));
         }
 
-        let nonce = bytes[1];
+        let word: u64 = value.0.to();
+        let year = (word >> 24) as u16;
+        let month = ((word >> 16) & 0xFF) as u8;
+        let nonce = ((word >> 8) & 0xFF) as u8;
+        let version = (word & 0xFF) as u8;
+
+        if version != Prefix::V1 as u8 {
+            return Err(alloy_rlp::Error::Custom(
+                "invalid external nullifier version",
+            ));
+        }
 
         Ok(Self {
-            version,
+            version: Prefix::V1,
             year,
             month,
             nonce,
         })
     }
-
-    pub fn to_word(&self) -> U256 {
-        let bytes = self.be_bytes();
-
-        U256::from_be_bytes(bytes)
-    }
-
-    pub fn from_word(word: U256) -> Self {
-        Self::try_from_word(word).expect("Invalid version")
-    }
-
-    pub fn try_from_word(word: U256) -> Result<Self, ExternalNullifierError> {
-        let bytes = word.to_be_bytes();
-
-        Self::try_from_bytes(bytes)
-    }
 }
 
 impl std::fmt::Display for ExternalNullifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let w = self.to_word();
-        std::fmt::Display::fmt(&w, f)
+        let word = EncodedExternalNullifier::from(*self).0;
+        write!(f, "{}", word)
     }
 }
 
@@ -126,6 +113,12 @@ pub enum ExternalNullifierError {
 
     #[error("error parsing external nullifier version")]
     InvalidVersion,
+
+    #[error("error parsing external nullifier")]
+    InvalidExternalNullifier,
+
+    #[error(transparent)]
+    RlpError(#[from] alloy_rlp::Error),
 }
 
 impl FromStr for ExternalNullifier {
@@ -133,26 +126,33 @@ impl FromStr for ExternalNullifier {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let word: U256 = s.parse()?;
-
-        Self::try_from_word(word)
+        Ok(Self::try_from(EncodedExternalNullifier(word))?)
     }
 }
 
 impl Decodable for ExternalNullifier {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         let word = U256::decode(buf)?;
-
-        // TODO: How to retrieve this error value? Maybe just log?
-        Self::try_from_word(word)
-            .map_err(|_err| alloy_rlp::Error::Custom("Invalid external nullifier version"))
+        Ok(Self::try_from(EncodedExternalNullifier(word))?)
     }
 }
 
 impl Encodable for ExternalNullifier {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        let word = self.to_word();
+        EncodedExternalNullifier::from(*self).encode(out);
+    }
+}
 
-        word.encode(out);
+impl Encodable for EncodedExternalNullifier {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.0.encode(out);
+    }
+}
+
+impl Decodable for EncodedExternalNullifier {
+    fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        let word = U256::decode(buf)?;
+        Ok(Self(word))
     }
 }
 
@@ -166,7 +166,6 @@ mod tests {
     #[test_case(ExternalNullifier::v1(12, 3078, 19))]
     fn parse_external_nulliifer_roundtrip(e: ExternalNullifier) {
         let s = e.to_string();
-
         let actual: ExternalNullifier = s.parse().unwrap();
 
         assert_eq!(actual, e);
@@ -176,11 +175,13 @@ mod tests {
     #[test_case(ExternalNullifier::v1(12, 3078, 19))]
     fn rlp_roundtrip(e: ExternalNullifier) {
         let mut buffer = vec![];
-
         e.encode(&mut buffer);
-
         let decoded = ExternalNullifier::decode(&mut buffer.as_slice()).unwrap();
-
         assert_eq!(e, decoded);
+        let encoded = EncodedExternalNullifier::from(e);
+        let mut buffer = vec![];
+        encoded.encode(&mut buffer);
+        let decoded = EncodedExternalNullifier::decode(&mut buffer.as_slice()).unwrap();
+        assert_eq!(encoded, decoded);
     }
 }

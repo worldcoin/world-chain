@@ -1,10 +1,13 @@
-shared_utils = import_module(
+ethereum_package_shared_utils = import_module(
     "github.com/ethpandaops/ethereum-package/src/shared_utils/shared_utils.star"
 )
 
-constants = import_module(
+ethereum_package_constants = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/constants.star"
 )
+
+observability = import_module("../../observability/observability.star")
+prometheus = import_module("../../observability/prometheus/prometheus_launcher.star")
 
 #
 #  ---------------------------------- Batcher client -------------------------------------
@@ -20,10 +23,10 @@ BATCHER_HTTP_PORT_NUM = 8548
 
 def get_used_ports():
     used_ports = {
-        BATCHER_HTTP_PORT_ID: shared_utils.new_port_spec(
+        BATCHER_HTTP_PORT_ID: ethereum_package_shared_utils.new_port_spec(
             BATCHER_HTTP_PORT_NUM,
-            shared_utils.TCP_PROTOCOL,
-            shared_utils.HTTP_APPLICATION_PROTOCOL,
+            ethereum_package_shared_utils.TCP_PROTOCOL,
+            ethereum_package_shared_utils.HTTP_APPLICATION_PROTOCOL,
         ),
     }
     return used_ports
@@ -40,6 +43,9 @@ def launch(
     cl_context,
     l1_config_env_vars,
     gs_batcher_private_key,
+    batcher_params,
+    observability_helper,
+    da_server_context,
 ):
     batcher_service_name = "{0}".format(service_name)
 
@@ -51,6 +57,9 @@ def launch(
         cl_context,
         l1_config_env_vars,
         gs_batcher_private_key,
+        batcher_params,
+        observability_helper,
+        da_server_context,
     )
 
     batcher_service = plan.add_service(service_name, config)
@@ -59,6 +68,8 @@ def launch(
     batcher_http_url = "http://{0}:{1}".format(
         batcher_service.ip_address, batcher_http_port.number
     )
+
+    observability.register_op_service_metrics_job(observability_helper, batcher_service)
 
     return "op_batcher"
 
@@ -71,7 +82,12 @@ def get_batcher_config(
     cl_context,
     l1_config_env_vars,
     gs_batcher_private_key,
+    batcher_params,
+    observability_helper,
+    da_server_context,
 ):
+    ports = dict(get_used_ports())
+
     cmd = [
         "op-batcher",
         "--l2-eth-rpc=" + el_context.rpc_http_url,
@@ -87,13 +103,26 @@ def get_batcher_config(
         "--max-channel-duration=1",
         "--l1-eth-rpc=" + l1_config_env_vars["L1_RPC_URL"],
         "--private-key=" + gs_batcher_private_key,
-        "--data-availability-type=blobs",
+        # da commitments currently have to be sent as calldata to the batcher inbox
+        "--data-availability-type="
+        + ("calldata" if da_server_context.enabled else "blobs"),
+        "--altda.enabled=" + str(da_server_context.enabled),
+        "--altda.da-server=" + da_server_context.http_url,
+        # This flag is very badly named, but is needed in order to let the da-server compute the commitment.
+        # This leads to sending POST requests to /put instead of /put/<keccak256(data)>
+        "--altda.da-service",
     ]
 
-    ports = get_used_ports()
+    # apply customizations
+
+    if observability_helper.enabled:
+        observability.configure_op_service_metrics(cmd, ports)
+
+    cmd += batcher_params.extra_params
+
     return ServiceConfig(
         image=image,
         ports=ports,
         cmd=cmd,
-        private_ip_address_placeholder=constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
+        private_ip_address_placeholder=ethereum_package_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
     )

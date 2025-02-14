@@ -1,0 +1,18 @@
+<script>start("/Users/leyton.taylor/work/optimism-package/");</script>
+<script>onHasParentDirectory();</script>
+<script>addRow(".git",".git",1,480,"480 B",1739232420,"2/10/25, 5:07:00 PM");</script>
+<script>addRow("src","src",1,704,"704 B",1739231228,"2/10/25, 4:47:08 PM");</script>
+<script>addRow("static_files","static_files",1,160,"160 B",1739230941,"2/10/25, 4:42:21 PM");</script>
+<script>addRow(".editorconfig",".editorconfig",0,695,"695 B",1730738736,"11/4/24, 9:45:36 AM");</script>
+<script>addRow(".gitignore",".gitignore",0,872,"872 B",1730738736,"11/4/24, 9:45:36 AM");</script>
+<script>addRow(".release-please-manifest.json",".release-please-manifest.json",0,19,"19 B",1736807541,"1/13/25, 3:32:21 PM");</script>
+<script>addRow("CHANGELOG.md","CHANGELOG.md",0,11398,"11.1 kB",1736807541,"1/13/25, 3:32:21 PM");</script>
+<script>addRow("funding.json","funding.json",0,109,"109 B",1730738736,"11/4/24, 9:45:36 AM");</script>
+<script>addRow("kurtosis-package-icon.png","kurtosis-package-icon.png",0,10319,"10.1 kB",1730738736,"11/4/24, 9:45:36 AM");</script>
+<script>addRow("kurtosis.yml","kurtosis.yml",0,239,"239 B",1739232069,"2/10/25, 5:01:09 PM");</script>
+<script>addRow("main.star","main.star",0,7884,"7.7 kB",1739231961,"2/10/25, 4:59:21 PM");</script>
+<script>addRow("network_params.yaml","network_params.yaml",0,2224,"2.2 kB",1739230785,"2/10/25, 4:39:45 PM");</script>
+<script>addRow("optimism-package","optimism-package",0,0,"0 B",1739232703,"2/10/25, 5:11:43 PM");</script>
+<script>addRow("README.md","README.md",0,25051,"24.5 kB",1739202395,"2/10/25, 8:46:35 AM");</script>
+<script>addRow("release-please-config.json","release-please-config.json",0,309,"309 B",1736807541,"1/13/25, 3:32:21 PM");</script>
+<script>addRow("version.txt","version.txt",0,6,"6 B",1736807541,"1/13/25, 3:32:21 PM");</script>

@@ -18,7 +18,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
 use clap::Parser;
 use eyre::eyre::{eyre, Result};
-use fixtures::generate_fixture;
+use fixtures::TransactionFixtures;
 use std::process::Command;
 use tokio::time::sleep;
 use tracing::info;
@@ -41,13 +41,14 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let args = Args::parse();
-    let (builder_rpc, sequencer_rpc) = start_devnet(args).await?;
+    let (builder_rpc, sequencer_rpc, rundler) = start_devnet(args).await?;
 
     let sequencer_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
     let builder_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
-
+    let rundler_provider: Arc<RootProvider<Ethereum>> =
+        Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
     let timeout = std::time::Duration::from_secs(30);
 
     info!("Waiting for the devnet to be ready");
@@ -59,9 +60,16 @@ async fn main() -> Result<()> {
     };
     f.await;
 
-    let fixture = generate_fixture(255).await;
+    let fixture = TransactionFixtures::new().await;
+    info!("Running Rundler Ops test");
+    cases::user_ops_test(
+        rundler_provider,
+        builder_provider.clone(),
+        fixture.pbh_user_operations,
+    )
+    .await?;
     info!("Running load test");
-    cases::load_test(builder_provider.clone(), fixture.pbh).await?;
+    cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
     info!("Running Transact Conditional Test");
     cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
     info!("Running fallback test");
@@ -69,7 +77,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn start_devnet(args: Args) -> Result<(String, String)> {
+async fn start_devnet(args: Args) -> Result<(String, String, String)> {
     if !args.no_deploy {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
@@ -80,25 +88,26 @@ async fn start_devnet(args: Args) -> Result<(String, String)> {
         run_command(&"just", &["devnet-up"], path).await?;
     }
 
-    let (builder_socket, sequencer_socket) = get_endpoints().await?;
+    let (builder_socket, sequencer_socket, rundler) = get_endpoints().await?;
 
     info!(
         builder_rpc = %builder_socket,
         sequencer_rpc = %sequencer_socket,
+        rundler_rpc = %rundler,
         "Devnet is ready"
     );
 
-    Ok((builder_socket, sequencer_socket))
+    Ok((builder_socket, sequencer_socket, rundler))
 }
 
-async fn get_endpoints() -> Result<(String, String)> {
+async fn get_endpoints() -> Result<(String, String, String)> {
     let builder_socket = run_command(
         "kurtosis",
         &[
             "port",
             "print",
             "world-chain",
-            "wc-admin-world-chain-builder",
+            "op-el-builder-1-world-chain-builder-op-node-op-kurtosis",
             "rpc",
         ],
         env!("CARGO_MANIFEST_DIR"),
@@ -112,7 +121,20 @@ async fn get_endpoints() -> Result<(String, String)> {
 
     let sequencer_socket = run_command(
         "kurtosis",
-        &["port", "print", "world-chain", "wc-admin-op-geth", "rpc"],
+        &[
+            "port",
+            "print",
+            "world-chain",
+            "op-el-1-op-geth-op-node-op-kurtosis",
+            "rpc",
+        ],
+        env!("CARGO_MANIFEST_DIR"),
+    )
+    .await?;
+
+    let rundler_socket = run_command(
+        "kurtosis",
+        &["port", "print", "world-chain", "rundlerop-kurtosis", "rpc"],
         env!("CARGO_MANIFEST_DIR"),
     )
     .await?;
@@ -122,7 +144,7 @@ async fn get_endpoints() -> Result<(String, String)> {
         sequencer_socket.split("http://").collect::<Vec<&str>>()[1]
     );
 
-    Ok((builder_socket, sequencer_socket))
+    Ok((builder_socket, sequencer_socket, rundler_socket))
 }
 
 async fn wait<N, P>(provider: P, timeout: time::Duration)

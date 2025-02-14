@@ -6,6 +6,7 @@ use semaphore::Field;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::external_nullifier::EncodedExternalNullifier;
 use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
 
 pub const TREE_DEPTH: usize = 30;
@@ -97,7 +98,7 @@ impl PBHPayload {
             self.root,
             self.nullifier_hash,
             signal,
-            self.external_nullifier.to_word(),
+            EncodedExternalNullifier::from(self.external_nullifier).0,
             &self.proof.0,
             TREE_DEPTH,
         )? {
@@ -131,7 +132,6 @@ impl PBHPayload {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod test {
     use chrono::TimeZone;
