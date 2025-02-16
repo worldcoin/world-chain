@@ -21,13 +21,13 @@ reth-trie-db = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-stages-types = { workspace = true, optional = true }
 reth-optimism-primitives.workspace = true
-reth-optimism-chainspec.workspace = true
+reth-optimism-chainspec = { workspace = true, optional = true }
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
 
-alloy-genesis.workspace = true
 alloy-consensus.workspace = true
+alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 alloy-eips.workspace = true
@@ -41,7 +41,7 @@ op-alloy-consensus.workspace = true
 ethers-core.workspace = true
 tokio.workspace = true
 semaphore.workspace = true
-eyre.workspace = true
+eyre = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
@@ -59,11 +59,14 @@ chrono.workspace = true
 default = []
 test = [
     "dep:reth-e2e-test-utils",
+    "dep:reth-optimism-chainspec",
     "dep:reth-trie-db",
     "dep:reth-stages-types",
     "dep:reth-trie",
     "dep:alloy-signer-local",
     "dep:alloy-network",
+    "dep:alloy-genesis",
+    "dep:eyre",
     "dep:bon",
 ]
 

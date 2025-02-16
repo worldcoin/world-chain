@@ -685,7 +685,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client> {
-    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpPrimitives>,
+    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec, OpPrimitives>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,

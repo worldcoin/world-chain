@@ -18,7 +18,7 @@ use alloy_rpc_types::Withdrawals;
 use parking_lot::Mutex;
 use reth::{
     api::NodeTypes,
-    chainspec::{ChainInfo, ChainSpec, ChainSpecBuilder},
+    chainspec::{ChainInfo, ChainSpec},
 };
 use reth::{core::primitives::SignedTransaction, revm::revm};
 use reth_db::{

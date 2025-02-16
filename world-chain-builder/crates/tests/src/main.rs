@@ -16,7 +16,6 @@ use alloy_provider::network::Ethereum;
 use alloy_provider::RootProvider;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
-use alloy_transport::Transport;
 use clap::Parser;
 use eyre::eyre::{eyre, Result};
 use fixtures::generate_fixture;
