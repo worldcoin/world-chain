@@ -56,15 +56,46 @@ where
         }
     }
 
-    /// Get a reference to the inner transaction validator.
-    pub fn inner(&self) -> &OpTransactionValidator<Client, Tx> {
-        &self.inner
+    /// Validates a PBH bundle transaction
+    ///
+    /// If the transaction is valid marks it for priority inclusion
+    pub fn validate_pbh(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        if let Some(pbh_sidecar) = tx.pbh_sidecar() {
+            match pbh_sidecar {
+                PBHSidecar::PBHBundle(_) => {
+                    todo!()
+                }
+                PBHSidecar::PBHPayload(_) => {
+                    todo!()
+                }
+            }
+        } else {
+            let function_signature: [u8; 4] = tx
+                .input()
+                .get(..4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .unwrap_or_default();
+
+            match function_signature {
+                IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+                    self.validate_pbh_aggregated_ops(origin, tx)
+                }
+                IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
+                    self.validate_pbh_multicall(origin, tx)
+                }
+                _ => self.inner.validate_one(origin, tx.clone()),
+            }
+        }
     }
 
     /// Validates a PBH bundle transaction
     ///
     /// If the transaction is valid marks it for priority inclusion
-    pub fn validate_pbh_bundle(
+    pub fn validate_pbh_aggregated_ops(
         &self,
         origin: TransactionOrigin,
         tx: Tx,
@@ -177,7 +208,18 @@ where
         origin: TransactionOrigin,
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        // TODO:
+        let Some(pbh_sidecar) = tx.pbh_sidecar() else {
+            return WorldChainPoolTransactionError::MissingPbhSidecar.to_outcome(tx);
+        };
+
+        match pbh_sidecar {
+            PBHSidecar::PBHBundle(_) => {
+                todo!()
+            }
+            PBHSidecar::PBHPayload(_) => {
+                todo!()
+            }
+        }
 
         todo!()
     }
@@ -197,27 +239,39 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if transaction.pbh_sidecar().is_some() {
-            return self.validate_pbh_sidecar(origin, transaction);
-        } else if transaction.to().unwrap_or_default() != self.pbh_validator {
-            return self.inner.validate_one(origin, transaction.clone());
+        if transaction.pbh_sidecar().is_some()
+            || transaction.to().unwrap_or_default() == self.pbh_validator
+        {
+            self.validate_pbh(origin, transaction)
+        } else {
+            self.inner.validate_one(origin, transaction)
         }
 
-        let function_signature: [u8; 4] = transaction
-            .input()
-            .get(..4)
-            .and_then(|bytes| bytes.try_into().ok())
-            .unwrap_or_default();
+        // // TODO: if pbh sidecar or to addr is pbh_validator,
+        // // have one validate pbh function
+        // // else inner validate one
 
-        match function_signature {
-            IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
-                self.validate_pbh_bundle(origin, transaction)
-            }
-            IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
-                self.validate_pbh_multicall(origin, transaction)
-            }
-            _ => self.inner.validate_one(origin, transaction.clone()),
-        }
+        // if transaction.pbh_sidecar().is_some() {
+        //     return self.validate_pbh_sidecar(origin, transaction);
+        // } else if transaction.to().unwrap_or_default() != self.pbh_validator {
+        //     return self.inner.validate_one(origin, transaction.clone());
+        // }
+
+        // let function_signature: [u8; 4] = transaction
+        //     .input()
+        //     .get(..4)
+        //     .and_then(|bytes| bytes.try_into().ok())
+        //     .unwrap_or_default();
+
+        // match function_signature {
+        //     IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+        //         self.validate_pbh_bundle(origin, transaction)
+        //     }
+        //     IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
+        //         self.validate_pbh_multicall(origin, transaction)
+        //     }
+        //     _ => self.inner.validate_one(origin, transaction.clone()),
+        // }
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
