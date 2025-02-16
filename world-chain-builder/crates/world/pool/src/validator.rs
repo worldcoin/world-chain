@@ -63,9 +63,16 @@ where
         origin: TransactionOrigin,
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
+        // TODO: this can be simplified
         if let Some(pbh_sidecar) = tx.pbh_sidecar() {
+            // Ensure that the tx is a valid OP transaction and return early if invalid
+            let mut tx_outcome = match self.inner.validate_one(origin, tx.clone()) {
+                valid @ TransactionValidationOutcome::Valid { .. } => valid,
+                other => return other,
+            };
+
             match pbh_sidecar {
-                PBHSidecar::PBHBundle(_) => {
+                PBHSidecar::PBHBundle(pbh_bundle) => {
                     todo!()
                 }
                 PBHSidecar::PBHPayload(payload) => {
@@ -78,10 +85,18 @@ where
                         return WorldChainPoolTransactionError::PBHValidationError(err)
                             .to_outcome(tx);
                     }
-
-                    todo!()
                 }
             }
+
+            if let TransactionValidationOutcome::Valid {
+                transaction: ValidTransaction::Valid(tx),
+                ..
+            } = &mut tx_outcome
+            {
+                tx.set_pbh_sidecar(pbh_sidecar.clone());
+            }
+
+            tx_outcome
         } else {
             let function_signature: [u8; 4] = tx
                 .input()
