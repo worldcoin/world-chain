@@ -3,4 +3,12 @@ authors = [""]
 language = "en"
 multilingual = false
 src = "specs"
-title = "specs"
+title = "World Chain Specs"
+
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+
+[output.html]
+additional-js = ["specs/static/mermaid.min.js", "specs/static/mermaid-init.js"]
