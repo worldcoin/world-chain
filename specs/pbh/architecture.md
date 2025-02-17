@@ -6,7 +6,27 @@ World Chain is an OP Stack chain that enables Priority Blockspace for Humans (PB
  The [Engine API](https://specs.optimism.io/protocol/exec-engine.html#engine-api) defines the communication protocol between the Consensus Layer (CL) and the Execution Layer (EL) and is responsible for orchestrating block production on the OP Stack. Periodically, the sequencer's consensus client will send a fork choice update (FCU) to its execution client, signaling for a new block to be built. After a series of API calls between the CL and EL, the EL will return a new `ExecutionPayload` containing a newly constructed block. The CL will then advance the unsafe head of the chain and peer the new block to other nodes in the network.
  
 
-<!-- TODO: insert diagram -->
+```mermaid
+sequenceDiagram
+    box OP Stack Sequencer
+        participant sequencer-cl as Sequencer CL
+        participant sequencer-el as Sequencer EL
+    end
+    box Network
+        participant peers-cl as Peers CL
+    end
+
+    Note over sequencer-cl: FCU with Attributes
+    sequencer-cl->>sequencer-el: engine_forkChoiceUpdatedV3(ForkChoiceState, Attrs)
+    sequencer-el-->>sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: buildProcessId}
+    Note over sequencer-el: Build execution payload
+    sequencer-cl->>sequencer-el: engine_getPayloadV3(PayloadId)
+    sequencer-el-->>sequencer-cl: {executionPayload, blockValue}
+    sequencer-cl->>peers-cl: Propagate new block
+
+
+```
+
 
  For a detailed look at how block production works on the OP Stack, see the [OP Stack specs](https://specs.optimism.io/protocol/exec-engine.html#engine-api).
 
@@ -53,6 +73,7 @@ sequenceDiagram
     rollup-boost->>sequencer-el: engine_newPayload
     sequencer-cl->>rollup-boost: engine_FCU (without attrs)
     rollup-boost->>sequencer-el: engine_FCU (without attrs)
+    sequencer-cl->>builder-cl: Peer new block
 ```
 
 
