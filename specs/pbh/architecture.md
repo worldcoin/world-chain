@@ -18,7 +18,7 @@ sequenceDiagram
 
     Note over sequencer-cl: FCU with Attributes
     sequencer-cl->>sequencer-el: engine_forkChoiceUpdatedV3(ForkChoiceState, Attrs)
-    sequencer-el-->>sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: buildProcessId}
+    sequencer-el-->>sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: PayloadId}
     Note over sequencer-el: Build execution payload
     sequencer-cl->>sequencer-el: engine_getPayloadV3(PayloadId)
     sequencer-el-->>sequencer-cl: {executionPayload, blockValue}
@@ -48,32 +48,38 @@ sequenceDiagram
         participant sequencer-el as Sequencer EL
     end
     box Builder
-        participant builder-cl as Builder CL
         participant builder-el as Builder EL
     end
 
-    Note over sequencer-cl, builder-el: 1. FCU with Attributes
-    sequencer-cl->>rollup-boost: engine_FCU (with attrs)
-    rollup-boost->>sequencer-el: engine_FCU (with attrs)
-    rollup-boost->>builder-el: engine_FCU (with attrs)
-    rollup-boost->>sequencer-cl: Payload ID
+    Note over sequencer-cl: FCU with Attributes
+    sequencer-cl->>rollup-boost: engine_forkChoiceUpdatedV3(..., Attrs)
 
-    Note over sequencer-cl, builder-el: 2. Get Payload
-    sequencer-cl->>rollup-boost: engine_getPayload
-    rollup-boost->>sequencer-el: engine_getPayload
-    rollup-boost->>builder-el: engine_getPayload
+    Note over rollup-boost: Forward FCU
+    rollup-boost->>builder-el: engine_forkChoiceUpdatedV3(..., Attrs)
 
-    Note over sequencer-cl, builder-el: 3. Validate block
-    rollup-boost->>sequencer-el: engine_newPayload
-    sequencer-el->>rollup-boost: block validity
-    rollup-boost->>sequencer-cl: block payload
+    rollup-boost->>sequencer-el: engine_forkChoiceUpdatedV3(..., Attrs)
+    sequencer-el-->>rollup-boost: {payloadId: PayloadId}
+    rollup-boost-->>sequencer-cl: {payloadId: PayloadId}
 
-    Note over sequencer-cl, builder-el: 4. Propagate new block
-    sequencer-cl->>rollup-boost: engine_newPayload
-    rollup-boost->>sequencer-el: engine_newPayload
-    sequencer-cl->>rollup-boost: engine_FCU (without attrs)
-    rollup-boost->>sequencer-el: engine_FCU (without attrs)
-    sequencer-cl->>builder-cl: Peer new block
+
+    Note over sequencer-cl: Get Payload
+    sequencer-cl->>rollup-boost: engine_getPayloadV3(PayloadId)
+    Note over rollup-boost: Forward Get Payload
+    rollup-boost->>sequencer-el: engine_getPayloadV3(PayloadId)
+    rollup-boost->>builder-el: engine_getPayloadV3(PayloadId)
+    builder-el-->>rollup-boost: {executionPayload, blockValue}
+    sequencer-el-->>rollup-boost: {executionPayload, blockValue}
+
+
+
+    Note over rollup-boost, sequencer-el: Validate builder block
+    rollup-boost->>sequencer-el: engine_newPayloadV3(ExecutionPayload)
+    sequencer-el->>rollup-boost: {status: VALID, ...}
+
+    Note over rollup-boost: Propose exectuion payload
+    rollup-boost->>sequencer-cl: {executionPayload, blockValue}
+    
+    Note over sequencer-cl: Propagate new block
 ```
 
 
