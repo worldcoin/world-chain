@@ -56,7 +56,7 @@ sequenceDiagram
 ```
 
 
-By default, `rollup-boost` will proxy all RPC calls from the proposer `sequencer-cl` to its local `sequencer-el` node. Additionally, specific RPC calls will also be forwarded to external builders:
+By default, `rollup-boost` will proxy all RPC calls from the proposer `op-node` to its local execution client. Additionally, specific RPC calls will also be forwarded to external builders:
 
 - `engine_forkchoiceUpdatedV3`
     - This call is only multiplexed to the builder if the call contains payload attributes and the `no_tx_pool` attribute is `false`.
