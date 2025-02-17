@@ -57,6 +57,11 @@ where
         }
     }
 
+    /// Returns the configured client
+    pub fn client(&self) -> &Client {
+        &self.inner.client()
+    }
+
     /// Validates a PBH transaction
     pub fn validate_pbh(
         &self,
