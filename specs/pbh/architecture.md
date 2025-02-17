@@ -14,49 +14,49 @@ World Chain is an OP Stack chain that enables Priority Blockspace for Humans (PB
 
 
  ## Rollup Boost
-`rollup-boost` is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. `rollup-boost` acts as an intermediary between the sequencer's consensus and execution client. When `op-node` sends a new FCU to `rollup-boost`, the request will be multiplexed to both the sequencer's execution client and external block builders signaling that a new block should be built. 
+`rollup-boost` is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. `rollup-boost` acts as an intermediary between the sequencer's consensus and execution client. When `sequencer-cl` sends a new FCU to `rollup-boost`, the request will be multiplexed to both the sequencer's execution client and external block builders signaling that a new block should be built. 
 
-When the sequencer is ready to propose a new block, `op-node` will send an `engine_getPayload` request to `rollup-boost` which is forwarded to the default execution client and external block builders. Note that `rollup-boost` will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block. 
+When the sequencer is ready to propose a new block, `sequencer-cl` will send an `engine_getPayload` request to `rollup-boost` which is forwarded to the default execution client and external block builders. Note that `rollup-boost` will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block. 
 
-Once `rollup-boost` receives the external builder's block, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer `op-node`, otherwise, `rollup-boost` will return the fallback block.  
+Once `rollup-boost` receives the external builder's block, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer `sequencer-cl`, otherwise, `rollup-boost` will return the fallback block.
 
 ```mermaid
 sequenceDiagram
-    box Proposer
-        participant op-node
+    box Sequencer
+        participant sequencer-cl as Sequencer CL
         participant rollup-boost
-        participant op-geth
+        participant sequencer-el as Sequencer EL
     end
     box Builder
-        participant builder-op-node as op-node
-        participant builder-op-geth as builder
+        participant builder-cl as Builder CL
+        participant builder-el as Builder EL
     end
 
-    Note over op-node, builder-op-geth: 1. Triggering Block Building
-    op-node->>rollup-boost: engine_FCU (with attrs)
-    rollup-boost->>op-geth: engine_FCU (with attrs)
-    rollup-boost->>builder-op-geth: engine_FCU (with attrs)
-    rollup-boost->>op-node: proposer payload id
+    Note over sequencer-cl, builder-el: 1. FCU with Attributes
+    sequencer-cl->>rollup-boost: engine_FCU (with attrs)
+    rollup-boost->>sequencer-el: engine_FCU (with attrs)
+    rollup-boost->>builder-el: engine_FCU (with attrs)
+    rollup-boost->>sequencer-cl: Payload ID
 
-    Note over op-node, builder-op-geth: 2. Get Local and Builder Blocks
-    op-node->>rollup-boost: engine_getPayload
-    rollup-boost->>op-geth: engine_getPayload
-    rollup-boost->>builder-op-geth: engine_getPayload
+    Note over sequencer-cl, builder-el: 2. Get Payload
+    sequencer-cl->>rollup-boost: engine_getPayload
+    rollup-boost->>sequencer-el: engine_getPayload
+    rollup-boost->>builder-el: engine_getPayload
 
-    Note over op-node, builder-op-geth: 3. Validating and Returning Builder Block
-    rollup-boost->>op-geth: engine_newPayload
-    op-geth->>rollup-boost: block validity
-    rollup-boost->>op-node: block payload
+    Note over sequencer-cl, builder-el: 3. Validate block
+    rollup-boost->>sequencer-el: engine_newPayload
+    sequencer-el->>rollup-boost: block validity
+    rollup-boost->>sequencer-cl: block payload
 
-    Note over op-node, builder-op-geth: 4. Updating Chain State
-    op-node->>rollup-boost: engine_newPayload
-    rollup-boost->>op-geth: engine_newPayload
-    op-node->>rollup-boost: engine_FCU (without attrs)
-    rollup-boost->>op-geth: engine_FCU (without attrs)
+    Note over sequencer-cl, builder-el: 4. Propagate new block
+    sequencer-cl->>rollup-boost: engine_newPayload
+    rollup-boost->>sequencer-el: engine_newPayload
+    sequencer-cl->>rollup-boost: engine_FCU (without attrs)
+    rollup-boost->>sequencer-el: engine_FCU (without attrs)
 ```
 
 
-By default, `rollup-boost` will proxy all RPC calls from the proposer `op-node` to its local `op-geth` node. Additionally, specific RPC calls will also be forwarded to external builders:
+By default, `rollup-boost` will proxy all RPC calls from the proposer `sequencer-cl` to its local `sequencer-el` node. Additionally, specific RPC calls will also be forwarded to external builders:
 
 - `engine_forkchoiceUpdatedV3`
     - This call is only multiplexed to the builder if the call contains payload attributes and the `no_tx_pool` attribute is `false`.
