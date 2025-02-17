@@ -83,23 +83,17 @@ sequenceDiagram
 ```
 
 
-By default, `rollup-boost` will proxy all RPC calls from the proposer `op-node` to its local execution client. Additionally, specific RPC calls will also be forwarded to external builders:
-
-- `engine_forkchoiceUpdatedV3`
-    - This call is only multiplexed to the builder if the call contains payload attributes and the `no_tx_pool` attribute is `false`.
-- `engine_getPayloadV3`
+In addition to Engine API requests, `rollup-boost` will proxy all RPC calls from the sequencer `op-node` to its local execution client. The following RPC calls will also be forwarded to external builders:
 - `miner_*`
     - The Miner API is used to notify execution clients of changes in effective gas price, extra data, and DA throttling requests from the batcher.
 - `eth_sendRawTransaction*`
     - Forwards transactions the sequencer receives to the builder for block building.
-
-
  
  </br>
  
  ## Block Production on World Chain
 
+World Chain leverages `rollup-boost` to enable external block production and integrates the World Chain Builder as a block builder in the network. The World Chain Builder implements a custom block ordering policy (ie. PBH) to provide priority inclusion for transactions with a valid World ID proof. Note that the custom ordering policy adheres to the OP Stack spec. 
 
-<!-- TODO: -->
- 
+In the event that the block builder is offline, `rollup-boost` will fallback to the block built by the default execution client with standard OP Stack ordering rules.
 
