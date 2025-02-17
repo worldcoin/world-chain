@@ -20,7 +20,6 @@ import {Mock4337Module} from "../test/mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 
 contract DeployDevnet is Script {
-    address public entryPoint;
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
@@ -29,6 +28,8 @@ contract DeployDevnet is Script {
     SafeProxyFactory public factory;
     SafeModuleSetup public moduleSetup;
 
+    address public constant ENTRY_POINT =
+        0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant WORLD_ID =
         0x5FbDB2315678afecb367f032d93F642f64180aa3;
     /// @dev The root of the Test tree.
@@ -44,17 +45,11 @@ contract DeployDevnet is Script {
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
-        deployEntryPoint();
         deployPBHEntryPoint();
         deployPBHSignatureAggregator();
         deploySafeAndModules();
         updateWorldID();
         vm.stopBroadcast();
-    }
-
-    function deployEntryPoint() public {
-        entryPoint = address(new EntryPoint());
-        console.log("EntryPoint Deployed at: ", entryPoint);
     }
 
     function deployPBHEntryPoint() public {
@@ -64,7 +59,7 @@ contract DeployDevnet is Script {
             PBHEntryPointImplV1.initialize,
             (
                 IWorldID(WORLD_ID),
-                IEntryPoint(entryPoint),
+                IEntryPoint(ENTRY_POINT),
                 255,
                 address(0x123),
                 MAX_PBH_GAS_LIMIT
@@ -121,7 +116,7 @@ contract DeployDevnet is Script {
             console.log("Owner Key", ownerKey);
             console.log("Owner", owner);
             Mock4337Module module = new Mock4337Module(
-                entryPoint,
+                ENTRY_POINT,
                 pbhSignatureAggregator,
                 PBH_NONCE_KEY
             );
@@ -167,7 +162,7 @@ contract DeployDevnet is Script {
             Safe safe = Safe(payable(address(proxy)));
             require(safe.isOwner(owner), "Owner not added to Safe");
             console.log("Safe Proxy Deployed at: ", address(safe));
-            IEntryPoint(entryPoint).depositTo{value: 1 ether}(address(safe));
+            IEntryPoint(ENTRY_POINT).depositTo{value: 1 ether}(address(safe));
         }
     }
 

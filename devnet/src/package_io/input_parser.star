@@ -19,7 +19,7 @@ DEFAULT_CL_IMAGES = {
 }
 
 DEFAULT_BUNDLER_IMAGES = {
-    "rundler": "leytont/rundler:test",
+    "rundler": "alchemyplatform/rundler:v0.6.0-alpha.0",
 }
 
 DEFAULT_BATCHER_IMAGES = {
