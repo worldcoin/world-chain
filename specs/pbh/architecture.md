@@ -38,7 +38,7 @@ sequenceDiagram
 
 When the sequencer is ready to propose a new block, `sequencer-cl` will send an `engine_getPayload` request to `rollup-boost` which is forwarded to the default execution client and external block builders. Note that `rollup-boost` will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block. 
 
-Once `rollup-boost` receives the external builder's block, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer `sequencer-cl`, otherwise, `rollup-boost` will return the fallback block.
+Once `rollup-boost` receives the external builder's block, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer `op-node`, otherwise, `rollup-boost` will return the fallback block.
 
 ```mermaid
 sequenceDiagram
