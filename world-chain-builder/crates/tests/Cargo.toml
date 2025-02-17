@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 world-chain-builder-node = { workspace = true, features = ["test"]}
 world-chain-builder-pool = { workspace = true, features = ["test"]}
+world-chain-builder-test-utils.workspace = true
+world-chain-builder-pbh.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
@@ -30,3 +32,4 @@ serde_json.workspace = true
 futures.workspace = true
 tokio.workspace = true
 eyre.workspace = true
+chrono.workspace = true

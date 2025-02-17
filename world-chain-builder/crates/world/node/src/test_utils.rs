@@ -44,52 +44,79 @@ use std::{
 };
 use tokio::sync::{broadcast, watch};
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_builder_test_utils::{
+    utils::{pbh_bundle, pbh_multicall, signer, user_op},
+    PBH_DEV_ENTRYPOINT,
+};
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
 use world_chain_builder_pool::{
-    test_utils::{pbh_bundle, signer, user_op, PBH_TEST_ENTRYPOINT},
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
 
 pub const DEV_CHAIN_ID: u64 = 2151908;
 
-#[derive(Default)]
-pub struct PBHTransactionTestContext;
+pub async fn raw_pbh_bundle_bytes(
+    acc: u32,
+    pbh_nonce: u8,
+    tx_nonce: u64,
+    user_op_nonce: U256,
+    chain_id: u64,
+) -> Bytes {
+    let dt = chrono::Utc::now();
+    let dt = dt.naive_local();
+    let month = dt.month() as u8;
+    let year = dt.year() as u16;
 
-impl PBHTransactionTestContext {
-    pub async fn raw_pbh_tx_bytes(
-        acc: u32,
-        pbh_nonce: u8,
-        tx_nonce: u64,
-        user_op_nonce: U256,
-        chain_id: u64,
-    ) -> Bytes {
-        let dt = chrono::Utc::now();
-        let dt = dt.naive_local();
-        let month = dt.month() as u8;
-        let year = dt.year() as u16;
+    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
+    let (uo, proof) = user_op()
+        .acc(acc)
+        .nonce(user_op_nonce)
+        .external_nullifier(ext_nullifier)
+        .call();
 
-        let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
-        let (uo, proof) = user_op()
-            .acc(acc)
-            .nonce(user_op_nonce)
-            .external_nullifier(ext_nullifier)
-            .call();
+    let data = pbh_bundle(vec![uo], vec![proof.into()]);
+    let encoded = data.abi_encode();
+    let tx = tx(
+        chain_id,
+        Some(Bytes::from(encoded)),
+        tx_nonce,
+        PBH_DEV_ENTRYPOINT,
+    );
+    let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
+    let raw_tx = envelope.encoded_2718();
+    raw_tx.into()
+}
 
-        let data = pbh_bundle(vec![uo], vec![proof]);
-        let encoded = data.abi_encode();
-        let tx = tx(
-            chain_id,
-            Some(Bytes::from(encoded)),
-            tx_nonce,
-            PBH_TEST_ENTRYPOINT,
-        );
-        let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
-        let raw_tx = envelope.encoded_2718();
-        raw_tx.into()
-    }
+pub async fn raw_pbh_multicall_bytes(
+    acc: u32,
+    pbh_nonce: u8,
+    tx_nonce: u64,
+    chain_id: u64,
+) -> Bytes {
+    let dt = chrono::Utc::now();
+    let dt = dt.naive_local();
+    let month = dt.month() as u8;
+    let year = dt.year() as u16;
+
+    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
+
+    let data = pbh_multicall()
+        .acc(acc)
+        .external_nullifier(ext_nullifier)
+        .call();
+    let encoded = data.abi_encode();
+    let tx = tx(
+        chain_id,
+        Some(Bytes::from(encoded)),
+        tx_nonce,
+        PBH_DEV_ENTRYPOINT,
+    );
+    let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
+    let raw_tx = envelope.encoded_2718();
+    raw_tx.into()
 }
 
 pub fn tx(chain_id: u64, data: Option<Bytes>, nonce: u64, to: Address) -> TransactionRequest {

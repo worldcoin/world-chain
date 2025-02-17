@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 world-chain-builder-payload.workspace = true
 world-chain-builder-pool.workspace = true
+world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 
 reth.workspace = true
@@ -22,13 +23,13 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-primitives = { workspace = true, optional = true }
+reth-primitives-traits = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
 reth-provider.workspace = true
 reth-optimism-evm.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
-reth-primitives = { workspace = true, optional = true }
-reth-primitives-traits = { workspace = true, optional = true }
 reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-e2e-test-utils = { workspace = true, optional = true }
@@ -71,7 +72,7 @@ chrono.workspace = true
 [features]
 default = []
 test = [
-    "world-chain-builder-pool/test",
+    "world-chain-builder-test-utils",
     "world-chain-builder-pbh",
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
