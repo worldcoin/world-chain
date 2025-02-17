@@ -95,5 +95,9 @@ In addition to Engine API requests, `rollup-boost` will proxy all RPC calls from
 
 World Chain leverages `rollup-boost` to enable external block production and integrates the World Chain Builder as a block builder in the network. The World Chain Builder implements a custom block ordering policy (ie. PBH) to provide priority inclusion for transactions with a valid World ID proof. Note that the custom ordering policy adheres to the OP Stack spec. 
 
+
+<!-- TODO: insert Default block vs PBH block -->
+
+
 In the event that the block builder is offline, `rollup-boost` will fallback to the block built by the default execution client with standard OP Stack ordering rules.
 

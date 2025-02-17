@@ -3,7 +3,7 @@
 
 ## About World Chain
 
-[World Chain]() is a blockchain for humans.
+[World Chain](https://worldscan.org/) is a blockchain for humans.
 
 
 
