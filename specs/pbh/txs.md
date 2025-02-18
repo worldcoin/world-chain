@@ -1,7 +1,9 @@
 # PBH Transactions
 
 The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid [PBHPayload](https://github.com/worldcoin/world-chain/blob/main/contracts/src/interfaces/IPBHEntryPoint.sol#L9-L19) either encoded in a transaction envelope or the tx calldata.
-<!-- TODO: link on how to create a semaphore proof -->
+
+TODO: link to helper libraries to create a proof 
+
 
 ## PBHPayload
 A `PBHPayload` consists of the following RLP encoded fields:
@@ -61,11 +63,17 @@ function decode(uint256 externalNullifier)
     version = uint8(externalNullifier & 0xFF);
 }
 ```
+<br>
 
 The **World Chain Builder** enforces:
 - The `external_nullifier` is correctly formatted and includes the current year, month and valid nonce.
 - The `proof` is valid and specifies the `external_nullifier` as a public input to the proof.
 - The `external_nullifier` has not been used before, ensuring that the `pbh_nonce` is unique for the given month and year.
+
+
+
+TODO: Explain the role of the signal hash when creating the semaphore proof and how it is used in the builder to verify the 
+data integrity.
 
 
 ## World Chain Tx Envelope
