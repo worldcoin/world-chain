@@ -10,4 +10,8 @@ title = "World Chain Specs"
 command = "mdbook-mermaid"
 
 [output.html]
-additional-js = ["specs/static/mermaid.min.js", "specs/static/mermaid-init.js"]
+additional-js = [
+    "specs/static/mermaid.min.js",
+    "specs/static/mermaid-init.js",
+    "specs/static/solidity-min.js",
+]
