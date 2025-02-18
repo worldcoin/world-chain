@@ -19,7 +19,7 @@ sequenceDiagram
     Note over sequencer-cl: FCU with Attributes
     sequencer-cl->>sequencer-el: engine_forkChoiceUpdatedV3(ForkChoiceState, Attrs)
     sequencer-el-->>sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: PayloadId}
-    Note over sequencer-el: Build execution payload
+    sequencer-el->>sequencer-el: Build execution payload
     sequencer-cl->>sequencer-el: engine_getPayloadV3(PayloadId)
     sequencer-el-->>sequencer-cl: {executionPayload, blockValue}
     sequencer-cl->>peers-cl: Propagate new block
