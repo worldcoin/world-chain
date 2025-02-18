@@ -1,11 +1,10 @@
 # PBH Transactions
 
-<!-- TODO: Update world id proof link  -->
-The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid [World ID proof](https://docs.world.org/world-id/reference/contracts#usage) either encoded in a transaction envelope or the tx calldata.
+The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid [PBHPayload](https://github.com/worldcoin/world-chain/blob/main/contracts/src/interfaces/IPBHEntryPoint.sol#L9-L19) either encoded in a transaction envelope or the tx calldata.
+<!-- TODO: link on how to create a semaphore proof -->
 
-## World ID Proof
-
-A `WorldIDProof` consists of the following RLP encoded fields:
+## PBHPayload
+A `PBHPayload` consists of the following RLP encoded fields:
 
 | Field                 | Type        | Description |
 |-----------------------|------------|-------------|
@@ -22,11 +21,11 @@ The `external_nullifier` is used to enforce that a World ID user can only submit
 
 
 The `external_nullifier` is encoded as a 32-bit packed unsigned integer, with the following structure:
-
 - **Version (`uint8`)**: Defines the schema version.
 - **Year (`uint16`)**: The current year expressed as `yyyy`.
 - **Month (`uint8`)**: The current month expressed as (1-12).
 - **PBH Nonce (`uint8`)**: The PBH nonce, where `0 <= n < pbhNonceLimit`.
+
 
 
 Below is an example of how to encode and decode the `external_nullifier` for a given PBH transaction.
@@ -63,6 +62,10 @@ function decode(uint256 externalNullifier)
 }
 ```
 
+The **World Chain Builder** enforces:
+- The `external_nullifier` is correctly formatted and includes the current year, month and valid nonce.
+- The `proof` is valid and specifies the `external_nullifier` as a public input to the proof.
+- The `external_nullifier` has not been used before, ensuring that the `pbh_nonce` is unique for the given month and year.
 
 
 ## World Chain Tx Envelope
