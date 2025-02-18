@@ -13,7 +13,7 @@ sequenceDiagram
         participant sequencer-el as Sequencer EL
     end
     box Network
-        participant peers-cl as Peers CL
+        participant peers-cl as Peers
     end
 
     Note over sequencer-cl: FCU with Attributes
