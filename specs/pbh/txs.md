@@ -1,6 +1,7 @@
 # PBH Transactions
 
-The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the transaction envelope or the tx calldata.
+The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` encoded in the tx calldata and target the `PBHEntryPoint`.
+<!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 
 TODO: link to helper libraries to create a proof 
 
@@ -72,17 +73,20 @@ The **World Chain Builder** enforces:
 
 
 
-TODO: Explain the role of the signal hash when creating the semaphore proof and how it is used in the builder to verify the 
-data integrity.
+### Signal Hash
+
+One of the inputs when [generating a World ID proof](https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html) is the `signal_hash`. 
+As the name suggests, the `signal_hash` is the hash of the [signal](https://docs.semaphore.pse.dev/V2/technical-reference/circuits#signal) which is an arbitrary message provided by the prover, allowing the verifier to hash the `signal` when verifying the proof, ensuring that the proof was generated with the expected inputs.
+
+Within the context of PBH, the `signal_hash` is used to ensure the proof was created for the transaction being submitted. Depending on the type of the PBH transaction, this value could be a hash of the tx calldata, a 4337 UserOp hash or the tx hash itself.
+
+<!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
+The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
 
 
-## World Chain Tx Envelope
+## `PBHEntryPoint`
+    - pbhmulticall
 
-- WorldChainTxEnvelope
-    - PBH Tx
-    - PBH 4337 Bundle
+## PBH 4337 UserOps
+  - note that if specifying the pbh signature aggregator, the bundler will send via pbhentrypoint, if no signature aggregator is specified, then the bundler will submit the bundle with a WorldChainTxEnvelope.
 
-## PBH EntryPoint
-- PBHEntrypoint
-    - PBH multicall
-    - PBH bundle
