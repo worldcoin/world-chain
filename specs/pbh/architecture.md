@@ -36,9 +36,9 @@ sequenceDiagram
  ## Rollup Boost
 `rollup-boost` is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. `rollup-boost` acts as an intermediary between the sequencer's consensus and execution client. When `sequencer-cl` sends a new FCU to `rollup-boost`, the request will be multiplexed to both the sequencer's execution client and external block builders signaling that a new block should be built. 
 
-When the sequencer is ready to propose a new block, `sequencer-cl` will send an `engine_getPayload` request to `rollup-boost` which is forwarded to the default execution client and external block builders. Note that `rollup-boost` will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block. 
+When the sequencer is ready to propose a new block, `op-node` will send an `engine_getPayload` request to `rollup-boost` which is forwarded to the default execution client and external block builders.  
 
-Once `rollup-boost` receives the external builder's block, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer `op-node`, otherwise, `rollup-boost` will return the fallback block.
+Once `rollup-boost` receives the built block from external builder, it will then validate the block by sending it to the sequencer's execution client via `engine_newPayload`. If the external block is valid, it is returned to the sequencer's `op-node`, otherwise `rollup-boost` will return the fallback block. Note that `rollup-boost` will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block.
 
 ```mermaid
 sequenceDiagram

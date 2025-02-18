@@ -3,8 +3,6 @@
 The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` encoded in the tx calldata and target the `PBHEntryPoint`.
 <!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 
-TODO: link to helper libraries to create a proof 
-
 
 ## PBHPayload
 A `PBHPayload` consists of the following RLP encoded fields:
@@ -85,7 +83,37 @@ The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the 
 
 
 ## `PBHEntryPoint`
-    - pbhmulticall
+To submit a valid PBH transaction, users can call the `pbhMulticall()` function on the `PBHEntryPoint` contract.
+
+
+```solidity
+    /// @notice Executes a Priority Multicall3.
+    /// @param calls The calls to execute.
+    /// @param pbhPayload The PBH payload containing the proof data.
+    /// @return returnData The results of the calls.
+    function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
+        external
+        virtual
+        onlyProxy
+        onlyInitialized
+        nonReentrant
+        returns (IMulticall3.Result[] memory returnData)
+    {
+        if (gasleft() > pbhGasLimit) {
+            revert GasLimitExceeded(gasleft(), pbhGasLimit);
+        }
+
+        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
+        _verifyPbh(signalHash, pbhPayload);
+        nullifierHashes[pbhPayload.nullifierHash] = true;
+
+        returnData = IMulticall3(_multicall3).aggregate3(calls);
+        emit PBH(msg.sender, signalHash, pbhPayload);
+    }
+```
+
+This function takes an array of `calls` and a [PBHPayload](https://github.com/worldcoin/world-chain/blob/main/contracts/src/interfaces/IPBHEntryPoint.sol#L14-L19) where the `signalHash` is specified as `uint256 signalHash = abi.encode(msg.sender, calls).hashToField();`.
+During transaction validation, the World Chain Builder will validate the `PBHPayload` and mark the transaction for priority inclusion.
 
 ## PBH 4337 UserOps
   - note that if specifying the pbh signature aggregator, the bundler will send via pbhentrypoint, if no signature aggregator is specified, then the bundler will submit the bundle with a WorldChainTxEnvelope.
