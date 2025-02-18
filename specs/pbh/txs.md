@@ -1,6 +1,6 @@
 # PBH Transactions
 
-The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid [PBHPayload](https://github.com/worldcoin/world-chain/blob/main/contracts/src/interfaces/IPBHEntryPoint.sol#L9-L19) either encoded in a transaction envelope or the tx calldata.
+The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the transaction envelope or the tx calldata.
 
 TODO: link to helper libraries to create a proof 
 
