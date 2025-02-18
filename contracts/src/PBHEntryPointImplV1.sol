@@ -90,7 +90,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     //////////////////////////////////////////////////////////////////////////////
 
     /// @notice Thrown when attempting to reuse a nullifier
-    error InvalidNullifier();
+    /// @param signalHash The signal hash associated with the PBH payload.
+    error InvalidNullifier(uint256 nullifierHash, uint256 signalHash);
 
     /// @notice Error thrown when the address is 0
     error AddressZero();
@@ -193,11 +194,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     function _verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload) internal view {
         // First, we make sure this nullifier has not been used before.
         if (nullifierHashes[pbhPayload.nullifierHash]) {
-            revert InvalidNullifier();
+            revert InvalidNullifier(pbhPayload.nullifierHash, signalHash);
         }
 
         // Verify the external nullifier
-        PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth);
+        PBHExternalNullifier.verify(pbhPayload.pbhExternalNullifier, numPbhPerMonth, signalHash);
 
         // If worldId address is set, proceed with on chain verification,
         // otherwise assume verification has been done off chain by the builder.

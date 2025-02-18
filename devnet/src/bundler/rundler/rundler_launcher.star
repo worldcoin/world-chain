@@ -94,11 +94,16 @@ def get_rundler_config(
         rundler_constants.CHAIN_SPEC_MOUNT: chain_spec_file,
     }
 
+    env_vars = {
+        "RUST_LOG": "INFO",
+    }
+
     ports = get_used_ports()
     return ServiceConfig(
         image=image,
         ports=ports,
         cmd=cmd,
         files=files,
+        env_vars=env_vars,
         private_ip_address_placeholder=ethereum_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
     )

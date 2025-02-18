@@ -243,13 +243,13 @@ contract PBHSignatureAggregatorTest is TestSetup {
 
     function testFuzz_ValidateUserOpSignature(
         uint256 root,
-        uint256 pbhExternalNullifier,
         uint256 nullifierHash,
         ProofData calldata proofData,
         uint8 signatureThreshold
     ) public {
         vm.assume(signatureThreshold >= 1);
         deployMockSafe(address(pbhAggregator), signatureThreshold);
+        uint256 pbhExternalNullifier = TestUtils.getPBHExternalNullifier(0);
         IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
             root: root,
             pbhExternalNullifier: pbhExternalNullifier,

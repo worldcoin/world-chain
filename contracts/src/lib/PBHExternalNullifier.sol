@@ -14,25 +14,15 @@ import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 ///      - Bits 8-15: Nonce
 ///      - Bits 0-7: Version
 library PBHExternalNullifier {
-    /// @notice Thrown when the provided external nullifier doesn't
-    /// contain the correct leading zeros
-    error InvalidExternalNullifierLeadingZeros();
-
-    /// @notice Thrown when the provided external nullifier version
-    /// is not equal to V1 - the only currently supported version
-    error InvalidExternalNullifierVersion();
-
-    /// @notice Thrown when the provided external nullifier year doesn't
-    /// match the current year
-    error InvalidExternalNullifierYear();
-
     /// @notice Thrown when the provided external nullifier month doesn't
     /// match the current month
     error InvalidExternalNullifierMonth();
 
-    /// @notice Thrown when the provided external
-    /// nullifier pbhNonce >= numPbhPerMonth
-    error InvalidPbhNonce();
+    /// @notice Thrown when the external nullifier is invalid
+    /// @param externalNullifier The external nullifier that is invalid
+    /// @param signalHash The signal hash associated with the PBHPayload
+    /// @param reason The reason the external nullifier is invalid
+    error InvalidExternalNullifier(uint256 externalNullifier, uint256 signalHash, string reason);
 
     uint8 public constant V1 = 1;
 
@@ -68,16 +58,26 @@ library PBHExternalNullifier {
     /// @param externalNullifier The external nullifier to verify.
     /// @param numPbhPerMonth The number of PBH transactions alloted to each World ID per month, 0 indexed.
     ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs.
+    /// @param signalHash The signal hash associated with the PBHPayload.
     /// @dev This function ensures the external nullifier matches the current year and month,
     ///      and that the nonce does not exceed `numPbhPerMonth`.
     /// @custom:reverts Reverts if the current block timestamp does not match
     /// the provided month/year or if pbhNonce !<  numPbhPerMonth.
-    function verify(uint256 externalNullifier, uint8 numPbhPerMonth) public view {
-        require(externalNullifier <= type(uint40).max, InvalidExternalNullifierLeadingZeros());
+    function verify(uint256 externalNullifier, uint8 numPbhPerMonth, uint256 signalHash) internal view {
+        require(
+            externalNullifier <= type(uint40).max,
+            InvalidExternalNullifier(externalNullifier, signalHash, "Leading zeros")
+        );
         (uint8 version, uint8 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
-        require(version == V1, InvalidExternalNullifierVersion());
-        require(year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp), InvalidExternalNullifierYear());
-        require(month == BokkyPooBahsDateTimeLibrary.getMonth(block.timestamp), InvalidExternalNullifierMonth());
-        require(pbhNonce < numPbhPerMonth, InvalidPbhNonce());
+        require(version == V1, InvalidExternalNullifier(externalNullifier, signalHash, "Invalid Version"));
+        require(
+            year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp),
+            InvalidExternalNullifier(externalNullifier, signalHash, "Invalid Year")
+        );
+        require(
+            month == BokkyPooBahsDateTimeLibrary.getMonth(block.timestamp),
+            InvalidExternalNullifier(externalNullifier, signalHash, "Invalid Month")
+        );
+        require(pbhNonce < numPbhPerMonth, InvalidExternalNullifier(externalNullifier, signalHash, "Invalid PBH Nonce"));
     }
 }

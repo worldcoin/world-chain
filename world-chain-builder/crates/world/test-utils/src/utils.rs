@@ -583,7 +583,7 @@ mod tests {
 
         assert_eq!(
             safe_op_hash,
-            fixed_bytes!("0x6278d2de0a0ad2a362e7d421434ca04885bd291c965b311de6fb687d4e4c86b1")
+            fixed_bytes!("0x71d71c003eed5782e2f73a49b9e0be207ab8a2f35c138c5fa046c5b1e31c1be7")
         );
     }
 
