@@ -95,8 +95,52 @@ In addition to Engine API requests, `rollup-boost` will proxy all RPC calls from
 
 World Chain leverages `rollup-boost` to enable external block production and integrates the World Chain Builder as a block builder in the network. The World Chain Builder implements a custom block ordering policy (ie. PBH) to provide priority inclusion for transactions with a valid World ID proof. Note that the custom ordering policy adheres to the OP Stack spec. 
 
+<br>
+<div style="display: flex; justify-content: center; gap: 40px;">
+  <div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
+    <div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">Default Block</div>
+    <table style="width: 100%; margin-top: 10px;">
+      <tr>
+        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
+        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
+      </tr>
+      <tr><td>0xaaaa</td><td>$0.04</td></tr>
+      <tr><td>0xbbbb</td><td>$0.04</td></tr>
+      <tr><td>0xcccc</td><td>$0.03</td></tr>
+      <tr><td>0xdddd</td><td>$0.03</td></tr>
+      <tr><td>0xeeee</td><td>$0.03</td></tr>
+      <tr><td>0x2222</td><td>$0.02</td></tr>
+      <tr><td>0x3333</td><td>$0.02</td></tr>
+      <tr><td>0x4444</td><td>$0.02</td></tr>
+      <tr><td>0x5555</td><td>$0.01</td></tr>
+      <tr><td>0x6666</td><td>$0.01</td></tr>
+    </table>
+  </div>
+  <div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
+    <div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">PBH Block</div>
+    <table style="width: 100%; margin-top: 10px;">
+      <tr>
+        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
+        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
+      </tr>
+      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x5555</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
+      <tr style="color: #33ff33;"><td>0x3333</td><td>$0.02</td></tr>
+      <tr><td>0xaaaa</td><td>$0.04</td></tr>
+      <tr><td>0xbbbb</td><td>$0.04</td></tr>
+      <tr><td>0xcccc</td><td>$0.03</td></tr>
+      <tr><td>0xdddd</td><td>$0.03</td></tr>
+      <tr><td>0xeeee</td><td>$0.03</td></tr>
+      <tr><td>0x2222</td><td>$0.02</td></tr>
+    </table>
+  </div>
+</div>
+<br>
 
-<!-- TODO: insert Default block vs PBH block -->
+Each block has a "PBH blockspace capacity", which determines how many PBH transactions will be included in the block. Blocks on World Chain will always reserve a percentage of blockspace for non-PBH transactions to ensure inclusion for automated systems and non-verified users. If there are not enough pending PBH transactions to fill the entirety of PBH blockspace, standard transactions will be used to fill the remainder of the block. 
+
+If the amount of pending PBH transactions exceed the PBH blockspace capacity, the remaining PBH transactions will carry over to the next block. PBH transactions aim to provide verified users with faster, cheaper transaction inclusion, especially during network congestion.
 
 
 In the event that the block builder is offline, `rollup-boost` will fallback to the block built by the default execution client with standard OP Stack ordering rules.
