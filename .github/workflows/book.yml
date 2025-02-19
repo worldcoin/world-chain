@@ -11,26 +11,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Check out the repository code
       - name: Checkout code
         uses: actions/checkout@v3
-
-      # Set up the Rust toolchain (required to install mdBook)
       - name: Setup Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-
-      # Install mdBook via Cargo
       - name: Install mdBook
         run: cargo install mdbook
-
-      # Build the mdBook (by default the output is in the "book" directory)
       - name: Build mdBook
         run: mdbook build
-
-      # Deploy the built book to GitHub Pages using the peaceiris action
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
