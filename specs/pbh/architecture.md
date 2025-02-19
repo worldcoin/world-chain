@@ -125,10 +125,10 @@ Each block has a "PBH blockspace capacity", which determines how many PBH transa
         <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
         <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
       </tr>
-      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
       <tr style="color: #33ff33;"><td>0x3333</td><td>$0.02</td></tr>
-      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
       <tr style="color: #33ff33;"><td>0x5555</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
       <tr><td>0xaaaa</td><td>$0.04</td></tr>
       <tr><td>0xbbbb</td><td>$0.04</td></tr>
       <tr><td>0xcccc</td><td>$0.03</td></tr>
