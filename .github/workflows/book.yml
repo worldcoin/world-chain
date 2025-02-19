@@ -20,7 +20,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Install mdBook
-        run: cargo install mdbook
+        run: cargo install mdbook mdbook-mermaid
       - name: Build mdBook
         run: mdbook build
       - name: Deploy to GitHub Pages
