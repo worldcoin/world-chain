@@ -9,7 +9,6 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "2"
 members = [
-    "crates/tests",
     "crates/toolkit",
     "crates/world/bin",
     "crates/world/node",
@@ -18,6 +17,8 @@ members = [
     "crates/world/pbh",
     "crates/world/pool", 
     "crates/world/test-utils",
+    "crates/tests/sepolia",
+    "crates/tests/devnet",
 ]
 
 default-members = ["crates/world/bin"]
@@ -155,3 +156,4 @@ rand = { version = "0.8", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
 bon = "3.3.0"
 rayon = "1.10.0"
+signup-sequencer = { git = "https://github.com/worldcoin/signup-sequencer" }
