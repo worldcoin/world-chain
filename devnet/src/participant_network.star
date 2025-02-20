@@ -32,8 +32,8 @@ def launch_participant_network(
     observability_helper,
     interop_params,
     da_server_context,
-    entrypoint_config_file,
-    mempool_config_file,
+    rundler_builder_config_file,
+    rundler_mempool_config_file,
     chain_spec,
 ):
     num_participants = len(participants)
@@ -133,8 +133,8 @@ def launch_participant_network(
         "rundler{0}".format(l2_services_suffix),
         input_parser.DEFAULT_BUNDLER_IMAGES["rundler"],
         all_el_contexts[0],
-        entrypoint_config_file,
-        mempool_config_file,
+        rundler_builder_config_file,
+        rundler_mempool_config_file,
         chain_spec,
     )
 

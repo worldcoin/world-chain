@@ -36,7 +36,7 @@ def launch(
     service_name,
     image,
     el_context,
-    entrypoint_config_file,
+    builder_config_file,
     mempool_config_file,
     chain_spec_file,
 ):
@@ -47,7 +47,7 @@ def launch(
         image,
         service_name,
         el_context,
-        entrypoint_config_file,
+        builder_config_file,
         mempool_config_file,
         chain_spec_file,
     )
@@ -66,32 +66,33 @@ def get_rundler_config(
     image,
     service_name,
     el_context,
-    entrypoint_config_file,
+    builder_config_file,
     mempool_config_file,
     chain_spec_file,
 ):
     cmd = [
         "node",
-        "--chain_spec={0}".format(rundler_constants.CHAIN_SPEC_MOUNT_PATH),
+        "--chain_spec={0}".format(rundler_constants.RUNDLER_CHAIN_SPEC_MOUNT_PATH),
         "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
         "--builder.dropped_status_unsupported",
         "--unsafe",
         "--da_gas_tracking_enabled",
-        "--entry_point_builders_path={0}".format(rundler_constants.ENTRYPOINT_CONFIG_MOUNT_PATH),
-        "--mempool_config_path={0}".format(rundler_constants.MEMPOOL_CONFIG_MOUNT_PATH),
+        "--builders_config_path={0}".format(rundler_constants.RUNDLER_BUILDER_CONFIG_MOUNT_PATH),
+        "--mempool_config_path={0}".format(rundler_constants.RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH),
         "--min_stake_value={0}".format("1"),
         "--min_unstake_delay={0}".format("0"),
         "--disable_entry_point_v0_6",
         "--enabled_aggregators=PBH",
+        "--aggregator_options=PBH_ADDRESS=0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
         "--pool.same_sender_mempool_count=255"
     ]
 
     files = {
-        rundler_constants.MEMPOOL_CONFIG_MOUNT: mempool_config_file,
-        rundler_constants.ENTRYPOINT_CONFIG_MOUNT: entrypoint_config_file,
-        rundler_constants.CHAIN_SPEC_MOUNT: chain_spec_file,
+        rundler_constants.RUNDLER_MEMPOOL_CONFIG_MOUNT: mempool_config_file,
+        rundler_constants.RUNDLER_BUILDER_CONFIG_MOUNT: builder_config_file,
+        rundler_constants.RUNDLER_CHAIN_SPEC_MOUNT: chain_spec_file,
     }
 
     env_vars = {
