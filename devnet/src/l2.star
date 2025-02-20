@@ -22,8 +22,8 @@ def launch_l2(
     persistent,
     observability_helper,
     interop_params,
-    entrypoint_config_file,
-    mempool_config_file,
+    rundler_builder_config_file,
+    rundler_mempool_config_file,
     chain_spec,
 ):
     network_params = l2_args.network_params
@@ -69,8 +69,8 @@ def launch_l2(
         observability_helper,
         interop_params,
         da_server_context,
-        entrypoint_config_file,
-        mempool_config_file,
+        rundler_builder_config_file,
+        rundler_mempool_config_file,
         chain_spec,
     )
 

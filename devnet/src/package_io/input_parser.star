@@ -19,7 +19,7 @@ DEFAULT_CL_IMAGES = {
 }
 
 DEFAULT_BUNDLER_IMAGES = {
-    "rundler": "alchemyplatform/rundler:v0.6.0-alpha.0",
+    "rundler": "alchemyplatform/rundler:v0.6.0-alpha.3",
 }
 
 DEFAULT_BATCHER_IMAGES = {

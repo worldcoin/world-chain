@@ -107,13 +107,13 @@ def run(plan, args):
         name="op_jwt_file",
     )
 
-    entrypoint_config_file = plan.upload_files(
-        src=rundler_static.ENTRYPOINT_CONFIG_FILE_PATH,
-        name="entrypoint_config.json",
+    rundler_builder_config_file = plan.upload_files(
+        src=rundler_static.RUNDLER_BUILDER_CONFIG_FILE_PATH,
+        name="builder_config.json",
     )
 
-    mempool_config_file = plan.upload_files(
-        src=rundler_static.MEMPOOL_CONFIG_FILE_PATH,
+    rundler_mempool_config_file = plan.upload_files(
+        src=rundler_static.RUNDLER_MEMPOOL_CONFIG_FILE_PATH,
         name="mempool_config.json",
     )
 
@@ -141,8 +141,8 @@ def run(plan, args):
                 persistent,
                 observability_helper,
                 interop_params,
-                entrypoint_config_file,
-                mempool_config_file,
+                rundler_builder_config_file,
+                rundler_mempool_config_file,
                 rundler_chain_spec,
             )
         )
