@@ -267,9 +267,15 @@ pub fn user_op_sepolia(
 
     let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
 
-    let proof = semaphore_rs::protocol::generate_proof(&identity, &inclusion_proof.proof, encoded_external_nullifier.0, signal)
-        .expect("Failed to generate semaphore proof");
-    let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
+    let proof = semaphore_rs::protocol::generate_proof(
+        &identity,
+        &inclusion_proof.proof,
+        encoded_external_nullifier.0,
+        signal,
+    )
+    .expect("Failed to generate semaphore proof");
+    let nullifier_hash =
+        semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
 
     let proof = Proof(proof);
 

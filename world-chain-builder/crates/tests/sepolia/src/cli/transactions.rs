@@ -14,7 +14,7 @@ use reqwest::Client;
 use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use tracing::info;
+use tracing::{debug, info};
 use world_chain_builder_pbh::{
     date_marker::DateMarker,
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
@@ -237,36 +237,37 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
             let rpc_client = RpcClient::new(http, false);
             let provider = ProviderBuilder::new().on_client(rpc_client);
 
-            let txs = bundle
-                .pbh_transactions
-                .iter()
-                .zip(bundle.std_transactions.iter());
-            stream::iter(txs)
-                .map(Ok)
-                .try_for_each_concurrent(1000, |(pbh_tx, tx)| {
-                    let provider = provider.clone();
-                    async move {
-                        let (res0, res1) = tokio::join!(
-                            provider.send_raw_transaction(&pbh_tx.0),
-                            provider.send_raw_transaction(&tx.0)
-                        );
-                        let res0 = res0?;
-                        let res1 = res1?;
-                        let hash_0 = res0.tx_hash();
-                        let hash_1 = res1.tx_hash();
+            stream::iter(
+                bundle
+                    .pbh_transactions
+                    .iter()
+                    .zip(bundle.std_transactions.iter()),
+            )
+            .map(Ok)
+            .try_for_each_concurrent(1000, |(pbh_tx, tx)| {
+                let provider = provider.clone();
+                async move {
+                    let (response_pbh, response_tx) = tokio::join!(
+                        provider.send_raw_transaction(&pbh_tx.0),
+                        provider.send_raw_transaction(&tx.0)
+                    );
+                    let pbh_builder = response_pbh?;
+                    let tx_builder = response_tx?;
 
-                        info!(?hash_0, "Sending PBH transaction");
-                        info!(?hash_1, "Sending transaction");
+                    let pbh_hash = pbh_builder.tx_hash();
+                    let tx_hash = tx_builder.tx_hash();
 
-                        let receipt_0 = res0.get_receipt().await?;
-                        let receipt_1 = res1.get_receipt().await?;
+                    info!(?pbh_hash, "Sending PBH transaction");
+                    info!(?tx_hash, "Sending transaction");
 
-                        info!(?receipt_0, "Received tx receipt for PBH Transaction");
-                        info!(?receipt_1, "Received tx receipt for Non-PBH Transaction");
-                        Ok::<_, eyre::Report>(())
-                    }
-                })
-                .await?;
+                    let pbh_receipt = pbh_builder.get_receipt().await?;
+                    let tx_receipt = tx_builder.get_receipt().await?;
+                    debug!(?pbh_receipt, ?tx_receipt, "Receipts");
+
+                    Ok::<_, eyre::Report>(())
+                }
+            })
+            .await?;
         }
         TxType::UserOperation => {}
     }
