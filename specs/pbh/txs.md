@@ -1,6 +1,6 @@
 # PBH Transactions
 
-The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` encoded in the tx calldata and target the `PBHEntryPoint`.
+The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the [PBHEntryPoint](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol) and includes a [PBHPayload](./payload.md) encoded in the tx calldata.
 <!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 
 
@@ -37,37 +37,20 @@ To submit a valid PBH transaction, users can call the `pbhMulticall()` function 
     }
 ```
 
-This function takes an array of `calls` and a [PBHPayload](https://github.com/worldcoin/world-chain/blob/main/contracts/src/interfaces/IPBHEntryPoint.sol#L14-L19) where the `signalHash` is specified as `uint256 signalHash = abi.encode(msg.sender, calls).hashToField();`.
-During transaction validation, the World Chain Builder will validate the `PBHPayload` and mark the transaction for priority inclusion.
+This function takes an array of `calls` and a `PBHPayload`. During [transaction validation](./validation.md), the World Chain Builder will validate the payload and mark the transaction for priority inclusion. Visit the [validation](./validation.md#signal-hash) section of the docs to see how to encode the `signalHash` for a PBH Multicall.
 
 ## PBH 4337 UserOps
-The `PBHEntryPoint` also allows 4337 bundle transactions to be included with top of block priority. A priority bundle is a bundle of UserOperations who's `sender` field is a PBH Safe, and who's `validationData` returned from `validateUserOp` contains an authorizer of the `PBHSignatureAggregator`.
+The `PBHEntryPoint` contract also provides priority inclusion for 4337 [UserOps](https://eips.ethereum.org/EIPS/eip-4337#useroperation) through PBH bundles. A PBH bundle is a standard 4337 bundle where the aggregated signature field is consists of an array of `PBHPayload`. A valid PBH bundle should include a `n` `PBHPayload`s, with each item corresponding to a `UserOp` in the bundle.
 
-```solidity
-function validateUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32,
-        uint256 missingAccountFunds
-) external onlySupportedEntryPoint returns (uint256 validationData) {}
-```
 
-Priority UserOperations append the abi.encoded [`PBHPayload`](https://github.com/worldcoin/world-chain/blob/efb6526be58493986b1f619ba4bffb76c13aa79d/contracts/src/interfaces/IPBHEntryPoint.sol#L14) on the `signature` field of the UserOperation, and bundlers are able to group priority UserOperations together based on the signature aggregator returned in the validation path when validating the UserOperation signature on the PBH Safe. 
+When creating a PBH `UserOp`, users will append the `PBHPayload` to the [signature](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/interfaces/PackedUserOperation.sol#L27) field and set specify the [PBHSignatureAggregator]() as the [sigAuthorizer](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/legacy/v06/IAccount06.sol#L25-L26). The `UserOp` can then be sent to a 4337 bundler that supports PBH and maintains an alt-mempool for PBH `UserOps`. 
 
-The signature encoding scheme on a priority UserOperation leveraging the [PBH4337Module](../../contracts/src/PBH4337Module.sol) is as follows:
-
-```js
-    Bytes [0:12] Timestamp Validation Data
-    Bytes [12: 65 * signatureThreshold + 12] ECDSA Signatures
-    Bytes [65 * signatureThreshold + 12 : 65 * signatureThreshold + 364] ABI Encoded PBHPayload
-```
-
-After grouping priority UserOperation's together based on a unified `PBHSignatureAggregator` the bundler then interfaces with the `PBHSignatureAggregator` to strip off the encoded `PBHPayload` from the UserOperation signature, and accumulates an aggregated signature as an abi encoded vector of `PBHPayload`s.
+The bundler will [validate the PBHPayload](./validation.md), strip the payload from the `userOp.signature` field and add it to the aggregated signature. 
 
 ```solidity
     /**
      * Aggregate multiple signatures into a single value.
      * This method is called off-chain to calculate the signature to pass with handleOps()
-     * bundler MAY use optimized custom code perform this aggregation.
      * @param userOps              - Array of UserOperations to collect the signatures from.
      * @return aggregatedSignature - The aggregated signature.
      */
@@ -85,60 +68,9 @@ After grouping priority UserOperation's together based on a unified `PBHSignatur
         }
         aggregatedSignature = abi.encode(pbhPayloads);
     }
+}
 ```
 
-The aggregated signature accumulated from all UserOperation signatures is then checked against a few strict criteria in the `PBHEntryPoint` prior to proxying the `handleAggregatedOps` call to the singleton `EntryPoint`:
+Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.
 
-1.) The length of `PBHPayload`s on the aggregated signature must be equivelant to the amount of UserOperations in the bundle.
-
-2.) The proofs must be valid on all `PBHPayload`s
-
-3.) The `nullifierHash` on each `PBHPayload` must be unique
-
-```solidity
-    /// Execute a batch of PackedUserOperation with Aggregators
-    /// @param opsPerAggregator - The operations to execute, grouped by aggregator (or address(0) for no-aggregator accounts).
-    /// @param beneficiary      - The address to receive the fees.
-    function handleAggregatedOps(
-        IEntryPoint.UserOpsPerAggregator[] calldata opsPerAggregator,
-        address payable beneficiary
-    ) external virtual onlyProxy onlyInitialized nonReentrant {
-        for (uint256 i = 0; i < opsPerAggregator.length; ++i) {
-
-            // ------------snip---------------------
-
-            PBHPayload[] memory pbhPayloads = abi.decode(opsPerAggregator[i].signature, (PBHPayload[]));
-            require(
-                pbhPayloads.length == opsPerAggregator[i].userOps.length,
-                InvalidAggregatedSignature(pbhPayloads.length, opsPerAggregator[i].userOps.length)
-            );
-            for (uint256 j = 0; j < pbhPayloads.length; ++j) {
-                address sender = opsPerAggregator[i].userOps[j].sender;
-                // We now generate the signal hash from the sender, nonce, and calldata
-                uint256 signalHash = abi.encodePacked(
-                    sender, opsPerAggregator[i].userOps[j].nonce, opsPerAggregator[i].userOps[j].callData
-                ).hashToField();
-
-                _verifyPbh(signalHash, pbhPayloads[j]);
-                nullifierHashes[pbhPayloads[j].nullifierHash] = true;
-                emit PBH(sender, signalHash, pbhPayloads[j]);
-            }
-        }
-
-        // ------------snip---------------------
-    }
-```
-
-If all these conditions are met the bundle transaction will be proxied to the `EntryPoint` for execution of the UserOperations.
-
-Note that the `PBHEntryPoint` hashes all UserOperations, and stores the hash in transient storage when executing a `handleAggregatedOps` call. The `PBHSignatureAggregator` then calls back into the `PBHEntryPoint` when called by the `EntryPoint` with `validateSignatures`. 
-
-```solidity
-function validateSignatures(PackedUserOperation[] calldata userOps, bytes calldata) external view {
-        bytes memory encoded = abi.encode(userOps);
-        pbhEntryPoint.validateSignaturesCallback(keccak256(encoded));
-    }
-```
-
-This callback creates a cryptographic link between the `PBHSignatureAggregator` and the `PBHEntryPoint`, and prevents the bundler from modifying the destination of the transaction without causing the bundle to revert. This guarantees a Priority UserOperation will always be included in a priority bundle, and cannot be tampered with by the bundler. 
-
+Visit the [validation](./validation.md#signal-hash) section of the docs to see how to encode the `signalHash` for a PBH `UserOps` work, check out the [handleAggregatedOps()](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol#L216-L250) function and [PBH4337Module](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBH4337Module.sol).

@@ -68,7 +68,7 @@ The **World Chain Builder** enforces:
 
 ### Signal Hash
 
-One of the inputs when [generating a World ID proof](https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html) is the `signal_hash`. 
+One of the required inputs when [generating a World ID proof](https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html) is the `signal_hash`. 
 As the name suggests, the `signal_hash` is the hash of the [signal](https://docs.semaphore.pse.dev/V2/technical-reference/circuits#signal) which is an arbitrary message provided by the prover, allowing the verifier to hash the `signal` when verifying the proof, ensuring that the proof was generated with the expected inputs.
 
 Within the context of PBH, the `signal_hash` is used to ensure the proof was created for the transaction being submitted. Depending on the type of the PBH transaction, this value could be a hash of the tx calldata, a 4337 UserOp hash or the tx hash itself.
