@@ -43,7 +43,7 @@ This function takes an array of `calls` and a `PBHPayload`. During [transaction 
 The `PBHEntryPoint` contract also provides priority inclusion for 4337 [UserOps](https://eips.ethereum.org/EIPS/eip-4337#useroperation) through PBH bundles. A PBH bundle is a standard 4337 bundle where the aggregated signature field is consists of an array of `PBHPayload`. A valid PBH bundle should include a `n` `PBHPayload`s, with each item corresponding to a `UserOp` in the bundle.
 
 
-When creating a PBH `UserOp`, users will append the `PBHPayload` to the [signature](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/interfaces/PackedUserOperation.sol#L27) field and set specify the [PBHSignatureAggregator]() as the [sigAuthorizer](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/legacy/v06/IAccount06.sol#L25-L26). The `UserOp` can then be sent to a 4337 bundler that supports PBH and maintains an alt-mempool for PBH `UserOps`. 
+When creating a PBH `UserOp`, users will append the `PBHPayload` to the [signature](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/interfaces/PackedUserOperation.sol#L27) field and specify the [PBHSignatureAggregator]() as the [sigAuthorizer](https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/legacy/v06/IAccount06.sol#L25-L26). The `UserOp` can then be sent to a 4337 bundler that supports PBH and maintains an alt-mempool for PBH `UserOps`. 
 
 The bundler will [validate the PBHPayload](./validation.md), strip the payload from the `userOp.signature` field and add it to the aggregated signature. 
 
