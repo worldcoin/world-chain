@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use reth_rpc_layer::JwtSecret;
 
 pub mod identities;
 pub mod transactions;
@@ -35,7 +36,7 @@ pub struct GenerateArgs {
     #[clap(long, short)]
     pub username: String,
     /// The Password to authenticate with the signup sequencer.
-    #[clap(long, short)]
+    #[clap(long)]
     pub password: String,
     /// The number of identities to generate.
     #[clap(long, short, default_value_t = 1)]
@@ -72,15 +73,27 @@ pub struct BundleArgs {
     #[clap(long, short, default_value_t = 0)]
     pub nonce: u64,
     /// Whether to create PBH transactions or UserOperations.
-    #[clap(long, short)]
+    #[clap(long, default_value = "transaction")]
     pub tx_type: TxType,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct SendArgs {
     /// The Transaction Type to send to the WC Sepolia Testnet.
-    #[clap(long, short)]
+    #[clap(long, default_value = "transaction")]
     pub tx_type: TxType,
+    /// The file path to write the generated bundle.
+    #[clap(long, short, default_value = "pbh_bundle.json")]
+    pub bundle_path: String,
+    /// The RPC URL for WC Sepolia Testnet.
+    #[clap(long, short, required = true)]
+    pub rpc_url: String,
+
+    /// JWT Secret authorization in the headers.
+    // TODO:
+    #[clap(long, short)] 
+    pub auth: Option<JwtSecret>,
+    
 }
 
 #[derive(Debug, Clone, ValueEnum)]
