@@ -60,7 +60,7 @@ function decode(uint256 externalNullifier)
 <br>
 
 The **World Chain Builder** enforces:
-- The `external_nullifier` is correctly formatted and includes the current year, month and valid nonce.
+- The `external_nullifier` is correctly formatted and specifies the current month, year and a valid nonce.
 - The `proof` is valid and specifies the `external_nullifier` as a public input to the proof.
 - The `external_nullifier` has not been used before, ensuring that the `pbh_nonce` is unique for the given month and year.
 
