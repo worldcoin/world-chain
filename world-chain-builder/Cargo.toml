@@ -38,7 +38,6 @@ world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
 world-chain-builder-test-utils = { path = "crates/world/test-utils" }
-toolkit = { path = "crates/toolkit" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", tag = "v1.2.0" }

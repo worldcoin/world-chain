@@ -4,7 +4,7 @@ use alloy_network::TxSigner;
 use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
-use alloy_primitives::{B256, U128, U64, U8};
+use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;
@@ -464,7 +464,7 @@ impl Into<RpcUserOperationV0_7> for PackedUserOperation {
             paymaster_data: None,
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
-            aggregator: Some(PBH_DEV_SIGNATURE_AGGREGATOR),
+            aggregator: Some(address!("39911B3242e952d86270857Bc8eFC3FcE8d84abe")),
             eip7702_auth: None,
         }
     }

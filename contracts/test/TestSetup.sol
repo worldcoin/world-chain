@@ -75,9 +75,9 @@ contract TestSetup is Test {
     /// @notice This function runs before every single test.
     /// @dev It is run before every single iteration of a property-based fuzzing test.
     function setUp() public virtual {
-        string memory rpcUrl = vm.envOr("ETHEREUM_PROVIDER", MAINNET_RPC_URL);
-        uint256 forkId = vm.createFork(rpcUrl);
-        vm.selectFork(forkId);
+        // string memory rpcUrl = vm.envOr("ETHEREUM_PROVIDER", MAINNET_RPC_URL);
+        // uint256 forkId = vm.createFork(rpcUrl);
+        // vm.selectFork(forkId);
 
         safeOwner = vm.addr(safeOwnerKey);
         vm.startPrank(OWNER);

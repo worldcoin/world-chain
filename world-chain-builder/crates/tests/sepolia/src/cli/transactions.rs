@@ -1,5 +1,5 @@
 use alloy_eips::Encodable2718;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use alloy_primitives::{Bytes, TxKind};
 use alloy_provider::network::{EthereumWallet, TransactionBuilder};
 use alloy_provider::{Provider, ProviderBuilder};
@@ -13,7 +13,10 @@ use futures::{stream, StreamExt, TryStreamExt};
 use reqwest::Client;
 use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::str::FromStr;
+use std::time::Duration;
+use tokio::time::sleep;
 use tracing::{debug, info};
 use world_chain_builder_pbh::{
     date_marker::DateMarker,
@@ -22,7 +25,10 @@ use world_chain_builder_pbh::{
 };
 use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
-use world_chain_builder_test_utils::utils::{user_op_sepolia, InclusionProof};
+use world_chain_builder_test_utils::utils::{
+    user_op_sepolia, InclusionProof, RpcUserOperationByHash, RpcUserOperationV0_7,
+};
+use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
 
 use super::SendArgs;
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
@@ -222,21 +228,20 @@ pub async fn sign_transaction(
 }
 
 pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
+    let bundle: Bundle = serde_json::from_reader(std::fs::File::open(&args.bundle_path)?)?;
+    // TODO: Implement this
+    // let mut headers = HeaderMap::new();
+    // headers.insert(AUTHORIZATION, secret_to_bearer_header(&secret));
+
+    // Create the reqwest::Client with the AUTHORIZATION header.
+    let client_with_auth = Client::builder().build()?;
+
+    // Create the HTTP transport.
+    let http = Http::with_client(client_with_auth, args.rpc_url.parse()?);
+    let rpc_client = RpcClient::new(http, false);
+    let provider = ProviderBuilder::new().on_client(rpc_client);
     match args.tx_type {
         TxType::Transaction => {
-            let bundle: Bundle = serde_json::from_reader(std::fs::File::open(&args.bundle_path)?)?;
-            // TODO: Implement this
-            // let mut headers = HeaderMap::new();
-            // headers.insert(AUTHORIZATION, secret_to_bearer_header(&secret));
-
-            // Create the reqwest::Client with the AUTHORIZATION header.
-            let client_with_auth = Client::builder().build()?;
-
-            // Create the HTTP transport.
-            let http = Http::with_client(client_with_auth, args.rpc_url.parse()?);
-            let rpc_client = RpcClient::new(http, false);
-            let provider = ProviderBuilder::new().on_client(rpc_client);
-
             stream::iter(
                 bundle
                     .pbh_transactions
@@ -269,7 +274,53 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
             })
             .await?;
         }
-        TxType::UserOperation => {}
+        TxType::UserOperation => {
+            stream::iter(bundle.pbh_user_operations.iter())
+                .map(Ok)
+                .try_for_each_concurrent(1000, move |uo| {
+                    let provider = provider.clone();
+                    async move {
+                        let uo: RpcUserOperationV0_7 = uo.clone().into();
+                        let hash: B256 = provider.raw_request(
+                            Cow::Borrowed("eth_sendUserOperation"),
+                            (uo, DEVNET_ENTRYPOINT),
+                        )
+                        .await?;
+
+                        // Fetch the Transaction by hash
+                        let max_retries = 100;
+                        let mut tries = 0;
+                        loop {
+                            if tries >= max_retries {
+                                panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                            }
+                            // Check if the User Operation has been included in a Transaction
+                            let resp: RpcUserOperationByHash = provider
+                                .raw_request(
+                                    Cow::Borrowed("eth_getUserOperationByHash"),
+                                    (hash.clone(),),
+                                )
+                                .await?;
+
+                            if let Some(transaction_hash) = resp.transaction_hash {
+                                info!(target: "tests::user_ops_test",  ?transaction_hash, "User Operation Included in Transaction");
+                                // Fetch the Transaction Receipt from the builder
+                                let receipt = provider.get_transaction_by_hash(transaction_hash).await?;
+                                assert!(receipt.is_some_and(|receipt| {
+                                    info!(target: "tests::user_ops_test",  ?receipt, "Transaction Receipt Received");
+                                    true
+                                }));
+
+                                break;
+                            }
+
+                            tries += 1;
+                            sleep(Duration::from_secs(2)).await;
+                        }
+                        Ok::<(), eyre::Report>(())
+                    }
+                }).await?;
+        }
     }
     Ok(())
 }

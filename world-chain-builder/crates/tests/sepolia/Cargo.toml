@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 world-chain-builder-test-utils.workspace = true
 world-chain-builder-pbh.workspace = true
-toolkit.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true

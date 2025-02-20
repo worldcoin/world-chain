@@ -110,12 +110,11 @@ pub struct SendArgs {
     #[clap(long, default_value = "transaction")]
     pub tx_type: TxType,
     /// The file path to write the generated bundle.
-    #[clap(long, short, default_value = "pbh_bundle.json")]
+    #[clap(long, default_value = "pbh_bundle.json")]
     pub bundle_path: String,
-    /// The RPC URL for WC Sepolia Testnet.
+    /// The RPC URL
     #[clap(long, short, required = true)]
     pub rpc_url: String,
-
     /// JWT Secret authorization in the headers.
     // TODO:
     #[clap(long, short)]
