@@ -10,10 +10,8 @@ use alloy_sol_types::SolCall;
 use alloy_sol_types::SolValue;
 use alloy_transport_http::Http;
 use futures::{stream, StreamExt, TryStreamExt};
-use reqwest::header::{HeaderMap, AUTHORIZATION};
 use reqwest::Client;
-use reth_rpc_layer::secret_to_bearer_header;
-use semaphore_rs::{hash_to_field, identity::Identity, poseidon_tree::Proof, Field};
+use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tracing::info;
@@ -24,15 +22,10 @@ use world_chain_builder_pbh::{
 };
 use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
+use world_chain_builder_test_utils::utils::{user_op_sepolia, InclusionProof};
 
 use super::SendArgs;
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct InclusionProof {
-    root: Field,
-    proof: Proof,
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
@@ -66,7 +59,7 @@ pub async fn create_bundle(args: BundleArgs) -> eyre::Result<()> {
             )?;
         }
         TxType::UserOperation => {
-            let pbh_user_operations = bundle_pbh_user_operations(&args, identities)?;
+            let pbh_user_operations = bundle_pbh_user_operations(&args, identities).await?;
             serde_json::to_writer(
                 std::fs::File::create(&args.bundle_path)?,
                 &Bundle {
@@ -93,8 +86,9 @@ pub async fn bundle_pbh_transactions(
     .await?;
 
     let mut txs = vec![];
+    let mut nonce = args.pbh_nonce;
     for (identity, proof) in identities.iter().zip(proofs.iter()) {
-        let signer = PrivateKeySigner::from_str(&args.private_key)?;
+        let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
         let sender = signer.address();
         let date = chrono::Utc::now().naive_utc().date();
         let date_marker = DateMarker::from(date);
@@ -129,8 +123,9 @@ pub async fn bundle_pbh_transactions(
                 calls,
                 payload: payload.into(),
             };
+
             let tx = TransactionRequest {
-                nonce: Some(args.nonce + i as u64),
+                nonce: Some(nonce),
                 value: None,
                 to: Some(TxKind::Call(
                     args.pbh_entry_point.parse().expect("Invalid address"),
@@ -147,6 +142,7 @@ pub async fn bundle_pbh_transactions(
                 ..Default::default()
             };
 
+            nonce += 1;
             txs.push(sign_transaction(tx, signer.clone()).await?)
         }
     }
@@ -154,21 +150,48 @@ pub async fn bundle_pbh_transactions(
     Ok(txs)
 }
 
-// TODO:
-pub fn bundle_pbh_user_operations(
-    _args: &BundleArgs,
-    _identities: Vec<Identity>,
+pub async fn bundle_pbh_user_operations(
+    args: &BundleArgs,
+    identities: Vec<Identity>,
 ) -> eyre::Result<Vec<PackedUserOperation>> {
-    Ok(vec![])
+    let proofs = futures::future::try_join_all(
+        identities
+            .iter()
+            .map(|identity| async { fetch_inclusion_proof(&args.sequencer_url, identity).await }),
+    )
+    .await?;
+
+    let mut txs = vec![];
+    for (identity, proof) in identities.iter().zip(proofs.iter()) {
+        let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
+        let date = chrono::Utc::now().naive_utc().date();
+        let date_marker = DateMarker::from(date);
+        for i in 0..args.pbh_batch_size {
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i);
+            let uo = user_op_sepolia()
+                .signer(signer.clone())
+                .safe(args.user_op_args.safe.parse().expect("Invalid address"))
+                .module(args.user_op_args.module.parse().expect("Invalid address"))
+                .external_nullifier(external_nullifier)
+                .inclusion_proof(proof.clone())
+                .identity(identity.clone())
+                .call();
+
+            txs.push(uo);
+        }
+    }
+
+    Ok(txs)
 }
 
 pub async fn bundle_std_transactions(args: &BundleArgs) -> eyre::Result<Vec<Bytes>> {
-    let signer = args.private_key.parse::<PrivateKeySigner>()?;
+    let signer = args.std_private_key.parse::<PrivateKeySigner>()?;
     let sender = signer.address();
     let mut txs = vec![];
-    for i in 0..args.tx_batch_size {
+    let mut nonce = args.std_nonce;
+    for _ in 0..args.tx_batch_size {
         let tx = TransactionRequest {
-            nonce: Some(args.nonce + args.pbh_batch_size as u64 + i as u64),
+            nonce: Some(nonce),
             value: None,
             to: Some(TxKind::Call(Address::random())),
             gas: Some(100000),
@@ -183,6 +206,7 @@ pub async fn bundle_std_transactions(args: &BundleArgs) -> eyre::Result<Vec<Byte
             ..Default::default()
         };
 
+        nonce += 1;
         txs.push(sign_transaction(tx, signer.clone()).await?)
     }
 
@@ -216,18 +240,29 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
             let txs = bundle
                 .pbh_transactions
                 .iter()
-                .chain(bundle.std_transactions.iter());
+                .zip(bundle.std_transactions.iter());
             stream::iter(txs)
                 .map(Ok)
-                .try_for_each_concurrent(1000, |tx| {
+                .try_for_each_concurrent(1000, |(pbh_tx, tx)| {
                     let provider = provider.clone();
                     async move {
-                        let tx = provider.send_raw_transaction(&tx).await?;
-                        let hash = tx.tx_hash();
-                        info!(?hash, "Sending transaction");
+                        let (res0, res1) = tokio::join!(
+                            provider.send_raw_transaction(&pbh_tx.0),
+                            provider.send_raw_transaction(&tx.0)
+                        );
+                        let res0 = res0?;
+                        let res1 = res1?;
+                        let hash_0 = res0.tx_hash();
+                        let hash_1 = res1.tx_hash();
 
-                        let receipt = tx.get_receipt().await?;
-                        info!(?receipt, "Received tx receipt");
+                        info!(?hash_0, "Sending PBH transaction");
+                        info!(?hash_1, "Sending transaction");
+
+                        let receipt_0 = res0.get_receipt().await?;
+                        let receipt_1 = res1.get_receipt().await?;
+
+                        info!(?receipt_0, "Received tx receipt for PBH Transaction");
+                        info!(?receipt_1, "Received tx receipt for Non-PBH Transaction");
                         Ok::<_, eyre::Report>(())
                     }
                 })

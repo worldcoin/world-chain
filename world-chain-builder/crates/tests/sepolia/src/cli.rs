@@ -30,7 +30,11 @@ pub struct GenerateArgs {
     #[clap(long, short, default_value = "test_identities.json")]
     pub path: String,
     /// The URL to the target signup sequencer.
-    #[clap(long, short, default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev")]
+    #[clap(
+        long,
+        short,
+        default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
+    )]
     pub sequencer_url: String,
     /// The Username to authenticate with the signup sequencer.
     #[clap(long, short)]
@@ -49,7 +53,11 @@ pub struct BundleArgs {
     #[clap(long, default_value = "test_identities.json")]
     pub identities_path: String,
     /// The URL to the target signup sequencer.
-    #[clap(long, short, default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev")]
+    #[clap(
+        long,
+        short,
+        default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
+    )]
     pub sequencer_url: String,
     /// The Chain ID
     #[clap(long, default_value_t = 4801)]
@@ -68,13 +76,32 @@ pub struct BundleArgs {
     pub tx_batch_size: u8,
     /// The private key signer for the transactions or UserOperations.
     #[clap(long)]
-    pub private_key: String,
+    pub pbh_private_key: String,
+    /// The private key signer for the transactions or UserOperations.
+    #[clap(long)]
+    pub std_private_key: String,
     /// The nonce for the wallet.
-    #[clap(long, short, default_value_t = 0)]
-    pub nonce: u64,
+    #[clap(long, default_value_t = 0)]
+    pub pbh_nonce: u64,
+    /// The nonce for the wallet.
+    #[clap(long, default_value_t = 0)]
+    pub std_nonce: u64,
     /// Whether to create PBH transactions or UserOperations.
     #[clap(long, default_value = "transaction")]
     pub tx_type: TxType,
+    /// UserOperation arguments
+    #[command(flatten)]
+    pub user_op_args: UserOpArgs,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct UserOpArgs {
+    /// Address of the Safe to execute UserOperations on.
+    #[clap(long)]
+    pub safe: String,
+    /// Address of the Module to execute UserOperations on.
+    #[clap(long)]
+    pub module: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -91,9 +118,8 @@ pub struct SendArgs {
 
     /// JWT Secret authorization in the headers.
     // TODO:
-    #[clap(long, short)] 
+    #[clap(long, short)]
     pub auth: Option<JwtSecret>,
-    
 }
 
 #[derive(Debug, Clone, ValueEnum)]

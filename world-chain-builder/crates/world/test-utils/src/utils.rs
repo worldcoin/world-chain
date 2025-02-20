@@ -27,7 +27,7 @@ use crate::bindings::IPBHEntryPoint::{self, PBHPayload};
 use crate::bindings::{EncodedSafeOpStruct, IMulticall3};
 use crate::{
     DEVNET_ENTRYPOINT, DEV_CHAIN_ID, MNEMONIC, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES,
+    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES, WC_SEPOLIA_CHAIN_ID,
 };
 
 pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
@@ -42,6 +42,12 @@ pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
 
     tree.derived()
 });
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InclusionProof {
+    pub root: Field,
+    pub proof: semaphore_rs::poseidon_tree::Proof,
+}
 
 pub fn signer(index: u32) -> PrivateKeySigner {
     alloy_signer_local::MnemonicBuilder::<English>::default()
@@ -217,6 +223,86 @@ pub fn user_op(
     user_op.signature = Bytes::from(uo_sig);
 
     (user_op, payload)
+}
+
+#[builder]
+pub fn user_op_sepolia(
+    signer: PrivateKeySigner,
+    safe: Address,
+    module: Address,
+    identity: Identity,
+    inclusion_proof: InclusionProof,
+    #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
+    #[builder(into, default = U256::ZERO)] nonce: U256,
+    #[builder(default = Bytes::default())] init_code: Bytes,
+    #[builder(default = bytes!("7bb3742800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))]
+    // abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0))
+    calldata: Bytes,
+    #[builder(default = fixed_bytes!("000000000000000000000000000fffd30000000000000000000000000000C350"))]
+    account_gas_limits: FixedBytes<32>,
+    #[builder(default = U256::from(500836))] pre_verification_gas: U256,
+    #[builder(default = fixed_bytes!("0000000000000000000000003B9ACA0000000000000000000000000073140B60"))]
+    gas_fees: FixedBytes<32>,
+    #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
+) -> IEntryPoint::PackedUserOperation {
+    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    let mut user_op = PackedUserOperation {
+        sender: safe,
+        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        initCode: init_code,
+        callData: calldata,
+        accountGasLimits: account_gas_limits,
+        preVerificationGas: pre_verification_gas,
+        gasFees: gas_fees,
+        paymasterAndData: paymaster_and_data,
+        signature: bytes!("000000000000000000000000"),
+    };
+
+    let operation_hash = get_operation_hash(user_op.clone(), module, WC_SEPOLIA_CHAIN_ID);
+
+    let signature = signer
+        .sign_message_sync(&operation_hash.0)
+        .expect("Failed to sign operation hash");
+    let signal = hash_user_op(&user_op);
+
+    let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
+
+    let proof = semaphore_rs::protocol::generate_proof(&identity, &inclusion_proof.proof, encoded_external_nullifier.0, signal)
+        .expect("Failed to generate semaphore proof");
+    let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
+
+    let proof = Proof(proof);
+
+    let payload = PbhPayload {
+        external_nullifier,
+        nullifier_hash,
+        root: inclusion_proof.root,
+        proof,
+    };
+    let mut uo_sig = Vec::new();
+
+    // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
+    let v: FixedBytes<1> = if signature.v() as u8 == 0 {
+        fixed_bytes!("1F") // 31
+    } else {
+        fixed_bytes!("20") // 32
+    };
+
+    uo_sig.extend_from_slice(
+        &(
+            fixed_bytes!("000000000000000000000000"),
+            signature.r(),
+            signature.s(),
+            v,
+        )
+            .abi_encode_packed(),
+    );
+
+    uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+
+    user_op.signature = Bytes::from(uo_sig);
+
+    user_op
 }
 
 pub fn pbh_bundle(

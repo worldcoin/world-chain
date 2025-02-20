@@ -24,7 +24,7 @@ pub const TEST_MODULES: [Address; 6] = [
     address!("3Aa5ebB10DC797CAC828524e59A333d0A371443c"),
     address!("4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1"),
 ];
-
+pub const WC_SEPOLIA_CHAIN_ID: u64 = 4801;
 pub const DEV_CHAIN_ID: u64 = 2151908;
 
 pub const PBH_NONCE_KEY: u32 = 1123123123;
