@@ -3,9 +3,9 @@ use alloy_rlp::Decodable;
 use clap::Parser;
 use cli::inclusion_proof_source::InclusionProofSourceVariant;
 use cli::{Cmd, Opt};
-use semaphore::identity::Identity;
-use semaphore::poseidon_tree::Proof;
-use semaphore::{hash_to_field, Field};
+use semaphore_rs::identity::Identity;
+use semaphore_rs::poseidon_tree::Proof;
+use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Serialize};
 use world_chain_builder_pbh::date_marker::DateMarker;
 use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
@@ -55,7 +55,7 @@ async fn main() -> eyre::Result<()> {
                 ExternalNullifier::with_date_marker(date_marker, prove_args.pbh_nonce);
             let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
 
-            let semaphore_proof = semaphore::protocol::generate_proof(
+            let semaphore_proof = semaphore_rs::protocol::generate_proof(
                 &identity,
                 &inclusion_proof.proof,
                 external_nullifier_hash,
@@ -63,7 +63,7 @@ async fn main() -> eyre::Result<()> {
             )?;
 
             let nullifier_hash =
-                semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+                semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
 
             let proof = PBHPayload {
                 external_nullifier: external_nullifier,
@@ -92,7 +92,7 @@ fn load_inclusion_proof_file(path: impl AsRef<std::path::Path>) -> eyre::Result<
     Ok(proof)
 }
 
-async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<InclusionProof> {
+pub async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<InclusionProof> {
     let client = reqwest::Client::new();
 
     let commitment = identity.commitment();

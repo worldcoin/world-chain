@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bytes::BytesMut;
 use clap::Args;
-use semaphore::identity::Identity;
+use semaphore_rs::identity::Identity;
 
 use super::utils::bytes_mut_parse_hex;
 

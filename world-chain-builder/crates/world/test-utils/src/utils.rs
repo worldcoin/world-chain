@@ -13,9 +13,9 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
-use semaphore::identity::Identity;
-use semaphore::poseidon_tree::LazyPoseidonTree;
-use semaphore::{hash_to_field, Field};
+use semaphore_rs::identity::Identity;
+use semaphore_rs::poseidon_tree::LazyPoseidonTree;
+use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use std::{str::FromStr, sync::LazyLock};
@@ -67,25 +67,25 @@ pub fn tree_root() -> Field {
     TREE.root()
 }
 
-pub fn tree_inclusion_proof(acc: u32) -> semaphore::poseidon_tree::Proof {
+pub fn tree_inclusion_proof(acc: u32) -> semaphore_rs::poseidon_tree::Proof {
     TREE.proof(acc as usize)
 }
 
 pub fn nullifier_hash(acc: u32, external_nullifier: Field) -> Field {
     let identity = identity(acc);
 
-    semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier)
+    semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier)
 }
 
 pub fn semaphore_proof(
     acc: u32,
     ext_nullifier: Field,
     signal: Field,
-) -> semaphore::protocol::Proof {
+) -> semaphore_rs::protocol::Proof {
     let identity = identity(acc);
     let incl_proof = tree_inclusion_proof(acc);
 
-    semaphore::protocol::generate_proof(&identity, &incl_proof, ext_nullifier, signal)
+    semaphore_rs::protocol::generate_proof(&identity, &incl_proof, ext_nullifier, signal)
         .expect("Failed to generate semaphore proof")
 }
 
@@ -262,19 +262,6 @@ pub fn pbh_multicall(
         proof.2 .1,
     ];
 
-    // TODO: Switch to ruint in semaphore-rs and remove this
-    let proof: [U256; 8] = proof
-        .into_iter()
-        .map(|x| {
-            let mut bytes_repr: [u8; 32] = [0; 32];
-            x.to_big_endian(&mut bytes_repr);
-
-            U256::from_be_bytes(bytes_repr)
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-
     let payload = IPBHEntryPoint::PBHPayload {
         root,
         pbhExternalNullifier: EncodedExternalNullifier::from(external_nullifier).0,
@@ -342,37 +329,20 @@ impl From<PackedUserOperation> for EncodedSafeOpStruct {
 
 impl From<PbhPayload> for PBHPayload {
     fn from(val: PbhPayload) -> Self {
-        let mut p0 = [0; 32];
-        val.proof.0 .0 .0.to_big_endian(&mut p0);
-        let mut p1 = [0; 32];
-        val.proof.0 .0 .1.to_big_endian(&mut p1);
-        let mut p2 = [0; 32];
-        val.proof.0 .1 .0[0].to_big_endian(&mut p2);
-        let mut p3 = [0; 32];
-        val.proof.0 .1 .0[1].to_big_endian(&mut p3);
-        let mut p4 = [0; 32];
-        val.proof.0 .1 .1[0].to_big_endian(&mut p4);
-        let mut p5 = [0; 32];
-        val.proof.0 .1 .1[1].to_big_endian(&mut p5);
-        let mut p6 = [0; 32];
-        val.proof.0 .2 .0.to_big_endian(&mut p6);
-        let mut p7 = [0; 32];
-        val.proof.0 .2 .1.to_big_endian(&mut p7);
+        let p0 = val.proof.0 .0 .0;
+        let p1 = val.proof.0 .0 .1;
+        let p2 = val.proof.0 .1 .0[0];
+        let p3 = val.proof.0 .1 .0[1];
+        let p4 = val.proof.0 .1 .1[0];
+        let p5 = val.proof.0 .1 .1[1];
+        let p6 = val.proof.0 .2 .0;
+        let p7 = val.proof.0 .2 .1;
 
         Self {
             root: val.root,
             pbhExternalNullifier: EncodedExternalNullifier::from(val.external_nullifier).0,
             nullifierHash: val.nullifier_hash,
-            proof: [
-                U256::from_be_bytes(p0),
-                U256::from_be_bytes(p1),
-                U256::from_be_bytes(p2),
-                U256::from_be_bytes(p3),
-                U256::from_be_bytes(p4),
-                U256::from_be_bytes(p5),
-                U256::from_be_bytes(p6),
-                U256::from_be_bytes(p7),
-            ],
+            proof: [p0, p1, p2, p3, p4, p5, p6, p7],
         }
     }
 }

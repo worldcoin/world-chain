@@ -7,7 +7,7 @@ use reth::api::Block;
 use reth_primitives::SealedBlock;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 
-use semaphore::Field;
+use semaphore_rs::Field;
 
 use super::error::WorldChainTransactionPoolError;
 
