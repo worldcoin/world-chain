@@ -20,7 +20,7 @@ contract DeploySafe is Script {
 
     address public constant ENTRY_POINT =
         0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant PBH_SIGNATURE_AGGREGATOR = 0x39911B3242e952d86270857Bc8eFC3FcE8d84abe;
+    address public constant PBH_SIGNATURE_AGGREGATOR = 0xED5dc9CDB270818dCec0784bBdc8094082f0eBcB;
     uint32 public constant PBH_NONCE_KEY = 1123123123;
 
     function run() public {
