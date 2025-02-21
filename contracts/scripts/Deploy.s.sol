@@ -15,7 +15,7 @@ contract Deploy is Script {
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
 
-    address internal constant WORLD_ID = 0x047eE5313F98E26Cc8177fA38877cB36292D2364;
+    address internal constant WORLD_ID = 0xE177F37AF0A862A02edFEa4F59C02668E9d0aAA4;
     address internal constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     uint256 internal constant MAX_PBH_GAS_LIMIT = 10500000; // 10.5M 70% of 15M
     uint8 internal constant PBH_NONCE_LIMIT = 30;
