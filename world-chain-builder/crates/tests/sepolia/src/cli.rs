@@ -65,11 +65,11 @@ pub struct BundleArgs {
         default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
     )]
     pub sequencer_url: String,
-    /// The Chain ID
+    /// The Chain ID of the network.
     #[clap(long, default_value_t = 4801)]
     pub chain_id: u64,
     /// The `PBHEntryPoint` address
-    #[clap(long, default_value = "0x7AcDc12cbCba53E1ea2206844D0A8cCb6f3B08fB")]
+    #[clap(long, default_value = "0xCDfDF72065493bDDb2131478c89C1D5482BD1dF6")]
     pub pbh_entry_point: String,
     /// The file path to write the generated bundle.
     #[clap(long, short, default_value = "pbh_bundle.json")]
