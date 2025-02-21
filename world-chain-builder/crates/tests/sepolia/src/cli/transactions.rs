@@ -50,7 +50,8 @@ pub async fn create_bundle(args: BundleArgs) -> eyre::Result<()> {
             trapdoor: identity.trapdoor,
         })
         .collect();
-    let std_transactions = bundle_std_transactions(&args).await?;
+
+    let std_transactions = bundle_transactions(&args).await?;
 
     match args.tx_type {
         TxType::Transaction => {
@@ -176,8 +177,8 @@ pub async fn bundle_pbh_user_operations(
             let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i);
             let uo = user_op_sepolia()
                 .signer(signer.clone())
-                .safe(args.user_op_args.safe.parse().expect("Invalid address"))
-                .module(args.user_op_args.module.parse().expect("Invalid address"))
+                .safe(args.safe.expect("Safe address is required"))
+                .module(args.module.expect("Module address is required"))
                 .external_nullifier(external_nullifier)
                 .inclusion_proof(proof.clone())
                 .identity(identity.clone())
@@ -190,7 +191,7 @@ pub async fn bundle_pbh_user_operations(
     Ok(txs)
 }
 
-pub async fn bundle_std_transactions(args: &BundleArgs) -> eyre::Result<Vec<Bytes>> {
+pub async fn bundle_transactions(args: &BundleArgs) -> eyre::Result<Vec<Bytes>> {
     let signer = args.std_private_key.parse::<PrivateKeySigner>()?;
     let sender = signer.address();
     let mut txs = vec![];

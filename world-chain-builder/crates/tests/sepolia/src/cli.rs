@@ -1,10 +1,16 @@
+use alloy_primitives::Address;
 use clap::{Parser, ValueEnum};
 use reth_rpc_layer::JwtSecret;
 
 pub mod identities;
 pub mod transactions;
 
-/// A CLI utility for load testing WorldChain Sepolia PBH
+/// A CLI utility for load testing PBH transactions.
+///
+/// The CLI consists of three stages:
+///  - `generate`: Command to generate Test identities, and insert them into the signup sequencer.
+///  - `bundle`: Command to create a bundle of PBH transactions, or PBH UserOperations on specified identities.
+///  - `send`: Command to send a batch of test transactions, or UserOperations.
 #[derive(Debug, Clone, Parser)]
 #[clap(version, about)]
 pub struct Cli {
@@ -37,10 +43,10 @@ pub struct GenerateArgs {
     )]
     pub sequencer_url: String,
     /// The Username to authenticate with the signup sequencer.
-    #[clap(long, short)]
+    #[clap(long, short, required = true)]
     pub username: String,
     /// The Password to authenticate with the signup sequencer.
-    #[clap(long)]
+    #[clap(long, required = true)]
     pub password: String,
     /// The number of identities to generate.
     #[clap(long, short, default_value_t = 1)]
@@ -74,11 +80,11 @@ pub struct BundleArgs {
     /// The number of Non-PBH transactions to generate.
     #[clap(long, default_value_t = 0)]
     pub tx_batch_size: u8,
-    /// The private key signer for the transactions or UserOperations.
-    #[clap(long)]
+    /// The private key signer for transactions or UserOperations.
+    #[clap(long, required = true)]
     pub pbh_private_key: String,
-    /// The private key signer for the transactions or UserOperations.
-    #[clap(long)]
+    /// The private key signer for Non-PBH transactions.
+    #[clap(long, required = true)]
     pub std_private_key: String,
     /// The nonce for the wallet.
     #[clap(long, default_value_t = 0)]
@@ -89,19 +95,12 @@ pub struct BundleArgs {
     /// Whether to create PBH transactions or UserOperations.
     #[clap(long, default_value = "transaction")]
     pub tx_type: TxType,
-    /// UserOperation arguments
-    #[command(flatten)]
-    pub user_op_args: UserOpArgs,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct UserOpArgs {
-    /// Address of the Safe to execute UserOperations on.
-    #[clap(long)]
-    pub safe: String,
-    /// Address of the Module to execute UserOperations on.
-    #[clap(long)]
-    pub module: String,
+    /// Address of the Safe to execute UserOperation's on.
+    #[clap(long, required_if_eq("tx_type", "user-operation"))]
+    pub safe: Option<Address>,
+    /// Address of the Module to execute UserOperation's on.
+    #[clap(long, required_if_eq("tx_type", "user-operation"))]
+    pub module: Option<Address>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -113,7 +112,7 @@ pub struct SendArgs {
     #[clap(long, default_value = "pbh_bundle.json")]
     pub bundle_path: String,
     /// The RPC URL
-    #[clap(long, short, required = true)]
+    #[clap(long, required = true)]
     pub rpc_url: String,
     /// JWT Secret authorization in the headers.
     // TODO:

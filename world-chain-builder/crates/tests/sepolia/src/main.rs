@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use clap::Parser;
 use cli::identities::generate_identities;
 use cli::transactions::{create_bundle, send_bundle};

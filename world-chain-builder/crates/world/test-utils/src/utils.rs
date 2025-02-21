@@ -1,10 +1,10 @@
 use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
+use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
-use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;

@@ -10736,17 +10736,14 @@ dependencies = [
 name = "tests-sepolia"
 version = "0.1.0"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-client",
  "alloy-rpc-types-eth",
- "alloy-signer",
  "alloy-signer-local",
  "alloy-sol-types",
  "alloy-transport-http",
- "base64 0.22.1",
  "chrono",
  "clap",
  "color-eyre",
