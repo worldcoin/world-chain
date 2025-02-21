@@ -16,7 +16,7 @@ use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use semaphore::hash_to_field;
+use semaphore_rs::hash_to_field;
 use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
 
 /// Validator for World Chain transactions.

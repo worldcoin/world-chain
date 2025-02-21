@@ -18,13 +18,13 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
-alloy-signer-local.workspace = true
+alloy-signer-local = { workspace = true, features = ["mnemonic"]}
 alloy-signer.workspace = true
 alloy-network.workspace = true
 op-alloy-consensus.workspace = true
 
 # 3rd party
-semaphore.workspace = true
+semaphore-rs = { workspace = true, features = ["depth_30"]}
 bon.workspace = true
 serde.workspace = true
 
