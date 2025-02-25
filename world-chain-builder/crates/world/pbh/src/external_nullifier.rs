@@ -29,7 +29,7 @@ pub struct ExternalNullifier {
 }
 
 /// The encoding format is as follows:
-///      - Bits:48-263: Empty
+///      - Bits:48-255: Empty
 ///      - Bits 40-47: Year
 ///      - Bits 24-39: Month
 ///      - Bits 8-23: Nonce
