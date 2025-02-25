@@ -60,7 +60,7 @@ pub const DEV_CHAIN_ID: u64 = 2151908;
 
 pub async fn raw_pbh_bundle_bytes(
     acc: u32,
-    pbh_nonce: u8,
+    pbh_nonce: u16,
     tx_nonce: u64,
     user_op_nonce: U256,
     chain_id: u64,
@@ -92,7 +92,7 @@ pub async fn raw_pbh_bundle_bytes(
 
 pub async fn raw_pbh_multicall_bytes(
     acc: u32,
-    pbh_nonce: u8,
+    pbh_nonce: u16,
     tx_nonce: u64,
     chain_id: u64,
 ) -> Bytes {
@@ -101,7 +101,7 @@ pub async fn raw_pbh_multicall_bytes(
     let month = dt.month() as u8;
     let year = dt.year() as u16;
 
-    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
+    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce as u16);
 
     let data = pbh_multicall()
         .acc(acc)

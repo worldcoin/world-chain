@@ -25,7 +25,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
 
     event PBH(address indexed sender, uint256 indexed signalHash, IPBHEntryPoint.PBHPayload payload);
-    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+    event NumPbhPerMonthSet(uint16 indexed numPbhPerMonth);
     event WorldIdSet(address indexed worldId);
 
     function test_verifyPbh(address sender, uint8 pbhNonce) public view {
@@ -277,7 +277,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         assertEq(returnData.returnData, expectedReturnData);
     }
 
-    function test_setNumPbhPerMonth(uint8 numPbh) public {
+    function test_setNumPbhPerMonth(uint16 numPbh) public {
         vm.assume(numPbh > 0);
 
         vm.prank(OWNER);

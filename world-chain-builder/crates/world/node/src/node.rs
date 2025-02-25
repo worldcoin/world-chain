@@ -178,7 +178,7 @@ impl NodeTypesWithEngine for WorldChainNode {
 /// config.
 #[derive(Debug, Clone)]
 pub struct WorldChainPoolBuilder {
-    pub num_pbh_txs: u8,
+    pub num_pbh_txs: u16,
     pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
     pub world_id: Address,
@@ -188,7 +188,7 @@ pub struct WorldChainPoolBuilder {
 
 impl WorldChainPoolBuilder {
     pub fn new(
-        num_pbh_txs: u8,
+        num_pbh_txs: u16,
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
         world_id: Address,
