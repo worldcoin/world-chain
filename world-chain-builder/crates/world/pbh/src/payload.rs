@@ -90,7 +90,7 @@ impl PBHPayload {
         &self,
         signal: U256,
         valid_roots: &[Field],
-        pbh_nonce_limit: u8,
+        pbh_nonce_limit: u16,
     ) -> Result<(), PbhValidationError> {
         self.validate_root(valid_roots)?;
 
@@ -122,7 +122,7 @@ impl PBHPayload {
     pub fn validate_external_nullifier(
         &self,
         date: chrono::DateTime<chrono::Utc>,
-        pbh_nonce_limit: u8,
+        pbh_nonce_limit: u16,
     ) -> Result<(), PbhValidationError> {
         if self.external_nullifier.date_marker() != DateMarker::from(date) {
             return Err(PbhValidationError::InvalidExternalNullifierPeriod);

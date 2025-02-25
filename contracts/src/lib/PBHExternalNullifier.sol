@@ -32,9 +32,9 @@ library PBHExternalNullifier {
     /// @param month An 8-bit 1-indexed value representing the month (1-12).
     /// @param year A 16-bit value representing the year (e.g., 2024).
     /// @return The encoded PBHExternalNullifier.
-    function encode(uint8 version, uint8 pbhNonce, uint8 month, uint16 year) internal pure returns (uint256) {
+    function encode(uint8 version, uint16 pbhNonce, uint8 month, uint16 year) internal pure returns (uint256) {
         require(month > 0 && month < 13, InvalidExternalNullifierMonth());
-        return (uint256(year) << 24) | (uint256(month) << 16) | (uint256(pbhNonce) << 8) | uint256(version);
+        return (uint256(year) << 32) | (uint256(month) << 24) | (uint256(pbhNonce) << 8) | uint256(version);
     }
 
     /// @notice Decodes an encoded PBHExternalNullifier into its constituent components.
@@ -46,11 +46,11 @@ library PBHExternalNullifier {
     function decode(uint256 externalNullifier)
         internal
         pure
-        returns (uint8 version, uint8 pbhNonce, uint8 month, uint16 year)
+        returns (uint8 version, uint16 pbhNonce, uint8 month, uint16 year)
     {
-        year = uint16(externalNullifier >> 24);
-        month = uint8((externalNullifier >> 16) & 0xFF);
-        pbhNonce = uint8((externalNullifier >> 8) & 0xFF);
+        year = uint16(externalNullifier >> 32);
+        month = uint8((externalNullifier >> 24) & 0xFF);
+        pbhNonce = uint16((externalNullifier >> 8) & 0xFFFF);
         version = uint8(externalNullifier & 0xFF);
     }
 
@@ -63,12 +63,12 @@ library PBHExternalNullifier {
     ///      and that the nonce does not exceed `numPbhPerMonth`.
     /// @custom:reverts Reverts if the current block timestamp does not match
     /// the provided month/year or if pbhNonce !<  numPbhPerMonth.
-    function verify(uint256 externalNullifier, uint8 numPbhPerMonth, uint256 signalHash) internal view {
+    function verify(uint256 externalNullifier, uint16 numPbhPerMonth, uint256 signalHash) internal view {
         require(
-            externalNullifier <= type(uint40).max,
+            externalNullifier <= type(uint48).max,
             InvalidExternalNullifier(externalNullifier, signalHash, "Leading zeros")
         );
-        (uint8 version, uint8 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
+        (uint8 version, uint16 pbhNonce, uint8 month, uint16 year) = PBHExternalNullifier.decode(externalNullifier);
         require(version == V1, InvalidExternalNullifier(externalNullifier, signalHash, "Invalid Version"));
         require(
             year == BokkyPooBahsDateTimeLibrary.getYear(block.timestamp),

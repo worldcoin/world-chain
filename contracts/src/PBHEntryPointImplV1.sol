@@ -33,7 +33,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
 
     /// @notice The number of PBH transactions alloted to each World ID per month, 0 indexed.
     ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs
-    uint8 public numPbhPerMonth;
+    uint16 public numPbhPerMonth;
 
     /// @notice Address of the Multicall3 implementation.
     address internal _multicall3;
@@ -58,7 +58,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId,
         IEntryPoint indexed entryPoint,
-        uint8 indexed numPbhPerMonth,
+        uint16 indexed numPbhPerMonth,
         address multicall3,
         uint256 pbhGasLimit
     );
@@ -78,7 +78,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Emitted when the number of PBH transactions allowed per month is set.
     ///
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    event NumPbhPerMonthSet(uint8 indexed numPbhPerMonth);
+    event NumPbhPerMonthSet(uint16 indexed numPbhPerMonth);
 
     /// @notice Emitted when setting the PBH gas limit.
     ///
@@ -146,7 +146,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     function initialize(
         IWorldID _worldId,
         IEntryPoint _entryPoint,
-        uint8 _numPbhPerMonth,
+        uint16 _numPbhPerMonth,
         address multicall3,
         uint256 _pbhGasLimit
     ) external reinitializer(1) {
@@ -286,7 +286,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
 
     /// @notice Sets the number of PBH transactions allowed per month.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
-    function setNumPbhPerMonth(uint8 _numPbhPerMonth) external virtual onlyProxy onlyInitialized onlyOwner {
+    function setNumPbhPerMonth(uint16 _numPbhPerMonth) external virtual onlyProxy onlyInitialized onlyOwner {
         if (_numPbhPerMonth == 0) {
             revert InvalidNumPbhPerMonth();
         }
