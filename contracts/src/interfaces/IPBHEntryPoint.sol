@@ -30,7 +30,7 @@ interface IPBHEntryPoint {
     function initialize(
         IWorldID worldId,
         IEntryPoint entryPoint,
-        uint8 _numPbhPerMonth,
+        uint16 _numPbhPerMonth,
         address _multicall3,
         uint256 _multicallGasLimit
     ) external;
@@ -43,9 +43,9 @@ interface IPBHEntryPoint {
 
     function worldId() external view returns (IWorldID);
 
-    function numPbhPerMonth() external view returns (uint8);
+    function numPbhPerMonth() external view returns (uint16);
 
-    function setNumPbhPerMonth(uint8 _numPbhPerMonth) external;
+    function setNumPbhPerMonth(uint16 _numPbhPerMonth) external;
 
     function setWorldId(address _worldId) external;
 

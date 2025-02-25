@@ -21,7 +21,7 @@ impl TransactionFixtures {
     pub async fn new() -> Self {
         let mut pbh_txs = Vec::new();
         for i in 0..255 {
-            pbh_txs.push(raw_pbh_multicall_bytes(1, i as u8, i as u64, DEV_CHAIN_ID).await);
+            pbh_txs.push(raw_pbh_multicall_bytes(1, i as u16, i as u64, DEV_CHAIN_ID).await);
         }
 
         let mut pbh_user_operations = Vec::new();

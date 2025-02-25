@@ -27,7 +27,7 @@ where
 {
     inner: OpTransactionValidator<Client, Tx>,
     root_validator: WorldChainRootValidator<Client>,
-    num_pbh_txs: u8,
+    num_pbh_txs: u16,
     pbh_validator: Address,
     pbh_signature_aggregator: Address,
 }
@@ -43,7 +43,7 @@ where
     pub fn new(
         inner: OpTransactionValidator<Client, Tx>,
         root_validator: WorldChainRootValidator<Client>,
-        num_pbh_txs: u8,
+        num_pbh_txs: u16,
         pbh_validator: Address,
         pbh_signature_aggregator: Address,
     ) -> Self {

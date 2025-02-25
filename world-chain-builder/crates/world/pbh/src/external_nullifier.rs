@@ -24,25 +24,25 @@ pub struct ExternalNullifier {
     pub year: u16,
     #[builder(into)]
     pub month: u8,
-    #[builder(into, default = 0)]
-    pub nonce: u8,
+    #[builder(default = 0)]
+    pub nonce: u16,
 }
 
 /// The encoding format is as follows:
-///      - Bits:40-255: Empty
-///      - Bits 32-39: Year
-///      - Bits 16-31: Month
-///      - Bits 8-15: Nonce
+///      - Bits:48-263: Empty
+///      - Bits 40-47: Year
+///      - Bits 24-39: Month
+///      - Bits 8-23: Nonce
 ///      - Bits 0-7: Version
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncodedExternalNullifier(pub U256);
 
 impl ExternalNullifier {
-    pub fn with_date_marker(marker: DateMarker, nonce: u8) -> Self {
+    pub fn with_date_marker(marker: DateMarker, nonce: u16) -> Self {
         Self::v1(marker.month as u8, marker.year as u16, nonce)
     }
 
-    pub fn v1(month: u8, year: u16, nonce: u8) -> Self {
+    pub fn v1(month: u8, year: u16, nonce: u16) -> Self {
         Self {
             version: Prefix::V1,
             year,
@@ -59,8 +59,8 @@ impl ExternalNullifier {
 impl From<ExternalNullifier> for EncodedExternalNullifier {
     fn from(e: ExternalNullifier) -> Self {
         EncodedExternalNullifier(U256::from(
-            (e.year as u64) << 24
-                | (e.month as u64) << 16
+            (e.year as u64) << 32
+                | (e.month as u64) << 24
                 | (e.nonce as u64) << 8
                 | e.version as u64,
         ))
@@ -71,14 +71,14 @@ impl TryFrom<EncodedExternalNullifier> for ExternalNullifier {
     type Error = alloy_rlp::Error;
 
     fn try_from(value: EncodedExternalNullifier) -> Result<Self, Self::Error> {
-        if value.0 > U256::from(1) << 40 {
+        if value.0 > U256::from(1) << 48 {
             return Err(alloy_rlp::Error::Custom("invalid external nullifier"));
         }
 
         let word: u64 = value.0.to();
-        let year = (word >> 24) as u16;
-        let month = ((word >> 16) & 0xFF) as u8;
-        let nonce = ((word >> 8) & 0xFF) as u8;
+        let year = (word >> 32) as u16;
+        let month = ((word >> 24) & 0xFF) as u8;
+        let nonce = ((word >> 8) & 0xFFFF) as u16;
         let version = (word & 0xFF) as u8;
 
         if version != Prefix::V1 as u8 {

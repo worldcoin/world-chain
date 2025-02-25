@@ -243,7 +243,7 @@ where
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
                     root_validator,
-                    num_pbh_txs,
+                    num_pbh_txs as u16,
                     pbh_entrypoint,
                     pbh_signature_aggregator,
                 )
