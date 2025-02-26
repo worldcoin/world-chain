@@ -39,7 +39,7 @@ interface IPBHEntryPoint {
 
     function verifyPbh(uint256 signalHash, PBHPayload calldata pbhPayload) external view;
 
-    function nullifierHashes(uint256) external view returns (bool);
+    function nullifierHashes(uint256) external view returns (uint256);
 
     function worldId() external view returns (IWorldID);
 
