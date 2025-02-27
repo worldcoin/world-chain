@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "src/WorldChainBlockRegistry.sol";
+import "../src/WorldChainBlockRegistry.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 contract WorldChainBlockRegistryTest is Test {
     WorldChainBlockRegistry blockRegistry;
@@ -51,7 +52,7 @@ contract WorldChainBlockRegistryTest is Test {
     function test_updateBuilder_RevertIf_Unauthorized() public {
         address newBuilder = address(0xCAFE);
         vm.prank(address(0xDEAD));
-        vm.expectRevert(WorldChainBlockRegistry.Unauthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xDEAD)));
         blockRegistry.updateBuilder(newBuilder);
     }
 }
