@@ -25,7 +25,7 @@ contract WorldChainBlockRegistry is Ownable2Step {
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
     error AddressZero();
-    error BlockAlreadyStamped();
+    error BlockAlreadyRegistered();
     error Unauthorized();
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -45,7 +45,7 @@ contract WorldChainBlockRegistry is Ownable2Step {
     }
 
     function stampBlock() public onlyBuilder {
-        require(builtBlocks[block.number] == address(0), BlockAlreadyStamped());
+        require(builtBlocks[block.number] == address(0), BlockAlreadyRegistered());
         builtBlocks[block.number] = msg.sender;
         emit BuiltBlock(msg.sender, block.number);
     }
