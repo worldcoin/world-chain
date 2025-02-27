@@ -1,9 +1,14 @@
 //! World Chain transaction pool types
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+use std::sync::Arc;
+
 use super::root::WorldChainRootValidator;
 use super::tx::WorldChainPoolTransaction;
 use crate::bindings::IPBHEntryPoint;
 use crate::bindings::IPBHEntryPoint::PBHPayload;
+use crate::error::WorldChainTransactionPoolError;
 use crate::tx::WorldChainPoolTransactionError;
+use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -16,8 +21,22 @@ use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
+use revm_primitives::U256;
 use semaphore::hash_to_field;
+use tracing::{info, warn};
 use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
+
+/// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
+pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([305, 0, 0, 0]);
+
+/// The slot of the `pbh_nonce_limit` in the PBHEntryPoint contract.
+pub const PBH_NONCE_LIMIT_SLOT: U256 = U256::from_limbs([302, 0, 0, 0]);
+
+/// The offset in bits of the `PBH_NONCE_LIMIT_SLOT` containing the u16 nonce limit.
+pub const PBH_NONCE_LIMIT_OFFSET: u32 = 160;
+
+/// Max u16
+pub const MAX_U16: U256 = U256::from_limbs([0xFFFF, 0, 0, 0]);
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -25,10 +44,17 @@ pub struct WorldChainTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
+    /// The inner transaction validator.
     inner: OpTransactionValidator<Client, Tx>,
+    /// Validates World ID proofs contain a valid root in the WorldID account.
     root_validator: WorldChainRootValidator<Client>,
-    num_pbh_txs: u16,
-    pbh_validator: Address,
+    /// The maximum number of PBH transactions a single World ID can execute in a given month.
+    max_pbh_nonce: Arc<AtomicU16>,
+    /// The maximum amount of gas a single PBH transaction can consume.
+    max_pbh_gas_limit: Arc<AtomicU64>,
+    /// The address of the entrypoint for all PBH transactions.
+    pbh_entrypoint: Address,
+    /// The address of the World ID PBH signature aggregator.
     pbh_signature_aggregator: Address,
 }
 
@@ -43,17 +69,45 @@ where
     pub fn new(
         inner: OpTransactionValidator<Client, Tx>,
         root_validator: WorldChainRootValidator<Client>,
-        num_pbh_txs: u16,
-        pbh_validator: Address,
+        pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WorldChainTransactionPoolError> {
+        let state = inner.client().state_by_block_id(BlockId::latest())?;
+        // The `num_pbh_txs` storage is in a packed slot at a 160 bit offset consuming 16 bits.
+        let max_pbh_nonce: u16 = ((state
+            .storage(pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())?
+            .unwrap_or_default()
+            >> PBH_NONCE_LIMIT_OFFSET)
+            & MAX_U16)
+            .to();
+        let max_pbh_gas_limit: u64 = state
+            .storage(pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())?
+            .unwrap_or_default()
+            .to();
+
+        if max_pbh_nonce == 0 && max_pbh_gas_limit == 0 {
+            warn!(
+                %pbh_entrypoint,
+                %pbh_signature_aggregator,
+                "WorldChainTransactionValidator Initialized with PBH Disabled - Failed to fetch PBH nonce and gas limit from PBHEntryPoint. Defaulting to 0."
+            )
+        } else {
+            info!(
+                %max_pbh_gas_limit,
+                %max_pbh_nonce,
+                %pbh_entrypoint,
+                %pbh_signature_aggregator,
+                "WorldChainTransactionValidator Initialized with PBH Enabled"
+            )
+        }
+        Ok(Self {
             inner,
             root_validator,
-            num_pbh_txs,
-            pbh_validator,
+            max_pbh_nonce: Arc::new(AtomicU16::new(max_pbh_nonce)),
+            max_pbh_gas_limit: Arc::new(AtomicU64::new(max_pbh_gas_limit)),
+            pbh_entrypoint,
             pbh_signature_aggregator,
-        }
+        })
     }
 
     /// Get a reference to the inner transaction validator.
@@ -107,7 +161,11 @@ where
                     let Ok(payload) = PbhPayload::try_from(payload) else {
                         return Err(WorldChainPoolTransactionError::InvalidCalldata);
                     };
-                    payload.validate(signal, &valid_roots, self.num_pbh_txs)?;
+                    payload.validate(
+                        signal,
+                        &valid_roots,
+                        self.max_pbh_nonce.load(Ordering::Relaxed),
+                    )?;
                     Ok::<(), WorldChainPoolTransactionError>(())
                 })
             {
@@ -150,9 +208,11 @@ where
             hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
 
         // Verify the proof
-        if let Err(err) =
-            pbh_payload.validate(signal_hash, &self.root_validator.roots(), self.num_pbh_txs)
-        {
+        if let Err(err) = pbh_payload.validate(
+            signal_hash,
+            &self.root_validator.roots(),
+            self.max_pbh_nonce.load(Ordering::Relaxed),
+        ) {
             return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
         }
 
@@ -165,6 +225,30 @@ where
         }
 
         tx_outcome
+    }
+
+    pub fn validate_pbh(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        if tx.gas_limit() > self.max_pbh_gas_limit.load(Ordering::Relaxed) {
+            return WorldChainPoolTransactionError::PbhGasLimitExceeded.to_outcome(tx);
+        }
+
+        let function_signature: [u8; 4] = tx
+            .input()
+            .get(..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .unwrap_or_default();
+
+        match function_signature {
+            IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
+                self.validate_pbh_bundle(origin, tx)
+            }
+            IPBHEntryPoint::pbhMulticallCall::SELECTOR => self.validate_pbh_multicall(origin, tx),
+            _ => self.inner.validate_one(origin, tx.clone()),
+        }
     }
 }
 
@@ -182,31 +266,47 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        if transaction.to().unwrap_or_default() != self.pbh_validator {
+        if transaction.to().unwrap_or_default() != self.pbh_entrypoint {
             return self.inner.validate_one(origin, transaction.clone());
         }
 
-        let function_signature: [u8; 4] = transaction
-            .input()
-            .get(..4)
-            .and_then(|bytes| bytes.try_into().ok())
-            .unwrap_or_default();
-
-        match function_signature {
-            IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
-                self.validate_pbh_bundle(origin, transaction)
-            }
-            IPBHEntryPoint::pbhMulticallCall::SELECTOR => {
-                self.validate_pbh_multicall(origin, transaction)
-            }
-            _ => self.inner.validate_one(origin, transaction.clone()),
-        }
+        self.validate_pbh(origin, transaction)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
         B: reth_primitives_traits::Block,
     {
+        if self.max_pbh_gas_limit.load(Ordering::Relaxed) == 0
+            && self.max_pbh_nonce.load(Ordering::Relaxed) == 0
+        {
+            // Try and fetch the max pbh nonce and gas limit from the state at the latest block
+            if let Some(state) = self
+                .inner
+                .client()
+                .state_by_block_id(BlockId::latest())
+                .ok()
+            {
+                if let Some(max_pbh_nonce) = state
+                    .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
+                    .ok()
+                    .flatten()
+                {
+                    let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
+                    self.max_pbh_nonce
+                        .store(max_pbh_nonce.to(), Ordering::Relaxed);
+                }
+
+                if let Some(max_pbh_gas_limit) = state
+                    .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
+                    .ok()
+                    .flatten()
+                {
+                    self.max_pbh_gas_limit
+                        .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
+                }
+            }
+        }
         self.inner.on_new_head_block(new_tip_block);
         self.root_validator.on_new_block(new_tip_block);
     }
@@ -214,6 +314,8 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use std::u16;
+
     use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
@@ -230,12 +332,13 @@ pub mod tests {
     };
     use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
-    use super::WorldChainTransactionValidator;
     use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
     use crate::test_utils::world_chain_validator;
     use crate::tx::WorldChainPooledTransaction;
+
+    use super::WorldChainTransactionValidator;
 
     async fn setup() -> Pool<
         WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>,
@@ -263,6 +366,7 @@ pub mod tests {
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),
         );
+
         let header = Header {
             gas_limit: 20000000,
             ..Default::default()
@@ -519,7 +623,7 @@ pub mod tests {
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
-                255,
+                u16::MAX,
             ))
             .call();
 
