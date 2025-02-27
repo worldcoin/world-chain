@@ -19,7 +19,7 @@ contract WorldChainBlockRegistryTest is Test {
         vm.expectEmit(true, true, true, true);
         emit WorldChainBlockRegistry.BuiltBlock(builder, block.number);
         blockRegistry.stampBlock();
-        assertEq(registry.builtBlocks(block.number), builder);
+        assertEq(blockRegistry.builtBlocks(block.number), builder);
     }
 
     function test_stampBlock_RevertIf_Unauthorized() public {
@@ -45,7 +45,7 @@ contract WorldChainBlockRegistryTest is Test {
 
         vm.prank(newBuilder);
         blockRegistry.stampBlock();
-        assertEq(registry.builtBlocks(block.number), newBuilder);
+        assertEq(blockRegistry.builtBlocks(block.number), newBuilder);
     }
 
     function test_updateBuilder_RevertIf_Unauthorized() public {
