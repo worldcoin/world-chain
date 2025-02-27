@@ -46,7 +46,7 @@ contract WorldChainBlockRegistry is Ownable2Step {
     ///////////////////////////////////////////////////////////////////////////////
     ///                               FUNCTIONS                                 ///
     ///////////////////////////////////////////////////////////////////////////////
-    constructor(address builder) Ownable2Step(msg.sender) {
+    constructor(address builder) Ownable(msg.sender) {
         require(builder != address(0), AddressZero());
         worldChainBuilder = builder;
     }
