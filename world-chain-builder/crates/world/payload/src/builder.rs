@@ -11,6 +11,7 @@ use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::witness::ExecutionWitnessRecord;
 use reth::revm::{DatabaseCommit, State};
+use reth::rpc::types::TransactionRequest;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
@@ -18,12 +19,13 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::Evm;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes, OpReceiptBuilder,
-    ReceiptBuilderCtx,
+    OpBuiltPayload, OpEvm, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
@@ -34,14 +36,13 @@ use reth_optimism_primitives::{
     OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{Block, BlockBody, Header, RecoveredBlock, SealedHeader};
+use reth_primitives::{Block, BlockBody, Header, Recovered, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::{BlobStore, PoolTransaction};
-use revm::Database;
 use revm_primitives::{
     Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
@@ -718,7 +719,7 @@ where
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        let block_gas_limit = self.inner.block_gas_limit();
+        let mut block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.inner.base_fee();
@@ -726,14 +727,22 @@ where
         let mut pbh_call_tracer =
             PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
 
+        let builder_addr = Address::new([0; 20]);
+        // let nonce = db.basic(builder_addr).unwrap().unwrap().nonce;
+        //
+        // let stamp_block_tx = crate::stamp::stamp_block_tx(db)?;
+
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
             &mut pbh_call_tracer,
         );
 
+        let db = evm.db_mut();
+
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
+        let x = TransactionRequest::default();
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -816,28 +825,7 @@ where
             };
 
             // commit changes
-            evm.db_mut().commit(state);
-
-            let gas_used = result.gas_used();
-
-            // add gas used by the transaction to cumulative gas used, before creating the
-            // receipt
-            info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += tx.length() as u64;
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts
-                .push(self.build_receipt(info, result, None, &tx));
-
-            // update add to total fees
-            let miner_fee = tx
-                .effective_tip_per_gas(base_fee)
-                .expect("fee is always valid; execution succeeded");
-            info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-            // append sender and transaction to the respective lists
-            info.executed_senders.push(tx.signer());
-            info.executed_transactions.push(tx.into_tx());
+            self.commit_changes(info, base_fee, &mut evm, tx, result, state);
         }
 
         if !invalid_txs.is_empty() {
@@ -845,6 +833,46 @@ where
         }
 
         Ok(None)
+    }
+
+    fn commit_changes<DB>(
+        &self,
+        info: &mut ExecutionInfo<OpPrimitives>,
+        base_fee: u64,
+        evm: &mut OpEvm<'_, &mut PBHCallTracer, &mut DB>,
+        tx: Recovered<OpTransactionSigned>,
+        result: ExecutionResult,
+        state: std::collections::HashMap<
+            Address,
+            revm_primitives::Account,
+            revm_primitives::map::foldhash::fast::RandomState,
+        >,
+    ) where
+        DB: revm::Database + revm::DatabaseCommit,
+        <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+    {
+        evm.db_mut().commit(state);
+
+        let gas_used = result.gas_used();
+
+        // add gas used by the transaction to cumulative gas used, before creating the
+        // receipt
+        info.cumulative_gas_used += gas_used;
+        info.cumulative_da_bytes_used += tx.length() as u64;
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        info.receipts
+            .push(self.build_receipt(info, result, None, &tx));
+
+        // update add to total fees
+        let miner_fee = tx
+            .effective_tip_per_gas(base_fee)
+            .expect("fee is always valid; execution succeeded");
+        info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+
+        // append sender and transaction to the respective lists
+        info.executed_senders.push(tx.signer());
+        info.executed_transactions.push(tx.into_tx());
     }
 
     /// Constructs a receipt for the given transaction.
