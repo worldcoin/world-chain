@@ -1,4 +1,7 @@
 //! World Chain transaction pool types
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
+use std::sync::Arc;
+
 use super::root::WorldChainRootValidator;
 use super::tx::WorldChainPoolTransaction;
 use crate::bindings::IPBHEntryPoint;
@@ -20,6 +23,7 @@ use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use semaphore::hash_to_field;
+use tracing::warn;
 use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
@@ -45,9 +49,9 @@ where
     /// Validates World ID proofs contain a valid root in the WorldID account.
     root_validator: WorldChainRootValidator<Client>,
     /// The maximum number of PBH transactions a single World ID can execute in a given month.
-    max_pbh_nonce: u16,
+    max_pbh_nonce: Arc<AtomicU16>,
     /// The maximum amount of gas a single PBH transaction can consume.
-    max_pbh_gas_limit: U256,
+    max_pbh_gas_limit: Arc<AtomicU64>,
     /// The address of the entrypoint for all PBH transactions.
     pbh_entrypoint: Address,
     /// The address of the World ID PBH signature aggregator.
@@ -69,25 +73,28 @@ where
         pbh_signature_aggregator: Address,
     ) -> Result<Self, WorldChainTransactionPoolError> {
         let state = inner.client().state_by_block_id(BlockId::latest())?;
-        let max_pbh_nonce: alloy_primitives::Uint<256, 4> = (state
+        // The `num_pbh_txs` storage is in a packed slot at a 160 bit offset consuming 16 bits.
+        let max_pbh_nonce: u16 = ((state
             .storage(pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())?
-            .ok_or(WorldChainTransactionPoolError::Initialization(
-                "PBH nonce limit not found in PBHEntryPoint contract".to_string(),
-            ))?
+            .unwrap_or_default()
             >> PBH_NONCE_LIMIT_OFFSET)
-            & MAX_U16;
-
-        let max_pbh_gas_limit = state
+            & MAX_U16)
+            .to();
+        let max_pbh_gas_limit: u64 = state
             .storage(pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())?
-            .ok_or(WorldChainTransactionPoolError::Initialization(
-                "PBH gas limit not found in PBHEntryPoint contract".to_string(),
-            ))?;
+            .unwrap_or_default()
+            .to();
 
+        if max_pbh_nonce == 0 && max_pbh_gas_limit == 0 {
+            warn!(
+                "PBH Disabled - Failed to fetch PBH nonce and gas limit from state. Defaulting to 0."
+            )
+        }
         Ok(Self {
             inner,
             root_validator,
-            max_pbh_nonce: max_pbh_nonce.to(),
-            max_pbh_gas_limit,
+            max_pbh_nonce: Arc::new(AtomicU16::new(max_pbh_nonce)),
+            max_pbh_gas_limit: Arc::new(AtomicU64::new(max_pbh_gas_limit)),
             pbh_entrypoint,
             pbh_signature_aggregator,
         })
@@ -144,7 +151,11 @@ where
                     let Ok(payload) = PbhPayload::try_from(payload) else {
                         return Err(WorldChainPoolTransactionError::InvalidCalldata);
                     };
-                    payload.validate(signal, &valid_roots, self.max_pbh_nonce)?;
+                    payload.validate(
+                        signal,
+                        &valid_roots,
+                        self.max_pbh_nonce.load(Ordering::Relaxed),
+                    )?;
                     Ok::<(), WorldChainPoolTransactionError>(())
                 })
             {
@@ -190,7 +201,7 @@ where
         if let Err(err) = pbh_payload.validate(
             signal_hash,
             &self.root_validator.roots(),
-            self.max_pbh_nonce,
+            self.max_pbh_nonce.load(Ordering::Relaxed),
         ) {
             return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
         }
@@ -211,7 +222,7 @@ where
         origin: TransactionOrigin,
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if tx.gas_limit() > self.max_pbh_gas_limit.to() {
+        if tx.gas_limit() > self.max_pbh_gas_limit.load(Ordering::Relaxed) {
             return WorldChainPoolTransactionError::PbhGasLimitExceeded.to_outcome(tx);
         }
 
@@ -256,6 +267,36 @@ where
     where
         B: reth_primitives_traits::Block,
     {
+        if self.max_pbh_gas_limit.load(Ordering::Relaxed) == 0
+            && self.max_pbh_nonce.load(Ordering::Relaxed) == 0
+        {
+            // Try and fetch the max pbh nonce and gas limit from the state at the latest block
+            if let Some(state) = self
+                .inner
+                .client()
+                .state_by_block_id(BlockId::latest())
+                .ok()
+            {
+                if let Some(max_pbh_nonce) = state
+                    .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
+                    .ok()
+                    .flatten()
+                {
+                    let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
+                    self.max_pbh_nonce
+                        .store(max_pbh_nonce.to(), Ordering::Relaxed);
+                }
+
+                if let Some(max_pbh_gas_limit) = state
+                    .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
+                    .ok()
+                    .flatten()
+                {
+                    self.max_pbh_gas_limit
+                        .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
+                }
+            }
+        }
         self.inner.on_new_head_block(new_tip_block);
         self.root_validator.on_new_block(new_tip_block);
     }
