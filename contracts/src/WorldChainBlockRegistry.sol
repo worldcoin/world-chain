@@ -2,12 +2,13 @@
 pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "./interfaces/IWorldChainBlockRegistry.sol";
 
 /// @title World Chain Block Registry
 /// @notice This contract records which blocks were built by the World Chain Builder.
 /// @dev Each block, the builder will insert a transaction calling stampBlock() to indiciate which
 /// blocks should enforce PBH priority ordering.
-contract WorldChainBlockRegistry is Ownable2Step {
+contract WorldChainBlockRegistry is IWorldChainBlockRegistry, Ownable2Step {
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
     //////////////////////////////////////////////////////////////////////////////
