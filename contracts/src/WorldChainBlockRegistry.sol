@@ -12,13 +12,20 @@ contract WorldChainBlockRegistry is Ownable2Step {
     ///                             STATE VARIABLES                             ///
     //////////////////////////////////////////////////////////////////////////////
 
+    /// @notice Address of the World Chain Builder
     address worldChainBuilder;
+
+    /// @notice Mapping to record which blocks were built by the World Chain Builder
     mapping(uint256 blockNumber => address builder) public builtBlocks;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  Events                                ///
     //////////////////////////////////////////////////////////////////////////////
+
+    /// @notice Event emitted whenever the builder calls stampBlock()
     event BuiltBlock(address indexed builder, uint256 indexed blockNumber);
+
+    /// @notice Event emitted whenever the owner updates the builder
     event WorldChainBuilderUpdated(address indexed builder);
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -44,12 +51,14 @@ contract WorldChainBlockRegistry is Ownable2Step {
         worldChainBuilder = builder;
     }
 
+    /// @notice Record the current block as being built by the World Chain Builder
     function stampBlock() public onlyBuilder {
         require(builtBlocks[block.number] == address(0), BlockAlreadyRegistered());
         builtBlocks[block.number] = msg.sender;
         emit BuiltBlock(msg.sender, block.number);
     }
 
+    /// @notice Update the World Chain Builder address
     function updateBuilder(address builder) public onlyOwner {
         require(builder != address(0), AddressZero());
         worldChainBuilder = builder;
