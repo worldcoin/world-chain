@@ -230,6 +230,8 @@ pub enum WorldChainPoolTransactionError {
     InvalidSignatureAggregator,
     #[error("PBH call tracer error")]
     PBHCallTracerError,
+    #[error("pbh gas limit exceeded")]
+    PbhGasLimitExceeded,
 }
 
 impl WorldChainPoolTransactionError {
