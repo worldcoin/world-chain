@@ -7,6 +7,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth_optimism_node::OpEvm;
+use revm_primitives::address;
 use std::sync::LazyLock;
 use WorldChainBlockRegistry::stampBlockCall;
 
@@ -35,7 +36,7 @@ where
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let nonce = evm.db_mut().basic(address)?.unwrap_or_default().nonce;
     let base_fee: u128 = evm.context.evm.env.block.basefee.try_into().unwrap();
-
+    let chain_id = evm.context.evm.env.cfg.chain_id;
     // spawn a new os thread
     let tx = std::thread::spawn(move || {
         block_on(async {
@@ -44,7 +45,8 @@ where
                 .gas_limit(100_000)
                 .max_priority_fee_per_gas(base_fee)
                 .max_fee_per_gas(base_fee)
-                .with_chain_id(4801)
+                .with_chain_id(chain_id)
+                .to(address!("4A679253410272dd5232B3Ff7cF5dbB88f295319"))
                 .with_call(&stampBlockCall {})
                 .build(&wallet)
                 .await

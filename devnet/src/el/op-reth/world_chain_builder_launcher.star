@@ -233,6 +233,7 @@ def get_config(
 
     cmd += participant.el_builder_extra_params
     env_vars = participant.el_builder_extra_env_vars
+    env_vars["BUILDER_PRIVATE_KEY"] = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
     config_args = {
         "image": participant.el_builder_image,
         "ports": used_ports,
