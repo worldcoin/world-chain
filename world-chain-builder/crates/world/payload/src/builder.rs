@@ -4,7 +4,7 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Typed2718;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt, OpTxEnvelope};
+use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt};
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -37,7 +37,7 @@ use reth_optimism_primitives::{
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
 use reth_primitives::{Block, BlockBody, Header, Recovered, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{Block as _, SignedTransaction};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -733,10 +733,15 @@ where
             &mut pbh_call_tracer,
         );
 
-        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(&mut evm).unwrap();
+        // TODO: perhaps we don't want to error out here.
+        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(&mut evm)
+            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
+
+        // Subtract stamp_block_tx gas limit form the overall block gas limit.
+        // This gas will be saved to execute stampBlock at the end of the block.
         block_gas_limit -= stamp_block_tx.gas_limit();
 
         while let Some(pooled_tx) = best_txs.next(()) {
@@ -820,28 +825,21 @@ where
                 }
             };
 
-            // commit changes
             self.commit_changes(info, base_fee, &mut evm, tx, result, state);
         }
 
-        // let address = SignedTransaction::recover_signer(&stamp_block_tx).unwrap();
-        // let address = stamp_block_tx.recover_signer().unwrap();
-
         // execute the stamp block transaction
-        // OpTransactionSigned
         let op_tx_signed: OpTransactionSigned = stamp_block_tx.into();
+
         let ResultAndState { result, state } = evm
             .transact(self.inner.evm_config.tx_env(&op_tx_signed, builder_addr))
-            .unwrap();
+            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
-        self.commit_changes(
-            info,
-            base_fee,
-            &mut evm,
-            op_tx_signed.into_recovered_unchecked().unwrap(),
-            result,
-            state,
-        );
+        let recovered = op_tx_signed
+            .into_recovered_unchecked()
+            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+
+        self.commit_changes(info, base_fee, &mut evm, recovered, result, state);
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
@@ -850,6 +848,7 @@ where
         Ok(None)
     }
 
+    /// After computing the execution result and state we can commit changes to the database
     fn commit_changes<DB>(
         &self,
         info: &mut ExecutionInfo<OpPrimitives>,
@@ -864,7 +863,7 @@ where
         >,
     ) where
         DB: revm::Database + revm::DatabaseCommit,
-        <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+        <DB as revm::Database>::Error: Send + Sync + derive_more::Error + 'static,
     {
         evm.db_mut().commit(state);
 

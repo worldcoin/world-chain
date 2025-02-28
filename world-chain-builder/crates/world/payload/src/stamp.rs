@@ -1,18 +1,13 @@
-use std::sync::{LazyLock, OnceLock};
-
 use alloy::sol;
-use alloy_consensus::TxEnvelope;
 use alloy_network::{EthereumWallet, NetworkWallet, TransactionBuilder};
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder};
-use alloy_sol_types::SolCall;
-use eyre::eyre;
+use eyre::eyre::eyre;
 use futures::executor::block_on;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types::OpTransactionRequest;
-use reth::rpc::types::TransactionRequest;
 use reth_optimism_node::OpEvm;
-use tokio::runtime::Handle;
+use std::sync::LazyLock;
 use WorldChainBlockRegistry::stampBlockCall;
 
 use crate::inspector::PBHCallTracer;
@@ -36,25 +31,13 @@ where
 {
     let signer = MnemonicBuilder::<English>::default()
         .phrase(BUILDER_MNEMONIC.to_string())
-        .index(1)
-        .unwrap()
+        .index(1)?
         .build()?;
 
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let db = evm.db_mut();
-    let nonce = db.basic(address).unwrap().unwrap().nonce;
-
-    let runtime = Handle::current();
-
-    futures::executor::block_on(async move {
-        runtime
-            .spawn(async move {
-                println!("Sending stamp block tx");
-            })
-            .await
-            .unwrap()
-    });
+    let nonce = db.basic(address)?.unwrap_or_default().nonce;
 
     // spawn a new os thread
     let tx = std::thread::spawn(move || {
@@ -68,11 +51,11 @@ where
                 .with_call(&stampBlockCall {})
                 .build(&wallet)
                 .await
-                .unwrap()
         })
     })
     .join()
-    .unwrap();
+    .map_err(|e| eyre!("{e:?}"))?
+    .map_err(|e| eyre!("{e:?}"))?;
 
     Ok((address, tx))
 }
