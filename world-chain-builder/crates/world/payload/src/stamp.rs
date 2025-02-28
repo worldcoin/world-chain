@@ -62,7 +62,7 @@ where
                 .gas_limit(100000)
                 .max_priority_fee_per_gas(100_000_000)
                 .max_fee_per_gas(100_000_000)
-                .with_chain_id(1)
+                .with_chain_id(4801)
                 .with_call(&stampBlockCall {})
                 .build(&wallet)
                 .await
