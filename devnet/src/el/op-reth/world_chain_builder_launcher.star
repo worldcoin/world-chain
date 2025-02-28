@@ -198,7 +198,8 @@ def get_config(
         "--rpc.eth-proof-window=302400",
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
-        "--builder.world_id={0}".format(WORLD_ID)
+        "--builder.world_id={0}".format(WORLD_ID),
+        "--builder.block_registry=0x4A679253410272dd5232B3Ff7cF5dbB88f295319"
     ]
 
     if not sequencer_enabled:

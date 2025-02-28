@@ -70,6 +70,8 @@ where
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
+    pub builder_private_key: String,
+    pub block_registry: Address,
 }
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
@@ -86,6 +88,8 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        builder_private_key: String,
+        block_registry: Address,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -97,6 +101,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         )
     }
 
@@ -111,6 +117,8 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        builder_private_key: String,
+        block_registry: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(
             pool,
@@ -126,6 +134,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         }
     }
 }
@@ -149,6 +159,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         } = self;
 
         let OpPayloadBuilder {
@@ -174,6 +186,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         }
     }
 
@@ -243,6 +257,8 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+            block_registry: self.block_registry,
         };
 
         let op_ctx = &ctx.inner;
@@ -315,6 +331,8 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+            block_registry: self.block_registry,
         };
 
         let state_provider = self
@@ -692,6 +710,8 @@ pub struct WorldChainPayloadBuilderCtx<Client> {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
+    pub builder_private_key: String,
+    pub block_registry: Address,
 }
 
 impl<Client> WorldChainPayloadBuilderCtx<Client>
@@ -704,21 +724,23 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<DB, Pool>(
+    pub fn execute_best_transactions<TXS, DB, Pool>(
         &self,
         info: &mut ExecutionInfo<OpPrimitives>,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        mut best_txs: TXS,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
+        TXS: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
         DB: Database<Error = ProviderError>,
         Pool: TransactionPool<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
+        println!("\n\n{:?}\n\n", std::any::type_name::<TXS>());
         let mut block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
@@ -734,7 +756,7 @@ where
         );
 
         // TODO: perhaps we don't want to error out here.
-        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(&mut evm)
+        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(self, &mut evm)
             .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
         let mut invalid_txs = vec![];

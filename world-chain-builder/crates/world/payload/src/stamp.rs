@@ -7,15 +7,9 @@ use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth_optimism_node::OpEvm;
-use revm_primitives::address;
-use std::sync::LazyLock;
 use WorldChainBlockRegistry::stampBlockCall;
 
-use crate::inspector::PBHCallTracer;
-
-static BUILDER_PRIVATE_KEY: LazyLock<String> = LazyLock::new(|| {
-    std::env::var("BUILDER_PRIVATE_KEY").expect("BUILDER_PRIVATE_KEY env var not set")
-});
+use crate::{builder::WorldChainPayloadBuilderCtx, inspector::PBHCallTracer};
 
 sol! {
     #[sol(rpc)]
@@ -24,19 +18,22 @@ sol! {
     }
 }
 
-pub fn stamp_block_tx<DB>(
+pub fn stamp_block_tx<DB, Client>(
+    ctx: &WorldChainPayloadBuilderCtx<Client>,
     evm: &mut OpEvm<'_, &mut PBHCallTracer, &mut DB>,
 ) -> eyre::Result<(revm_primitives::Address, OpTxEnvelope)>
 where
     DB: revm::Database + revm::DatabaseCommit,
     <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
 {
-    let signer: PrivateKeySigner = BUILDER_PRIVATE_KEY.parse()?;
+    let signer: PrivateKeySigner = ctx.builder_private_key.parse()?;
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let nonce = evm.db_mut().basic(address)?.unwrap_or_default().nonce;
     let base_fee: u128 = evm.context.evm.env.block.basefee.try_into().unwrap();
+    let registry = ctx.block_registry;
     let chain_id = evm.context.evm.env.cfg.chain_id;
+
     // spawn a new os thread
     let tx = std::thread::spawn(move || {
         block_on(async {
@@ -46,8 +43,8 @@ where
                 .max_priority_fee_per_gas(base_fee)
                 .max_fee_per_gas(base_fee)
                 .with_chain_id(chain_id)
-                .to(address!("4A679253410272dd5232B3Ff7cF5dbB88f295319"))
                 .with_call(&stampBlockCall {})
+                .to(registry)
                 .build(&wallet)
                 .await
         })
