@@ -101,7 +101,7 @@ pub async fn raw_pbh_multicall_bytes(
     let month = dt.month() as u8;
     let year = dt.year() as u16;
 
-    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce as u16);
+    let ext_nullifier = ExternalNullifier::v1(month, year, pbh_nonce);
 
     let data = pbh_multicall()
         .acc(acc)
