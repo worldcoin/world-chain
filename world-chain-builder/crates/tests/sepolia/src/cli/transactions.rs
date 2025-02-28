@@ -100,7 +100,7 @@ pub async fn bundle_pbh_transactions(
         let date = chrono::Utc::now().naive_utc().date();
         let date_marker = DateMarker::from(date);
         for i in args.pbh_nonce..args.pbh_batch_size as u64 + args.pbh_nonce {
-            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i as u8);
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i as u16);
             let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
 
             let call = IMulticall3::Call3::default();
@@ -174,7 +174,7 @@ pub async fn bundle_pbh_user_operations(
         let date = chrono::Utc::now().naive_utc().date();
         let date_marker = DateMarker::from(date);
         for i in args.pbh_nonce..args.pbh_batch_size as u64 + args.pbh_nonce {
-            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i as u8);
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i as u16);
             let uo = user_op_sepolia()
                 .signer(signer.clone())
                 .safe(args.safe.expect("Safe address is required"))

@@ -14,7 +14,7 @@ use world_chain_builder_pbh::payload::PBHPayload;
 mod cli;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct InclusionProof {
+pub struct InclusionProof {
     root: Field,
     proof: Proof,
 }

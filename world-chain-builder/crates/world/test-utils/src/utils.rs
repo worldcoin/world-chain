@@ -464,7 +464,7 @@ impl Into<RpcUserOperationV0_7> for PackedUserOperation {
             paymaster_data: None,
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
-            aggregator: Some(address!("ED5dc9CDB270818dCec0784bBdc8094082f0eBcB")),
+            aggregator: Some(address!("f07d3efadD82A1F0b4C5Cc3476806d9a170147Ba")),
             eip7702_auth: None,
         }
     }
