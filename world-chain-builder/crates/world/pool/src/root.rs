@@ -87,10 +87,10 @@ where
         let state = self
             .client
             .state_by_block_hash(block.hash())
-            .map_err(WorldChainTransactionPoolError::RootProvider)?;
+            .map_err(WorldChainTransactionPoolError::Provider)?;
         let root = state
             .storage(self.world_id, LATEST_ROOT_SLOT.into())
-            .map_err(WorldChainTransactionPoolError::RootProvider)?;
+            .map_err(WorldChainTransactionPoolError::Provider)?;
         self.latest_valid_timestamp = block.timestamp();
         if let Some(root) = root {
             self.valid_roots.insert(block.timestamp(), root);

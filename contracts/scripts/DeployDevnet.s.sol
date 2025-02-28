@@ -18,11 +18,13 @@ import {SafeModuleSetup} from "@4337/SafeModuleSetup.sol";
 import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
 import {Mock4337Module} from "../test/mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
+import {WorldChainBlockRegistry} from "../src/WorldChainBlockRegistry.sol";
 
 contract DeployDevnet is Script {
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
+    address public worldChainBlockRegistry;
 
     Safe public singleton;
     SafeProxyFactory public factory;
@@ -32,15 +34,16 @@ contract DeployDevnet is Script {
         0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant WORLD_ID =
         0x5FbDB2315678afecb367f032d93F642f64180aa3;
+    address public constant BUILDER = address(0); // TODO: Update
     /// @dev The root of the Test tree.
     uint256 constant INITIAL_ROOT =
         0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
-    uint256 public constant MAX_PBH_GAS_LIMIT = 10000000;
+    uint256 public constant MAX_PBH_GAS_LIMIT = 30000000;
     uint32 public constant PBH_NONCE_KEY = 1123123123;
 
     function run() public {
         console.log(
-            "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module"
+            "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module, WorldChainBlockRegistry"
         );
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
@@ -48,6 +51,7 @@ contract DeployDevnet is Script {
         deployPBHEntryPoint();
         deployPBHSignatureAggregator();
         deploySafeAndModules();
+        deployWorldChainBlockRegistry();
         updateWorldID();
         vm.stopBroadcast();
     }
@@ -78,6 +82,16 @@ contract DeployDevnet is Script {
         console.log(
             "PBHSignatureAggregator Deployed at: ",
             pbhSignatureAggregator
+        );
+    }
+
+    function deployWorldChainBlockRegistry() public {
+        worldChainBlockRegistry = new WorldChainBlockRegistry(
+            BUILDER
+        );
+        console.log(
+            "WorldChainBlockRegistry Deployed at: ",
+            worldChainBlockRegistry
         );
     }
 

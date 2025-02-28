@@ -87,7 +87,6 @@ impl WorldChainNode {
     {
         let WorldChainArgs {
             rollup_args,
-            num_pbh_txs,
             verified_blockspace_capacity,
             pbh_entrypoint,
             signature_aggregator,
@@ -104,7 +103,6 @@ impl WorldChainNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder::new(
-                num_pbh_txs,
                 pbh_entrypoint,
                 signature_aggregator,
                 world_id,
@@ -178,7 +176,6 @@ impl NodeTypesWithEngine for WorldChainNode {
 /// config.
 #[derive(Debug, Clone)]
 pub struct WorldChainPoolBuilder {
-    pub num_pbh_txs: u16,
     pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
     pub world_id: Address,
@@ -188,13 +185,11 @@ pub struct WorldChainPoolBuilder {
 
 impl WorldChainPoolBuilder {
     pub fn new(
-        num_pbh_txs: u16,
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
         world_id: Address,
     ) -> Self {
         Self {
-            num_pbh_txs,
             pbh_entrypoint,
             pbh_signature_aggregator,
             world_id,
@@ -211,7 +206,6 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let Self {
-            num_pbh_txs,
             pbh_entrypoint,
             pbh_signature_aggregator,
             world_id,
@@ -240,13 +234,14 @@ where
                 let root_validator =
                     WorldChainRootValidator::new(validator.client().clone(), world_id)
                         .expect("failed to initialize root validator");
+
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
                     root_validator,
-                    num_pbh_txs,
                     pbh_entrypoint,
                     pbh_signature_aggregator,
                 )
+                .expect("failed to create world chain validator")
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
