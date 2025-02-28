@@ -25,5 +25,7 @@ pub enum WorldChainTransactionPoolError {
     #[error(transparent)]
     Database(#[from] DatabaseError),
     #[error(transparent)]
-    RootProvider(#[from] ProviderError),
+    Provider(#[from] ProviderError),
+    #[error("invalid entrypoint - {0}")]
+    Initialization(String),
 }

@@ -25,7 +25,7 @@ use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
-use revm_primitives::{Address, FixedBytes, B256};
+use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -34,7 +34,9 @@ use world_chain_builder_node::node::WorldChainNode;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::validator::WorldChainTransactionValidator;
+use world_chain_builder_pool::validator::{
+    WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
+};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::{signer, tree_root};
 use world_chain_builder_test_utils::{
@@ -111,7 +113,6 @@ impl WorldChainBuilderTestContext {
         // is 0.0.0.0 by default
         node_config.network.addr = [127, 0, 0, 1].into();
         let builder_args = WorldChainArgs {
-            num_pbh_txs: 30,
             verified_blockspace_capacity: 70,
             pbh_entrypoint: PBH_DEV_ENTRYPOINT,
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
@@ -301,13 +302,26 @@ fn get_chain_spec() -> OpChainSpec {
     genesis.config.chain_id = BASE_CHAIN_ID;
 
     OpChainSpecBuilder::base_mainnet()
-        .genesis(genesis.extend_accounts(vec![(
-            DEV_WORLD_ID,
-            GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![(
-                LATEST_ROOT_SLOT.into(),
-                tree_root().into(),
-            )]))),
-        )]))
+        .genesis(
+            genesis
+                .extend_accounts(vec![(
+                    DEV_WORLD_ID,
+                    GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![(
+                        LATEST_ROOT_SLOT.into(),
+                        tree_root().into(),
+                    )]))),
+                )])
+                .extend_accounts(vec![(
+                    PBH_DEV_ENTRYPOINT,
+                    GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![
+                        (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000).into()),
+                        (
+                            PBH_NONCE_LIMIT_SLOT.into(),
+                            (MAX_U16 << U256::from(160)).into(),
+                        ),
+                    ]))),
+                )]),
+        )
         .ecotone_activated()
         .build()
 }

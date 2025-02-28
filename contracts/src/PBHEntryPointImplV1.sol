@@ -39,7 +39,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     address internal _multicall3;
 
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
-    mapping(uint256 => bool) public nullifierHashes;
+    mapping(uint256 nullifierHash => uint256 blockNumber) public nullifierHashes;
 
     /// @notice The gas limit for a PBH multicall transaction
     uint256 public pbhGasLimit;
@@ -193,7 +193,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param pbhPayload The PBH payload containing the proof data.
     function _verifyPbh(uint256 signalHash, PBHPayload memory pbhPayload) internal view {
         // First, we make sure this nullifier has not been used before.
-        if (nullifierHashes[pbhPayload.nullifierHash]) {
+        if (nullifierHashes[pbhPayload.nullifierHash] != 0) {
             revert InvalidNullifier(pbhPayload.nullifierHash, signalHash);
         }
 
@@ -241,7 +241,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
                 ).hashToField();
 
                 _verifyPbh(signalHash, pbhPayloads[j]);
-                nullifierHashes[pbhPayloads[j].nullifierHash] = true;
+                nullifierHashes[pbhPayloads[j].nullifierHash] = block.number;
                 emit PBH(sender, signalHash, pbhPayloads[j]);
             }
         }
@@ -272,13 +272,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasleft(), pbhGasLimit);
-        }
-
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         _verifyPbh(signalHash, pbhPayload);
-        nullifierHashes[pbhPayload.nullifierHash] = true;
+        nullifierHashes[pbhPayload.nullifierHash] = block.number;
 
         returnData = IMulticall3(_multicall3).aggregate3(calls);
         emit PBH(msg.sender, signalHash, pbhPayload);
