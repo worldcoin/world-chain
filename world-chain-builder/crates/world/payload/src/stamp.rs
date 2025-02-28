@@ -36,6 +36,8 @@ where
 {
     let signer = MnemonicBuilder::<English>::default()
         .phrase(BUILDER_MNEMONIC.to_string())
+        .index(1)
+        .unwrap()
         .build()?;
 
     let wallet = EthereumWallet::from(signer);
