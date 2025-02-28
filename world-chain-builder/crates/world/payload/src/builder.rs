@@ -4,14 +4,13 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Typed2718;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
-use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt};
+use op_alloy_consensus::{EIP1559ParamError, OpDepositReceipt, OpTxEnvelope};
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::db::states::bundle_state::BundleRetention;
 use reth::revm::witness::ExecutionWitnessRecord;
 use reth::revm::{DatabaseCommit, State};
-use reth::rpc::types::TransactionRequest;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
@@ -20,7 +19,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
 use reth_evm::Evm;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
@@ -36,8 +35,9 @@ use reth_optimism_primitives::{
     OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
+use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
 use reth_primitives::{Block, BlockBody, Header, Recovered, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SignedTransaction};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -727,22 +727,18 @@ where
         let mut pbh_call_tracer =
             PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
 
-        let builder_addr = Address::new([0; 20]);
-        // let nonce = db.basic(builder_addr).unwrap().unwrap().nonce;
-        //
-        // let stamp_block_tx = crate::stamp::stamp_block_tx(db)?;
-
         let mut evm = self.inner.evm_config.evm_with_env_and_inspector(
             &mut *db,
             self.inner.evm_env.clone(),
             &mut pbh_call_tracer,
         );
 
-        let db = evm.db_mut();
+        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(&mut evm).unwrap();
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
-        let x = TransactionRequest::default();
+        block_gas_limit -= stamp_block_tx.gas_limit();
+
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -827,6 +823,25 @@ where
             // commit changes
             self.commit_changes(info, base_fee, &mut evm, tx, result, state);
         }
+
+        // let address = SignedTransaction::recover_signer(&stamp_block_tx).unwrap();
+        // let address = stamp_block_tx.recover_signer().unwrap();
+
+        // execute the stamp block transaction
+        // OpTransactionSigned
+        let op_tx_signed: OpTransactionSigned = stamp_block_tx.into();
+        let ResultAndState { result, state } = evm
+            .transact(self.inner.evm_config.tx_env(&op_tx_signed, builder_addr))
+            .unwrap();
+
+        self.commit_changes(
+            info,
+            base_fee,
+            &mut evm,
+            op_tx_signed.into_recovered_unchecked().unwrap(),
+            result,
+            state,
+        );
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);

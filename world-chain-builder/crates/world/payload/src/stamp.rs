@@ -6,12 +6,12 @@ use alloy_network::{EthereumWallet, NetworkWallet, TransactionBuilder};
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder};
 use alloy_sol_types::SolCall;
 use eyre::eyre;
+use futures::executor::block_on;
+use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_network::Optimism;
-use reth::revm::State;
+use op_alloy_rpc_types::OpTransactionRequest;
 use reth::rpc::types::TransactionRequest;
-use reth_evm::Database;
 use reth_optimism_node::OpEvm;
-use reth_provider::ProviderError;
 use tokio::runtime::Handle;
 use WorldChainBlockRegistry::stampBlockCall;
 
@@ -27,15 +27,22 @@ sol! {
     }
 }
 
-pub async fn stamp_block_tx<E>(
-    db: &mut dyn revm_primitives::db::components::state::State<Error = E>,
-) -> eyre::Result<TxEnvelope> {
+pub fn stamp_block_tx<DB>(
+    evm: &mut OpEvm<'_, &mut PBHCallTracer, &mut DB>,
+) -> eyre::Result<(revm_primitives::Address, OpTxEnvelope)>
+where
+    DB: revm::Database + revm::DatabaseCommit,
+    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+{
     let signer = MnemonicBuilder::<English>::default()
         .phrase(BUILDER_MNEMONIC.to_string())
         .build()?;
 
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
+    let db = evm.db_mut();
+    let nonce = db.basic(address).unwrap().unwrap().nonce;
+
     let runtime = Handle::current();
 
     futures::executor::block_on(async move {
@@ -47,15 +54,23 @@ pub async fn stamp_block_tx<E>(
             .unwrap()
     });
 
-    let x = Ok(TransactionRequest::default()
-        .nonce(0)
-        .gas_limit(100000)
-        .max_priority_fee_per_gas(1000000000)
-        .with_chain_id(1)
-        .with_call(&stampBlockCall {})
-        .build(&wallet)
-        .await
-        .unwrap());
+    // spawn a new os thread
+    let tx = std::thread::spawn(move || {
+        block_on(async {
+            OpTransactionRequest::default()
+                .nonce(nonce)
+                .gas_limit(100000)
+                .max_priority_fee_per_gas(100_000_000)
+                .max_fee_per_gas(100_000_000)
+                .with_chain_id(1)
+                .with_call(&stampBlockCall {})
+                .build(&wallet)
+                .await
+                .unwrap()
+        })
+    })
+    .join()
+    .unwrap();
 
-    x
+    Ok((address, tx))
 }
