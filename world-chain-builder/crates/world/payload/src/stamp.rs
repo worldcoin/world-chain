@@ -1,6 +1,6 @@
 use alloy::sol;
 use alloy_network::{EthereumWallet, NetworkWallet, TransactionBuilder};
-use alloy_signer_local::{coins_bip39::English, MnemonicBuilder};
+use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use futures::executor::block_on;
 use op_alloy_consensus::OpTxEnvelope;
@@ -12,8 +12,9 @@ use WorldChainBlockRegistry::stampBlockCall;
 
 use crate::inspector::PBHCallTracer;
 
-static BUILDER_MNEMONIC: LazyLock<String> =
-    LazyLock::new(|| std::env::var("BUILDER_MNEMONIC").expect("BUILDER_MNEMONIC env var not set"));
+static BUILDER_PRIVATE_KEY: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("BUILDER_PRIVATE_KEY").expect("BUILDER_PRIVATE_KEY env var not set")
+});
 
 sol! {
     #[sol(rpc)]
@@ -29,11 +30,7 @@ where
     DB: revm::Database + revm::DatabaseCommit,
     <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
 {
-    let signer = MnemonicBuilder::<English>::default()
-        .phrase(BUILDER_MNEMONIC.to_string())
-        .index(1)?
-        .build()?;
-
+    let signer: PrivateKeySigner = BUILDER_PRIVATE_KEY.parse()?;
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let db = evm.db_mut();
