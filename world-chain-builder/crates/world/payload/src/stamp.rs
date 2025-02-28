@@ -33,17 +33,17 @@ where
     let signer: PrivateKeySigner = BUILDER_PRIVATE_KEY.parse()?;
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
-    let db = evm.db_mut();
-    let nonce = db.basic(address)?.unwrap_or_default().nonce;
+    let nonce = evm.db_mut().basic(address)?.unwrap_or_default().nonce;
+    let base_fee: u128 = evm.context.evm.env.block.basefee.try_into().unwrap();
 
     // spawn a new os thread
     let tx = std::thread::spawn(move || {
         block_on(async {
             OpTransactionRequest::default()
                 .nonce(nonce)
-                .gas_limit(100000)
-                .max_priority_fee_per_gas(100_000_000)
-                .max_fee_per_gas(100_000_000)
+                .gas_limit(100_000)
+                .max_priority_fee_per_gas(base_fee)
+                .max_fee_per_gas(base_fee)
                 .with_chain_id(4801)
                 .with_call(&stampBlockCall {})
                 .build(&wallet)
