@@ -756,7 +756,7 @@ where
         );
 
         // TODO: perhaps we don't want to error out here.
-        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(&mut evm)
+        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(self, &mut evm)
             .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
         let mut invalid_txs = vec![];
