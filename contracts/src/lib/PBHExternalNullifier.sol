@@ -57,12 +57,13 @@ library PBHExternalNullifier {
     /// @notice Verifies the validity of a PBHExternalNullifier by checking its components.
     /// @param externalNullifier The external nullifier to verify.
     /// @param numPbhPerMonth The number of PBH transactions alloted to each World ID per month, 0 indexed.
-    ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs.
+    ///         For example, if `numPbhPerMonth` is 30, a user can submit 30 PBH txs
+    ///         using nonce 0, 1,..., 29.
     /// @param signalHash The signal hash associated with the PBHPayload.
     /// @dev This function ensures the external nullifier matches the current year and month,
     ///      and that the nonce does not exceed `numPbhPerMonth`.
     /// @custom:reverts Reverts if the current block timestamp does not match
-    /// the provided month/year or if pbhNonce !<  numPbhPerMonth.
+    /// the provided month/year or if pbhNonce is not strickly less than numPbhPerMonth.
     function verify(uint256 externalNullifier, uint16 numPbhPerMonth, uint256 signalHash) internal view {
         require(
             externalNullifier <= type(uint48).max,
