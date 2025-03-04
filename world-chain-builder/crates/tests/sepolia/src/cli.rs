@@ -115,7 +115,6 @@ pub struct SendArgs {
     #[clap(long, required = true)]
     pub rpc_url: String,
     /// JWT Secret authorization in the headers.
-    // TODO:
     #[clap(long, short)]
     pub auth: Option<JwtSecret>,
 }

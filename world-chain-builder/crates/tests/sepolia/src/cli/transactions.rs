@@ -10,7 +10,9 @@ use alloy_sol_types::SolCall;
 use alloy_sol_types::SolValue;
 use alloy_transport_http::Http;
 use futures::{stream, StreamExt, TryStreamExt};
+use reqwest::header::{HeaderMap, AUTHORIZATION};
 use reqwest::Client;
+use reth_rpc_layer::secret_to_bearer_header;
 use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -230,15 +232,16 @@ pub async fn sign_transaction(
 
 pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
     let bundle: Bundle = serde_json::from_reader(std::fs::File::open(&args.bundle_path)?)?;
-    // TODO: Implement this
-    // let mut headers = HeaderMap::new();
-    // headers.insert(AUTHORIZATION, secret_to_bearer_header(&secret));
 
-    // Create the reqwest::Client with the AUTHORIZATION header.
-    let client_with_auth = Client::builder().build()?;
+    let mut headers = HeaderMap::new();
+    if let Some(secret) = args.auth {
+        headers.insert(AUTHORIZATION, secret_to_bearer_header(&secret));
+    }
+
+    let client = Client::builder().default_headers(headers).build()?;
 
     // Create the HTTP transport.
-    let http = Http::with_client(client_with_auth, args.rpc_url.parse()?);
+    let http = Http::with_client(client, args.rpc_url.parse()?);
     let rpc_client = RpcClient::new(http, false);
     let provider = ProviderBuilder::new().on_client(rpc_client);
     match args.tx_type {
@@ -304,11 +307,10 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
                                 .await?;
 
                             if let Some(transaction_hash) = resp.transaction_hash {
-                                info!(target: "tests::user_ops_test",  ?transaction_hash, "User Operation Included in Transaction");
                                 // Fetch the Transaction Receipt from the builder
                                 let receipt = provider.get_transaction_by_hash(transaction_hash).await?;
                                 assert!(receipt.is_some_and(|receipt| {
-                                    info!(target: "tests::user_ops_test",  ?receipt, "Transaction Receipt Received");
+                                    debug!(target: "tests::user_ops_test",  ?receipt, "Transaction Receipt Received");
                                     true
                                 }));
 
