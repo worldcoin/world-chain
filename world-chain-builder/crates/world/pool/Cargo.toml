@@ -39,7 +39,6 @@ alloy-network = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 
 # 3rd party
-ethers-core.workspace = true
 tokio.workspace = true
 semaphore-rs = { workspace = true, features = ["depth_30"]}
 eyre = { workspace = true, optional = true }
@@ -50,6 +49,7 @@ rayon.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+ethers-core.workspace = true
 test-case.workspace = true
 alloy-signer-local.workspace = true
 reth-e2e-test-utils.workspace = true
