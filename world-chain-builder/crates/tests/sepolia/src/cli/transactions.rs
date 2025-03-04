@@ -32,6 +32,8 @@ use world_chain_builder_test_utils::utils::{
 };
 use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
 
+use crate::PBH_SIGNATURE_AGGREGATOR;
+
 use super::SendArgs;
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
 
@@ -284,7 +286,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
                 .try_for_each_concurrent(1000, move |uo| {
                     let provider = provider.clone();
                     async move {
-                        let uo: RpcUserOperationV0_7 = uo.clone().into();
+                        let uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
                         let hash: B256 = provider.raw_request(
                             Cow::Borrowed("eth_sendUserOperation"),
                             (uo, DEVNET_ENTRYPOINT),

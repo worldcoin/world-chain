@@ -1,10 +1,10 @@
 use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
-use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
+use alloy_primitives::{B256, U128, U64, U8};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;
@@ -439,32 +439,34 @@ impl From<PbhPayload> for PBHPayload {
     }
 }
 
-impl Into<RpcUserOperationV0_7> for PackedUserOperation {
+impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
     fn into(self) -> RpcUserOperationV0_7 {
+        let (user_op, aggregator) = self;
         RpcUserOperationV0_7 {
-            sender: self.sender,
-            nonce: self.nonce,
+            sender: user_op.sender,
+            nonce: user_op.nonce,
             factory: None,
-            call_data: self.callData,
+            call_data: user_op.callData,
             factory_data: None,
-            verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+            verification_gas_limit: (U256::from_be_bytes(user_op.accountGasLimits.into())
                 >> U256::from(128))
             .to(),
-            call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+            call_gas_limit: (U256::from_be_bytes(user_op.accountGasLimits.into())
                 & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
-            pre_verification_gas: self.preVerificationGas,
-            max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
-                .to(),
-            max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
+            pre_verification_gas: user_op.preVerificationGas,
+            max_priority_fee_per_gas: (U256::from_be_bytes(user_op.gasFees.into())
+                >> U256::from(128))
+            .to(),
+            max_fee_per_gas: (U256::from_be_bytes(user_op.gasFees.into())
                 & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
-            signature: self.signature,
+            signature: user_op.signature,
             paymaster: None,
             paymaster_data: None,
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
-            aggregator: Some(address!("f07d3efadD82A1F0b4C5Cc3476806d9a170147Ba")),
+            aggregator: Some(aggregator),
             eip7702_auth: None,
         }
     }
