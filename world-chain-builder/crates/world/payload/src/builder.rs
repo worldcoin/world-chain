@@ -18,12 +18,13 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::env::EvmEnv;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::Evm;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes, OpReceiptBuilder,
-    ReceiptBuilderCtx,
+    OpBuiltPayload, OpEvm, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, ExecutionInfo, OpPayloadBuilderCtx, OpPayloadTransactions,
@@ -34,19 +35,19 @@ use reth_optimism_primitives::{
     OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{Block, BlockBody, Header, RecoveredBlock, SealedHeader};
+use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
+use reth_primitives::{Block, BlockBody, Header, Recovered, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
     StateProofProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::{BlobStore, PoolTransaction};
-use revm::Database;
 use revm_primitives::{
     Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
@@ -69,6 +70,8 @@ where
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
+    pub builder_private_key: String,
+    pub block_registry: Address,
 }
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
@@ -85,6 +88,8 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        builder_private_key: String,
+        block_registry: Address,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -96,6 +101,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         )
     }
 
@@ -110,6 +117,8 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        builder_private_key: String,
+        block_registry: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(
             pool,
@@ -125,6 +134,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         }
     }
 }
@@ -148,6 +159,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         } = self;
 
         let OpPayloadBuilder {
@@ -173,6 +186,8 @@ where
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
         }
     }
 
@@ -242,6 +257,8 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+            block_registry: self.block_registry,
         };
 
         let op_ctx = &ctx.inner;
@@ -314,6 +331,8 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+            block_registry: self.block_registry,
         };
 
         let state_provider = self
@@ -691,6 +710,8 @@ pub struct WorldChainPayloadBuilderCtx<Client> {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
+    pub builder_private_key: String,
+    pub block_registry: Address,
 }
 
 impl<Client> WorldChainPayloadBuilderCtx<Client>
@@ -703,22 +724,23 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<DB, Pool>(
+    pub fn execute_best_transactions<TXS, DB, Pool>(
         &self,
         info: &mut ExecutionInfo<OpPrimitives>,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        mut best_txs: TXS,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
+        TXS: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
         DB: Database<Error = ProviderError>,
         Pool: TransactionPool<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        let block_gas_limit = self.inner.block_gas_limit();
+        let mut block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = self.inner.base_fee();
@@ -732,8 +754,17 @@ where
             &mut pbh_call_tracer,
         );
 
+        // TODO: perhaps we don't want to error out here.
+        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(self, &mut evm)
+            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
+
+        // Subtract stamp_block_tx gas limit from the overall block gas limit.
+        // This gas will be saved to execute stampBlock at the end of the block.
+        block_gas_limit -= stamp_block_tx.gas_limit();
+
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -815,36 +846,71 @@ where
                 }
             };
 
-            // commit changes
-            evm.db_mut().commit(state);
-
-            let gas_used = result.gas_used();
-
-            // add gas used by the transaction to cumulative gas used, before creating the
-            // receipt
-            info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += tx.length() as u64;
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts
-                .push(self.build_receipt(info, result, None, &tx));
-
-            // update add to total fees
-            let miner_fee = tx
-                .effective_tip_per_gas(base_fee)
-                .expect("fee is always valid; execution succeeded");
-            info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-            // append sender and transaction to the respective lists
-            info.executed_senders.push(tx.signer());
-            info.executed_transactions.push(tx.into_tx());
+            self.commit_changes(info, base_fee, &mut evm, tx, result, state);
         }
+
+        // execute the stamp block transaction
+        let op_tx_signed: OpTransactionSigned = stamp_block_tx.into();
+
+        let ResultAndState { result, state } = evm
+            .transact(self.inner.evm_config.tx_env(&op_tx_signed, builder_addr))
+            .map_err(|e| {
+                error!(target: "payload_builder", %e, "failed to stamp block transaction");
+                PayloadBuilderError::Other(e.into())
+            })?;
+
+        let recovered = op_tx_signed
+            .into_recovered_unchecked()
+            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+
+        self.commit_changes(info, base_fee, &mut evm, recovered, result, state);
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
         }
 
         Ok(None)
+    }
+
+    /// After computing the execution result and state we can commit changes to the database
+    fn commit_changes<DB>(
+        &self,
+        info: &mut ExecutionInfo<OpPrimitives>,
+        base_fee: u64,
+        evm: &mut OpEvm<'_, &mut PBHCallTracer, &mut DB>,
+        tx: Recovered<OpTransactionSigned>,
+        result: ExecutionResult,
+        state: std::collections::HashMap<
+            Address,
+            revm_primitives::Account,
+            revm_primitives::map::foldhash::fast::RandomState,
+        >,
+    ) where
+        DB: revm::Database + revm::DatabaseCommit,
+        <DB as revm::Database>::Error: Send + Sync + derive_more::Error + 'static,
+    {
+        evm.db_mut().commit(state);
+
+        let gas_used = result.gas_used();
+
+        // add gas used by the transaction to cumulative gas used, before creating the
+        // receipt
+        info.cumulative_gas_used += gas_used;
+        info.cumulative_da_bytes_used += tx.length() as u64;
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        info.receipts
+            .push(self.build_receipt(info, result, None, &tx));
+
+        // update add to total fees
+        let miner_fee = tx
+            .effective_tip_per_gas(base_fee)
+            .expect("fee is always valid; execution succeeded");
+        info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+
+        // append sender and transaction to the respective lists
+        info.executed_senders.push(tx.signer());
+        info.executed_transactions.push(tx.into_tx());
     }
 
     /// Constructs a receipt for the given transaction.

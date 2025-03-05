@@ -109,15 +109,19 @@ mod tests {
 
     fn deploy_contracts(db: &mut CacheDB<EmptyDB>) -> (Address, Address) {
         let mock_pbh_entry_point = Address::random();
-        let mut info = AccountInfo::default();
-        info.code = Some(Bytecode::new_raw(
-            MockPbhEntryPoint::DEPLOYED_BYTECODE.clone(),
-        ));
+        let info = AccountInfo {
+            code: Some(Bytecode::new_raw(
+                MockPbhEntryPoint::DEPLOYED_BYTECODE.clone(),
+            )),
+            ..Default::default()
+        };
         db.insert_account_info(mock_pbh_entry_point, info);
 
         let multicall3 = Address::random();
-        let mut info = AccountInfo::default();
-        info.code = Some(Bytecode::new_raw(Multicall3::DEPLOYED_BYTECODE.clone()));
+        let info = AccountInfo {
+            code: Some(Bytecode::new_raw(Multicall3::DEPLOYED_BYTECODE.clone())),
+            ..Default::default()
+        };
         db.insert_account_info(multicall3, info);
 
         (mock_pbh_entry_point, multicall3)

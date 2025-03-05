@@ -16,7 +16,7 @@ members = [
     "crates/world/payload",
     "crates/world/rpc",
     "crates/world/pbh",
-    "crates/world/pool", 
+    "crates/world/pool",
     "crates/world/test-utils",
 ]
 
@@ -99,6 +99,7 @@ op-alloy-rpc-types-engine = "0.10.3"
 op-alloy-network = "0.10.3"
 
 # alloy
+alloy = { version = "0.11.1" }
 alloy-provider = { version = "0.11.1", default-features = false }
 alloy-transport = { version = "0.11.1", default-features = false }
 alloy-consensus = { version = "0.11.1", default-features = false }
