@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use semaphore::poseidon_tree::Proof;
+use semaphore_rs::poseidon_tree::Proof;
 
 use super::utils::parse_from_json;
 use crate::InclusionProof;

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-semaphore = { workspace = true, features = ["depth_30"] }
+semaphore-rs = { workspace = true, features = ["depth_30"]}
 world-chain-builder-pbh = { workspace = true }
 
 # Alloy

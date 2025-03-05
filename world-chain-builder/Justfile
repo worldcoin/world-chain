@@ -14,7 +14,7 @@ fmt-check:
   cargo +nightly fmt --all -- --check
 
 e2e-test *args='':
-    RUST_LOG=debug cargo run -p tests --release -- $@
+    RUST_LOG="info,tests=debug" cargo run -p tests-devnet --release -- $@
 
 install *args='':
   cargo install --path crates/world/bin --locked $@
