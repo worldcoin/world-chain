@@ -761,7 +761,7 @@ where
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
 
-        // Subtract stamp_block_tx gas limit form the overall block gas limit.
+        // Subtract stamp_block_tx gas limit from the overall block gas limit.
         // This gas will be saved to execute stampBlock at the end of the block.
         block_gas_limit -= stamp_block_tx.gas_limit();
 
