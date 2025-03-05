@@ -47,7 +47,7 @@ use revm_primitives::{
     Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
@@ -740,7 +740,6 @@ where
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        println!("\n\n{:?}\n\n", std::any::type_name::<TXS>());
         let mut block_gas_limit = self.inner.block_gas_limit();
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
@@ -855,7 +854,10 @@ where
 
         let ResultAndState { result, state } = evm
             .transact(self.inner.evm_config.tx_env(&op_tx_signed, builder_addr))
-            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+            .map_err(|e| {
+                error!(target: "payload_builder", %e, "failed to stamp block transaction");
+                PayloadBuilderError::Other(e.into())
+            })?;
 
         let recovered = op_tx_signed
             .into_recovered_unchecked()
