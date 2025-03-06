@@ -63,7 +63,7 @@ library PBHExternalNullifier {
     /// @dev This function ensures the external nullifier matches the current year and month,
     ///      and that the nonce does not exceed `numPbhPerMonth`.
     /// @custom:reverts Reverts if the current block timestamp does not match
-    /// the provided month/year or if pbhNonce is not strickly less than numPbhPerMonth.
+    /// the provided month/year or if pbhNonce is not strictly less than numPbhPerMonth.
     function verify(uint256 externalNullifier, uint16 numPbhPerMonth, uint256 signalHash) internal view {
         require(
             externalNullifier <= type(uint48).max,
