@@ -24,10 +24,6 @@ To submit a valid PBH transaction, users can call the `pbhMulticall()` function 
         nonReentrant
         returns (IMulticall3.Result[] memory returnData)
     {
-        if (gasleft() > pbhGasLimit) {
-            revert GasLimitExceeded(gasleft(), pbhGasLimit);
-        }
-
         uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
         _verifyPbh(signalHash, pbhPayload);
         nullifierHashes[pbhPayload.nullifierHash] = true;
