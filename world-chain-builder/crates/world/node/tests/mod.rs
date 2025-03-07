@@ -218,10 +218,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     );
     // Assert the non-pbh transaction is included in the block last
     assert_eq!(
-        *payload
-            .block()
-            .body()
-            .transactions[payload.block().body().transactions.len() - 2]
+        *payload.block().body().transactions[payload.block().body().transactions.len() - 2]
             .tx_hash(),
         non_pbh_hash
     );
