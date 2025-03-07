@@ -117,7 +117,7 @@ impl WorldChainBuilderTestContext {
             pbh_entrypoint: PBH_DEV_ENTRYPOINT,
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
-
+            builder_private_key: signer(6).to_bytes().to_string(),
             ..Default::default()
         };
 
@@ -174,7 +174,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
     assert_eq!(
         payload.block().body().transactions.len(),
-        pbh_tx_hashes.len()
+        pbh_tx_hashes.len() + 1
     );
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -214,16 +214,14 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 
     assert_eq!(
         payload.block().body().transactions.len(),
-        pbh_tx_hashes.len() + 1
+        pbh_tx_hashes.len() + 2
     );
     // Assert the non-pbh transaction is included in the block last
     assert_eq!(
         *payload
             .block()
             .body()
-            .transactions
-            .last()
-            .unwrap()
+            .transactions[payload.block().body().transactions.len() - 2]
             .tx_hash(),
         non_pbh_hash
     );
@@ -267,7 +265,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 
     // One transaction should be successfully validated
     // and included in the block.
-    assert_eq!(payload.block().body().transactions.len(), 1);
+    assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
 }
