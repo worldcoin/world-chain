@@ -47,7 +47,7 @@ use revm_primitives::{
     Address, EVMError, ExecutionResult, InvalidTransaction, ResultAndState, U256,
 };
 use std::sync::Arc;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
@@ -768,6 +768,11 @@ where
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
+                warn!(
+                    target: "payload_builder",
+                    ?tx,
+                    "Transaction is over the block gas limit, skipping"
+                );
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -787,12 +792,22 @@ where
             if pooled_tx.valid_pbh()
                 && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
             {
+                warn!(
+                    target: "payload_builder",
+                    ?tx,
+                    "Transaction is over the verified gas limit, skipping"
+                );
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
 
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+                warn!(
+                    target: "payload_builder",
+                    ?tx,
+                    "Transaction is over the block gas limit, skipping"
+                );
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -802,6 +817,11 @@ where
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
+                warn!(
+                    target: "payload_builder",
+                    ?tx,
+                    "Transaction is a blob or deposit transaction, skipping"
+                );
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
@@ -821,11 +841,11 @@ where
                         EVMError::Transaction(err) => {
                             if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
                                 // if the nonce is too low, we can skip this transaction
-                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                                warn!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
                             } else {
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
-                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                                warn!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
                                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
@@ -833,7 +853,7 @@ where
                         }
 
                         EVMError::Custom(ref err_str) if err_str == PBH_CALL_TRACER_ERROR => {
-                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                            warn!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
                             best_txs.mark_invalid(tx.signer(), tx.nonce());
                             continue;
                         }
