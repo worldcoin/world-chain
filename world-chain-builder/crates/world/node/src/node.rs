@@ -1,6 +1,7 @@
 use alloy_primitives::Address;
 use reth::builder::components::{
-    ComponentsBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+    BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder,
+    PoolBuilderConfigOverrides,
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
@@ -11,7 +12,6 @@ use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
@@ -71,7 +71,7 @@ impl WorldChainNode {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -109,7 +109,7 @@ impl WorldChainNode {
                 signature_aggregator,
                 world_id,
             ))
-            .payload(
+            .payload(BasicPayloadServiceBuilder::new(
                 WorldChainPayloadBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
@@ -119,7 +119,7 @@ impl WorldChainNode {
                     block_registry,
                 )
                 .with_da_config(self.da_config.clone()),
-            )
+            ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -143,7 +143,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -408,7 +408,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 pool,
                 ctx.provider().clone(),
                 evm_config,
-                BasicOpReceiptBuilder::default(),
                 OpBuilderConfig {
                     da_config: self.da_config.clone(),
                 },
@@ -425,7 +424,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, S, Txs> PayloadServiceBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
+impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for WorldChainPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
@@ -443,10 +442,14 @@ where
         world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        self.build(
+            OpEvmConfig::new(ctx.chain_spec(), Default::default()),
+            ctx,
+            pool,
+        )
     }
 }

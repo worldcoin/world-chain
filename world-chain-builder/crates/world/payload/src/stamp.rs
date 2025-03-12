@@ -6,6 +6,7 @@ use futures::executor::block_on;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types::OpTransactionRequest;
+use reth_evm::Evm;
 use reth_optimism_node::OpEvm;
 use WorldChainBlockRegistry::stampBlockCall;
 
@@ -20,7 +21,7 @@ sol! {
 
 pub fn stamp_block_tx<DB, Client>(
     ctx: &WorldChainPayloadBuilderCtx<Client>,
-    evm: &mut OpEvm<'_, &mut PBHCallTracer, &mut DB>,
+    evm: &mut OpEvm<DB, PBHCallTracer>,
 ) -> eyre::Result<(revm_primitives::Address, OpTxEnvelope)>
 where
     DB: revm::Database + revm::DatabaseCommit,
@@ -30,9 +31,9 @@ where
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let nonce = evm.db_mut().basic(address)?.unwrap_or_default().nonce;
-    let base_fee: u128 = evm.context.evm.env.block.basefee.try_into().unwrap();
+    let base_fee: u128 = evm.ctx().block.basefee.try_into().unwrap();
     let registry = ctx.block_registry;
-    let chain_id = evm.context.evm.env.cfg.chain_id;
+    let chain_id = evm.ctx().cfg.chain_id;
 
     // spawn a new os thread
     let tx = std::thread::spawn(move || {

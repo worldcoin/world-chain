@@ -1,4 +1,5 @@
-use reth::revm::{Database, Inspector};
+use reth::revm::Inspector;
+use revm::context::{ContextTr, Transaction};
 use revm::interpreter::{CallOutcome, Gas, InstructionResult, InterpreterResult};
 use revm_primitives::{Address, Bytes};
 
@@ -16,6 +17,8 @@ pub struct PBHCallTracer {
     /// The address of the `PBHSignatureAggregator`.
     /// This address is allowed to make calls to the `PBHEntryPoint`.
     pub pbh_signature_aggregator: Address,
+    /// Whether the tracer is active.
+    pub active: bool,
 }
 
 impl PBHCallTracer {
@@ -23,23 +26,28 @@ impl PBHCallTracer {
         Self {
             pbh_entry_point,
             pbh_signature_aggregator,
+            active: true,
         }
     }
 }
 
-impl<DB: Database> Inspector<DB> for PBHCallTracer {
+impl<CTX: ContextTr> Inspector<CTX> for PBHCallTracer {
     fn call(
         &mut self,
-        context: &mut reth::revm::EvmContext<DB>,
+        context: &mut CTX,
         inputs: &mut reth::revm::interpreter::CallInputs,
-    ) -> Option<reth::revm::interpreter::CallOutcome> {
+    ) -> Option<CallOutcome> {
+        if !self.active {
+            return None;
+        }
+
         // Check if the target address is the `PBHEntryPoint`. If the caller is not the tx origin
         // or the `PBHSignatureAggregator`, mark the tx as invalid.
         if inputs.target_address == self.pbh_entry_point
-            && inputs.caller != context.env.tx.caller
+            && inputs.caller != context.tx().caller()
             && inputs.caller != self.pbh_signature_aggregator
         {
-            context.error = Err(revm_primitives::EVMError::Custom(
+            *context.error() = Err(revm::context_interface::context::ContextError::Custom(
                 PBH_CALL_TRACER_ERROR.to_string(),
             ));
 
