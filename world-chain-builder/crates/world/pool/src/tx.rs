@@ -1,20 +1,18 @@
 use std::sync::Arc;
 
 use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
-use alloy_eips::Typed2718;
+use alloy_eips::{eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Bytes, TxHash};
-use alloy_rpc_types::erc4337::TransactionConditional;
+use alloy_rpc_types::{erc4337::TransactionConditional, AccessList};
 use reth::transaction_pool::{
     error::{InvalidPoolTransactionError, PoolTransactionError},
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
 };
 use reth_optimism_node::txpool::{conditional::MaybeConditionalTransaction, OpPooledTransaction};
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::Recovered;
+use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
-use revm_primitives::{
-    AccessList, Address, InvalidTransaction, KzgSettings, SignedAuthorization, TxKind, B256, U256,
-};
+use revm_primitives::{Address, TxKind, B256, U256};
 use thiserror::Error;
 use world_chain_builder_pbh::payload::PbhValidationError;
 
@@ -169,6 +167,10 @@ impl MaybeConditionalTransaction for WorldChainPooledTransaction {
         self.set_conditional(conditional);
         self
     }
+
+    fn conditional(&self) -> Option<&TransactionConditional> {
+        self.inner.conditional()
+    }
 }
 
 impl PoolTransaction for WorldChainPooledTransaction {
@@ -218,8 +220,6 @@ impl PoolTransaction for WorldChainPooledTransaction {
 pub enum WorldChainPoolTransactionError {
     #[error("Conditional Validation Failed: {0}")]
     ConditionalValidationFailed(B256),
-    #[error(transparent)]
-    InvalidTransaction(#[from] InvalidTransaction),
     #[error(transparent)]
     PbhValidationError(#[from] PbhValidationError),
     #[error("Invalid calldata encoding")]
