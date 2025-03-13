@@ -74,21 +74,24 @@ mod tests {
     use alloy_signer_local::PrivateKeySigner;
     use alloy_sol_types::{sol, SolCall};
     use op_alloy_consensus::OpTypedTransaction;
+    use op_revm::OpHaltReason;
+    use op_revm::OpTransactionError;
     use reth::{
         chainspec::ChainSpec,
         rpc::types::{TransactionInput, TransactionRequest},
     };
-    use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv};
+    use reth_evm::{ConfigureEvm, Evm, EvmEnv};
     use reth_optimism_chainspec::OpChainSpec;
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives::Recovered;
     use revm::{
-        db::{CacheDB, EmptyDB},
+        context::result::ExecutionResult,
+        database::{CacheDB, EmptyDB},
+        state::{AccountInfo, Bytecode},
         Database,
     };
-    use revm_primitives::{
-        AccountInfo, Address, Bytecode, Bytes, ExecutionResult, ResultAndState, U256,
-    };
+    use revm_primitives::{Address, Bytes, U256};
 
     use crate::inspector::PBH_CALL_TRACER_ERROR;
 
@@ -140,7 +143,11 @@ mod tests {
         tx: OpTransactionSigned,
         signer: Address,
         pbh_tracer: &mut PBHCallTracer,
-    ) -> Result<ResultAndState, revm_primitives::EVMError<Infallible>> {
+    ) -> Result<
+        ExecutionResult<OpHaltReason>,
+        revm::context::result::EVMError<Infallible, OpTransactionError>,
+    > {
+        let tx = Recovered::new_unchecked(tx, signer);
         let info = AccountInfo {
             balance: U256::MAX,
             ..Default::default()
@@ -148,12 +155,10 @@ mod tests {
         db.insert_account_info(signer, info);
 
         let chain_spec = Arc::new(OpChainSpec::new(ChainSpec::default()));
-        let evm_config = OpEvmConfig::new(chain_spec);
+        let evm_config: OpEvmConfig = OpEvmConfig::new(chain_spec, Default::default());
 
         let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
-        let tx_env = evm_config.tx_env(&tx, signer);
-
-        evm.transact_commit(tx_env)
+        evm.transact_commit(&tx)
     }
 
     #[tokio::test]
@@ -193,13 +198,9 @@ mod tests {
         assert_eq!(pre_state, U256::from(0));
 
         let mut pbh_tracer = PBHCallTracer::new(mock_pbh_entry_point, Address::random());
-        let result_and_state =
-            execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
+        let result = execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
 
-        assert!(matches!(
-            result_and_state.result,
-            ExecutionResult::Success { .. }
-        ));
+        assert!(matches!(result, ExecutionResult::Success { .. }));
 
         let post_state = db.storage(mock_pbh_entry_point, slot).unwrap();
         assert_eq!(post_state, U256::from(1));
@@ -254,13 +255,9 @@ mod tests {
         assert_eq!(pre_state, U256::from(0));
 
         let mut pbh_tracer = PBHCallTracer::new(mock_pbh_entry_point, multicall);
-        let result_and_state =
-            execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
+        let result = execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer)?;
 
-        assert!(matches!(
-            result_and_state.result,
-            ExecutionResult::Success { .. }
-        ));
+        assert!(matches!(result, ExecutionResult::Success { .. }));
 
         let post_state = db.storage(mock_pbh_entry_point, slot).unwrap();
         assert_eq!(post_state, U256::from(1));
@@ -319,7 +316,7 @@ mod tests {
         let res = execute_with_pbh_tracer(&mut db, tx, signer.address(), &mut pbh_tracer);
 
         let expected_err =
-            revm_primitives::EVMError::<Infallible>::Custom(PBH_CALL_TRACER_ERROR.to_string());
+            revm::context::result::EVMError::<_, _>::Custom(PBH_CALL_TRACER_ERROR.to_string());
 
         assert_eq!(res.err().unwrap(), expected_err);
 

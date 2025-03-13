@@ -14316,6 +14316,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
+ "op-revm",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",

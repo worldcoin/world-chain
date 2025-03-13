@@ -12,7 +12,7 @@ use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
+use reth_primitives::transaction::SignedTransaction;
 use semaphore::identity::Identity;
 use semaphore::poseidon_tree::LazyPoseidonTree;
 use semaphore::{hash_to_field, Field};

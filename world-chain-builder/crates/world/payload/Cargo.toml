@@ -58,3 +58,4 @@ alloy-sol-types.workspace = true
 alloy-signer-local.workspace = true
 alloy-signer.workspace = true
 alloy-network.workspace = true
+op-revm.workspace = true
