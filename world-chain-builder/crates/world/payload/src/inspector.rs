@@ -85,6 +85,7 @@ mod tests {
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::Recovered;
+    use revm::context::BlockEnv;
     use revm::{
         context::result::ExecutionResult,
         database::{CacheDB, EmptyDB},
@@ -157,7 +158,18 @@ mod tests {
         let chain_spec = Arc::new(OpChainSpec::new(ChainSpec::default()));
         let evm_config: OpEvmConfig = OpEvmConfig::new(chain_spec, Default::default());
 
-        let mut evm = evm_config.evm_with_env_and_inspector(db, EvmEnv::default(), pbh_tracer);
+        let mut evm = evm_config.evm_with_env_and_inspector(
+            db,
+            EvmEnv {
+                block_env: BlockEnv {
+                    // set block number to 1 to avoid hitting revm special handling of genesis block.
+                    number: 1,
+                    ..Default::default()
+                },
+                cfg_env: Default::default(),
+            },
+            pbh_tracer,
+        );
         evm.transact_commit(&tx)
     }
 
