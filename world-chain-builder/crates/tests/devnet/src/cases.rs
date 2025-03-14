@@ -22,6 +22,7 @@ use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
 use world_chain_builder_test_utils::utils::RpcUserOperationByHash;
 use world_chain_builder_test_utils::utils::RpcUserOperationV0_7;
 use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
+use world_chain_builder_test_utils::PBH_DEV_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
 
@@ -44,7 +45,7 @@ where
             let bundler_provider = bundler_provider.clone();
             let builder_provider = builder_provider.clone();
             async move {
-                let uo: RpcUserOperationV0_7 = uo.clone().into();
+                let uo: RpcUserOperationV0_7 = (uo.clone(), PBH_DEV_SIGNATURE_AGGREGATOR).into();
                 let hash: B256 = bundler_provider.raw_request(
                     Cow::Borrowed("eth_sendUserOperation"),
                     (uo, DEVNET_ENTRYPOINT),
@@ -62,7 +63,7 @@ where
                     let resp: RpcUserOperationByHash = bundler_provider
                         .raw_request(
                             Cow::Borrowed("eth_getUserOperationByHash"),
-                            (hash.clone(),),
+                            (hash,),
                         )
                         .await?;
 

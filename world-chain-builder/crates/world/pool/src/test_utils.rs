@@ -26,10 +26,10 @@ pub fn world_chain_validator(
     validator.client().add_account(
         PBH_DEV_ENTRYPOINT,
         ExtendedAccount::new(0, alloy_primitives::U256::ZERO).extend_storage(vec![
-            (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000).into()),
+            (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000)),
             (
                 PBH_NONCE_LIMIT_SLOT.into(),
-                ((MAX_U16 - U256::from(1)) << U256::from(160)).into(),
+                ((MAX_U16 - U256::from(1)) << U256::from(160)),
             ),
         ]),
     );

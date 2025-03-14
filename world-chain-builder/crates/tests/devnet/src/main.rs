@@ -85,7 +85,7 @@ async fn start_devnet(args: Args) -> Result<(String, String, String)> {
             .unwrap()
             .canonicalize()?;
 
-        run_command(&"just", &["devnet-up"], path).await?;
+        run_command("just", &["devnet-up"], path).await?;
     }
 
     let (builder_socket, sequencer_socket, rundler) = get_endpoints().await?;

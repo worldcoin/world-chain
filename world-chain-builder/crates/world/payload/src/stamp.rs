@@ -31,7 +31,7 @@ where
     let wallet = EthereumWallet::from(signer);
     let address = NetworkWallet::<Optimism>::default_signer_address(&wallet);
     let nonce = evm.db_mut().basic(address)?.unwrap_or_default().nonce;
-    let base_fee: u128 = evm.ctx().block.basefee.try_into().unwrap();
+    let base_fee: u128 = evm.ctx().block.basefee.into();
     let registry = ctx.block_registry;
     let chain_id = evm.ctx().cfg.chain_id;
 

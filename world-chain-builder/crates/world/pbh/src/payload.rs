@@ -1,8 +1,8 @@
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use semaphore::packed_proof::PackedProof;
-use semaphore::protocol::{verify_proof, ProofError};
-use semaphore::Field;
+use semaphore_rs::packed_proof::PackedProof;
+use semaphore_rs::protocol::{verify_proof, ProofError};
+use semaphore_rs::Field;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -16,14 +16,17 @@ const LEN: usize = 256;
 pub type ProofBytes = [u8; LEN];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Proof(pub semaphore::protocol::Proof);
+pub struct Proof(pub semaphore_rs::protocol::Proof);
 
 impl Default for Proof {
     fn default() -> Self {
-        let proof = semaphore::protocol::Proof(
-            (0u64.into(), 0u64.into()),
-            ([0u64.into(), 0u64.into()], [0u64.into(), 0u64.into()]),
-            (0u64.into(), 0u64.into()),
+        let proof = semaphore_rs::protocol::Proof(
+            (U256::from(0u64), U256::from(0u64)),
+            (
+                [U256::from(0u64), U256::from(0u64)],
+                [U256::from(0u64), U256::from(0u64)],
+            ),
+            (U256::from(0u64), U256::from(0u64)),
         );
 
         Proof(proof)
@@ -134,9 +137,9 @@ impl PBHPayload {
 }
 #[cfg(test)]
 mod test {
+    use alloy_primitives::U256;
     use chrono::TimeZone;
-    use ethers_core::types::U256;
-    use semaphore::Field;
+    use semaphore_rs::Field;
     use test_case::test_case;
 
     use super::*;
@@ -144,7 +147,7 @@ mod test {
     #[test]
     // TODO: fuzz inputs
     fn test_encode_decode() {
-        let proof = Proof(semaphore::protocol::Proof(
+        let proof = Proof(semaphore_rs::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
             (
                 [U256::from(3u64), U256::from(4u64)],

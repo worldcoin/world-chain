@@ -13,9 +13,9 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
-use semaphore::identity::Identity;
-use semaphore::poseidon_tree::LazyPoseidonTree;
-use semaphore::{hash_to_field, Field};
+use semaphore_rs::identity::Identity;
+use semaphore_rs::poseidon_tree::LazyPoseidonTree;
+use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use std::{str::FromStr, sync::LazyLock};
@@ -27,7 +27,7 @@ use crate::bindings::IPBHEntryPoint::{self, PBHPayload};
 use crate::bindings::{EncodedSafeOpStruct, IMulticall3};
 use crate::{
     DEVNET_ENTRYPOINT, DEV_CHAIN_ID, MNEMONIC, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES,
+    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES, WC_SEPOLIA_CHAIN_ID,
 };
 
 pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
@@ -42,6 +42,12 @@ pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
 
     tree.derived()
 });
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InclusionProof {
+    pub root: Field,
+    pub proof: semaphore_rs::poseidon_tree::Proof,
+}
 
 pub fn signer(index: u32) -> PrivateKeySigner {
     alloy_signer_local::MnemonicBuilder::<English>::default()
@@ -67,25 +73,25 @@ pub fn tree_root() -> Field {
     TREE.root()
 }
 
-pub fn tree_inclusion_proof(acc: u32) -> semaphore::poseidon_tree::Proof {
+pub fn tree_inclusion_proof(acc: u32) -> semaphore_rs::poseidon_tree::Proof {
     TREE.proof(acc as usize)
 }
 
 pub fn nullifier_hash(acc: u32, external_nullifier: Field) -> Field {
     let identity = identity(acc);
 
-    semaphore::protocol::generate_nullifier_hash(&identity, external_nullifier)
+    semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier)
 }
 
 pub fn semaphore_proof(
     acc: u32,
     ext_nullifier: Field,
     signal: Field,
-) -> semaphore::protocol::Proof {
+) -> semaphore_rs::protocol::Proof {
     let identity = identity(acc);
     let incl_proof = tree_inclusion_proof(acc);
 
-    semaphore::protocol::generate_proof(&identity, &incl_proof, ext_nullifier, signal)
+    semaphore_rs::protocol::generate_proof(&identity, &incl_proof, ext_nullifier, signal)
         .expect("Failed to generate semaphore proof")
 }
 
@@ -124,7 +130,7 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
     let op_tx: OpTypedTransaction = tx.clone().into();
     let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
     let pooled = OpPooledTransaction::new(
-        tx_signed.clone().into_recovered_unchecked().unwrap(),
+        tx_signed.clone().try_into_recovered().unwrap(),
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
@@ -219,6 +225,92 @@ pub fn user_op(
     (user_op, payload)
 }
 
+#[builder]
+pub fn user_op_sepolia(
+    signer: PrivateKeySigner,
+    safe: Address,
+    module: Address,
+    identity: Identity,
+    inclusion_proof: InclusionProof,
+    #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
+    #[builder(into, default = U256::ZERO)] nonce: U256,
+    #[builder(default = Bytes::default())] init_code: Bytes,
+    #[builder(default = bytes!("7bb3742800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))]
+    // abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0))
+    calldata: Bytes,
+    #[builder(default = fixed_bytes!("000000000000000000000000000fffd30000000000000000000000000000C350"))]
+    account_gas_limits: FixedBytes<32>,
+    #[builder(default = U256::from(500836))] pre_verification_gas: U256,
+    #[builder(default = fixed_bytes!("0000000000000000000000003B9ACA0000000000000000000000000073140B60"))]
+    gas_fees: FixedBytes<32>,
+    #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
+) -> IEntryPoint::PackedUserOperation {
+    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    let mut user_op = PackedUserOperation {
+        sender: safe,
+        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        initCode: init_code,
+        callData: calldata,
+        accountGasLimits: account_gas_limits,
+        preVerificationGas: pre_verification_gas,
+        gasFees: gas_fees,
+        paymasterAndData: paymaster_and_data,
+        signature: bytes!("000000000000000000000000"),
+    };
+
+    let operation_hash = get_operation_hash(user_op.clone(), module, WC_SEPOLIA_CHAIN_ID);
+
+    let signature = signer
+        .sign_message_sync(&operation_hash.0)
+        .expect("Failed to sign operation hash");
+    let signal = hash_user_op(&user_op);
+
+    let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
+
+    let proof = semaphore_rs::protocol::generate_proof(
+        &identity,
+        &inclusion_proof.proof,
+        encoded_external_nullifier.0,
+        signal,
+    )
+    .expect("Failed to generate semaphore proof");
+    let nullifier_hash =
+        semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
+
+    let proof = Proof(proof);
+
+    let payload = PbhPayload {
+        external_nullifier,
+        nullifier_hash,
+        root: inclusion_proof.root,
+        proof,
+    };
+    let mut uo_sig = Vec::new();
+
+    // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
+    let v: FixedBytes<1> = if signature.v() as u8 == 0 {
+        fixed_bytes!("1F") // 31
+    } else {
+        fixed_bytes!("20") // 32
+    };
+
+    uo_sig.extend_from_slice(
+        &(
+            fixed_bytes!("000000000000000000000000"),
+            signature.r(),
+            signature.s(),
+            v,
+        )
+            .abi_encode_packed(),
+    );
+
+    uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+
+    user_op.signature = Bytes::from(uo_sig);
+
+    user_op
+}
+
 pub fn pbh_bundle(
     user_ops: Vec<PackedUserOperation>,
     proofs: Vec<PBHPayload>,
@@ -262,19 +354,6 @@ pub fn pbh_multicall(
         proof.2 .1,
     ];
 
-    // TODO: Switch to ruint in semaphore-rs and remove this
-    let proof: [U256; 8] = proof
-        .into_iter()
-        .map(|x| {
-            let mut bytes_repr: [u8; 32] = [0; 32];
-            x.to_big_endian(&mut bytes_repr);
-
-            U256::from_be_bytes(bytes_repr)
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-
     let payload = IPBHEntryPoint::PBHPayload {
         root,
         pbhExternalNullifier: EncodedExternalNullifier::from(external_nullifier).0,
@@ -291,9 +370,9 @@ pub fn get_operation_hash(
     chain_id: u64,
 ) -> FixedBytes<32> {
     let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
-    let safe_struct_hash = keccak256(&encoded_safe_struct.abi_encode());
+    let safe_struct_hash = keccak256(encoded_safe_struct.abi_encode());
     let domain_separator = keccak256(
-        &(
+        (
             fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218"),
             chain_id,
             module,
@@ -342,67 +421,53 @@ impl From<PackedUserOperation> for EncodedSafeOpStruct {
 
 impl From<PbhPayload> for PBHPayload {
     fn from(val: PbhPayload) -> Self {
-        let mut p0 = [0; 32];
-        val.proof.0 .0 .0.to_big_endian(&mut p0);
-        let mut p1 = [0; 32];
-        val.proof.0 .0 .1.to_big_endian(&mut p1);
-        let mut p2 = [0; 32];
-        val.proof.0 .1 .0[0].to_big_endian(&mut p2);
-        let mut p3 = [0; 32];
-        val.proof.0 .1 .0[1].to_big_endian(&mut p3);
-        let mut p4 = [0; 32];
-        val.proof.0 .1 .1[0].to_big_endian(&mut p4);
-        let mut p5 = [0; 32];
-        val.proof.0 .1 .1[1].to_big_endian(&mut p5);
-        let mut p6 = [0; 32];
-        val.proof.0 .2 .0.to_big_endian(&mut p6);
-        let mut p7 = [0; 32];
-        val.proof.0 .2 .1.to_big_endian(&mut p7);
+        let p0 = val.proof.0 .0 .0;
+        let p1 = val.proof.0 .0 .1;
+        let p2 = val.proof.0 .1 .0[0];
+        let p3 = val.proof.0 .1 .0[1];
+        let p4 = val.proof.0 .1 .1[0];
+        let p5 = val.proof.0 .1 .1[1];
+        let p6 = val.proof.0 .2 .0;
+        let p7 = val.proof.0 .2 .1;
 
         Self {
             root: val.root,
             pbhExternalNullifier: EncodedExternalNullifier::from(val.external_nullifier).0,
             nullifierHash: val.nullifier_hash,
-            proof: [
-                U256::from_be_bytes(p0),
-                U256::from_be_bytes(p1),
-                U256::from_be_bytes(p2),
-                U256::from_be_bytes(p3),
-                U256::from_be_bytes(p4),
-                U256::from_be_bytes(p5),
-                U256::from_be_bytes(p6),
-                U256::from_be_bytes(p7),
-            ],
+            proof: [p0, p1, p2, p3, p4, p5, p6, p7],
         }
     }
 }
 
-impl Into<RpcUserOperationV0_7> for PackedUserOperation {
+#[allow(clippy::from_over_into)]
+impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
     fn into(self) -> RpcUserOperationV0_7 {
+        let (user_op, aggregator) = self;
         RpcUserOperationV0_7 {
-            sender: self.sender,
-            nonce: self.nonce,
+            sender: user_op.sender,
+            nonce: user_op.nonce,
             factory: None,
-            call_data: self.callData,
+            call_data: user_op.callData,
             factory_data: None,
-            verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+            verification_gas_limit: (U256::from_be_bytes(user_op.accountGasLimits.into())
                 >> U256::from(128))
             .to(),
-            call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+            call_gas_limit: (U256::from_be_bytes(user_op.accountGasLimits.into())
                 & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
-            pre_verification_gas: self.preVerificationGas,
-            max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
-                .to(),
-            max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
+            pre_verification_gas: user_op.preVerificationGas,
+            max_priority_fee_per_gas: (U256::from_be_bytes(user_op.gasFees.into())
+                >> U256::from(128))
+            .to(),
+            max_fee_per_gas: (U256::from_be_bytes(user_op.gasFees.into())
                 & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
             .to(),
-            signature: self.signature,
+            signature: user_op.signature,
             paymaster: None,
             paymaster_data: None,
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
-            aggregator: Some(PBH_DEV_SIGNATURE_AGGREGATOR),
+            aggregator: Some(aggregator),
             eip7702_auth: None,
         }
     }

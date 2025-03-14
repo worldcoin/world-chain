@@ -9,7 +9,6 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "2"
 members = [
-    "crates/tests",
     "crates/toolkit",
     "crates/world/bin",
     "crates/world/node",
@@ -18,6 +17,8 @@ members = [
     "crates/world/pbh",
     "crates/world/pool",
     "crates/world/test-utils",
+    "crates/tests/sepolia",
+    "crates/tests/devnet",
 ]
 
 default-members = ["crates/world/bin"]
@@ -81,7 +82,7 @@ reth-e2e-test-utils = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-node-core = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-tracing = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
-
+reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 # alloy op
 op-alloy-consensus = "0.11.0"
 op-alloy-rpc-types = "0.11.0"
@@ -91,6 +92,8 @@ op-alloy-network = "0.11.0"
 # alloy
 alloy = { version = "0.12.5" }
 alloy-provider = { version = "0.12.5", default-features = false }
+alloy-rpc-client = { version = "0.12.5", default-features = false }
+alloy-transport-http = { version = "0.12.5", default-features = false }
 alloy-transport = { version = "0.12.5", default-features = false }
 alloy-consensus = { version = "0.12.5", default-features = false }
 alloy-network = { version = "0.12.5", default-features = false }
@@ -124,9 +127,8 @@ chrono = "0.4"
 thiserror = "1"
 strum = { version = "0.26", features = ["derive"] }
 bytemuck = "1"
-semaphore = { git = "https://github.com/worldcoin/semaphore-rs", rev = "d0d1f899add7116ccc1228f5e5e5ee2e2e233768", features = [
-    "depth_30",
-] }
+semaphore-rs = "0.3.1"
+semaphore-rs-tree = "0.3.1"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
