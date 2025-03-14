@@ -281,12 +281,7 @@ where
             && self.max_pbh_nonce.load(Ordering::Relaxed) == 0
         {
             // Try and fetch the max pbh nonce and gas limit from the state at the latest block
-            if let Some(state) = self
-                .inner
-                .client()
-                .state_by_block_id(BlockId::latest())
-                .ok()
-            {
+            if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
                 if let Some(max_pbh_nonce) = state
                     .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
                     .ok()

@@ -27,7 +27,6 @@ reth-primitives = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
 reth-provider.workspace = true
-reth-optimism-evm.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-trie-db.workspace = true

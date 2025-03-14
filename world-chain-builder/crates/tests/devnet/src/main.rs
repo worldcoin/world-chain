@@ -15,7 +15,7 @@ use alloy_network::Network;
 use alloy_provider::network::Ethereum;
 use alloy_provider::RootProvider;
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use clap::Parser;
 use eyre::eyre::{eyre, Result};
 use fixtures::TransactionFixtures;
@@ -85,7 +85,7 @@ async fn start_devnet(args: Args) -> Result<(String, String, String)> {
             .unwrap()
             .canonicalize()?;
 
-        run_command(&"just", &["devnet-up"], path).await?;
+        run_command("just", &["devnet-up"], path).await?;
     }
 
     let (builder_socket, sequencer_socket, rundler) = get_endpoints().await?;
@@ -155,7 +155,7 @@ where
     let start = Instant::now();
     loop {
         if provider
-            .get_block_by_number(BlockNumberOrTag::Latest, BlockTransactionsKind::Hashes)
+            .get_block_by_number(BlockNumberOrTag::Latest)
             .await
             .is_ok()
         {

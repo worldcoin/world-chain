@@ -3,9 +3,8 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionRequest, Withdrawals};
-use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter, TreeConfig};
 use reth::builder::components::Components;
-use reth::builder::engine_tree_config::TreeConfig;
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
@@ -19,7 +18,7 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
+use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::node::OpAddOns;
 use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpTransactionSigned;
@@ -69,14 +68,8 @@ type NodeHelperType = NodeAdapter<
             DiskFileBlobStore,
         >,
         OpEvmConfig,
-        BasicBlockExecutorProvider<OpExecutionStrategyFactory>,
+        BasicBlockExecutorProvider<OpEvmConfig>,
         Arc<OpBeaconConsensus<OpChainSpec>>,
-        world_chain_builder_payload::builder::WorldChainPayloadBuilder<
-            BlockchainProvider<
-                NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
-            >,
-            DiskFileBlobStore,
-        >,
     >,
 >;
 
@@ -117,7 +110,7 @@ impl WorldChainBuilderTestContext {
             pbh_entrypoint: PBH_DEV_ENTRYPOINT,
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
-
+            builder_private_key: signer(6).to_bytes().to_string(),
             ..Default::default()
         };
 
@@ -170,11 +163,11 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
         pbh_tx_hashes.push(pbh_hash);
     }
 
-    let (payload, _) = ctx.node.advance_block().await?;
+    let payload = ctx.node.advance_block().await?;
 
     assert_eq!(
         payload.block().body().transactions.len(),
-        pbh_tx_hashes.len()
+        pbh_tx_hashes.len() + 1
     );
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -210,20 +203,15 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
         pbh_tx_hashes.push(pbh_hash);
     }
 
-    let (payload, _) = ctx.node.advance_block().await?;
+    let payload = ctx.node.advance_block().await?;
 
     assert_eq!(
         payload.block().body().transactions.len(),
-        pbh_tx_hashes.len() + 1
+        pbh_tx_hashes.len() + 2
     );
     // Assert the non-pbh transaction is included in the block last
     assert_eq!(
-        *payload
-            .block()
-            .body()
-            .transactions
-            .last()
-            .unwrap()
+        *payload.block().body().transactions[payload.block().body().transactions.len() - 2]
             .tx_hash(),
         non_pbh_hash
     );
@@ -263,11 +251,11 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     // same pbh_nonce should fail to validate.
     assert!(ctx.node.rpc.inject_tx(raw_tx_1.clone()).await.is_err());
 
-    let (payload, _) = ctx.node.advance_block().await?;
+    let payload = ctx.node.advance_block().await?;
 
     // One transaction should be successfully validated
     // and included in the block.
-    assert_eq!(payload.block().body().transactions.len(), 1);
+    assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
 }

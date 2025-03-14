@@ -1,6 +1,7 @@
 use alloy_primitives::Address;
 use reth::builder::components::{
-    ComponentsBuilder, PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+    BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder,
+    PoolBuilderConfigOverrides,
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
@@ -11,7 +12,6 @@ use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::BasicOpReceiptBuilder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
@@ -71,7 +71,7 @@ impl WorldChainNode {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -91,6 +91,8 @@ impl WorldChainNode {
             pbh_entrypoint,
             signature_aggregator,
             world_id,
+            builder_private_key,
+            block_registry,
         } = self.args.clone();
 
         let RollupArgs {
@@ -107,15 +109,17 @@ impl WorldChainNode {
                 signature_aggregator,
                 world_id,
             ))
-            .payload(
+            .payload(BasicPayloadServiceBuilder::new(
                 WorldChainPayloadBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
                     pbh_entrypoint,
                     signature_aggregator,
+                    builder_private_key,
+                    block_registry,
                 )
                 .with_da_config(self.da_config.clone()),
-            )
+            ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -139,7 +143,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WorldChainPoolBuilder,
-        WorldChainPayloadBuilder,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -312,6 +316,13 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
+
+    /// Sets the private key of the builder
+    /// used for signing the stampBlock transaction
+    pub builder_private_key: String,
+
+    /// Contract address for the world chain block registry contract
+    pub block_registry: Address,
 }
 
 impl WorldChainPayloadBuilder {
@@ -322,6 +333,8 @@ impl WorldChainPayloadBuilder {
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
+        builder_private_key: String,
+        block_registry: Address,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -329,6 +342,8 @@ impl WorldChainPayloadBuilder {
             pbh_entry_point,
             pbh_signature_aggregator,
             best_transactions: (),
+            builder_private_key,
+            block_registry,
             da_config: OpDAConfig::default(),
         }
     }
@@ -350,6 +365,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
+            builder_private_key,
+            block_registry,
             ..
         } = self;
 
@@ -360,6 +377,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             pbh_entry_point,
             pbh_signature_aggregator,
             best_transactions,
+            builder_private_key,
+            block_registry,
         }
     }
 
@@ -389,7 +408,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 pool,
                 ctx.provider().clone(),
                 evm_config,
-                BasicOpReceiptBuilder::default(),
                 OpBuilderConfig {
                     da_config: self.da_config.clone(),
                 },
@@ -397,6 +415,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 self.verified_blockspace_capacity,
                 self.pbh_entry_point,
                 self.pbh_signature_aggregator,
+                self.builder_private_key.clone(),
+                self.block_registry,
             )
             .with_transactions(self.best_transactions.clone());
 
@@ -404,7 +424,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, S, Txs> PayloadServiceBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
+impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for WorldChainPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
@@ -422,10 +442,14 @@ where
         world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        self.build(
+            OpEvmConfig::new(ctx.chain_spec(), Default::default()),
+            ctx,
+            pool,
+        )
     }
 }

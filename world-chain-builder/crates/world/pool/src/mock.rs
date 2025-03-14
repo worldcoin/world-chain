@@ -7,9 +7,8 @@ use std::{
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{
-    keccak256,
-    map::{B256HashMap, HashMap},
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
+    TxHash, TxNumber, B256, U256,
 };
 
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
@@ -557,7 +556,7 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
@@ -596,7 +595,7 @@ impl BlockReader for MockEthProvider {
         Ok(vec![])
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
@@ -729,17 +728,13 @@ impl StateProofProvider for MockEthProvider {
         Ok(MultiProof::default())
     }
 
-    fn witness(
-        &self,
-        _input: TrieInput,
-        _target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>> {
-        Ok(HashMap::default())
+    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+        Ok(Vec::default())
     }
 }
 
 impl HashedPostStateProvider for MockEthProvider {
-    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

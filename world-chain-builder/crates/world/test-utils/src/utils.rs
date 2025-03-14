@@ -12,7 +12,7 @@ use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::transaction::SignedTransactionIntoRecoveredExt;
+use reth_primitives::transaction::SignedTransaction;
 use semaphore_rs::identity::Identity;
 use semaphore_rs::poseidon_tree::LazyPoseidonTree;
 use semaphore_rs::{hash_to_field, Field};
@@ -130,7 +130,7 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
     let op_tx: OpTypedTransaction = tx.clone().into();
     let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
     let pooled = OpPooledTransaction::new(
-        tx_signed.clone().into_recovered_unchecked().unwrap(),
+        tx_signed.clone().try_into_recovered().unwrap(),
         tx_signed.eip1559().unwrap().size(),
     );
     pooled
@@ -370,9 +370,9 @@ pub fn get_operation_hash(
     chain_id: u64,
 ) -> FixedBytes<32> {
     let encoded_safe_struct: EncodedSafeOpStruct = user_op.into();
-    let safe_struct_hash = keccak256(&encoded_safe_struct.abi_encode());
+    let safe_struct_hash = keccak256(encoded_safe_struct.abi_encode());
     let domain_separator = keccak256(
-        &(
+        (
             fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218"),
             chain_id,
             module,
@@ -439,6 +439,7 @@ impl From<PbhPayload> for PBHPayload {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
     fn into(self) -> RpcUserOperationV0_7 {
         let (user_op, aggregator) = self;

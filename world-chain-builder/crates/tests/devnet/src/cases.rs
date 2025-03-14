@@ -63,7 +63,7 @@ where
                     let resp: RpcUserOperationByHash = bundler_provider
                         .raw_request(
                             Cow::Borrowed("eth_getUserOperationByHash"),
-                            (hash.clone(),),
+                            (hash,),
                         )
                         .await?;
 

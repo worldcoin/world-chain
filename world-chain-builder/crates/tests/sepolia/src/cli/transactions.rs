@@ -121,7 +121,7 @@ pub async fn bundle_pbh_transactions(
             )?;
 
             let nullifier_hash =
-                semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+                semaphore_rs::protocol::generate_nullifier_hash(identity, external_nullifier_hash);
 
             let payload = PBHPayload {
                 root,
@@ -304,7 +304,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
                             let resp: RpcUserOperationByHash = provider
                                 .raw_request(
                                     Cow::Borrowed("eth_getUserOperationByHash"),
-                                    (hash.clone(),),
+                                    (hash,),
                                 )
                                 .await?;
 
