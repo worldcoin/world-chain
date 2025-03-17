@@ -97,12 +97,25 @@ impl PBHPayload {
         let date = chrono::Utc::now();
         self.validate_external_nullifier(date, pbh_nonce_limit)?;
 
+        let flat = self.proof.0.flatten();
+        let proof =
+            if flat[4].is_zero() && flat[5].is_zero() && flat[6].is_zero() && flat[7].is_zero() {
+                // proof is compressed
+                let compressed_flat = [flat[0], flat[1], flat[2], flat[3]];
+                let compressed_proof =
+                    semaphore_rs_proof::compression::CompressedProof::from_flat(compressed_flat);
+                semaphore_rs_proof::compression::decompress_proof(compressed_proof)
+                    .ok_or(PbhValidationError::InvalidProof)?
+            } else {
+                semaphore_rs_proof::Proof::from_flat(flat)
+            };
+
         if verify_proof(
             self.root,
             self.nullifier_hash,
             signal,
             EncodedExternalNullifier::from(self.external_nullifier).0,
-            &self.proof.0,
+            &proof,
             TREE_DEPTH,
         )? {
             Ok(())
@@ -138,7 +151,7 @@ impl PBHPayload {
 #[cfg(test)]
 mod test {
     use alloy_primitives::U256;
-    use chrono::TimeZone;
+    use chrono::{Datelike, TimeZone, Utc};
     use semaphore_rs::Field;
     use test_case::test_case;
 
@@ -146,7 +159,7 @@ mod test {
 
     #[test]
     // TODO: fuzz inputs
-    fn test_encode_decode() {
+    fn encode_decode() {
         let proof = Proof(semaphore_rs::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
             (
@@ -169,7 +182,65 @@ mod test {
     }
 
     #[test]
-    fn test_valid_root() -> eyre::Result<()> {
+    fn serialize_compressed_proof() {
+        let identity = semaphore_rs::identity::Identity::from_secret(&mut [1, 2, 3], None);
+        let mut tree = semaphore_rs::poseidon_tree::LazyPoseidonTree::new_with_dense_prefix(
+            30,
+            0,
+            &U256::ZERO,
+        );
+        tree = tree.update_with_mutation(0, &identity.commitment());
+
+        let merkle_proof = tree.proof(0);
+        let now = Utc::now();
+        let date_marker = DateMarker::new(now.year(), now.month());
+
+        let external_nullifier = ExternalNullifier::with_date_marker(date_marker, 0);
+        let external_nullifier_hash: EncodedExternalNullifier = external_nullifier.into();
+        let external_nullifier_hash = external_nullifier_hash.0;
+        let signal = U256::ZERO;
+
+        // Generate a normal proof
+        let proof = semaphore_rs::protocol::generate_proof(
+            &identity,
+            &merkle_proof,
+            external_nullifier_hash,
+            signal,
+        )
+        .unwrap();
+        let nullifier_hash =
+            semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+
+        // Compress the proof
+        let compressed_proof = semaphore_rs_proof::compression::compress_proof(proof).unwrap();
+
+        // Reserialize to backwards compat format
+        let flat = compressed_proof.flatten();
+        let proof = [
+            flat[0],
+            flat[1],
+            flat[2],
+            flat[3],
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+        ];
+        let proof = semaphore_rs::protocol::Proof::from_flat(proof);
+        let proof = Proof(proof);
+
+        let pbh_payload = PBHPayload {
+            root: tree.root(),
+            external_nullifier,
+            nullifier_hash,
+            proof,
+        };
+
+        pbh_payload.validate(signal, &[tree.root()], 10).unwrap();
+    }
+
+    #[test]
+    fn valid_root() -> eyre::Result<()> {
         let pbh_payload = PBHPayload {
             root: Field::from(1u64),
             ..Default::default()
@@ -182,7 +253,7 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_root() -> eyre::Result<()> {
+    fn invalid_root() -> eyre::Result<()> {
         let pbh_payload = PBHPayload {
             root: Field::from(3u64),
             ..Default::default()
@@ -198,7 +269,7 @@ mod test {
     #[test_case(ExternalNullifier::v1(1, 2025, 0) ; "01-2025-0")]
     #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
     #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
-    fn test_valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
+    fn valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
@@ -213,7 +284,7 @@ mod test {
 
     #[test_case(ExternalNullifier::v1(1, 2024, 0) ; "01-2024-0")]
     #[test_case(ExternalNullifier::v1(2, 2025, 0) ; "02-2025-0")]
-    fn test_invalid_external_nullifier_invalid_period(
+    fn invalid_external_nullifier_invalid_period(
         external_nullifier: ExternalNullifier,
     ) -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
@@ -234,7 +305,7 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
+    fn invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
