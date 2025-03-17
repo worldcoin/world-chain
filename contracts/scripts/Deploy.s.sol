@@ -19,6 +19,7 @@ contract Deploy is Script {
     address internal constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     uint256 internal constant MAX_PBH_GAS_LIMIT = 15000000; // 15M
     uint16 internal constant PBH_NONCE_LIMIT = type(uint16).max;
+    address[] internal authorizedBuilders = [address(0)]; // TODO:
 
     function run() public {
         console.log(

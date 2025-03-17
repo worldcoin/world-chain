@@ -34,7 +34,9 @@ contract PBHEntryPointImplV1ProxyTest is Test {
         });
 
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(abi.encodeWithSelector(pbhEntryPoint.verifyPbh.selector, 0, pbhPayload));
+        (bool success,) =
+            address(pbhEntryPoint).call(abi.encodeWithSelector(pbhEntryPoint.verifyPbh.selector, 0, pbhPayload));
+        assert(!success);
     }
 
     function test_handleAggregatedOps_RevertIf_NotProxy() public {
@@ -42,16 +44,18 @@ contract PBHEntryPointImplV1ProxyTest is Test {
         address payable beneficiary = payable(address(0));
 
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(
+        (bool success,) = address(pbhEntryPoint).call(
             abi.encodeWithSelector(pbhEntryPoint.handleAggregatedOps.selector, opsPerAggregator, beneficiary)
         );
+        assert(!success);
     }
 
     function test_validateSignaturesCallback_RevertIf_NotProxy() public {
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(
+        (bool success,) = address(pbhEntryPoint).call(
             abi.encodeWithSelector(pbhEntryPoint.validateSignaturesCallback.selector, bytes32(0))
         );
+        assert(!success);
     }
 
     function test_pbhMulticall_RevertIf_Uninitialized() public {
@@ -64,18 +68,22 @@ contract PBHEntryPointImplV1ProxyTest is Test {
         });
 
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(
-            abi.encodeWithSelector(pbhEntryPoint.pbhMulticall.selector, calls, pbhPayload)
-        );
+        (bool success,) =
+            address(pbhEntryPoint).call(abi.encodeWithSelector(pbhEntryPoint.pbhMulticall.selector, calls, pbhPayload));
+        assert(!success);
     }
 
     function test_setNumPbhPerMonth_RevertIf_Uninitialized() public {
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(abi.encodeWithSelector(pbhEntryPoint.setNumPbhPerMonth.selector, 30));
+        (bool success,) =
+            address(pbhEntryPoint).call(abi.encodeWithSelector(pbhEntryPoint.setNumPbhPerMonth.selector, 30));
+        assert(!success);
     }
 
     function test_setWorldId_RevertIf_Uninitialized() public {
         vm.expectRevert("Function must be called through active proxy");
-        address(pbhEntryPoint).delegatecall(abi.encodeWithSelector(pbhEntryPoint.setWorldId.selector, address(0)));
+        (bool success,) =
+            address(pbhEntryPoint).call(abi.encodeWithSelector(pbhEntryPoint.setWorldId.selector, address(0)));
+        assert(!success);
     }
 }

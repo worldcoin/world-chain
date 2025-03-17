@@ -41,6 +41,7 @@ contract DeployDevnet is Script {
         0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
     uint256 public constant MAX_PBH_GAS_LIMIT = 30000000;
     uint32 public constant PBH_NONCE_KEY = 1123123123;
+    address[] public authorizedBuilders = [BUILDER];
 
     function run() public {
         console.log(
@@ -67,7 +68,8 @@ contract DeployDevnet is Script {
                 IEntryPoint(ENTRY_POINT),
                 255,
                 address(0x123),
-                MAX_PBH_GAS_LIMIT
+                MAX_PBH_GAS_LIMIT,
+                authorizedBuilders
             )
         );
         pbhEntryPoint = address(
