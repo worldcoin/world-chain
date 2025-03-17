@@ -12832,6 +12832,7 @@ dependencies = [
  "color-eyre",
  "ethers-core",
  "semaphore-rs",
+ "semaphore-rs-proof",
  "serde",
  "strum 0.26.3",
  "test-case",

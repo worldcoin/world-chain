@@ -9,16 +9,16 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "2"
 members = [
-    "crates/toolkit",
-    "crates/world/bin",
-    "crates/world/node",
-    "crates/world/payload",
-    "crates/world/rpc",
-    "crates/world/pbh",
-    "crates/world/pool",
-    "crates/world/test-utils",
-    "crates/tests/sepolia",
-    "crates/tests/devnet",
+  "crates/toolkit",
+  "crates/world/bin",
+  "crates/world/node",
+  "crates/world/payload",
+  "crates/world/rpc",
+  "crates/world/pbh",
+  "crates/world/pool",
+  "crates/world/test-utils",
+  "crates/tests/sepolia",
+  "crates/tests/devnet",
 ]
 
 default-members = ["crates/world/bin"]
@@ -46,7 +46,7 @@ reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0", features = [
-    "test-utils",
+  "test-utils",
 ] }
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
@@ -100,7 +100,7 @@ alloy-network = { version = "0.12.5", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false }
 alloy-rpc-types-eth = { version = "0.12.5", default-features = false }
 alloy-rpc-types = { version = "0.12.5", features = [
-    "eth",
+  "eth",
 ], default-features = false }
 alloy-rpc-types-engine = { version = "0.12.5" }
 alloy-rlp = "0.3.10"
@@ -129,6 +129,7 @@ strum = { version = "0.26", features = ["derive"] }
 bytemuck = "1"
 semaphore-rs = "0.3.1"
 semaphore-rs-tree = "0.3.1"
+semaphore-rs-proof = "0.3.1"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
@@ -149,3 +150,4 @@ rand = { version = "0.8", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
 bon = "3.3.0"
 rayon = "1.10.0"
+
