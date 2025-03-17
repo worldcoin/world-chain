@@ -98,17 +98,16 @@ impl PBHPayload {
         self.validate_external_nullifier(date, pbh_nonce_limit)?;
 
         let flat = self.proof.0.flatten();
-        let proof =
-            if flat[4].is_zero() && flat[5].is_zero() && flat[6].is_zero() && flat[7].is_zero() {
-                // proof is compressed
-                let compressed_flat = [flat[0], flat[1], flat[2], flat[3]];
-                let compressed_proof =
-                    semaphore_rs_proof::compression::CompressedProof::from_flat(compressed_flat);
-                semaphore_rs_proof::compression::decompress_proof(compressed_proof)
-                    .ok_or(PbhValidationError::InvalidProof)?
-            } else {
-                semaphore_rs_proof::Proof::from_flat(flat)
-            };
+        let proof = if is_compressed(&flat) {
+            // proof is compressed
+            let compressed_flat = [flat[0], flat[1], flat[2], flat[3]];
+            let compressed_proof =
+                semaphore_rs_proof::compression::CompressedProof::from_flat(compressed_flat);
+            semaphore_rs_proof::compression::decompress_proof(compressed_proof)
+                .ok_or(PbhValidationError::InvalidProof)?
+        } else {
+            semaphore_rs_proof::Proof::from_flat(flat)
+        };
 
         if verify_proof(
             self.root,
@@ -148,6 +147,11 @@ impl PBHPayload {
         Ok(())
     }
 }
+
+fn is_compressed(flat: &[U256; 8]) -> bool {
+    flat[4].is_zero() && flat[5].is_zero() && flat[6].is_zero() && flat[7].is_zero()
+}
+
 #[cfg(test)]
 mod test {
     use alloy_primitives::U256;
