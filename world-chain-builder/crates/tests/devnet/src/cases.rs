@@ -93,7 +93,7 @@ where
 }
 
 /// Sends a high volume of transactions to the builder concurrently.
-pub async fn load_test<N, P>(builder_provider: Arc<P>, transactions: Vec<Bytes>) -> Result<()>
+pub async fn load_test<N, P>(builder_provider: Arc<P>, transactions: &[Bytes]) -> Result<()>
 where
     N: Network,
     P: Provider<N>,

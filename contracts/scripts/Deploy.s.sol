@@ -42,8 +42,8 @@ contract Deploy is Script {
                 IWorldID(address(0)),
                 IEntryPoint(ENTRY_POINT),
                 PBH_NONCE_LIMIT,
-                MULTICALL3_ADDRESS,
-                MAX_PBH_GAS_LIMIT
+                MAX_PBH_GAS_LIMIT,
+                authorizedBuilders
             )
         );
         pbhEntryPoint = address(

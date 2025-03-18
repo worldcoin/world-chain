@@ -58,21 +58,6 @@ contract PBHEntryPointImplV1ProxyTest is Test {
         assert(!success);
     }
 
-    function test_pbhMulticall_RevertIf_Uninitialized() public {
-        IMulticall3.Call3[] memory calls;
-        IPBHEntryPoint.PBHPayload memory pbhPayload = IPBHEntryPoint.PBHPayload({
-            root: 1,
-            pbhExternalNullifier: 0,
-            nullifierHash: 1,
-            proof: [uint256(0), 0, 0, 0, 0, 0, 0, 0]
-        });
-
-        vm.expectRevert("Function must be called through active proxy");
-        (bool success,) =
-            address(pbhEntryPoint).call(abi.encodeWithSelector(pbhEntryPoint.pbhMulticall.selector, calls, pbhPayload));
-        assert(!success);
-    }
-
     function test_setNumPbhPerMonth_RevertIf_Uninitialized() public {
         vm.expectRevert("Function must be called through active proxy");
         (bool success,) =

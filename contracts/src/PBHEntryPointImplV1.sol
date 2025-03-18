@@ -35,9 +35,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs
     uint16 public numPbhPerMonth;
 
-    /// @notice Address of the Multicall3 implementation.
-    address internal _multicall3;
-
     /// @dev Whether a nullifier hash has been used already. Used to guarantee an action is only performed once by a single person
     mapping(uint256 nullifierHash => uint256 blockNumber) public nullifierHashes;
 
@@ -59,13 +56,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param worldId The World ID instance that will be used for verifying proofs.
     /// @param entryPoint The ERC-4337 Entry Point.
     /// @param numPbhPerMonth The number of allowed PBH transactions per month.
-    /// @param multicall3 Address of the Multicall3 implementation.
     /// @param pbhGasLimit The gas limit for a PBH multicall transaction.
     event PBHEntryPointImplInitialized(
         IWorldID indexed worldId,
         IEntryPoint indexed entryPoint,
         uint16 indexed numPbhPerMonth,
-        address multicall3,
         uint256 pbhGasLimit,
         address[] authorizedBuilders
     );
@@ -165,7 +160,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     ///        0 address, then it will be assumed that verification will take place off chain.
     /// @param _entryPoint The ERC-4337 Entry Point.
     /// @param _numPbhPerMonth The number of allowed PBH transactions per month.
-    /// @param multicall3 Address of the Multicall3 implementation.
     /// @param _pbhGasLimit The gas limit for a PBH multicall transaction.
     ///
     /// @custom:reverts string If called more than once at the same initialisation number.
@@ -173,11 +167,10 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         IWorldID _worldId,
         IEntryPoint _entryPoint,
         uint16 _numPbhPerMonth,
-        address multicall3,
         uint256 _pbhGasLimit,
         address[] memory _authorizedBuilders
     ) external reinitializer(1) {
-        if (address(_entryPoint) == address(0) || multicall3 == address(0)) {
+        if (address(_entryPoint) == address(0)) {
             revert AddressZero();
         }
 
@@ -201,7 +194,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         worldId = _worldId;
         entryPoint = _entryPoint;
         numPbhPerMonth = _numPbhPerMonth;
-        _multicall3 = multicall3;
 
         if (_pbhGasLimit == 0 || _pbhGasLimit > block.gaslimit) {
             revert InvalidPBHGasLimit(_pbhGasLimit);
@@ -210,9 +202,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         pbhGasLimit = _pbhGasLimit;
         // Say that the contract is initialized.
         __setInitialized();
-        emit PBHEntryPointImplInitialized(
-            _worldId, _entryPoint, _numPbhPerMonth, multicall3, _pbhGasLimit, _authorizedBuilders
-        );
+        emit PBHEntryPointImplInitialized(_worldId, _entryPoint, _numPbhPerMonth, _pbhGasLimit, _authorizedBuilders);
     }
 
     /// @notice Verifies a PBH payload.
@@ -297,25 +287,6 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
                 revert(0x1c, 0x04)
             }
         }
-    }
-
-    /// @notice Executes a Priority Multicall3.
-    /// @param calls The calls to execute.
-    /// @param pbhPayload The PBH payload containing the proof data.
-    /// @return returnData The results of the calls.
-    function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
-        external
-        virtual
-        onlyProxy
-        onlyInitialized
-        nonReentrant
-        returns (IMulticall3.Result[] memory returnData)
-    {
-        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
-        _verifyPbh(signalHash, pbhPayload);
-
-        returnData = IMulticall3(_multicall3).aggregate3(calls);
-        emit PBH(msg.sender, signalHash, pbhPayload);
     }
 
     /// @notice Sets the number of PBH transactions allowed per month.

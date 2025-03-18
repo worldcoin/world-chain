@@ -21,6 +21,7 @@ ethereum_package_input_parser = import_module(
 )
 
 constants = import_module("../../package_io/constants.star")
+observability = import_module("../../observability/observability.star")
 
 util = import_module("../../util.star")
 
@@ -121,10 +122,10 @@ def launch(
         cl_client_name,
         sequencer_enabled,
         sequencer_context,
+        observability_helper
     )
 
     service = plan.add_service(service_name, config)
-
     enode = ethereum_package_el_admin_node_info.get_enode_for_node(
         plan, service_name, RPC_PORT_ID
     )
@@ -162,11 +163,13 @@ def get_config(
     cl_client_name,
     sequencer_enabled,
     sequencer_context,
+    observability_helper
+
 ):
     public_ports = {}
     discovery_port = DISCOVERY_PORT_NUM
     used_ports = get_used_ports(discovery_port)
-
+    ports = dict(used_ports)
     cmd = [
         "node",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
@@ -201,6 +204,8 @@ def get_config(
         "--builder.world_id={0}".format(WORLD_ID),
         "--builder.block_registry=0x4A679253410272dd5232B3Ff7cF5dbB88f295319"
     ]
+    
+    observability.expose_metrics_port(ports)
 
     if not sequencer_enabled:
         cmd.append("--rollup.sequencer-http={0}".format(sequencer_context.rpc_http_url))

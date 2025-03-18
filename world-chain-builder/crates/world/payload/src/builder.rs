@@ -694,7 +694,7 @@ where
 
         // execute the stamp block transaction
         let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(|e| {
-            error!(target: "payload_builder", %e, "failed to create spend nullifier hashes transaction");
+            error!(target: "payload_builder", %e, "failed to create stamp block transaction");
             PayloadBuilderError::Other(e.into())
         })?;
 
@@ -702,7 +702,7 @@ where
             builder
                 .execute_transaction(tx.clone())
                 .map_err(|e: BlockExecutionError| {
-                    error!(target: "payload_builder", %e, "failed to stamp block transaction");
+                    error!(target: "payload_builder", %e, "failed to execute stamp block transaction");
                     PayloadBuilderError::evm(e)
                 })?;
 

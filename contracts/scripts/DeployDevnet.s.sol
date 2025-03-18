@@ -67,7 +67,6 @@ contract DeployDevnet is Script {
                 IWorldID(WORLD_ID),
                 IEntryPoint(ENTRY_POINT),
                 255,
-                address(0x123),
                 MAX_PBH_GAS_LIMIT,
                 authorizedBuilders
             )

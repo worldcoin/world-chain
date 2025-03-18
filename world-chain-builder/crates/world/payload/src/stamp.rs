@@ -40,20 +40,17 @@ where
         .basic(ctx.builder_private_key.address())?
         .unwrap_or_default()
         .nonce;
-    let base_fee: u128 = evm.ctx().block.basefee.into();
-    let registry = ctx.block_registry;
-    let chain_id = evm.ctx().cfg.chain_id;
 
     let mut tx = OpTransactionRequest::default()
         .nonce(nonce)
         .gas_limit(SPEND_NULLIFIER_HASHES_GAS)
-        .max_priority_fee_per_gas(base_fee)
-        .max_fee_per_gas(base_fee)
-        .with_chain_id(chain_id)
+        .max_priority_fee_per_gas(evm.ctx().block.basefee.into())
+        .max_fee_per_gas(evm.ctx().block.basefee.into())
+        .with_chain_id(evm.ctx().cfg.chain_id)
         .with_call(&spendNullifierHashesCall {
             _nullifierHashes: nullifier_hashes.into_iter().collect(),
         })
-        .to(registry)
+        .to(ctx.pbh_entry_point)
         .build_typed_tx()
         .map_err(|e| eyre!("{:?}", e))?;
 

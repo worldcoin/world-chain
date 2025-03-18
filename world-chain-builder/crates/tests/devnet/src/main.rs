@@ -69,9 +69,9 @@ async fn main() -> Result<()> {
     )
     .await?;
     info!("Running load test");
-    cases::load_test(builder_provider.clone(), fixture.pbh_txs).await?;
+    cases::load_test(builder_provider.clone(), &fixture.eip1559[..198]).await?;
     info!("Running Transact Conditional Test");
-    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[..2]).await?;
+    cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[198..]).await?;
     info!("Running fallback test");
     cases::fallback_test(sequencer_provider.clone()).await?;
     Ok(())

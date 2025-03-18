@@ -204,45 +204,6 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.validateSignaturesCallback(hashedOps);
     }
 
-    function test_pbhMulticall(uint8 pbhNonce) public {
-        vm.assume(pbhNonce < MAX_NUM_PBH_PER_MONTH);
-        address addr1 = address(0x1);
-        address addr2 = address(0x2);
-
-        uint256 extNullifier = TestUtils.getPBHExternalNullifier(pbhNonce);
-        IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
-
-        IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](2);
-
-        bytes memory testCallData = hex"";
-        calls[0] = IMulticall3.Call3({target: addr1, allowFailure: false, callData: testCallData});
-        calls[1] = IMulticall3.Call3({target: addr2, allowFailure: false, callData: testCallData});
-
-        uint256 signalHash = abi.encode(address(this), calls).hashToField();
-
-        vm.expectEmit(true, true, true, true);
-        emit PBH(address(this), signalHash, testPayload);
-        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
-    }
-
-    function test_pbhMulticall_RevertIf_Reentrancy(uint8 pbhNonce) public {
-        vm.assume(pbhNonce < MAX_NUM_PBH_PER_MONTH);
-
-        uint256 extNullifier = TestUtils.getPBHExternalNullifier(pbhNonce);
-        IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
-
-        IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](1);
-
-        bytes memory testCallData = abi.encodeWithSelector(IPBHEntryPoint.pbhMulticall.selector, calls, testPayload);
-        calls[0] = IMulticall3.Call3({target: address(pbhEntryPoint), allowFailure: true, callData: testCallData});
-
-        IMulticall3.Result memory returnData = pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload)[0];
-
-        bytes memory expectedReturnData = abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
-        assert(!returnData.success);
-        assertEq(returnData.returnData, expectedReturnData);
-    }
-
     function test_setNumPbhPerMonth(uint16 numPbh) public {
         vm.assume(numPbh > 0);
 
@@ -279,6 +240,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
     }
 
     function test_addBuilder(address addr) public {
+        vm.assume(addr != address(0));
         vm.prank(OWNER);
         pbhEntryPoint.addBuilder(addr);
     }

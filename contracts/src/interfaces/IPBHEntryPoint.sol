@@ -22,15 +22,11 @@ interface IPBHEntryPoint {
         IEntryPoint.UserOpsPerAggregator[] calldata opsPerAggregator,
         address payable beneficiary
     ) external;
-    function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
-        external
-        returns (IMulticall3.Result[] memory returnData);
     function initialize(
         IWorldID worldId,
         IEntryPoint entryPoint,
         uint16 _numPbhPerMonth,
-        address _multicall3,
-        uint256 _multicallGasLimit,
+        uint256 _pbhGasLimit,
         address[] calldata _authorizedBuilders
     ) external;
     function validateSignaturesCallback(bytes32 hashedOps) external view;
