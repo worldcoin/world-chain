@@ -632,7 +632,7 @@ where
                     continue;
                 }
 
-                block_gas_limit -= BASE_DYN_GAS * payloads.len() as u64;
+                block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                 if !applied_fixed_gas {
                     block_gas_limit -= FIXED_GAS;
                     applied_fixed_gas = true;
@@ -789,11 +789,11 @@ where
     }
 }
 
-pub const BASE_DYN_GAS: u64 = 20000;
+pub const COLD_SSTORE_GAS: u64 = 20000;
 pub const FIXED_GAS: u64 = 21000;
 
 pub const fn dyn_gas_limit(len: u64) -> u64 {
-    FIXED_GAS + len * BASE_DYN_GAS
+    FIXED_GAS + len * COLD_SSTORE_GAS
 }
 
 pub fn spend_nullifiers_tx<DB, I, Client>(
