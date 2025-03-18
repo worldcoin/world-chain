@@ -14,7 +14,7 @@ use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
 use revm_primitives::{Address, TxKind, B256, U256};
 use thiserror::Error;
-use world_chain_builder_pbh::payload::{PBHPayload, PbhValidationError};
+use world_chain_builder_pbh::payload::{PBHPayload, PBHValidationError};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
@@ -221,7 +221,7 @@ pub enum WorldChainPoolTransactionError {
     #[error("Conditional Validation Failed: {0}")]
     ConditionalValidationFailed(B256),
     #[error(transparent)]
-    PbhValidationError(#[from] PbhValidationError),
+    PBHValidationError(#[from] PBHValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
     #[error("Missing PBH Payload")]
