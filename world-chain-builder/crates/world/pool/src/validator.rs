@@ -213,7 +213,7 @@ where
             &self.root_validator.roots(),
             self.max_pbh_nonce.load(Ordering::Relaxed),
         ) {
-            return WorldChainPoolTransactionError::PbhValidationError(err).to_outcome(tx);
+            return WorldChainPoolTransactionError::PBHValidationError(err).to_outcome(tx);
         }
 
         if let TransactionValidationOutcome::Valid {
