@@ -332,7 +332,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @notice Removes a builder from the list of authorized builders.
     /// @param builder The address of the builder to deauthorize.
     function removeBuilder(address builder) external virtual onlyProxy onlyInitialized onlyOwner {
-        authorizedBuilder[builder] = false;
+        delete authorizedBuilder[builder];
     }
 
     /// @notice Allows a builder to spend all nullifiers within PBH blockspace.
