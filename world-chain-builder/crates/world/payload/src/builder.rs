@@ -571,8 +571,10 @@ where
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database + DatabaseCommit,
-        Builder:
-            BlockBuilder<Primitives = OpPrimitives, Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>>,
+        Builder: BlockBuilder<
+            Primitives = OpPrimitives,
+            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
+        >,
         TXS: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
@@ -765,13 +767,9 @@ where
             .evm_config
             .next_evm_env(self.inner.parent(), &attributes)
             .map_err(PayloadBuilderError::other)?;
-       
 
         // Prepare EVM.
-        let evm = self
-            .inner
-            .evm_config
-            .evm_with_env(db, evm_env);
+        let evm = self.inner.evm_config.evm_with_env(db, evm_env);
 
         // Prepare block execution context.
         let execution_ctx = self
