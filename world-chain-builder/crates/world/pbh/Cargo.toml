@@ -9,7 +9,8 @@ alloy-primitives = { workspace = true, features = ["rlp"] }
 
 chrono = { workspace = true }
 thiserror = { workspace = true }
-semaphore-rs = { workspace = true, features = ["depth_30"]}
+semaphore-rs = { workspace = true, features = ["depth_30"] }
+semaphore-rs-proof.workspace = true
 strum.workspace = true
 serde.workspace = true
 bon.workspace = true
