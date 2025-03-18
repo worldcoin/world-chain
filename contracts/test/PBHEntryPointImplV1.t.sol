@@ -242,6 +242,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
     function test_addBuilder(address addr) public {
         vm.assume(addr != address(0));
         vm.prank(OWNER);
+        vm.expectEmit(true, false, false, false);
+        emit PBHEntryPointImplV1.BuilderAuthorized(addr);
         pbhEntryPoint.addBuilder(addr);
     }
 
@@ -254,6 +256,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_removeBuilder(address addr) public {
         vm.prank(OWNER);
+        vm.expectEmit(true, false, false, false);
+        emit PBHEntryPointImplV1.BuilderDeauthorized(addr);
         pbhEntryPoint.removeBuilder(addr);
     }
 
@@ -264,27 +268,25 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.removeBuilder(addr);
     }
 
-    function test_spendNullifierHashes() public {
-        uint256[] memory nullfierHashes = new uint256[](3);
-        nullfierHashes[0] = uint256(0);
-        nullfierHashes[1] = uint256(1);
-        nullfierHashes[2] = uint256(1);
+    function test_spendNullifierHashes(uint256[] memory nullifierHashes) public {
         vm.prank(BLOCK_BUILDER);
-        pbhEntryPoint.spendNullifierHashes(nullfierHashes);
-        assertEq(pbhEntryPoint.nullifierHashes(0), block.number);
-        assertEq(pbhEntryPoint.nullifierHashes(1), block.number);
-        assertEq(pbhEntryPoint.nullifierHashes(1), block.number);
+        vm.expectEmit(true, true, false, false);
+        emit PBHEntryPointImplV1.NullifierHashesSpent(BLOCK_BUILDER, nullifierHashes);
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
     }
 
     function test_spendNullifierHashes_RevertIf_NotBlockBuilder(address builder) public {
-        uint256[] memory nullfierHashes = new uint256[](3);
-        nullfierHashes[0] = uint256(0);
-        nullfierHashes[1] = uint256(1);
-        nullfierHashes[2] = uint256(1);
+        uint256[] memory nullifierHashes = new uint256[](3);
+        nullifierHashes[0] = uint256(0);
+        nullifierHashes[1] = uint256(1);
+        nullifierHashes[2] = uint256(2);
         vm.assume(builder != BLOCK_BUILDER);
         vm.prank(builder);
         vm.expectRevert(PBHEntryPointImplV1.UnauthorizedBuilder.selector);
-        pbhEntryPoint.spendNullifierHashes(nullfierHashes);
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[0]), 0);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[1]), 0);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[2]), 0);
     }
 
     receive() external payable {}

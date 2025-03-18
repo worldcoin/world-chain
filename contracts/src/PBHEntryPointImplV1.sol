@@ -93,6 +93,16 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
     /// @param nullifierHashes The nullifier hashes that were spent.
     event NullifierHashesSpent(address indexed builder, uint256[] nullifierHashes);
 
+    /// @notice Emitted when the builder is authorized to build blocks.
+    ///
+    /// @param builder The address of the builder that is authorized.
+    event BuilderAuthorized(address indexed builder);
+
+    /// @notice Emitted when the builder is deauthorized to build blocks.
+    ///
+    /// @param builder The address of the builder that is deauthorized.
+    event BuilderDeauthorized(address indexed builder);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ERRORS                                ///
     //////////////////////////////////////////////////////////////////////////////
@@ -182,7 +192,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
             revert InvalidAuthorizedBuilders();
         }
 
-        for (uint256 i = 0; i < _authorizedBuilders.length; i++) {
+        for (uint256 i = 0; i < _authorizedBuilders.length; ++i) {
             if (_authorizedBuilders[i] == address(0)) {
                 revert AddressZero();
             }
@@ -327,12 +337,14 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, WorldIDImpl, ReentrancyGuardTran
         }
 
         authorizedBuilder[builder] = true;
+        emit BuilderAuthorized(builder);
     }
 
     /// @notice Removes a builder from the list of authorized builders.
     /// @param builder The address of the builder to deauthorize.
     function removeBuilder(address builder) external virtual onlyProxy onlyInitialized onlyOwner {
         delete authorizedBuilder[builder];
+        emit BuilderDeauthorized(builder);
     }
 
     /// @notice Allows a builder to spend all nullifiers within PBH blockspace.
