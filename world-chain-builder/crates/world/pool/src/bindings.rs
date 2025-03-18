@@ -51,6 +51,8 @@ sol! {
             IEntryPoint.UserOpsPerAggregator[] calldata,
             address payable
         ) external;
+
+        function spendNullifierHashes(uint256[] memory _nullifierHashes) external;
     }
 }
 

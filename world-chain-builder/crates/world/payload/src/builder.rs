@@ -1,8 +1,12 @@
-use alloy_consensus::Transaction;
+use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
+use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
+use eyre::eyre::eyre;
+use op_alloy_rpc_types::OpTransactionRequest;
+use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -33,21 +37,23 @@ use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{Block, Recovered, SealedHeader};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
     StateProviderFactory,
 };
 use reth_transaction_pool::{BlobStore, PoolTransaction};
 use revm::inspector::NoOpInspector;
+use revm::Inspector;
 use revm_primitives::{Address, U256};
+use semaphore_rs::Field;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, trace};
+use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
-
-use crate::stamp::{spend_nullifiers_tx, SPEND_NULLIFIER_HASHES_GAS};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -591,11 +597,7 @@ where
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
-
-        // Subtract stamp_block_tx gas limit from the overall block gas limit.
-        // This gas will be saved to execute stampBlock at the end of the block.
-        block_gas_limit -= SPEND_NULLIFIER_HASHES_GAS;
-
+        let mut applied_fixed_gas = false;
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -615,15 +617,12 @@ where
             }
 
             // If the transaction is verified, check if it can be added within the verified gas limit
-            if pooled_tx.valid_pbh() {
+            if let Some(payloads) = pooled_tx.pbh_payload() {
                 if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }
 
-                let Some(payloads) = pooled_tx.payload() else {
-                    unimplemented!()
-                };
                 if payloads
                     .iter()
                     .any(|payload| spent_nullifier_hashes.contains(&payload.nullifier_hash))
@@ -631,6 +630,12 @@ where
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
+                }
+
+                block_gas_limit -= BASE_DYN_GAS * payloads.len() as u64;
+                if !applied_fixed_gas {
+                    block_gas_limit -= FIXED_GAS;
+                    applied_fixed_gas = true;
                 }
             }
 
@@ -656,7 +661,7 @@ where
 
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
-                    if let Some(payloads) = pooled_tx.payload() {
+                    if let Some(payloads) = pooled_tx.pbh_payload() {
                         spent_nullifier_hashes
                             .extend(payloads.into_iter().map(|payload| payload.nullifier_hash));
                     }
@@ -692,21 +697,20 @@ where
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
-        // execute the stamp block transaction
-        let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(|e| {
+        if !spent_nullifier_hashes.is_empty() {
+            let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(|e| {
             error!(target: "payload_builder", %e, "failed to create stamp block transaction");
             PayloadBuilderError::Other(e.into())
         })?;
+            let gas_used = builder.execute_transaction(tx.clone()).map_err(
+            |e: BlockExecutionError| {
+                error!(target: "payload_builder", %e, "failed to execute stamp block transaction");
+                PayloadBuilderError::evm(e)
+            },
+        )?;
 
-        let gas_used =
-            builder
-                .execute_transaction(tx.clone())
-                .map_err(|e: BlockExecutionError| {
-                    error!(target: "payload_builder", %e, "failed to execute stamp block transaction");
-                    PayloadBuilderError::evm(e)
-                })?;
-
-        self.commit_changes(info, base_fee, gas_used, tx);
+            self.commit_changes(info, base_fee, gas_used, tx);
+        }
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
@@ -783,4 +787,45 @@ where
             .evm_config
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
+}
+
+pub const BASE_DYN_GAS: u64 = 20000;
+pub const FIXED_GAS: u64 = 21000;
+
+pub const fn dyn_gas_limit(len: u64) -> u64 {
+    FIXED_GAS + len * BASE_DYN_GAS
+}
+
+pub fn spend_nullifiers_tx<DB, I, Client>(
+    ctx: &WorldChainPayloadBuilderCtx<Client>,
+    evm: &mut OpEvm<DB, I>,
+    nullifier_hashes: HashSet<Field>,
+) -> eyre::Result<Recovered<OpTransactionSigned>>
+where
+    I: Inspector<OpContext<DB>>,
+    DB: revm::Database + revm::DatabaseCommit,
+    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+{
+    let nonce = evm
+        .db_mut()
+        .basic(ctx.builder_private_key.address())?
+        .unwrap_or_default()
+        .nonce;
+
+    let mut tx = OpTransactionRequest::default()
+        .nonce(nonce)
+        .gas_limit(dyn_gas_limit(nullifier_hashes.len() as u64))
+        .max_priority_fee_per_gas(evm.ctx().block.basefee.into())
+        .max_fee_per_gas(evm.ctx().block.basefee.into())
+        .with_chain_id(evm.ctx().cfg.chain_id)
+        .with_call(&spendNullifierHashesCall {
+            _nullifierHashes: nullifier_hashes.into_iter().collect(),
+        })
+        .to(ctx.pbh_entry_point)
+        .build_typed_tx()
+        .map_err(|e| eyre!("{:?}", e))?;
+
+    let signature = ctx.builder_private_key.sign_transaction_sync(&mut tx)?;
+    let signed: OpTransactionSigned = tx.into_signed(signature).into();
+    Ok(signed.into_recovered_unchecked()?)
 }

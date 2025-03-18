@@ -35,7 +35,6 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # alloy
-alloy.workspace = true
 alloy-network.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true

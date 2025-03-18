@@ -23,17 +23,12 @@ pub struct WorldChainPooledTransaction {
 }
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn valid_pbh(&self) -> bool;
     fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
-    fn payload(&self) -> Option<&Vec<PBHPayload>>;
+    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn valid_pbh(&self) -> bool {
-        self.payload.is_some()
-    }
-
     fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.inner.conditional()
     }
@@ -42,7 +37,7 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
         self.payload = Some(payload);
     }
 
-    fn payload(&self) -> Option<&Vec<PBHPayload>> {
+    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
         self.payload.as_ref()
     }
 }
