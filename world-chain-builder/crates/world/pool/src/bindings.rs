@@ -51,11 +51,6 @@ sol! {
             IEntryPoint.UserOpsPerAggregator[] calldata,
             address payable
         ) external;
-
-        function pbhMulticall(
-            IMulticall3.Call3[] calls,
-            PBHPayload payload,
-        ) external;
     }
 }
 

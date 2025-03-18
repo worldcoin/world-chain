@@ -14,31 +14,36 @@ use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
 use revm_primitives::{Address, TxKind, B256, U256};
 use thiserror::Error;
-use world_chain_builder_pbh::payload::PbhValidationError;
+use world_chain_builder_pbh::payload::{PBHPayload, PbhValidationError};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
     pub inner: OpPooledTransaction,
-    pub valid_pbh: bool,
+    pub payload: Option<Vec<PBHPayload>>,
 }
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
     fn valid_pbh(&self) -> bool;
-    fn set_valid_pbh(&mut self);
+    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
+    fn payload(&self) -> Option<&Vec<PBHPayload>>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn valid_pbh(&self) -> bool {
-        self.valid_pbh
+        self.payload.is_some()
     }
 
     fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.inner.conditional()
     }
 
-    fn set_valid_pbh(&mut self) {
-        self.valid_pbh = true;
+    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>) {
+        self.payload = Some(payload);
+    }
+
+    fn payload(&self) -> Option<&Vec<PBHPayload>> {
+        self.payload.as_ref()
     }
 }
 
@@ -191,7 +196,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
         let inner = OpPooledTransaction::from_pooled(tx);
         Self {
             inner,
-            valid_pbh: false,
+            payload: None,
         }
     }
 
@@ -263,7 +268,7 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
     fn from(tx: OpPooledTransaction) -> Self {
         Self {
             inner: tx,
-            valid_pbh: false,
+            payload: None,
         }
     }
 }

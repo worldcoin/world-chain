@@ -18,7 +18,7 @@ members = [
     "crates/world/pool",
     "crates/world/test-utils",
     "crates/tests/sepolia",
-    "crates/tests/devnet",
+    "crates/tests/devnet", 
 ]
 
 default-members = ["crates/world/bin"]

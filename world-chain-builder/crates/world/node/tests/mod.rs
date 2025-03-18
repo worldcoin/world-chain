@@ -42,7 +42,7 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::test_utils::{raw_pbh_multicall_bytes, tx};
+use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
 
 type NodeTypesAdapter = FullNodeTypesAdapter<
     WorldChainNode,
@@ -158,7 +158,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     let mut pbh_tx_hashes = vec![];
     let signers = ctx.signers.clone();
     for signer in signers.into_iter() {
-        let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
+        let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -198,7 +198,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let mut pbh_tx_hashes = vec![];
     let signers = ctx.signers.clone();
     for signer in signers.into_iter().skip(1) {
-        let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
+        let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
         let pbh_hash = ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
         pbh_tx_hashes.push(pbh_hash);
     }
@@ -230,7 +230,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     let ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
-    let raw_tx = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
+    let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
     ctx.node.rpc.inject_tx(raw_tx.clone()).await?;
     let dup_pbh_hash_res = ctx.node.rpc.inject_tx(raw_tx.clone()).await;
     assert!(dup_pbh_hash_res.is_err());
@@ -242,9 +242,9 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
-    let raw_tx_0 = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
+    let raw_tx_0 = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
     ctx.node.rpc.inject_tx(raw_tx_0.clone()).await?;
-    let raw_tx_1 = raw_pbh_multicall_bytes(signer, 0, 0, BASE_CHAIN_ID).await;
+    let raw_tx_1 = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, BASE_CHAIN_ID).await;
 
     // Now that the nullifier has successfully been stored in
     // the `ExecutedPbhNullifierTable`, inserting a new tx with the
