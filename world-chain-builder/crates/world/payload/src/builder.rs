@@ -621,12 +621,6 @@ where
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
-
-                block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
-                if !applied_fixed_gas {
-                    block_gas_limit -= FIXED_GAS;
-                    applied_fixed_gas = true;
-                }
             }
 
             // ensure we still have capacity for this transaction
@@ -652,6 +646,11 @@ where
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
+                        if spent_nullifier_hashes.is_empty() {
+                            block_gas_limit -= FIXED_GAS
+                        }
+
+                        block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                         spent_nullifier_hashes
                             .extend(payloads.into_iter().map(|payload| payload.nullifier_hash));
                     }
