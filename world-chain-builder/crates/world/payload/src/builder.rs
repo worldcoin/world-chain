@@ -66,7 +66,6 @@ where
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub builder_private_key: PrivateKeySigner,
-    pub block_registry: Address,
 }
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
@@ -83,7 +82,6 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
-        block_registry: Address,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -95,7 +93,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         )
     }
 
@@ -110,7 +107,6 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
-        block_registry: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(pool, client, evm_config, config)
             .set_compute_pending_block(compute_pending_block);
@@ -124,7 +120,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key: private_key,
-            block_registry,
         }
     }
 }
@@ -149,7 +144,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         } = self;
 
         let OpPayloadBuilder {
@@ -174,7 +168,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         }
     }
 
@@ -238,7 +231,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            block_registry: self.block_registry,
         };
 
         let op_ctx = &ctx.inner;
@@ -292,7 +284,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            block_registry: self.block_registry,
         };
 
         let state_provider = self
@@ -555,7 +546,6 @@ pub struct WorldChainPayloadBuilderCtx<Client> {
     pub pbh_signature_aggregator: Address,
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
-    pub block_registry: Address,
 }
 
 impl<Client> WorldChainPayloadBuilderCtx<Client>

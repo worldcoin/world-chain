@@ -68,7 +68,8 @@ contract DeployDevnet is Script {
                 IEntryPoint(ENTRY_POINT),
                 255,
                 MAX_PBH_GAS_LIMIT,
-                authorizedBuilders
+                authorizedBuilders,
+                msg.sender
             )
         );
         pbhEntryPoint = address(

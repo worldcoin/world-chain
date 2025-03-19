@@ -92,7 +92,6 @@ impl WorldChainNode {
             signature_aggregator,
             world_id,
             builder_private_key,
-            block_registry,
         } = self.args.clone();
 
         let RollupArgs {
@@ -116,7 +115,6 @@ impl WorldChainNode {
                     pbh_entrypoint,
                     signature_aggregator,
                     builder_private_key,
-                    block_registry,
                 )
                 .with_da_config(self.da_config.clone()),
             ))
@@ -321,8 +319,6 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
 
-    /// Contract address for the world chain block registry contract
-    pub block_registry: Address,
 }
 
 impl WorldChainPayloadBuilder {
@@ -334,7 +330,6 @@ impl WorldChainPayloadBuilder {
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
-        block_registry: Address,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -343,7 +338,6 @@ impl WorldChainPayloadBuilder {
             pbh_signature_aggregator,
             best_transactions: (),
             builder_private_key,
-            block_registry,
             da_config: OpDAConfig::default(),
         }
     }
@@ -366,7 +360,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
             ..
         } = self;
 
@@ -378,7 +371,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             pbh_signature_aggregator,
             best_transactions,
             builder_private_key,
-            block_registry,
         }
     }
 
@@ -416,7 +408,6 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
                 self.pbh_entry_point,
                 self.pbh_signature_aggregator,
                 self.builder_private_key.clone(),
-                self.block_registry,
             )
             .with_transactions(self.best_transactions.clone());
 

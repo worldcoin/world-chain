@@ -15,6 +15,7 @@ import {TestSetup} from "./TestSetup.sol";
 import {TestUtils} from "./TestUtils.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@lib/PBHExternalNullifier.sol";
 
@@ -213,8 +214,10 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.setNumPbhPerMonth(numPbh);
     }
 
-    function test_setNumPbhPerMonth_RevertIf_NotOwner(uint8 numPbh) public {
-        vm.expectRevert("Ownable: caller is not the owner");
+    function test_setNumPbhPerMonth_RevertIf_NotOwner(uint8 numPbh, address addr) public {
+        vm.assume(addr != OWNER);
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
         pbhEntryPoint.setNumPbhPerMonth(numPbh);
     }
 
@@ -235,7 +238,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_setWorldId_RevertIf_NotOwner(address addr) public {
         vm.assume(addr != OWNER);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
         pbhEntryPoint.setWorldId(addr);
     }
 
@@ -250,7 +254,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
     function test_addBuilder_RevertIf_NotOwner(address addr) public {
         vm.assume(addr != OWNER);
         vm.prank(addr);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
         pbhEntryPoint.addBuilder(addr);
     }
 
@@ -264,7 +268,8 @@ contract PBHEntryPointImplV1Test is TestSetup {
     function test_removeBuilder_RevertIf_NotOwner(address addr) public {
         vm.assume(addr != OWNER);
         vm.prank(addr);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
+
         pbhEntryPoint.removeBuilder(addr);
     }
 
