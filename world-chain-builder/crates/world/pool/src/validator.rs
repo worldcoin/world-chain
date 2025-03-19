@@ -26,10 +26,10 @@ use tracing::{info, warn};
 use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
-pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([305, 0, 0, 0]);
+pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
 
 /// The slot of the `pbh_nonce_limit` in the PBHEntryPoint contract.
-pub const PBH_NONCE_LIMIT_SLOT: U256 = U256::from_limbs([302, 0, 0, 0]);
+pub const PBH_NONCE_LIMIT_SLOT: U256 = U256::from_limbs([50, 0, 0, 0]);
 
 /// The offset in bits of the `PBH_NONCE_LIMIT_SLOT` containing the u16 nonce limit.
 pub const PBH_NONCE_LIMIT_OFFSET: u32 = 160;
