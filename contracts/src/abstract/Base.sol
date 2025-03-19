@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
@@ -7,7 +6,6 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 
 /// @title Base Delegated Implementation Contract
 /// @author Worldcoin
-/// @dev This is base class for implementations delegated to by a proxy.
 abstract contract Base is Ownable2StepUpgradeable, UUPSUpgradeable {
     /// @notice Initializes the contract with the given owner.
     ///
@@ -24,7 +22,7 @@ abstract contract Base is Ownable2StepUpgradeable, UUPSUpgradeable {
     /// @custom:reverts string If called by any account other than the proxy owner.
     function _authorizeUpgrade(address newImplementation) internal virtual override onlyProxy onlyOwner {}
 
-     /**
+    /**
      * @dev This empty reserved space is put in place to allow future versions to add new
      * variables without shifting down storage in the inheritance chain.
      * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps

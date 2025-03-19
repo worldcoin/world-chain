@@ -318,7 +318,6 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     /// Sets the private key of the builder
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
-
 }
 
 impl WorldChainPayloadBuilder {
