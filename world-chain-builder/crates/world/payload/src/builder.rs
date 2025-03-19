@@ -587,7 +587,6 @@ where
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
-        let mut applied_fixed_gas = false;
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
