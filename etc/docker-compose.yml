@@ -1,0 +1,86 @@
+name: 'reth'
+
+services:
+  world-chain-builder:
+    restart: unless-stopped
+    image: world-chain-builder:latest
+    ports:
+      - '9001:9001' # metrics
+      - '30303:30303' # eth/66 peering
+      - '8545:8545' # rpc
+      - '8551:8551' # engine
+    volumes:
+      - chain_data:/root/.local/share/reth/2151908
+      - ./network-config:/root/network-config
+      - logs:/root/logs
+      - ./jwttoken:/root/jwt:ro
+    pid: host
+    command: >
+      node
+        --chain /root/network-config/genesis.json
+        --http
+        --http.port 8545
+        --http.addr=0.0.0.0
+        --http.corsdomain *
+        --http.api=admin,net,eth,web3,debug,trace,miner
+        --ws
+        --ws.addr=0.0.0.0
+        --ws.port 8546
+        --ws.api=net,eth,miner
+        --ws.origins=*
+        --log.file.directory /root/logs
+        --authrpc.port 8551
+        --authrpc.jwtsecret /root/jwt/jwt.hex        
+        --authrpc.addr=0.0.0.0
+        --metrics=0.0.0.0:9001
+        --rpc.eth-proof-window 302400
+        --builder.pbh_entrypoint 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
+        --builder.signature_aggregator 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
+        --builder.world_id 0x5FbDB2315678afecb367f032d93F642f64180aa3
+        --builder.private_key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus
+    depends_on:
+      - world-chain-builder
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana:latest
+    depends_on:
+      - world-chain-builder
+      - prometheus
+    ports:
+      - 3000:3000
+    environment:
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
+
+volumes:
+  chain_data:
+    driver: local
+  logs:
+    driver: local
+  prometheusdata:
+    driver: local
+  grafanadata:
+    driver: local
