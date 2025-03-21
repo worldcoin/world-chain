@@ -1,0 +1,131 @@
+name: 'world-chain-builder'
+
+services:
+  world-chain-builder:
+    restart: unless-stopped
+    image: world-chain-builder:latest
+    ports:
+      - '9001:9001' # metrics
+      - '30303:30303' # eth/66 peering
+      - '8545:8545' # rpc
+      - '8551:8551' # engine
+    volumes:
+      - chain_data:/root/.local/share/reth/2151908
+      - ./network-config:/root/network-config
+      - logs:/root/logs
+    pid: host
+    env_file:
+      - ./.env
+    networks:
+      world-chain:
+        ipv4_address: 10.5.0.5
+    command: >
+      node
+        --chain /root/network-config/genesis.json
+        --http
+        --http.port 8545
+        --http.corsdomain *
+        --http.api=admin,net,eth,web3,debug,trace,miner
+        --ws
+        --ws.port 8546
+        --ws.api=net,eth,miner
+        --nat=extip:10.5.0.1
+        --ws.origins=*
+        --log.file.directory /root/logs
+        --authrpc.port 8551
+        --authrpc.jwtsecret /root/network-config/jwt.hex
+        --authrpc.addr 0.0.0.0
+        --metrics=localhost:9001
+        --rpc.eth-proof-window 302400
+        --builder.pbh_entrypoint ${PBH_ENTRYPOINT}
+        --builder.signature_aggregator ${PBH_SIGNATURE_AGGREGATOR}
+        --builder.world_id ${WORLD_ID}
+        --builder.private_key ${BUILDER_PRIVATE_KEY}
+  op-node-builder:
+    restart: unless-stopped
+    image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop
+    ports:
+      - '9002:9002' # metrics
+      - '30304:30304' # eth/66 peering
+      - '8546:8546' # rpc
+      - '8552:8552' # engine
+    volumes:
+      - beacon_data:/data/op-node/op-node-beacon-data
+      - ./network-config:/root/network-config
+      - logs:/root/logs
+    env_file:
+      - ./.env
+    depends_on:
+      - world-chain-builder
+    network_mode: host
+    command: >
+      op-node
+        --l2=http:/10.5.0.5:8551
+        --l2.jwt-secret=/root/network-config/jwt.hex
+        --verifier.l1-confs=1
+        --rollup.config=/root/network-config/rollup.json
+        --rpc.addr=0.0.0.0
+        --rpc.port=8547
+        --rpc.enable-admin
+        --l1=${L1_RPC}
+        --l1.beacon=${L1_BEACON}
+        --p2p.advertise.ip=0.0.0.0
+        --p2p.advertise.tcp=9003
+        --p2p.advertise.udp=9003
+        --p2p.listen.ip=0.0.0.0
+        --p2p.listen.tcp=9003
+        --p2p.listen.udp=9003
+        --safedb.path=/data/op-node/op-node-beacon-data
+    
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus
+    depends_on:
+      - world-chain-builder
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana:latest
+    depends_on:
+      - world-chain-builder
+      - prometheus
+    ports:
+      - 3000:3000
+    environment:
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
+
+volumes:
+  chain_data:
+  beacon_data:
+  logs:
+  prometheusdata:
+  grafanadata:
+
+networks:
+  world-chain:
+    driver: bridge
+    ipam:
+     config:
+       - subnet: 10.5.0.0/16
+         gateway: 10.5.0.1
+
+  

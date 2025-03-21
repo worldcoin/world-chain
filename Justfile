@@ -8,11 +8,11 @@ default:
 devnet-up: deploy-devnet deploy-contracts
 
 deploy-devnet:
-    @just ./etc/devnet-up
+    @just ./devnet/devnet-up
 
 # Stops the devnet **This will prune all docker containers**
 devnet-down:
-    @just ./etc/devnet-down
+    @just ./devnet/devnet-down
 
 deploy-contracts:
     @just ./contracts/deploy-contracts

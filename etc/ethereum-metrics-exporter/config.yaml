@@ -1,8 +1,0 @@
-execution:
-  enabled: true
-  url: "http://world-chain-builder:8545"
-  name: "execution-client"
-  modules:
-    - "eth"
-    - "net"
-    - "web3"
