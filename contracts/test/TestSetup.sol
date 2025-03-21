@@ -58,6 +58,8 @@ contract TestSetup is Test {
     address public safeOwner;
     uint256 public constant safeOwnerKey = 0x1234;
     address public OWNER = address(0xc0ffee);
+    address public constant BLOCK_BUILDER = address(0xdeadbeef);
+    address[] public AUTHORIZED_BUILDERS = [BLOCK_BUILDER];
     address public pbhEntryPointImpl;
     address public immutable thisAddress = address(this);
     address public constant nullAddress = address(0);
@@ -83,7 +85,7 @@ contract TestSetup is Test {
         vm.startPrank(OWNER);
         deployEntryPoint();
         deployWorldIDGroups();
-        deployPBHEntryPoint(worldIDGroups, entryPoint, MAX_PBH_GAS_LIMIT);
+        deployPBHEntryPoint(worldIDGroups, entryPoint, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS);
         deployPBHSignatureAggregator(address(pbhEntryPoint), address(worldIDGroups));
         deploySafeAndModule(address(pbhAggregator), 1);
         deployMockSafe(address(pbhAggregator), 1);
@@ -119,18 +121,21 @@ contract TestSetup is Test {
     ///
     /// @param initialGroupAddress The initial group's identity manager.
     /// @param initialEntryPoint The initial entry point.
-    function deployPBHEntryPoint(IWorldID initialGroupAddress, IEntryPoint initialEntryPoint, uint256 maxPbhGasLimit)
-        public
-    {
+    function deployPBHEntryPoint(
+        IWorldID initialGroupAddress,
+        IEntryPoint initialEntryPoint,
+        uint256 maxPbhGasLimit,
+        address[] memory authorizedBuilders
+    ) public {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit)
+            (initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, maxPbhGasLimit, authorizedBuilders, OWNER)
         );
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
-            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, MULTICALL3, maxPbhGasLimit
+            initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, maxPbhGasLimit, authorizedBuilders, OWNER
         );
         pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
     }

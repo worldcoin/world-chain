@@ -52,10 +52,7 @@ sol! {
             address payable
         ) external;
 
-        function pbhMulticall(
-            IMulticall3.Call3[] calls,
-            PBHPayload payload,
-        ) external;
+        function spendNullifierHashes(uint256[] memory _nullifierHashes) external;
     }
 }
 
