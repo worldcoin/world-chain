@@ -1,4 +1,4 @@
-name: 'reth'
+name: 'world-chain-builder'
 
 services:
   world-chain-builder:
@@ -13,32 +13,67 @@ services:
       - chain_data:/root/.local/share/reth/2151908
       - ./network-config:/root/network-config
       - logs:/root/logs
-      - ./jwttoken:/root/jwt:ro
     pid: host
+    env_file:
+      - ./.env
+    network_mode: host
     command: >
       node
         --chain /root/network-config/genesis.json
         --http
         --http.port 8545
-        --http.addr=0.0.0.0
         --http.corsdomain *
         --http.api=admin,net,eth,web3,debug,trace,miner
         --ws
-        --ws.addr=0.0.0.0
         --ws.port 8546
         --ws.api=net,eth,miner
         --ws.origins=*
         --log.file.directory /root/logs
         --authrpc.port 8551
-        --authrpc.jwtsecret /root/jwt/jwt.hex        
-        --authrpc.addr=0.0.0.0
+        --authrpc.addr 0.0.0.0
+        --authrpc.jwtsecret /root/network-config/jwt.hex
         --metrics=0.0.0.0:9001
         --rpc.eth-proof-window 302400
-        --builder.pbh_entrypoint 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
-        --builder.signature_aggregator 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
-        --builder.world_id 0x5FbDB2315678afecb367f032d93F642f64180aa3
-        --builder.private_key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-
+        --builder.pbh_entrypoint ${PBH_ENTRYPOINT}
+        --builder.signature_aggregator ${PBH_SIGNATURE_AGGREGATOR}
+        --builder.world_id ${WORLD_ID}
+        --builder.private_key ${BUILDER_PRIVATE_KEY}
+  op-node-builder:
+    restart: unless-stopped
+    image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:develop
+    ports:
+      - '9002:9002' # metrics
+      - '30304:30304' # eth/66 peering
+      - '8546:8546' # rpc
+      - '8552:8552' # engine
+    volumes:
+      - beacon_data:/data/op-node/op-node-beacon-data
+      - ./network-config:/root/network-config
+      - logs:/root/logs
+    env_file:
+      - ./.env
+    depends_on:
+      - world-chain-builder
+    network_mode: host
+    command: >
+      op-node
+        --l2=http://127.0.0.1:8551
+        --l2.jwt-secret=/root/network-config/jwt.hex
+        --verifier.l1-confs=1
+        --rollup.config=/root/network-config/rollup.json
+        --rpc.addr=0.0.0.0
+        --rpc.port=8547
+        --rpc.enable-admin
+        --l1=${L1_RPC}
+        --l1.beacon=${L1_BEACON}
+        --p2p.advertise.ip=0.0.0.0
+        --p2p.advertise.tcp=9003
+        --p2p.advertise.udp=9003
+        --p2p.listen.ip=0.0.0.0
+        --p2p.listen.tcp=9003
+        --p2p.listen.udp=9003
+        --safedb.path=/data/op-node/op-node-beacon-data
+    
   prometheus:
     restart: unless-stopped
     image: prom/prometheus
@@ -77,10 +112,14 @@ services:
 
 volumes:
   chain_data:
-    driver: local
+  beacon_data:
   logs:
-    driver: local
   prometheusdata:
-    driver: local
   grafanadata:
-    driver: local
+
+networks:
+  world-chain:
+    driver: host
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+  

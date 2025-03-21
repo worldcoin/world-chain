@@ -39,8 +39,8 @@ optimism_package:
         extra_params: []
       mev_params:
         rollup_boost_image: ""
-        builder_host: "localhost"
-        builder_port: "8547"
+        builder_host: "127.0.0.1"
+        builder_port: "8551"
       additional_services: 
         - rollup-boost
         - blockscout

@@ -8,14 +8,14 @@ default:
 devnet-up: deploy-devnet deploy-contracts
 
 deploy-devnet:
-    @just ./devnet/devnet-up
-
-deploy-contracts:
-    @just ./contracts/deploy-contracts
+    @just ./etc/devnet-up
 
 # Stops the devnet **This will prune all docker containers**
 devnet-down:
-    @just ./devnet/devnet-down
+    @just ./etc/devnet-down
+
+deploy-contracts:
+    @just ./contracts/deploy-contracts
 
 e2e-test *args='':
     @just ./world-chain-builder/e2e-test $@
