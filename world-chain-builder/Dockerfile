@@ -1,4 +1,4 @@
-FROM rust:1.82.0
+FROM rust:1.85.0
 
 COPY . ./world-chain-builder
 

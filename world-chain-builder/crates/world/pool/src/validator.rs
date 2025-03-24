@@ -22,15 +22,14 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
-use semaphore_rs::hash_to_field;
 use tracing::{info, warn};
 use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
-pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([305, 0, 0, 0]);
+pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
 
 /// The slot of the `pbh_nonce_limit` in the PBHEntryPoint contract.
-pub const PBH_NONCE_LIMIT_SLOT: U256 = U256::from_limbs([302, 0, 0, 0]);
+pub const PBH_NONCE_LIMIT_SLOT: U256 = U256::from_limbs([50, 0, 0, 0]);
 
 /// The offset in bits of the `PBH_NONCE_LIMIT_SLOT` containing the u16 nonce limit.
 pub const PBH_NONCE_LIMIT_OFFSET: u32 = 160;
@@ -141,6 +140,7 @@ where
         }
 
         // Validate all proofs associated with each UserOp
+        let mut aggregated_payloads = vec![];
         for aggregated_ops in calldata._0 {
             let buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
@@ -153,10 +153,11 @@ where
             }
 
             let valid_roots = self.root_validator.roots();
-            if let Err(err) = pbh_payloads
+
+            match pbh_payloads
                 .into_par_iter()
                 .zip(aggregated_ops.userOps)
-                .try_for_each(|(payload, op)| {
+                .map(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
                     let Ok(payload) = PbhPayload::try_from(payload) else {
                         return Err(WorldChainPoolTransactionError::InvalidCalldata);
@@ -166,10 +167,15 @@ where
                         &valid_roots,
                         self.max_pbh_nonce.load(Ordering::Relaxed),
                     )?;
-                    Ok::<(), WorldChainPoolTransactionError>(())
+
+                    Ok::<PbhPayload, WorldChainPoolTransactionError>(payload)
                 })
+                .collect::<Result<Vec<PbhPayload>, WorldChainPoolTransactionError>>()
             {
-                return err.to_outcome(tx);
+                Ok(payloads) => {
+                    aggregated_payloads.extend(payloads);
+                }
+                Err(err) => return err.to_outcome(tx),
             }
         }
 
@@ -178,50 +184,7 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_valid_pbh();
-        }
-
-        tx_outcome
-    }
-
-    /// Validates a PBH multicall transaction
-    ///
-    /// If the transaction is valid marks it for priority inclusion
-    pub fn validate_pbh_multicall(
-        &self,
-        origin: TransactionOrigin,
-        tx: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
-
-        // Decode the calldata and extract the PBH payload
-        let Ok(calldata) = IPBHEntryPoint::pbhMulticallCall::abi_decode(tx.input(), true) else {
-            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
-        };
-
-        let Ok(pbh_payload) = PbhPayload::try_from(calldata.payload) else {
-            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
-        };
-
-        let signal_hash: alloy_primitives::Uint<256, 4> =
-            hash_to_field(&SolValue::abi_encode_packed(&(tx.sender(), calldata.calls)));
-
-        // Verify the proof
-        if let Err(err) = pbh_payload.validate(
-            signal_hash,
-            &self.root_validator.roots(),
-            self.max_pbh_nonce.load(Ordering::Relaxed),
-        ) {
-            return WorldChainPoolTransactionError::PBHValidationError(err).to_outcome(tx);
-        }
-
-        if let TransactionValidationOutcome::Valid {
-            transaction: ValidTransaction::Valid(tx),
-            ..
-        } = &mut tx_outcome
-        {
-            tx.set_valid_pbh();
+            tx.set_pbh_payloads(aggregated_payloads);
         }
 
         tx_outcome
@@ -246,7 +209,6 @@ where
             IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
                 self.validate_pbh_bundle(origin, tx)
             }
-            IPBHEntryPoint::pbhMulticallCall::SELECTOR => self.validate_pbh_multicall(origin, tx),
             _ => self.inner.validate_one(origin, tx.clone()),
         }
     }

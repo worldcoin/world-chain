@@ -312,6 +312,14 @@ def launch(
                     client_name="external-builder",
                 )
 
+            for metrics_info in [x for x in el_builder_context.el_metrics_info if x != None]:
+                observability.register_node_metrics_job(
+                    observability_helper,
+                    el_builder_context.client_name,
+                    "world-chain-builder",
+                    metrics_info,
+            )
+
             rollup_boost_image = (
                 mev_params.rollup_boost_image
                 if mev_params.rollup_boost_image != ""
@@ -387,5 +395,6 @@ def launch(
             )
             all_cl_contexts.append(cl_builder_context)
 
-    plan.print("Successfully added {0} EL/CL participants".format(num_participants))
+    plan.print(
+        "Successfully added {0} EL/CL participants".format(num_participants))
     return all_el_contexts, all_cl_contexts

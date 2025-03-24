@@ -35,8 +35,4 @@ pub struct WorldChainArgs {
     /// used for signing the stampBlock transaction
     #[arg(long = "builder.private_key", env = "BUILDER_PRIVATE_KEY")]
     pub builder_private_key: String,
-
-    /// Contract address for the world chain block registry contract
-    #[arg(long = "builder.block_registry")]
-    pub block_registry: Address,
 }
