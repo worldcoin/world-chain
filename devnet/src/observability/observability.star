@@ -6,6 +6,14 @@ ethereum_package_node_metrics = import_module(
     "github.com/ethpandaops/ethereum-package/src/node_metrics_info.star"
 )
 
+util = import_module("../util.star")
+
+prometheus = import_module("./prometheus/prometheus_launcher.star")
+loki = import_module("./loki/loki_launcher.star")
+promtail = import_module("./promtail/promtail_launcher.star")
+grafana = import_module("./grafana/grafana_launcher.star")
+
+
 DEFAULT_SCRAPE_INTERVAL = "15s"
 
 METRICS_PORT_ID = "metrics"
@@ -18,15 +26,11 @@ METRICS_INFO_PATH_KEY = "path"
 METRICS_INFO_ADDITIONAL_CONFIG_KEY = "config"
 
 
-def make_metrics_url(service, metrics_port_num=METRICS_PORT_NUM):
-    return "{0}:{1}".format(service.ip_address, metrics_port_num)
-
-
 def new_metrics_info(helper, service, metrics_path=METRICS_PATH):
     if not helper.enabled:
         return None
 
-    metrics_url = make_metrics_url(service)
+    metrics_url = util.make_service_url_authority(service, METRICS_PORT_ID)
     metrics_info = ethereum_package_node_metrics.new_node_metrics_info(
         service.name, metrics_path, metrics_url
     )
@@ -36,7 +40,9 @@ def new_metrics_info(helper, service, metrics_path=METRICS_PATH):
 
 def expose_metrics_port(ports, port_id=METRICS_PORT_ID, port_num=METRICS_PORT_NUM):
     ports[port_id] = ethereum_package_shared_utils.new_port_spec(
-        port_num, ethereum_package_shared_utils.TCP_PROTOCOL
+        port_num,
+        ethereum_package_shared_utils.TCP_PROTOCOL,
+        ethereum_package_shared_utils.HTTP_APPLICATION_PROTOCOL,
     )
 
 
@@ -79,11 +85,12 @@ def new_metrics_job(
     }
 
 
-def register_op_service_metrics_job(helper, service):
+def register_op_service_metrics_job(helper, service, network_name=None):
     register_service_metrics_job(
         helper,
         service_name=service.name,
-        endpoint=make_metrics_url(service),
+        network_name=network_name,
+        endpoint=util.make_service_url_authority(service, METRICS_PORT_ID),
     )
 
 
@@ -91,15 +98,18 @@ def register_service_metrics_job(
     helper,
     service_name,
     endpoint,
+    network_name=None,
     metrics_path="",
     additional_labels={},
     scrape_interval=DEFAULT_SCRAPE_INTERVAL,
 ):
     labels = {
         "service": service_name,
-        "namespace": "kurtosis",
-        "stack_optimism_io_network": "kurtosis",
+        "namespace": service_name,
     }
+    if network_name != None:
+        labels["stack_optimism_io_network"] = network_name
+
     labels.update(additional_labels)
 
     add_metrics_job(
@@ -115,7 +125,12 @@ def register_service_metrics_job(
 
 
 def register_node_metrics_job(
-    helper, client_name, client_type, node_metrics_info, additional_labels={}
+    helper,
+    client_name,
+    client_type,
+    network_name,
+    node_metrics_info,
+    additional_labels={},
 ):
     labels = {
         "client_type": client_type,
@@ -140,8 +155,47 @@ def register_node_metrics_job(
     register_service_metrics_job(
         helper,
         service_name=node_metrics_info[METRICS_INFO_NAME_KEY],
+        network_name=network_name,
         endpoint=node_metrics_info[METRICS_INFO_URL_KEY],
         metrics_path=node_metrics_info[METRICS_INFO_PATH_KEY],
         additional_labels=labels,
         scrape_interval=scrape_interval,
+    )
+
+
+def launch(plan, observability_helper, global_node_selectors, observability_params):
+    if not observability_helper.enabled or len(observability_helper.metrics_jobs) == 0:
+        return
+
+    plan.print("Launching prometheus...")
+    prometheus_private_url = prometheus.launch_prometheus(
+        plan,
+        observability_helper,
+        global_node_selectors,
+    )
+
+    loki_url = None
+    if observability_params.enable_k8s_features:
+        plan.print("Launching loki...")
+        loki_url = loki.launch_loki(
+            plan,
+            global_node_selectors,
+            observability_params.loki_params,
+        )
+
+        plan.print("Launching promtail...")
+        promtail.launch_promtail(
+            plan,
+            global_node_selectors,
+            loki_url,
+            observability_params.promtail_params,
+        )
+
+    plan.print("Launching grafana...")
+    grafana.launch_grafana(
+        plan,
+        prometheus_private_url,
+        loki_url,
+        global_node_selectors,
+        observability_params.grafana_params,
     )

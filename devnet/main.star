@@ -181,21 +181,9 @@ def run(plan, args):
             observability_helper,
         )
 
-    if observability_helper.enabled and len(observability_helper.metrics_jobs) > 0:
-        plan.print("Launching prometheus...")
-        prometheus_private_url = prometheus.launch_prometheus(
-            plan,
-            observability_helper,
-            global_node_selectors,
-        )
-
-        plan.print("Launching grafana...")
-        grafana.launch_grafana(
-            plan,
-            prometheus_private_url,
-            global_node_selectors,
-            observability_params.grafana_params,
-        )
+    observability.launch(
+        plan, observability_helper, global_node_selectors, observability_params
+    )
 
 
 def get_l1_config(all_l1_participants, l1_network_params, l1_network_id):

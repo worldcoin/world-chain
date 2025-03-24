@@ -1,3 +1,5 @@
+constants = import_module("./package_io/constants.star")
+
 DEPLOYMENT_UTILS_IMAGE = "mslipper/deployment-utils:latest"
 
 
@@ -34,7 +36,9 @@ def write_to_file(plan, contents, directory, file_name):
     run = plan.run_sh(
         description="Write value to a file artifact",
         image=DEPLOYMENT_UTILS_IMAGE,
-        store=[file_path],
+        store=[
+            StoreSpec(src=file_path, name=file_name),
+        ],
         run="mkdir -p '{0}' && echo '{2}' > '{1}'".format(
             directory, file_path, contents
         ),
@@ -80,3 +84,63 @@ def label_from_image(image):
 
 def join_cmds(commands):
     return " && ".join(commands)
+
+
+def get_service_port_num(service, port_id):
+    return service.ports[port_id].number
+
+
+def get_service_http_port_num(service):
+    return get_service_port_num(service, constants.HTTP_PORT_ID)
+
+
+def make_url_authority(host, port_num):
+    return "{0}:{1}".format(host, port_num)
+
+
+def prefix_url_scheme(scheme, authority):
+    return "{0}://{1}".format(scheme, authority)
+
+
+def prefix_url_scheme_http(authority):
+    return prefix_url_scheme("http", authority)
+
+
+def prefix_url_scheme_ws(authority):
+    return prefix_url_scheme("ws", authority)
+
+
+def make_http_url(host, port_num):
+    return prefix_url_scheme_http(make_url_authority(host, port_num))
+
+
+def make_ws_url(host, port_num):
+    return prefix_url_scheme_ws(make_url_authority(host, port_num))
+
+
+def make_service_url_authority(service, port_id):
+    return make_url_authority(
+        service.ip_address, get_service_port_num(service, port_id)
+    )
+
+
+def make_service_http_url(service, port_id=constants.HTTP_PORT_ID):
+    return prefix_url_scheme_http(make_service_url_authority(service, port_id))
+
+
+def make_service_ws_url(service, port_id=constants.WS_PORT_ID):
+    return prefix_url_scheme_ws(make_service_url_authority(service, port_id))
+
+
+def make_execution_engine_url(el_context):
+    return make_http_url(
+        el_context.ip_addr,
+        el_context.engine_rpc_port_num,
+    )
+
+
+def make_execution_rpc_url(el_context):
+    return make_http_url(
+        el_context.ip_addr,
+        el_context.rpc_port_num,
+    )

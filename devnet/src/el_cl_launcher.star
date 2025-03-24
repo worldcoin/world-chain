@@ -279,7 +279,11 @@ def launch(
 
         for metrics_info in [x for x in el_context.el_metrics_info if x != None]:
             observability.register_node_metrics_job(
-                observability_helper, el_context.client_name, "execution", metrics_info
+                observability_helper,
+                el_context.client_name,
+                "execution",
+                network_params.network,
+                metrics_info,
             )
 
         if rollup_boost_enabled and sequencer_enabled:
@@ -301,6 +305,17 @@ def launch(
                     observability_helper,
                     interop_params,
                 )
+
+                for metrics_info in [
+                    x for x in el_builder_context.el_metrics_info if x != None
+                ]:
+                    observability.register_node_metrics_job(
+                        observability_helper,
+                        el_builder_context.client_name,
+                        "world-chain-builder",
+                        network_params.network,
+                        metrics_info,
+                    )
             else:
                 el_builder_context = struct(
                     ip_addr=mev_params.builder_host,
@@ -311,14 +326,6 @@ def launch(
                     ),
                     client_name="external-builder",
                 )
-
-            for metrics_info in [x for x in el_builder_context.el_metrics_info if x != None]:
-                observability.register_node_metrics_job(
-                    observability_helper,
-                    el_builder_context.client_name,
-                    "world-chain-builder",
-                    metrics_info,
-            )
 
             rollup_boost_image = (
                 mev_params.rollup_boost_image
@@ -365,6 +372,7 @@ def launch(
                 observability_helper,
                 cl_context.client_name,
                 "beacon",
+                network_params.network,
                 metrics_info,
                 {
                     "supernode": str(cl_context.supernode),
