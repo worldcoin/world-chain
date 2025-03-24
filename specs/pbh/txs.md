@@ -7,34 +7,6 @@ The World Chain Builder introduces the concept of PBH transactions, which are st
 <!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
 The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
 
-## PBH Multicall
-To submit a valid PBH transaction, users can call the `pbhMulticall()` function on the `PBHEntryPoint` contract.
-
-
-```solidity
-    /// @notice Executes a Priority Multicall3.
-    /// @param calls The calls to execute.
-    /// @param pbhPayload The PBH payload containing the proof data.
-    /// @return returnData The results of the calls.
-    function pbhMulticall(IMulticall3.Call3[] calldata calls, PBHPayload calldata pbhPayload)
-        external
-        virtual
-        onlyProxy
-        onlyInitialized
-        nonReentrant
-        returns (IMulticall3.Result[] memory returnData)
-    {
-        uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
-        _verifyPbh(signalHash, pbhPayload);
-        nullifierHashes[pbhPayload.nullifierHash] = true;
-
-        returnData = IMulticall3(_multicall3).aggregate3(calls);
-        emit PBH(msg.sender, signalHash, pbhPayload);
-    }
-```
-
-This function takes an array of `calls` and a `PBHPayload`. During [transaction validation](./validation.md), the World Chain Builder will validate the payload and mark the transaction for priority inclusion. Visit the [validation](./validation.md#signal-hash) section of the docs to see how to encode the `signalHash` for a PBH Multicall.
-
 ## PBH 4337 UserOps
 The `PBHEntryPoint` contract also provides priority inclusion for 4337 [UserOps](https://eips.ethereum.org/EIPS/eip-4337#useroperation) through PBH bundles. A PBH bundle is a standard 4337 bundle where the aggregated signature field is consists of an array of `PBHPayload`. A valid PBH bundle should include a `n` `PBHPayload`s, with each item corresponding to a `UserOp` in the bundle.
 
@@ -64,7 +36,7 @@ The bundler will [validate the PBHPayload](./validation.md), strip the payload f
         }
         aggregatedSignature = abi.encode(pbhPayloads);
     }
-}
+
 ```
 
 Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.

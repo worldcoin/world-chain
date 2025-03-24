@@ -52,10 +52,7 @@ sol! {
             address payable
         ) external;
 
-        function pbhMulticall(
-            IMulticall3.Call3[] calls,
-            PBHPayload payload,
-        ) external;
+        function spendNullifierHashes(uint256[] memory _nullifierHashes) external;
     }
 }
 
@@ -63,23 +60,11 @@ impl TryFrom<IPBHPayload> for PBHPayload {
     type Error = alloy_rlp::Error;
 
     fn try_from(val: IPBHPayload) -> Result<Self, Self::Error> {
-        let proof: [ethers_core::types::U256; 8] = val
-            .proof
-            .into_iter()
-            .map(|x| {
-                // TODO: Switch to ruint in semaphore-rs and remove this
-                let bytes_repr: [u8; 32] = x.to_be_bytes();
-                ethers_core::types::U256::from_big_endian(&bytes_repr)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(); // TODO: should we be unwrapping here?
+        let g1a = (val.proof[0], val.proof[1]);
+        let g2 = ([val.proof[2], val.proof[3]], [val.proof[4], val.proof[5]]);
+        let g1b = (val.proof[6], val.proof[7]);
 
-        let g1a = (proof[0], proof[1]);
-        let g2 = ([proof[2], proof[3]], [proof[4], proof[5]]);
-        let g1b = (proof[6], proof[7]);
-
-        let proof = Proof(semaphore::protocol::Proof(g1a, g2, g1b));
+        let proof = Proof(semaphore_rs::protocol::Proof(g1a, g2, g1b));
 
         Ok(PBHPayload {
             external_nullifier: ExternalNullifier::try_from(EncodedExternalNullifier(

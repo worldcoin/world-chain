@@ -64,7 +64,7 @@ alloy-signer-local.workspace = true
 alloy-eips.workspace = true
 
 criterion.workspace = true
-semaphore.workspace = true
+semaphore-rs = { workspace = true, features = ["depth_30"]}
 serde_json.workspace = true
 chrono.workspace = true
 

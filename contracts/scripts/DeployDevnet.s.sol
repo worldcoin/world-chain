@@ -34,12 +34,14 @@ contract DeployDevnet is Script {
         0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant WORLD_ID =
         0x5FbDB2315678afecb367f032d93F642f64180aa3;
-    address public constant BUILDER = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8; // TODO: Update
+    address public constant BUILDER =
+        0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
     /// @dev The root of the Test tree.
     uint256 constant INITIAL_ROOT =
         0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
     uint256 public constant MAX_PBH_GAS_LIMIT = 30000000;
     uint32 public constant PBH_NONCE_KEY = 1123123123;
+    address[] public authorizedBuilders = [BUILDER];
 
     function run() public {
         console.log(
@@ -65,8 +67,9 @@ contract DeployDevnet is Script {
                 IWorldID(WORLD_ID),
                 IEntryPoint(ENTRY_POINT),
                 255,
-                address(0x123),
-                MAX_PBH_GAS_LIMIT
+                MAX_PBH_GAS_LIMIT,
+                authorizedBuilders,
+                msg.sender
             )
         );
         pbhEntryPoint = address(
@@ -86,9 +89,7 @@ contract DeployDevnet is Script {
     }
 
     function deployWorldChainBlockRegistry() public {
-        worldChainBlockRegistry = address(new WorldChainBlockRegistry(
-            BUILDER
-        ));
+        worldChainBlockRegistry = address(new WorldChainBlockRegistry(BUILDER));
         console.log(
             "WorldChainBlockRegistry Deployed at: ",
             worldChainBlockRegistry

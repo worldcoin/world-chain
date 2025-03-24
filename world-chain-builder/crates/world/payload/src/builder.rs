@@ -1,7 +1,12 @@
-use alloy_consensus::Transaction;
+use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
+use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_signer_local::PrivateKeySigner;
+use eyre::eyre::eyre;
+use op_alloy_rpc_types::OpTransactionRequest;
+use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -16,7 +21,6 @@ use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_evm::execute::BlockExecutionError;
 use reth_evm::execute::BlockValidationError;
-use reth_evm::execute::InternalBlockExecutionError;
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
@@ -39,14 +43,17 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_transaction_pool::{BlobStore, PoolTransaction};
+use revm::inspector::NoOpInspector;
+use revm::Inspector;
 use revm_primitives::{Address, U256};
+use semaphore_rs::Field;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, trace};
+use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::WorldChainTransactionPool;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
-
-use crate::inspector::{PBHCallTracer, PBH_CALL_TRACER_ERROR};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -58,8 +65,7 @@ where
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
-    pub builder_private_key: String,
-    pub block_registry: Address,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
@@ -76,7 +82,6 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
-        block_registry: Address,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -88,7 +93,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         )
     }
 
@@ -103,18 +107,19 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
-        block_registry: Address,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(pool, client, evm_config, config)
             .set_compute_pending_block(compute_pending_block);
 
+        let private_key = builder_private_key
+            .parse()
+            .expect("invalid builder private key");
         Self {
             inner,
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
-            builder_private_key,
-            block_registry,
+            builder_private_key: private_key,
         }
     }
 }
@@ -139,7 +144,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         } = self;
 
         let OpPayloadBuilder {
@@ -164,7 +168,6 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            block_registry,
         }
     }
 
@@ -228,7 +231,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            block_registry: self.block_registry,
         };
 
         let op_ctx = &ctx.inner;
@@ -282,7 +284,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            block_registry: self.block_registry,
         };
 
         let state_provider = self
@@ -544,8 +545,7 @@ pub struct WorldChainPayloadBuilderCtx<Client> {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
-    pub builder_private_key: String,
-    pub block_registry: Address,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl<Client> WorldChainPayloadBuilderCtx<Client>
@@ -569,7 +569,7 @@ where
         DB: Database + DatabaseCommit,
         Builder: BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<DB, PBHCallTracer>>,
+            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
         >,
         TXS: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
@@ -583,20 +583,10 @@ where
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee;
 
-        // Enable inspector for execution of the block transactions
-        builder.evm_mut().inspector_mut().active = true;
-
-        // TODO: perhaps we don't want to error out here.
-        let (builder_addr, stamp_block_tx) = crate::stamp::stamp_block_tx(self, builder.evm_mut())
-            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
-
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
 
-        // Subtract stamp_block_tx gas limit from the overall block gas limit.
-        // This gas will be saved to execute stampBlock at the end of the block.
-        block_gas_limit -= stamp_block_tx.gas_limit();
-
+        let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx = pooled_tx.clone().into_consensus();
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -613,14 +603,6 @@ where
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
-            }
-
-            // If the transaction is verified, check if it can be added within the verified gas limit
-            if pooled_tx.valid_pbh()
-                && info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit
-            {
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
             }
 
             // ensure we still have capacity for this transaction
@@ -643,8 +625,34 @@ where
                 return Ok(Some(()));
             }
 
+            // If the transaction is verified, check if it can be added within the verified gas limit
+            if let Some(payloads) = pooled_tx.pbh_payload() {
+                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue;
+                }
+
+                if payloads
+                    .iter()
+                    .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
+                {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    invalid_txs.push(*pooled_tx.hash());
+                    continue;
+                }
+            }
+
             let gas_used = match builder.execute_transaction(tx.clone()) {
-                Ok(res) => res,
+                Ok(res) => {
+                    if let Some(payloads) = pooled_tx.pbh_payload() {
+                        if spent_nullifier_hashes.len() == payloads.len() {
+                            block_gas_limit -= FIXED_GAS
+                        }
+
+                        block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
+                    }
+                    res
+                }
                 Err(err) => {
                     match err {
                         BlockExecutionError::Validation(BlockValidationError::InvalidTx {
@@ -663,14 +671,6 @@ where
 
                             continue;
                         }
-                        BlockExecutionError::Internal(InternalBlockExecutionError::EVM {
-                            error,
-                            ..
-                        }) if error.to_string() == PBH_CALL_TRACER_ERROR => {
-                            trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(tx.signer(), tx.nonce());
-                            continue;
-                        }
 
                         err => {
                             // this is an error that we should treat as fatal for this attempt
@@ -683,25 +683,24 @@ where
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
-        // execute the stamp block transaction
-        let op_tx_signed: OpTransactionSigned = stamp_block_tx.into();
-        let op_tx_signed = op_tx_signed.with_signer(builder_addr);
-
-        let gas_used = builder
-            .execute_transaction(op_tx_signed.clone())
-            .map_err(|e| {
-                error!(target: "payload_builder", %e, "failed to stamp block transaction");
+        if !spent_nullifier_hashes.is_empty() {
+            let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(|e| {
+            error!(target: "payload_builder", %e, "failed to create stamp block transaction");
+            PayloadBuilderError::Other(e.into())
+        })?;
+            let gas_used = builder.execute_transaction(tx.clone()).map_err(
+            |e: BlockExecutionError| {
+                error!(target: "payload_builder", %e, "failed to execute stamp block transaction");
                 PayloadBuilderError::evm(e)
-            })?;
+            },
+        )?;
 
-        self.commit_changes(info, base_fee, gas_used, op_tx_signed);
+            self.commit_changes(info, base_fee, gas_used, tx);
+        }
 
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
         }
-
-        // Disable inspector
-        builder.evm_mut().inspector_mut().active = false;
 
         Ok(None)
     }
@@ -734,7 +733,7 @@ where
     ) -> Result<
         impl BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, PBHCallTracer>>,
+            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector>>,
         >,
         PayloadBuilderError,
     > {
@@ -759,16 +758,8 @@ where
             .next_evm_env(self.inner.parent(), &attributes)
             .map_err(PayloadBuilderError::other)?;
 
-        let mut pbh_call_tracer =
-            PBHCallTracer::new(self.pbh_entry_point, self.pbh_signature_aggregator);
-        // disable the tracer by default
-        pbh_call_tracer.active = false;
-
         // Prepare EVM.
-        let evm = self
-            .inner
-            .evm_config
-            .evm_with_env_and_inspector(db, evm_env, pbh_call_tracer);
+        let evm = self.inner.evm_config.evm_with_env(db, evm_env);
 
         // Prepare block execution context.
         let execution_ctx = self
@@ -782,4 +773,45 @@ where
             .evm_config
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
+}
+
+pub const COLD_SSTORE_GAS: u64 = 20000;
+pub const FIXED_GAS: u64 = 21000;
+
+pub const fn dyn_gas_limit(len: u64) -> u64 {
+    FIXED_GAS + len * COLD_SSTORE_GAS
+}
+
+pub fn spend_nullifiers_tx<DB, I, Client>(
+    ctx: &WorldChainPayloadBuilderCtx<Client>,
+    evm: &mut OpEvm<DB, I>,
+    nullifier_hashes: HashSet<Field>,
+) -> eyre::Result<Recovered<OpTransactionSigned>>
+where
+    I: Inspector<OpContext<DB>>,
+    DB: revm::Database + revm::DatabaseCommit,
+    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+{
+    let nonce = evm
+        .db_mut()
+        .basic(ctx.builder_private_key.address())?
+        .unwrap_or_default()
+        .nonce;
+
+    let mut tx = OpTransactionRequest::default()
+        .nonce(nonce)
+        .gas_limit(dyn_gas_limit(nullifier_hashes.len() as u64))
+        .max_priority_fee_per_gas(evm.ctx().block.basefee.into())
+        .max_fee_per_gas(evm.ctx().block.basefee.into())
+        .with_chain_id(evm.ctx().cfg.chain_id)
+        .with_call(&spendNullifierHashesCall {
+            _nullifierHashes: nullifier_hashes.into_iter().collect(),
+        })
+        .to(ctx.pbh_entry_point)
+        .build_typed_tx()
+        .map_err(|e| eyre!("{:?}", e))?;
+
+    let signature = ctx.builder_private_key.sign_transaction_sync(&mut tx)?;
+    let signed: OpTransactionSigned = tx.into_signed(signature).into();
+    Ok(signed.into_recovered_unchecked()?)
 }

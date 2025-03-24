@@ -1,29 +1,27 @@
+use crate::external_nullifier::EncodedExternalNullifier;
+use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use semaphore::packed_proof::PackedProof;
-use semaphore::protocol::{verify_proof, ProofError};
-use semaphore::Field;
+use semaphore_rs::packed_proof::PackedProof;
+use semaphore_rs::protocol::{verify_proof, ProofError};
+use semaphore_rs::Field;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::external_nullifier::EncodedExternalNullifier;
-use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
-
 pub const TREE_DEPTH: usize = 30;
-
 const LEN: usize = 256;
 
 pub type ProofBytes = [u8; LEN];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Proof(pub semaphore::protocol::Proof);
+pub struct Proof(pub semaphore_rs::protocol::Proof);
 
 impl Default for Proof {
     fn default() -> Self {
-        let proof = semaphore::protocol::Proof(
-            (0u64.into(), 0u64.into()),
-            ([0u64.into(), 0u64.into()], [0u64.into(), 0u64.into()]),
-            (0u64.into(), 0u64.into()),
+        let proof = semaphore_rs::protocol::Proof(
+            (U256::ZERO, U256::ZERO),
+            ([U256::ZERO, U256::ZERO], [U256::ZERO, U256::ZERO]),
+            (U256::ZERO, U256::ZERO),
         );
 
         Proof(proof)
@@ -49,7 +47,7 @@ impl Encodable for Proof {
 }
 
 #[derive(Error, Debug)]
-pub enum PbhValidationError {
+pub enum PBHValidationError {
     #[error("Invalid root")]
     InvalidRoot,
     #[error("Invalid external nullifier period")]
@@ -67,7 +65,6 @@ pub enum PbhValidationError {
 /// Contains the semaphore proof and relevant metadata
 /// required to to verify the pbh transaction.
 #[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
-// TODO: update to PBHPayload
 pub struct PBHPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
     pub external_nullifier: ExternalNullifier,
@@ -83,68 +80,87 @@ pub struct PBHPayload {
 }
 
 impl PBHPayload {
+    /// Validates the PBH payload by validating the merkle root, external nullifier, and semaphore proof.
+    /// Returns an error if any of the validations steps fail.
     pub fn validate(
         &self,
         signal: U256,
         valid_roots: &[Field],
         pbh_nonce_limit: u16,
-    ) -> Result<(), PbhValidationError> {
+    ) -> Result<(), PBHValidationError> {
         self.validate_root(valid_roots)?;
 
         let date = chrono::Utc::now();
         self.validate_external_nullifier(date, pbh_nonce_limit)?;
+
+        let flat = self.proof.0.flatten();
+        let proof = if (flat[4] | flat[5] | flat[6] | flat[7]).is_zero() {
+            // proof is compressed
+            let compressed_flat = [flat[0], flat[1], flat[2], flat[3]];
+            let compressed_proof =
+                semaphore_rs_proof::compression::CompressedProof::from_flat(compressed_flat);
+            &semaphore_rs_proof::compression::decompress_proof(compressed_proof)
+                .ok_or(PBHValidationError::InvalidProof)?
+        } else {
+            &self.proof.0
+        };
 
         if verify_proof(
             self.root,
             self.nullifier_hash,
             signal,
             EncodedExternalNullifier::from(self.external_nullifier).0,
-            &self.proof.0,
+            proof,
             TREE_DEPTH,
         )? {
             Ok(())
         } else {
-            Err(PbhValidationError::InvalidProof)
+            Err(PBHValidationError::InvalidProof)
         }
     }
 
-    pub fn validate_root(&self, valid_roots: &[Field]) -> Result<(), PbhValidationError> {
+    /// Checks if the Merkle root exists in the list of valid roots.
+    /// Returns an error if the root is not found.
+    pub fn validate_root(&self, valid_roots: &[Field]) -> Result<(), PBHValidationError> {
         if !valid_roots.contains(&self.root) {
-            return Err(PbhValidationError::InvalidRoot);
+            return Err(PBHValidationError::InvalidRoot);
         }
 
         Ok(())
     }
 
+    /// Ensures the external nullifier is valid by checking the month, year and nonce limit.
+    /// Returns an error if the date is incorrect or if the nonce exceeds the allowed limit.
     pub fn validate_external_nullifier(
         &self,
         date: chrono::DateTime<chrono::Utc>,
         pbh_nonce_limit: u16,
-    ) -> Result<(), PbhValidationError> {
+    ) -> Result<(), PBHValidationError> {
         if self.external_nullifier.date_marker() != DateMarker::from(date) {
-            return Err(PbhValidationError::InvalidExternalNullifierPeriod);
+            return Err(PBHValidationError::InvalidExternalNullifierPeriod);
         }
 
         if self.external_nullifier.nonce >= pbh_nonce_limit {
-            return Err(PbhValidationError::InvalidExternalNullifierNonce);
+            return Err(PBHValidationError::InvalidExternalNullifierNonce);
         }
 
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod test {
-    use chrono::TimeZone;
-    use ethers_core::types::U256;
-    use semaphore::Field;
+    use alloy_primitives::U256;
+    use chrono::{Datelike, TimeZone, Utc};
+    use semaphore_rs::Field;
     use test_case::test_case;
 
     use super::*;
 
     #[test]
     // TODO: fuzz inputs
-    fn test_encode_decode() {
-        let proof = Proof(semaphore::protocol::Proof(
+    fn encode_decode() {
+        let proof = Proof(semaphore_rs::protocol::Proof(
             (U256::from(1u64), U256::from(2u64)),
             (
                 [U256::from(3u64), U256::from(4u64)],
@@ -166,7 +182,65 @@ mod test {
     }
 
     #[test]
-    fn test_valid_root() -> eyre::Result<()> {
+    fn serialize_compressed_proof() {
+        let identity = semaphore_rs::identity::Identity::from_secret(&mut [1, 2, 3], None);
+        let mut tree = semaphore_rs::poseidon_tree::LazyPoseidonTree::new_with_dense_prefix(
+            30,
+            0,
+            &U256::ZERO,
+        );
+        tree = tree.update_with_mutation(0, &identity.commitment());
+
+        let merkle_proof = tree.proof(0);
+        let now = Utc::now();
+        let date_marker = DateMarker::new(now.year(), now.month());
+
+        let external_nullifier = ExternalNullifier::with_date_marker(date_marker, 0);
+        let external_nullifier_hash: EncodedExternalNullifier = external_nullifier.into();
+        let external_nullifier_hash = external_nullifier_hash.0;
+        let signal = U256::ZERO;
+
+        // Generate a normal proof
+        let proof = semaphore_rs::protocol::generate_proof(
+            &identity,
+            &merkle_proof,
+            external_nullifier_hash,
+            signal,
+        )
+        .unwrap();
+        let nullifier_hash =
+            semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+
+        // Compress the proof
+        let compressed_proof = semaphore_rs_proof::compression::compress_proof(proof).unwrap();
+
+        // Reserialize to backwards compat format
+        let flat = compressed_proof.flatten();
+        let proof = [
+            flat[0],
+            flat[1],
+            flat[2],
+            flat[3],
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+        ];
+        let proof = semaphore_rs::protocol::Proof::from_flat(proof);
+        let proof = Proof(proof);
+
+        let pbh_payload = PBHPayload {
+            root: tree.root(),
+            external_nullifier,
+            nullifier_hash,
+            proof,
+        };
+
+        pbh_payload.validate(signal, &[tree.root()], 10).unwrap();
+    }
+
+    #[test]
+    fn valid_root() -> eyre::Result<()> {
         let pbh_payload = PBHPayload {
             root: Field::from(1u64),
             ..Default::default()
@@ -179,7 +253,7 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_root() -> eyre::Result<()> {
+    fn invalid_root() -> eyre::Result<()> {
         let pbh_payload = PBHPayload {
             root: Field::from(3u64),
             ..Default::default()
@@ -187,7 +261,7 @@ mod test {
 
         let valid_roots = vec![Field::from(1u64), Field::from(2u64)];
         let res = pbh_payload.validate_root(&valid_roots);
-        assert!(matches!(res, Err(PbhValidationError::InvalidRoot)));
+        assert!(matches!(res, Err(PBHValidationError::InvalidRoot)));
 
         Ok(())
     }
@@ -195,7 +269,7 @@ mod test {
     #[test_case(ExternalNullifier::v1(1, 2025, 0) ; "01-2025-0")]
     #[test_case(ExternalNullifier::v1(1, 2025, 1) ; "01-2025-1")]
     #[test_case(ExternalNullifier::v1(1, 2025, 29) ; "01-2025-29")]
-    fn test_valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
+    fn valid_external_nullifier(external_nullifier: ExternalNullifier) -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
@@ -210,7 +284,7 @@ mod test {
 
     #[test_case(ExternalNullifier::v1(1, 2024, 0) ; "01-2024-0")]
     #[test_case(ExternalNullifier::v1(2, 2025, 0) ; "02-2025-0")]
-    fn test_invalid_external_nullifier_invalid_period(
+    fn invalid_external_nullifier_invalid_period(
         external_nullifier: ExternalNullifier,
     ) -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
@@ -224,14 +298,14 @@ mod test {
         let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
         assert!(matches!(
             res,
-            Err(PbhValidationError::InvalidExternalNullifierPeriod)
+            Err(PBHValidationError::InvalidExternalNullifierPeriod)
         ));
 
         Ok(())
     }
 
     #[test]
-    fn test_invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
+    fn invalid_external_nullifier_invalid_nonce() -> eyre::Result<()> {
         let pbh_nonce_limit = 30;
         let date = chrono::Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
@@ -244,7 +318,7 @@ mod test {
         let res = pbh_payload.validate_external_nullifier(date, pbh_nonce_limit);
         assert!(matches!(
             res,
-            Err(PbhValidationError::InvalidExternalNullifierNonce)
+            Err(PBHValidationError::InvalidExternalNullifierNonce)
         ));
 
         Ok(())

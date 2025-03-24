@@ -14,31 +14,31 @@ use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
 use revm_primitives::{Address, TxKind, B256, U256};
 use thiserror::Error;
-use world_chain_builder_pbh::payload::PbhValidationError;
+use world_chain_builder_pbh::payload::{PBHPayload, PBHValidationError};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
     pub inner: OpPooledTransaction,
-    pub valid_pbh: bool,
+    pub payload: Option<Vec<PBHPayload>>,
 }
 
 pub trait WorldChainPoolTransaction: EthPoolTransaction {
-    fn valid_pbh(&self) -> bool;
-    fn set_valid_pbh(&mut self);
+    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
+    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>>;
 }
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn valid_pbh(&self) -> bool {
-        self.valid_pbh
-    }
-
     fn conditional_options(&self) -> Option<&TransactionConditional> {
         self.inner.conditional()
     }
 
-    fn set_valid_pbh(&mut self) {
-        self.valid_pbh = true;
+    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>) {
+        self.payload = Some(payload);
+    }
+
+    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
+        self.payload.as_ref()
     }
 }
 
@@ -191,7 +191,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
         let inner = OpPooledTransaction::from_pooled(tx);
         Self {
             inner,
-            valid_pbh: false,
+            payload: None,
         }
     }
 
@@ -221,7 +221,7 @@ pub enum WorldChainPoolTransactionError {
     #[error("Conditional Validation Failed: {0}")]
     ConditionalValidationFailed(B256),
     #[error(transparent)]
-    PbhValidationError(#[from] PbhValidationError),
+    PBHValidationError(#[from] PBHValidationError),
     #[error("Invalid calldata encoding")]
     InvalidCalldata,
     #[error("Missing PBH Payload")]
@@ -263,7 +263,7 @@ impl From<OpPooledTransaction> for WorldChainPooledTransaction {
     fn from(tx: OpPooledTransaction) -> Self {
         Self {
             inner: tx,
-            valid_pbh: false,
+            payload: None,
         }
     }
 }

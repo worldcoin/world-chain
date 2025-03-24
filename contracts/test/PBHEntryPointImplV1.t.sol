@@ -15,6 +15,7 @@ import {TestSetup} from "./TestSetup.sol";
 import {TestUtils} from "./TestUtils.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@lib/PBHExternalNullifier.sol";
 
@@ -45,9 +46,10 @@ contract PBHEntryPointImplV1Test is TestSetup {
         uint256 extNullifier = TestUtils.getPBHExternalNullifier(pbhNonce);
         IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
 
-        IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](1);
-
-        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
+        vm.prank(BLOCK_BUILDER);
+        uint256[] memory nullifierHashes = new uint256[](1);
+        nullifierHashes[0] = testPayload.nullifierHash;
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
 
         bytes memory testCallData = hex"c0ffee";
         uint256 signalHash = abi.encodePacked(sender, pbhNonce, testCallData).hashToField();
@@ -203,45 +205,6 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.validateSignaturesCallback(hashedOps);
     }
 
-    function test_pbhMulticall(uint8 pbhNonce) public {
-        vm.assume(pbhNonce < MAX_NUM_PBH_PER_MONTH);
-        address addr1 = address(0x1);
-        address addr2 = address(0x2);
-
-        uint256 extNullifier = TestUtils.getPBHExternalNullifier(pbhNonce);
-        IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
-
-        IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](2);
-
-        bytes memory testCallData = hex"";
-        calls[0] = IMulticall3.Call3({target: addr1, allowFailure: false, callData: testCallData});
-        calls[1] = IMulticall3.Call3({target: addr2, allowFailure: false, callData: testCallData});
-
-        uint256 signalHash = abi.encode(address(this), calls).hashToField();
-
-        vm.expectEmit(true, true, true, true);
-        emit PBH(address(this), signalHash, testPayload);
-        pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload);
-    }
-
-    function test_pbhMulticall_RevertIf_Reentrancy(uint8 pbhNonce) public {
-        vm.assume(pbhNonce < MAX_NUM_PBH_PER_MONTH);
-
-        uint256 extNullifier = TestUtils.getPBHExternalNullifier(pbhNonce);
-        IPBHEntryPoint.PBHPayload memory testPayload = TestUtils.mockPBHPayload(0, pbhNonce, extNullifier);
-
-        IMulticall3.Call3[] memory calls = new IMulticall3.Call3[](1);
-
-        bytes memory testCallData = abi.encodeWithSelector(IPBHEntryPoint.pbhMulticall.selector, calls, testPayload);
-        calls[0] = IMulticall3.Call3({target: address(pbhEntryPoint), allowFailure: true, callData: testCallData});
-
-        IMulticall3.Result memory returnData = pbhEntryPoint.pbhMulticall{gas: MAX_PBH_GAS_LIMIT}(calls, testPayload)[0];
-
-        bytes memory expectedReturnData = abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
-        assert(!returnData.success);
-        assertEq(returnData.returnData, expectedReturnData);
-    }
-
     function test_setNumPbhPerMonth(uint16 numPbh) public {
         vm.assume(numPbh > 0);
 
@@ -251,8 +214,10 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.setNumPbhPerMonth(numPbh);
     }
 
-    function test_setNumPbhPerMonth_RevertIf_NotOwner(uint8 numPbh) public {
-        vm.expectRevert("Ownable: caller is not the owner");
+    function test_setNumPbhPerMonth_RevertIf_NotOwner(uint8 numPbh, address addr) public {
+        vm.assume(addr != OWNER);
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
         pbhEntryPoint.setNumPbhPerMonth(numPbh);
     }
 
@@ -273,8 +238,63 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_setWorldId_RevertIf_NotOwner(address addr) public {
         vm.assume(addr != OWNER);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
         pbhEntryPoint.setWorldId(addr);
+    }
+
+    function test_addBuilder(address addr) public {
+        vm.assume(addr != address(0));
+        vm.prank(OWNER);
+        vm.expectEmit(true, false, false, false);
+        emit PBHEntryPointImplV1.BuilderAuthorized(addr);
+        pbhEntryPoint.addBuilder(addr);
+    }
+
+    function test_addBuilder_RevertIf_NotOwner(address addr) public {
+        vm.assume(addr != OWNER);
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
+        pbhEntryPoint.addBuilder(addr);
+    }
+
+    function test_removeBuilder(address addr) public {
+        vm.prank(OWNER);
+        vm.expectEmit(true, true, true, true);
+        emit PBHEntryPointImplV1.BuilderDeauthorized(addr);
+        pbhEntryPoint.removeBuilder(addr);
+    }
+
+    function test_removeBuilder_RevertIf_NotOwner(address addr) public {
+        vm.assume(addr != OWNER);
+        vm.prank(addr);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, addr));
+
+        pbhEntryPoint.removeBuilder(addr);
+    }
+
+    function test_spendNullifierHashes(uint256[] memory nullifierHashes) public {
+        vm.prank(BLOCK_BUILDER);
+        vm.expectEmit(true, true, true, true);
+        emit PBHEntryPointImplV1.NullifierHashesSpent(BLOCK_BUILDER, nullifierHashes);
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
+        for (uint256 i = 0; i < nullifierHashes.length; i++) {
+            assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[i]), block.number);
+        }
+    }
+
+    function test_spendNullifierHashes_RevertIf_NotBlockBuilder(address builder) public {
+        uint256[] memory nullifierHashes = new uint256[](3);
+        nullifierHashes[0] = uint256(0);
+        nullifierHashes[1] = uint256(1);
+        nullifierHashes[2] = uint256(2);
+        vm.assume(builder != BLOCK_BUILDER);
+        vm.prank(builder);
+        vm.expectRevert(PBHEntryPointImplV1.UnauthorizedBuilder.selector);
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[0]), 0);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[1]), 0);
+        assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[2]), 0);
     }
 
     receive() external payable {}

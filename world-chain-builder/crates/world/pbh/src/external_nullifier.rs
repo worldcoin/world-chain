@@ -133,7 +133,7 @@ impl FromStr for ExternalNullifier {
 impl Decodable for ExternalNullifier {
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         let word = U256::decode(buf)?;
-        Ok(Self::try_from(EncodedExternalNullifier(word))?)
+        Self::try_from(EncodedExternalNullifier(word))
     }
 }
 
