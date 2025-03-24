@@ -260,7 +260,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_removeBuilder(address addr) public {
         vm.prank(OWNER);
-        vm.expectEmit(true, false, false, false);
+        vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.BuilderDeauthorized(addr);
         pbhEntryPoint.removeBuilder(addr);
     }
