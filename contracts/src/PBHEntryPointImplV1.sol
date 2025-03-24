@@ -348,7 +348,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
 
     /// @notice Allows a builder to spend all nullifiers within PBH blockspace.
     /// @param _nullifierHashes The nullifier hashes to spend.
-    function spendNullifierHashes(uint256[] memory _nullifierHashes) external virtual onlyProxy onlyBuilder {
+    function spendNullifierHashes(uint256[] calldata _nullifierHashes) external virtual onlyProxy onlyBuilder {
         for (uint256 i = 0; i < _nullifierHashes.length; ++i) {
             nullifierHashes[_nullifierHashes[i]] = block.number;
         }
