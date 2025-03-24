@@ -275,7 +275,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_spendNullifierHashes(uint256[] memory nullifierHashes) public {
         vm.prank(BLOCK_BUILDER);
-        vm.expectEmit(true, true, false, false);
+        vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.NullifierHashesSpent(BLOCK_BUILDER, nullifierHashes);
         pbhEntryPoint.spendNullifierHashes(nullifierHashes);
     }
