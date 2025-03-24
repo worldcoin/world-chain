@@ -646,7 +646,7 @@ where
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
-                        if spent_nullifier_hashes.is_empty() {
+                        if spent_nullifier_hashes.len() == payloads.len() {
                             block_gas_limit -= FIXED_GAS
                         }
 
