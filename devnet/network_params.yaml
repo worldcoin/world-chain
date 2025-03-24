@@ -1,4 +1,9 @@
 optimism_package:
+  observability:
+    enabled: true
+    enable_k8s_features: false
+    prometheus_params:
+      image: "prom/prometheus:v3.1.0"
   chains:
     - participants:
       - el_type: op-geth

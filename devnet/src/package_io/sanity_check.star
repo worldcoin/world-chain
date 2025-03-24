@@ -1,6 +1,21 @@
+ROOT_PARAMS = [
+    "observability",
+    "interop",
+    "altda_deploy_config",
+    "chains",
+    "op_contract_deployer_params",
+    "global_log_level",
+    "global_node_selectors",
+    "global_tolerations",
+    "persistent",
+]
+
 OBSERVABILITY_PARAMS = [
     "enabled",
+    "enable_k8s_features",
     "prometheus_params",
+    "loki_params",
+    "promtail_params",
     "grafana_params",
 ]
 
@@ -8,6 +23,22 @@ PROMETHEUS_PARAMS = [
     "image",
     "storage_tsdb_retention_time",
     "storage_tsdb_retention_size",
+    "min_cpu",
+    "max_cpu",
+    "min_mem",
+    "max_mem",
+]
+
+LOKI_PARAMS = [
+    "image",
+    "min_cpu",
+    "max_cpu",
+    "min_mem",
+    "max_mem",
+]
+
+PROMTAIL_PARAMS = [
+    "image",
     "min_cpu",
     "max_cpu",
     "min_mem",
@@ -71,8 +102,28 @@ PARTICIPANT_CATEGORIES = {
         "cl_max_mem",
         "el_builder_type",
         "el_builder_image",
+        "el_builder_log_level",
+        "el_builder_extra_env_vars",
+        "el_builder_extra_labels",
+        "el_builder_extra_params",
+        "el_builder_tolerations",
+        "el_builder_volume_size",
+        "el_builder_min_cpu",
+        "el_builder_max_cpu",
+        "el_builder_min_mem",
+        "el_builder_max_mem",
         "cl_builder_type",
         "cl_builder_image",
+        "cl_builder_log_level",
+        "cl_builder_extra_env_vars",
+        "cl_builder_extra_labels",
+        "cl_builder_extra_params",
+        "cl_builder_tolerations",
+        "cl_builder_volume_size",
+        "cl_builder_min_cpu",
+        "cl_builder_max_cpu",
+        "cl_builder_min_mem",
+        "cl_builder_max_mem",
         "node_selectors",
         "tolerations",
         "count",
@@ -92,17 +143,20 @@ SUBCATEGORY_PARAMS = {
         "interop_time_offset",
         "fund_dev_accounts",
     ],
+    "proxyd_params": ["image", "tag", "extra_params"],
     "batcher_params": ["image", "extra_params"],
+    "proposer_params": ["image", "extra_params", "game_type", "proposal_interval"],
     "challenger_params": [
+        "enabled",
         "image",
         "extra_params",
         "cannon_prestate_path",
         "cannon_prestates_url",
         "cannon_trace_types",
     ],
-    "proposer_params": ["image", "extra_params", "game_type", "proposal_interval"],
     "mev_params": ["rollup_boost_image", "builder_host", "builder_port"],
     "da_server_params": [
+        "enabled",
         "image",
         "cmd",
     ],
@@ -121,18 +175,6 @@ ADDITIONAL_SERVICES_PARAMS = [
     "blockscout",
     "rollup-boost",
     "da_server",
-]
-
-ROOT_PARAMS = [
-    "observability",
-    "interop",
-    "altda_deploy_config",
-    "chains",
-    "op_contract_deployer_params",
-    "global_log_level",
-    "global_node_selectors",
-    "global_tolerations",
-    "persistent",
 ]
 
 EXTERNAL_L1_NETWORK_PARAMS = [
@@ -190,6 +232,22 @@ def sanity_check(plan, optimism_config):
                 optimism_config["observability"],
                 "prometheus_params",
                 PROMETHEUS_PARAMS,
+            )
+
+        if "loki_params" in optimism_config["observability"]:
+            validate_params(
+                plan,
+                optimism_config["observability"],
+                "loki_params",
+                LOKI_PARAMS,
+            )
+
+        if "promtail_params" in optimism_config["observability"]:
+            validate_params(
+                plan,
+                optimism_config["observability"],
+                "promtail_params",
+                PROMTAIL_PARAMS,
             )
 
         if "grafana_params" in optimism_config["observability"]:

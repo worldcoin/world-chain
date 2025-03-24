@@ -3,6 +3,7 @@ ethereum_package_input_parser = import_module(
 )
 
 sanity_check = import_module("./sanity_check.star")
+constants = import_module("../package_io/constants.star")
 
 DEFAULT_EL_IMAGES = {
     "op-geth": "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-geth:latest",
@@ -60,7 +61,6 @@ DEFAULT_DA_SERVER_PARAMS = {
 
 DEFAULT_ADDITIONAL_SERVICES = []
 
-
 def external_l1_network_params_input_parser(plan, input_args):
     sanity_check.external_l1_network_params_input_parser(plan, input_args)
     return struct(
@@ -77,14 +77,10 @@ def input_parser(plan, input_args):
     sanity_check.sanity_check(plan, input_args)
     results = parse_network_params(plan, input_args)
 
-    results["global_log_level"] = "info"
-    results["global_node_selectors"] = {}
-    results["global_tolerations"] = []
-    results["persistent"] = False
-
     return struct(
         observability=struct(
             enabled=results["observability"]["enabled"],
+            enable_k8s_features=results["observability"]["enable_k8s_features"],
             prometheus_params=struct(
                 image=results["observability"]["prometheus_params"]["image"],
                 storage_tsdb_retention_time=results["observability"][
@@ -97,6 +93,20 @@ def input_parser(plan, input_args):
                 max_cpu=results["observability"]["prometheus_params"]["max_cpu"],
                 min_mem=results["observability"]["prometheus_params"]["min_mem"],
                 max_mem=results["observability"]["prometheus_params"]["max_mem"],
+            ),
+            loki_params=struct(
+                image=results["observability"]["loki_params"]["image"],
+                min_cpu=results["observability"]["loki_params"]["min_cpu"],
+                max_cpu=results["observability"]["loki_params"]["max_cpu"],
+                min_mem=results["observability"]["loki_params"]["min_mem"],
+                max_mem=results["observability"]["loki_params"]["max_mem"],
+            ),
+            promtail_params=struct(
+                image=results["observability"]["promtail_params"]["image"],
+                min_cpu=results["observability"]["promtail_params"]["min_cpu"],
+                max_cpu=results["observability"]["promtail_params"]["max_cpu"],
+                min_mem=results["observability"]["promtail_params"]["min_mem"],
+                max_mem=results["observability"]["promtail_params"]["max_mem"],
             ),
             grafana_params=struct(
                 image=results["observability"]["grafana_params"]["image"],
@@ -205,11 +215,17 @@ def input_parser(plan, input_args):
                     interop_time_offset=result["network_params"]["interop_time_offset"],
                     fund_dev_accounts=result["network_params"]["fund_dev_accounts"],
                 ),
+                proxyd_params=struct(
+                    image=result["proxyd_params"]["image"],
+                    tag=result["proxyd_params"]["tag"],
+                    extra_params=result["proxyd_params"]["extra_params"],
+                ),
                 batcher_params=struct(
                     image=result["batcher_params"]["image"],
                     extra_params=result["batcher_params"]["extra_params"],
                 ),
                 challenger_params=struct(
+                    enabled=result["challenger_params"]["enabled"],
                     image=result["challenger_params"]["image"],
                     extra_params=result["challenger_params"]["extra_params"],
                     cannon_prestate_path=result["challenger_params"][
@@ -274,6 +290,16 @@ def parse_network_params(plan, input_args):
         input_args.get("observability", {}).get("prometheus_params", {})
     )
 
+    results["observability"]["loki_params"] = default_loki_params()
+    results["observability"]["loki_params"].update(
+        input_args.get("observability", {}).get("loki_params", {})
+    )
+
+    results["observability"]["promtail_params"] = default_promtail_params()
+    results["observability"]["promtail_params"].update(
+        input_args.get("observability", {}).get("promtail_params", {})
+    )
+
     results["observability"]["grafana_params"] = default_grafana_params()
     results["observability"]["grafana_params"].update(
         input_args.get("observability", {}).get("grafana_params", {})
@@ -304,14 +330,17 @@ def parse_network_params(plan, input_args):
         network_params = default_network_params()
         network_params.update(chain.get("network_params", {}))
 
+        proxyd_params = default_proxyd_params()
+        proxyd_params.update(chain.get("proxyd_params", {}))
+
         batcher_params = default_batcher_params()
         batcher_params.update(chain.get("batcher_params", {}))
 
-        challenger_params = default_challenger_params()
-        challenger_params.update(chain.get("challenger_params", {}))
-
         proposer_params = default_proposer_params()
         proposer_params.update(chain.get("proposer_params", {}))
+
+        challenger_params = default_challenger_params()
+        challenger_params.update(chain.get("challenger_params", {}))
 
         mev_params = default_mev_params()
         mev_params.update(chain.get("mev_params", {}))
@@ -389,6 +418,7 @@ def parse_network_params(plan, input_args):
         result = {
             "participants": participants,
             "network_params": network_params,
+            "proxyd_params": proxyd_params,
             "batcher_params": batcher_params,
             "challenger_params": challenger_params,
             "proposer_params": proposer_params,
@@ -409,34 +439,31 @@ def parse_network_params(plan, input_args):
         input_args.get("op_contract_deployer_params", {})
     )
 
+    # configure global args
+
+    results["global_log_level"] = "info"
+    results["global_node_selectors"] = {}
+    results["global_tolerations"] = []
+    results["persistent"] = False
+
     results["global_log_level"] = input_args.get("global_log_level", "info")
+    results["global_node_selectors"].update(input_args.get("global_node_selectors", {}))
+    results["global_tolerations"] = input_args.get("global_tolerations", [])
+    results["persistent"] = input_args.get("persistent", False)
 
     return results
-
-
-def default_optimism_params():
-    return {
-        "observability": default_observability_params(),
-        "interop": default_interop_params(),
-        "altda": default_altda_deploy_config(),
-        "chains": default_chains(),
-        "op_contract_deployer_params": default_op_contract_deployer_params(),
-        "global_log_level": "info",
-        "global_node_selectors": {},
-        "global_tolerations": [],
-        "persistent": False,
-    }
 
 
 def default_observability_params():
     return {
         "enabled": True,
+        "enable_k8s_features": False,
     }
 
 
 def default_prometheus_params():
     return {
-        "image": "prom/prometheus:latest",
+        "image": "prom/prometheus:v3.1.0",
         "storage_tsdb_retention_time": "1d",
         "storage_tsdb_retention_size": "512MB",
         "min_cpu": 10,
@@ -448,8 +475,30 @@ def default_prometheus_params():
 
 def default_grafana_params():
     return {
-        "image": "grafana/grafana:latest",
-        "dashboard_sources": [],
+        "image": "grafana/grafana:11.5.0",
+        "dashboard_sources": [
+            "github.com/ethereum-optimism/grafana-dashboards-public/resources"
+        ],
+        "min_cpu": 10,
+        "max_cpu": 1000,
+        "min_mem": 128,
+        "max_mem": 2048,
+    }
+
+
+def default_loki_params():
+    return {
+        "image": "grafana/loki:3.3.2",
+        "min_cpu": 10,
+        "max_cpu": 1000,
+        "min_mem": 128,
+        "max_mem": 2048,
+    }
+
+
+def default_promtail_params():
+    return {
+        "image": "grafana/promtail:3.3.2",
         "min_cpu": 10,
         "max_cpu": 1000,
         "min_mem": 128,
@@ -495,9 +544,10 @@ def default_chains():
         {
             "participants": [default_participant()],
             "network_params": default_network_params(),
+            "proxyd_params": default_proxyd_params(),
             "batcher_params": default_batcher_params(),
-            "challenger_params": default_challenger_params(),
             "proposer_params": default_proposer_params(),
+            "challenger_params": default_challenger_params(),
             "mev_params": default_mev_params(),
             "da_server_params": default_da_server_params(),
             "additional_services": DEFAULT_ADDITIONAL_SERVICES,
@@ -507,7 +557,7 @@ def default_chains():
 
 def default_network_params():
     return {
-        "network": "kurtosis",
+        "network": constants.NETWORK_NAME,
         "network_id": "2151908",
         "name": "op-kurtosis",
         "seconds_per_slot": 2,
@@ -527,8 +577,17 @@ def default_batcher_params():
     }
 
 
+def default_proxyd_params():
+    return {
+        "image": "us-docker.pkg.dev/oplabs-tools-artifacts/images/proxyd",
+        "tag": "v4.14.2",
+        "extra_params": [],
+    }
+
+
 def default_challenger_params():
     return {
+        "enabled": True,
         "image": DEFAULT_CHALLENGER_IMAGES["op-challenger"],
         "extra_params": [],
         "cannon_prestate_path": "",
@@ -619,6 +678,12 @@ def default_op_contract_deployer_params():
 
 def default_ethereum_package_network_params():
     return {
+        "participants": [
+            {
+                "el_type": "geth",
+                "cl_type": "teku",
+            }
+        ],
         "network_params": {
             "preset": "minimal",
             "genesis_delay": 5,
@@ -633,7 +698,7 @@ def default_ethereum_package_network_params():
                     }
                 }
             ),
-        }
+        },
     }
 
 
