@@ -632,11 +632,10 @@ where
                     continue;
                 }
 
-                if payloads.iter().any(|payload| {
-                    let dup = spent_nullifier_hashes.contains(&payload.nullifier_hash);
-                    spent_nullifier_hashes.insert(payload.nullifier_hash);
-                    dup
-                }) {
+                if payloads
+                    .iter()
+                    .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
+                {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
