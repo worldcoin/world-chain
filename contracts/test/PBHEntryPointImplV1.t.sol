@@ -278,6 +278,9 @@ contract PBHEntryPointImplV1Test is TestSetup {
         vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.NullifierHashesSpent(BLOCK_BUILDER, nullifierHashes);
         pbhEntryPoint.spendNullifierHashes(nullifierHashes);
+        for (uint256 i = 0; i < nullifierHashes.length; i++) {
+            assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[i]), block.number);
+        }
     }
 
     function test_spendNullifierHashes_RevertIf_NotBlockBuilder(address builder) public {
