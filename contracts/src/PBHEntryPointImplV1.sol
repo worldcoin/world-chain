@@ -4,10 +4,8 @@ pragma solidity ^0.8.28;
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
-import {IMulticall3} from "./interfaces/IMulticall3.sol";
 import {ByteHasher} from "./lib/ByteHasher.sol";
 import {PBHExternalNullifier} from "./lib/PBHExternalNullifier.sol";
-import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 import {Base} from "./abstract/Base.sol";
@@ -350,7 +348,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
 
     /// @notice Allows a builder to spend all nullifiers within PBH blockspace.
     /// @param _nullifierHashes The nullifier hashes to spend.
-    function spendNullifierHashes(uint256[] memory _nullifierHashes) external virtual onlyProxy onlyBuilder {
+    function spendNullifierHashes(uint256[] calldata _nullifierHashes) external virtual onlyProxy onlyBuilder {
         for (uint256 i = 0; i < _nullifierHashes.length; ++i) {
             nullifierHashes[_nullifierHashes[i]] = block.number;
         }

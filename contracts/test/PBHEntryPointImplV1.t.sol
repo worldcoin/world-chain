@@ -260,7 +260,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_removeBuilder(address addr) public {
         vm.prank(OWNER);
-        vm.expectEmit(true, false, false, false);
+        vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.BuilderDeauthorized(addr);
         pbhEntryPoint.removeBuilder(addr);
     }
@@ -275,9 +275,12 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
     function test_spendNullifierHashes(uint256[] memory nullifierHashes) public {
         vm.prank(BLOCK_BUILDER);
-        vm.expectEmit(true, true, false, false);
+        vm.expectEmit(true, true, true, true);
         emit PBHEntryPointImplV1.NullifierHashesSpent(BLOCK_BUILDER, nullifierHashes);
         pbhEntryPoint.spendNullifierHashes(nullifierHashes);
+        for (uint256 i = 0; i < nullifierHashes.length; i++) {
+            assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[i]), block.number);
+        }
     }
 
     function test_spendNullifierHashes_RevertIf_NotBlockBuilder(address builder) public {

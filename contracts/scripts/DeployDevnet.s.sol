@@ -18,13 +18,11 @@ import {SafeModuleSetup} from "@4337/SafeModuleSetup.sol";
 import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
 import {Mock4337Module} from "../test/mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
-import {WorldChainBlockRegistry} from "../src/WorldChainBlockRegistry.sol";
 
 contract DeployDevnet is Script {
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;
     address public pbhSignatureAggregator;
-    address public worldChainBlockRegistry;
 
     Safe public singleton;
     SafeProxyFactory public factory;
@@ -53,7 +51,6 @@ contract DeployDevnet is Script {
         deployPBHEntryPoint();
         deployPBHSignatureAggregator();
         deploySafeAndModules();
-        deployWorldChainBlockRegistry();
         updateWorldID();
         vm.stopBroadcast();
     }
@@ -85,14 +82,6 @@ contract DeployDevnet is Script {
         console.log(
             "PBHSignatureAggregator Deployed at: ",
             pbhSignatureAggregator
-        );
-    }
-
-    function deployWorldChainBlockRegistry() public {
-        worldChainBlockRegistry = address(new WorldChainBlockRegistry(BUILDER));
-        console.log(
-            "WorldChainBlockRegistry Deployed at: ",
-            worldChainBlockRegistry
         );
     }
 

@@ -70,7 +70,6 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
         IWorldID worldId = IWorldID(address(1));
         IEntryPoint entryPoint = IEntryPoint(address(2));
         uint8 numPbh = 0;
-        address multicall = address(3);
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
 
@@ -85,7 +84,6 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
         IWorldID worldId = IWorldID(address(1));
         IEntryPoint entryPoint = IEntryPoint(address(2));
         uint8 numPbh = 30;
-        address multicall = address(3);
 
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
         bytes memory initCallData = abi.encodeCall(

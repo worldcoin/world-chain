@@ -605,23 +605,6 @@ where
                 }
             }
 
-            // If the transaction is verified, check if it can be added within the verified gas limit
-            if let Some(payloads) = pooled_tx.pbh_payload() {
-                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
-                    best_txs.mark_invalid(tx.signer(), tx.nonce());
-                    continue;
-                }
-
-                if payloads
-                    .iter()
-                    .any(|payload| spent_nullifier_hashes.contains(&payload.nullifier_hash))
-                {
-                    best_txs.mark_invalid(tx.signer(), tx.nonce());
-                    invalid_txs.push(*pooled_tx.hash());
-                    continue;
-                }
-            }
-
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
@@ -642,16 +625,31 @@ where
                 return Ok(Some(()));
             }
 
+            // If the transaction is verified, check if it can be added within the verified gas limit
+            if let Some(payloads) = pooled_tx.pbh_payload() {
+                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue;
+                }
+
+                if payloads
+                    .iter()
+                    .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
+                {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    invalid_txs.push(*pooled_tx.hash());
+                    continue;
+                }
+            }
+
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
-                        if spent_nullifier_hashes.is_empty() {
+                        if spent_nullifier_hashes.len() == payloads.len() {
                             block_gas_limit -= FIXED_GAS
                         }
 
                         block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
-                        spent_nullifier_hashes
-                            .extend(payloads.into_iter().map(|payload| payload.nullifier_hash));
                     }
                     res
                 }
