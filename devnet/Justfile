@@ -1,9 +1,13 @@
 set positional-arguments
 
-devnet-up: build spawn
+devnet-up: build setup spawn
 
 build:
     docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
+
+setup:
+    chmod +x ./scripts/configure_network.sh \
+        && ./scripts/configure_network.sh
 
 spawn: spawn-op spawn-builder
 
