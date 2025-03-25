@@ -7,10 +7,10 @@ services:
     env_file:
       - ./.env
     ports:
-      - '192.168.0.91:9001:9001' # metrics
-      - '192.168.0.91:30303:30303' # eth/66 peering
-      - '192.168.0.91:8545:8545' # rpc
-      - '192.168.0.91:8551:8551' # engine
+      - '${HOST_IP}:9001:9001' # metrics
+      - '${HOST_IP}:30303:30303' # eth/66 peering
+      - '${HOST_IP}:8545:8545' # rpc
+      - '${HOST_IP}:8551:8551' # engine
     volumes:
       - chain_data:/root/.local/share/reth/2151908
       - ./network-config:/root/network-config
@@ -27,7 +27,7 @@ services:
         --ws
         --ws.port 8546
         --ws.api=net,eth,miner
-        --nat=extip:192.168.0.91
+        --nat=extip:${HOST_IP}
         --trusted-peers=${L2_ENODE}
         --ws.origins=*
         --log.file.directory /root/logs
@@ -59,7 +59,7 @@ services:
     network_mode: host
     command: >
       op-node
-        --l2=http://192.168.0.91:8551
+        --l2=http://${HOST_IP}:8551
         --l2.jwt-secret=/root/network-config/jwt.hex
         --verifier.l1-confs=1
         --rollup.config=/root/network-config/rollup.json

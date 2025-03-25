@@ -22,4 +22,6 @@ ENODE="${ENODE_PREFIX}127.0.0.1:$L2_TCP_DISCOVERY"
 
 echo "L2_ENODE=$ENODE" >> .env
 
-# TODO Fetch Host inet gateway
+HOST_IP=$(ifconfig | sed -nE 's/127.0.0.1//;s/.*inet (addr:)?(([0-9]*\.){3}[0-9]*).*/\2/p')
+echo "HOST_IP=$HOST_IP" >> .env
+
