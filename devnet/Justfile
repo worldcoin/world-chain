@@ -5,19 +5,23 @@ devnet-up: build spawn
 build:
     docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
 
-spawn: spawn-op setup-env spawn-builder
+spawn: spawn-op spawn-builder
 
 spawn-op:
     kurtosis run github.com/ethpandaops/optimism-package --args-file ./kurtosis/network_params.yaml --enclave world-chain
 
-setup-env:
-    ./scripts/setup.sh
-
-spawn-builder:
+spawn-builder: setup-env
     docker compose up -d --build
+
+setup-env:
+    cp .env.devnet .env
+    chmod +x ./scripts/setup-env.sh \
+        && ./scripts/setup-env.sh
 
 devnet-down: 
     kurtosis clean -a
-    rm .env
+    docker compose down
+    rm .env && rm ./network-config/genesis.json && rm ./network-config/rollup.json
+    docker volume rm world-chain-builder_chain_data
 
 

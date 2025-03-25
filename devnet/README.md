@@ -6,7 +6,7 @@
 - [**Tests**](./tests/): Testing the World Chain Builder
 
 ### Starting the Devnet
-To start the devnet run `just devnet-up` from `etc` or the project root directory.
+To start the devnet run `just devnet-up` from `devnet` or the project root directory.
 
 ### Grafana
 

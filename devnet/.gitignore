@@ -1,1 +1,3 @@
-jwttoken
+network-config/genesis.json
+network-config/rollup.json
+.env
