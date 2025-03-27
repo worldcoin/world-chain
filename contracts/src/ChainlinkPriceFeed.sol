@@ -25,8 +25,6 @@ contract ChainlinkPriceFeed {
     // Struct to store price feed data
     struct PriceFeedData {
         int192 price;
-        int192 bid;
-        int192 ask;
         uint32 timestamp;
         uint32 expiresAt;
     }
@@ -52,8 +50,7 @@ contract ChainlinkPriceFeed {
     // Price feed data for the single pair
     PriceFeedData public priceFeed;
 
-    // Events
-    event PriceFeedUpdated(int192 price, int192 bid, int192 ask, uint32 timestamp, uint32 expiresAt);
+    event PriceFeedUpdated(int192 price, uint32 timestamp, uint32 expiresAt);
 
     /**
      * @dev Constructor to set the USDC address, Pair Token address, VerifierProxy address, feed ID and pair name
@@ -69,7 +66,7 @@ contract ChainlinkPriceFeed {
         address _usdcAddress,
         address _linkAddress,
         address _verifierProxyAddress,
-        // TODO: REMOVE NOT NEEDED
+        // TODO: REMOVE NOT NEEDED AFTER LINK REQUIREMENT IS REMOVED
         address _rewardManagerAddress,
         bytes32 _feedId,
         string memory _pairName
@@ -87,28 +84,27 @@ contract ChainlinkPriceFeed {
         PAIR_NAME = _pairName;
         LINK_TOKEN_ADDRESS = _linkAddress;
 
-        // TODO: Remove me, LINK payments are not required in production
-        // Approve the maximum amount of LINK tokens for spending by this contract
+        // TODO: REMOVE NOT NEEDED AFTER LINK REQUIREMENT IS REMOVED
         IERC20(LINK_TOKEN_ADDRESS).approve(address(_rewardManagerAddress), type(uint256).max);
     }
 
-    function updatePriceData(bytes memory verifyReportRequest, bytes memory parameterPayload) public returns (bytes memory) {
-        bytes memory returnDataCall = IVerifierProxy(VERIFIER_PROXY_ADDRESS).verify(
-            verifyReportRequest,
-            parameterPayload
-        );
+    function updatePriceData(bytes memory verifyReportRequest, bytes memory parameterPayload)
+        public
+        returns (bytes memory)
+    {
+        bytes memory returnDataCall =
+            IVerifierProxy(VERIFIER_PROXY_ADDRESS).verify(verifyReportRequest, parameterPayload);
 
         // Decode the return data into the specified structure
         (
             bytes32 receivedFeedId,
             uint32 validFromTimestamp,
             uint32 observationsTimestamp,
-            uint192 nativeFee,
-            uint192 linkFee,
+            ,
+            ,
             uint32 expiresAt,
             int192 price,
-            int192 bid,
-            int192 ask
+            ,
         ) = abi.decode(returnDataCall, (bytes32, uint32, uint32, uint192, uint192, uint32, int192, int192, int192));
 
         // Verify that the feed ID matches the contract's feed ID
@@ -119,16 +115,10 @@ contract ChainlinkPriceFeed {
         if (block.timestamp > expiresAt) revert PriceDataExpired();
 
         // Store the price feed data
-        priceFeed = PriceFeedData({
-            price: price,
-            bid: bid,
-            ask: ask,
-            timestamp: observationsTimestamp,
-            expiresAt: expiresAt
-        });
+        priceFeed = PriceFeedData({price: price, timestamp: observationsTimestamp, expiresAt: expiresAt});
 
         // Emit an event with the updated price feed data
-        emit PriceFeedUpdated(price, bid, ask, observationsTimestamp, expiresAt);
+        emit PriceFeedUpdated(price, observationsTimestamp, expiresAt);
 
         return returnDataCall;
     }
@@ -136,20 +126,14 @@ contract ChainlinkPriceFeed {
     /**
      * @dev Get the latest price feed data
      * @return price The latest price
-     * @return bid The latest bid price
-     * @return ask The latest ask price
      * @return timestamp The timestamp of the latest update
      * @return expiresAt The expiration timestamp
      */
-    function getLatestPriceFeed()
-        external
-        view
-        returns (int192 price, int192 bid, int192 ask, uint32 timestamp, uint32 expiresAt)
-    {
+    function getLatestPriceFeed() external view returns (int192 price, uint32 timestamp, uint32 expiresAt) {
         if (priceFeed.timestamp == 0) revert PriceFeedNotAvailable();
         if (block.timestamp > priceFeed.expiresAt) revert PriceFeedExpired();
 
-        return (priceFeed.price, priceFeed.bid, priceFeed.ask, priceFeed.timestamp, priceFeed.expiresAt);
+        return (priceFeed.price, priceFeed.timestamp, priceFeed.expiresAt);
     }
 
     /**
