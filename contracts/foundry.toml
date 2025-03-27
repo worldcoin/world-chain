@@ -1,11 +1,14 @@
 [profile.default]
+solc = "0.8.28"
 evm_version = 'cancun'
-fs_permissions = [{access = "read-write", path = "./"}]
 libs = ["lib"]
-optimizer = true
-optimizer_runs = 200
 out = "out"
 src = "src"
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+cbor_metadata = false
+fs_permissions = [{access = "read-write", path = "./"}]
 
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
