@@ -3,15 +3,24 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+interface IVerifierProxy {
+    function verify(bytes memory payload, bytes memory parameterPayload) external returns (bytes memory);
+}
+
 /**
  * @title PriceFeedStorage
  * @dev Contract for storing and updating price feed data for a single asset pair
  */
-contract PriceFeedStorage {
-    // Interface for the VerifierProxy contract
-    interface IVerifierProxy {
-        function verify(bytes memory payload, bytes memory parameterPayload) external returns (bytes);
-    }
+contract ChainlinkPriceFeed {
+    // Custom errors
+    error InvalidAddress(string parameterName);
+    error InvalidFeedId();
+    error VerificationFailed();
+    error FeedIdMismatch();
+    error PriceDataNotYetValid();
+    error PriceDataExpired();
+    error PriceFeedNotAvailable();
+    error PriceFeedExpired();
 
     // Struct to store price feed data
     struct PriceFeedData {
@@ -23,34 +32,28 @@ contract PriceFeedStorage {
     }
 
     // Address of the pair token (always the first token in the pair)
-    address public immutable pairAddress;
+    address public immutable PAIR_TOKEN_ADDRESS;
 
     // Address of the USDC token (always the second token in the pair)
-    address public immutable usdcAddress;
-    
+    address public immutable USDC_TOKEN_ADDRESS;
+
     // Address of the LINK token
-    address public immutable linkAddress;
+    address public immutable LINK_TOKEN_ADDRESS;
 
     // Address of the VerifierProxy contract
-    address public immutable verifierProxyAddress;
+    address public immutable VERIFIER_PROXY_ADDRESS;
 
     // The unique identifier for this price feed
-    bytes32 public immutable feedId;
-    
-    // Human-readable name of the pair (e.g., "ETH/USD")
-    string public pairName;
+    bytes32 public immutable FEED_ID;
+
+    // Human-readable name of the pair (e.g., "WLD/USD")
+    string public PAIR_NAME;
 
     // Price feed data for the single pair
     PriceFeedData public priceFeed;
 
     // Events
-    event PriceFeedUpdated(
-        int192 price,
-        int192 bid,
-        int192 ask,
-        uint32 timestamp,
-        uint32 expiresAt
-    );
+    event PriceFeedUpdated(int192 price, int192 bid, int192 ask, uint32 timestamp, uint32 expiresAt);
 
     /**
      * @dev Constructor to set the USDC address, Pair Token address, VerifierProxy address, feed ID and pair name
@@ -66,36 +69,34 @@ contract PriceFeedStorage {
         address _usdcAddress,
         address _linkAddress,
         address _verifierProxyAddress,
+        // TODO: REMOVE NOT NEEDED
+        address _rewardManagerAddress,
         bytes32 _feedId,
         string memory _pairName
     ) {
-        require(_usdcAddress != address(0), "Invalid USDC address");
-        require(_pairAddress != address(0), "Invalid pair address");
-        require(_verifierProxyAddress != address(0), "Invalid VerifierProxy address");
-        require(_feedId != bytes32(0), "Invalid feed ID");
-        require(_linkAddress != address(0), "Invalid LINK address");
-        
-        usdcAddress = _usdcAddress;
-        pairAddress = _pairAddress;
-        verifierProxyAddress = _verifierProxyAddress;
-        feedId = _feedId;
-        pairName = _pairName;
-        linkAddress = _linkAddress;
+        if (_usdcAddress == address(0)) revert InvalidAddress("USDC");
+        if (_pairAddress == address(0)) revert InvalidAddress("Pair");
+        if (_verifierProxyAddress == address(0)) revert InvalidAddress("VerifierProxy");
+        if (_feedId == bytes32(0)) revert InvalidFeedId();
+        if (_linkAddress == address(0)) revert InvalidAddress("LINK");
+
+        USDC_TOKEN_ADDRESS = _usdcAddress;
+        PAIR_TOKEN_ADDRESS = _pairAddress;
+        VERIFIER_PROXY_ADDRESS = _verifierProxyAddress;
+        FEED_ID = _feedId;
+        PAIR_NAME = _pairName;
+        LINK_TOKEN_ADDRESS = _linkAddress;
 
         // TODO: Remove me, LINK payments are not required in production
         // Approve the maximum amount of LINK tokens for spending by this contract
-        IERC20(linkAddress).approve(address(this), type(uint256).max);
+        IERC20(LINK_TOKEN_ADDRESS).approve(address(_rewardManagerAddress), type(uint256).max);
     }
 
-
-    function updatePriceData(bytes memory verifyReportRequest) public returns (bool success, bytes memory returnData) {
-        // Perform a low-level call to the verifierProxy.verify function
-        (success, returnData) = address(verifierProxy).call(
-            abi.encodeWithSignature("verify(bytes,bytes)", verifyReportRequest, bytes(linkAddress))
+    function updatePriceData(bytes memory verifyReportRequest, bytes memory parameterPayload) public returns (bytes memory) {
+        bytes memory returnDataCall = IVerifierProxy(VERIFIER_PROXY_ADDRESS).verify(
+            verifyReportRequest,
+            parameterPayload
         );
-
-        // Check if the call was successful
-        require(success, "Price data verification failed");
 
         // Decode the return data into the specified structure
         (
@@ -108,14 +109,14 @@ contract PriceFeedStorage {
             int192 price,
             int192 bid,
             int192 ask
-        ) = abi.decode(returnData, (bytes32, uint32, uint32, uint192, uint192, uint32, int192, int192, int192));
+        ) = abi.decode(returnDataCall, (bytes32, uint32, uint32, uint192, uint192, uint32, int192, int192, int192));
 
         // Verify that the feed ID matches the contract's feed ID
-        require(receivedFeedId == feedId, "Feed ID does not match");
+        if (receivedFeedId != FEED_ID) revert FeedIdMismatch();
 
         // Validate the expiration times
-        require(block.timestamp >= validFromTimestamp, "Price data is not yet valid");
-        require(block.timestamp <= expiresAt, "Price data has expired");
+        if (block.timestamp < validFromTimestamp) revert PriceDataNotYetValid();
+        if (block.timestamp > expiresAt) revert PriceDataExpired();
 
         // Store the price feed data
         priceFeed = PriceFeedData({
@@ -128,6 +129,8 @@ contract PriceFeedStorage {
 
         // Emit an event with the updated price feed data
         emit PriceFeedUpdated(price, bid, ask, observationsTimestamp, expiresAt);
+
+        return returnDataCall;
     }
 
     /**
@@ -138,23 +141,15 @@ contract PriceFeedStorage {
      * @return timestamp The timestamp of the latest update
      * @return expiresAt The expiration timestamp
      */
-    function getLatestPriceFeed() external view returns (
-        int192 price,
-        int192 bid,
-        int192 ask,
-        uint32 timestamp,
-        uint32 expiresAt
-    ) {
-        require(priceFeed.timestamp > 0, "Price feed not available");
-        require(block.timestamp <= priceFeed.expiresAt, "Price feed has expired");
-        
-        return (
-            priceFeed.price,
-            priceFeed.bid,
-            priceFeed.ask,
-            priceFeed.timestamp,
-            priceFeed.expiresAt
-        );
+    function getLatestPriceFeed()
+        external
+        view
+        returns (int192 price, int192 bid, int192 ask, uint32 timestamp, uint32 expiresAt)
+    {
+        if (priceFeed.timestamp == 0) revert PriceFeedNotAvailable();
+        if (block.timestamp > priceFeed.expiresAt) revert PriceFeedExpired();
+
+        return (priceFeed.price, priceFeed.bid, priceFeed.ask, priceFeed.timestamp, priceFeed.expiresAt);
     }
 
     /**
