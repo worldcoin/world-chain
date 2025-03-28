@@ -221,8 +221,6 @@ where
     }
 }
 
-pub struct Flashblock {}
-
 pub fn build_flashblock<EvmConfig, ChainSpec, DB, P>(
     mut state: State<DB>,
     ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec>,
