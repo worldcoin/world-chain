@@ -31,3 +31,4 @@ tokio.workspace = true
 
 # misc
 tracing.workspace = true
+serde_json.workspace = true
