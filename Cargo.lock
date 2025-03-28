@@ -3563,6 +3563,7 @@ dependencies = [
 name = "flashblocks-payload"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -3579,6 +3580,7 @@ dependencies = [
  "reth-transaction-pool",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
 ]
 
