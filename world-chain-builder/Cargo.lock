@@ -123,7 +123,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-trie",
  "arbitrary",
  "auto_impl",
@@ -148,7 +148,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
 ]
 
@@ -235,7 +235,7 @@ dependencies = [
  "alloy-eip7702",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "arbitrary",
  "auto_impl",
  "c-kzg",
@@ -274,7 +274,7 @@ checksum = "96b11774716152a5204aff0e86a8c841df499ea81464e2b1f82b3f72d6a2ef32"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-trie",
  "serde",
 ]
@@ -333,7 +333,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-any",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-signer",
  "alloy-sol-types",
  "async-trait",
@@ -354,7 +354,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
 ]
 
@@ -532,7 +532,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
 ]
 
@@ -556,7 +556,7 @@ checksum = "5462937f088889c337c236c2509226e87a26301d2b01f9fafee246bd84cb0407"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
 ]
 
@@ -568,7 +568,7 @@ checksum = "2cd4ceea38ea27eeb26f021df34ed5b7b793704ad7a2a009f16137a19461e7ca"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
 ]
 
 [[package]]
@@ -609,7 +609,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "derive_more 2.0.1",
  "ethereum_ssz",
  "ethereum_ssz_derive",
@@ -632,7 +632,7 @@ dependencies = [
  "alloy-network-primitives",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-sol-types",
  "arbitrary",
  "itertools 0.14.0",
@@ -651,7 +651,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
  "serde_json",
 ]
@@ -664,7 +664,7 @@ checksum = "5ef4bba67ec601730ceb23e542980d73ae9f718819604dfdd8289b13a506e762"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -678,8 +678,19 @@ checksum = "8edc8512f919feb79dd30864ef7574d2877e71b73e30b5de4925ba9bc6bd4f96"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "serde",
+]
+
+[[package]]
+name = "alloy-serde"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9afa753a97002a33b2ccb707d9f15f31c81b8c1b786c95b73cc62bb1d1fd0c3f"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3354,6 +3365,8 @@ dependencies = [
 name = "flashblocks-payload"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
+ "alloy-serde 0.7.3",
  "futures-util",
  "reth",
  "reth-basic-payload-builder",
@@ -3369,6 +3382,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-transaction-pool",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
@@ -5633,7 +5647,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "arbitrary",
  "derive_more 1.0.0",
  "serde",
@@ -5683,7 +5697,7 @@ dependencies = [
  "alloy-network-primitives",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "derive_more 1.0.0",
  "op-alloy-consensus",
  "serde",
@@ -5700,7 +5714,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "derive_more 1.0.0",
  "ethereum_ssz",
  "op-alloy-consensus",
@@ -7628,7 +7642,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "arbitrary",
  "derive_more 2.0.1",
  "modular-bitfield",
@@ -8528,7 +8542,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "arbitrary",
  "bytes",
  "derive_more 2.0.1",
@@ -8920,7 +8934,7 @@ dependencies = [
  "alloy-rpc-types-mev",
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-signer",
  "alloy-signer-local",
  "async-trait",
@@ -8988,7 +9002,7 @@ dependencies = [
  "alloy-rpc-types-mev",
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -9076,7 +9090,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-mev",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "async-trait",
  "auto_impl",
  "dyn-clone",
@@ -9483,7 +9497,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-serde",
+ "alloy-serde 0.12.5",
  "alloy-trie",
  "arbitrary",
  "bytes",
