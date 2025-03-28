@@ -3365,6 +3365,8 @@ dependencies = [
 name = "flashblocks-payload"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-serde 0.7.3",
  "futures-util",
@@ -3373,6 +3375,7 @@ dependencies = [
  "reth-chain-state",
  "reth-evm",
  "reth-optimism-chainspec",
+ "reth-optimism-consensus",
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
@@ -3382,6 +3385,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-transaction-pool",
+ "revm",
  "serde",
  "serde_json",
  "tokio",
