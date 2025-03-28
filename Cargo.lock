@@ -3560,6 +3560,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "flashblocks-payload"
+version = "0.1.0"
+dependencies = [
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-evm",
+ "reth-optimism-chainspec",
+ "reth-optimism-forks",
+ "reth-optimism-node",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-payload-util",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-transaction-pool",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
