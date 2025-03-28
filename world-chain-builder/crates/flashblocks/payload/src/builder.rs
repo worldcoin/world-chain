@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use futures_util::{sink::SinkExt, FutureExt};
 use reth::{
     api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
@@ -28,6 +29,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
 };
+use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::warn;
 
 pub trait FlashblockBuilder: BlockBuilder {
@@ -59,7 +61,7 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs = ()> {
     pub tx: mpsc::UnboundedSender<String>,
 }
 
-impl<Pool, Client, Evm, N, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
+impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
     pub fn new() -> Self {
         todo!()
     }
