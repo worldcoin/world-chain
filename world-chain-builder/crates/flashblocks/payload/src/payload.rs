@@ -1,9 +1,10 @@
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{map::foldhash::HashMap, Address, Bytes, U256};
 use reth::{
     payload::PayloadId,
     revm::primitives::{alloy_primitives::Bloom, B256},
     rpc::types::Withdrawal,
 };
+use reth_primitives::NodePrimitives;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -73,4 +74,11 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
     pub withdrawals: Vec<Withdrawal>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FlashblocksMetadata<N: NodePrimitives> {
+    pub receipts: HashMap<B256, N::Receipt>,
+    pub new_account_balances: HashMap<Address, U256>,
+    pub block_number: u64,
 }
