@@ -1,23 +1,31 @@
 set positional-arguments
 
-# default recipe to display help information
-default:
-    @just --list
+devnet-up: build setup spawn
 
-# Spawns the devnet
-devnet-up: build
-    kurtosis run . --args-file network_params.yaml --enclave world-chain
-
-# Stops the devnet **This will prune all docker containers**
-devnet-down:
-    kurtosis enclave rm -f world-chain
-    kurtosis clean
-
-# Builds and tags the world-chain-builder
-build: build-world-chain
-
-build-world-chain:
+build:
     docker buildx build -t world-chain-builder:latest -f ../world-chain-builder/Dockerfile ../world-chain-builder
 
-fmt: 
-    kurtosis lint --format
+setup:
+    chmod +x ./scripts/configure_network.sh \
+        && ./scripts/configure_network.sh
+
+spawn: spawn-op spawn-builder
+
+spawn-op:
+    kurtosis run github.com/ethpandaops/optimism-package --args-file ./kurtosis/network_params.yaml --enclave world-chain
+
+spawn-builder: setup-env
+    docker compose up -d --build
+
+setup-env:
+    cp .env.devnet .env
+    chmod +x ./scripts/setup-env.sh \
+        && ./scripts/setup-env.sh
+
+devnet-down: 
+    kurtosis clean -a
+    docker compose down
+    rm .env && rm ./network-config/genesis.json && rm ./network-config/rollup.json
+    docker volume rm world-chain-builder_chain_data
+
+
