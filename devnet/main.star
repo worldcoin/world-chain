@@ -2,6 +2,9 @@ optimism_package = import_module("github.com/dzejkop/optimism-package/main.star@
 
 world_chain_builder = import_module("./el/world_chain_builder_launcher.star")
 
+rundler = import_module("./bundler/rundler/rundler_launcher.star")
+rundler_static = import_module("./static_files/static_files.star")
+
 def run(plan, args={}):
   optimism_package.run(plan, args, custom_launchers={
       "el_builder_launcher": {
@@ -10,3 +13,33 @@ def run(plan, args={}):
       },
     }
   )
+
+  rundler_builder_config_file = plan.upload_files(
+      src=rundler_static.RUNDLER_BUILDER_CONFIG_FILE_PATH,
+      name="builder_config.json",
+  )
+  rundler_mempool_config_file = plan.upload_files(
+      src=rundler_static.RUNDLER_MEMPOOL_CONFIG_FILE_PATH,
+      name="mempool_config.json",
+  )
+  rundler_chain_spec = plan.upload_files(
+      src=rundler_static.RUNDLER_CHAIN_SPEC_FILE_PATH,
+      name="chain_spec.json",
+  )
+
+  # Extract HTTP RPC url of the builder
+  builder_srv = plan.get_service("op-el-builder-1-custom-op-node-op-kurtosis")
+  builder_rpc_port = builder_srv.ports["rpc"].number
+  builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
+
+  plan.print(builder_rpc_url)
+
+  rundler.launch(plan, 
+      service_name="rundler", 
+      image="alchemyplatform/rundler:v0.6.0-alpha.3",
+      rpc_http_url=builder_rpc_url,
+      builder_config_file=rundler_builder_config_file,
+      mempool_config_file=rundler_mempool_config_file,
+      chain_spec_file=rundler_chain_spec,
+  )
+

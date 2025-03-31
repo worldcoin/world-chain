@@ -7,6 +7,7 @@
 use std::{
     env,
     path::Path,
+    process::Stdio,
     sync::Arc,
     time::{self, Duration, Instant},
 };
@@ -17,11 +18,12 @@ use alloy_provider::RootProvider;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use clap::Parser;
-use eyre::eyre::{eyre, Result};
+use eyre::eyre;
+use eyre::Result;
 use fixtures::TransactionFixtures;
 use std::process::Command;
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{error, info};
 pub mod cases;
 pub mod fixtures;
 
@@ -40,6 +42,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
     let args = Args::parse();
     let (builder_rpc, sequencer_rpc, rundler) = start_devnet(args).await?;
 
@@ -81,11 +84,21 @@ async fn start_devnet(args: Args) -> Result<(String, String, String)> {
     if !args.no_deploy {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
-            .nth(3)
+            .nth(4)
             .unwrap()
             .canonicalize()?;
 
-        run_command("just", &["devnet-up"], path).await?;
+        let mut command = Command::new("just")
+            .current_dir(path)
+            .args(["devnet-up"])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+
+        let status = command.wait()?;
+        if !status.success() {
+            eyre::bail!("Failed to start the devnet");
+        }
     }
 
     let (builder_socket, sequencer_socket, rundler) = get_endpoints().await?;
@@ -107,7 +120,7 @@ async fn get_endpoints() -> Result<(String, String, String)> {
             "port",
             "print",
             "world-chain",
-            "op-el-builder-1-world-chain-builder-op-node-op-kurtosis",
+            "op-el-builder-1-custom-op-node-op-kurtosis",
             "rpc",
         ],
         env!("CARGO_MANIFEST_DIR"),
@@ -134,7 +147,7 @@ async fn get_endpoints() -> Result<(String, String, String)> {
 
     let rundler_socket = run_command(
         "kurtosis",
-        &["port", "print", "world-chain", "rundlerop-kurtosis", "rpc"],
+        &["port", "print", "world-chain", "rundler", "rpc"],
         env!("CARGO_MANIFEST_DIR"),
     )
     .await?;
@@ -168,16 +181,27 @@ where
     }
 }
 
-pub async fn run_command(cmd: &str, args: &[&str], ctx: impl AsRef<Path>) -> Result<String> {
-    let output = Command::new(cmd).current_dir(ctx).args(args).output()?;
+pub async fn run_command(cmd: &str, args: &[&str], cwd: impl AsRef<Path>) -> Result<String> {
+    let cwd = cwd.as_ref();
+    let output = Command::new(cmd).current_dir(cwd).args(args).output()?;
     if output.status.success() {
         let stdout = String::from_utf8(output.stdout)?;
         info!("{:?}", stdout.trim_end_matches(r#"\n"#));
         Ok(stdout)
     } else {
-        Err(eyre!(
-            "Command failed: {:?}",
-            String::from_utf8(output.stdout)?.trim_end_matches(r#"\n"#),
-        ))
+        let aggregate_cmd = std::iter::once(cmd)
+            .chain(args.iter().copied())
+            .collect::<Vec<&str>>()
+            .join(" ");
+        let stdout = String::from_utf8(output.stdout)?;
+        let stderr = String::from_utf8(output.stderr)?;
+
+        error!(
+            "Command {aggregate_cmd} in {cwd} failed:",
+            cwd = cwd.display()
+        );
+        error!("{stdout}");
+        error!("{stderr}");
+        eyre::bail!("Command {aggregate_cmd} failed: {stdout}\n{stderr}",)
     }
 }

@@ -140,7 +140,7 @@ where
             "service",
             "stop",
             "world-chain",
-            "op-el-builder-1-world-chain-builder-op-node-op-kurtosis",
+            "op-el-builder-1-custom-op-node-op-kurtosis",
         ],
         env!("CARGO_MANIFEST_DIR"),
     )
