@@ -10,7 +10,7 @@ import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {IMulticall3} from "../src/interfaces/IMulticall3.sol";
-import {PBHEntryPoint} from "../src/PBHEntryPoint.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {TestSetup} from "./TestSetup.sol";
 import {TestUtils} from "./TestUtils.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
