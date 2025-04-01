@@ -155,7 +155,7 @@ where
     fn build_payload<'a, Txs>(
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
-        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
@@ -176,7 +176,7 @@ where
             best_payload,
         };
 
-        let builder = FlashblockBuilder::new(best);
+        let builder = FlashblockBuilder::new(best, self.tx.clone());
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
 
@@ -205,9 +205,9 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let pool = self.pool.clone();
         self.build_payload(args, |attrs| {
-            self.best_transactions.best_transactions(pool, attrs)
+            self.best_transactions
+                .best_transactions(self.pool.clone(), attrs)
         })
     }
 
@@ -245,14 +245,20 @@ where
 /// 5. build the block: compute all roots (txs, state)
 pub struct FlashblockBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
+    best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
+    /// Channel sender for publishing messages
+    pub tx: mpsc::UnboundedSender<String>,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs> {
     /// Creates a new [`OpBuilder`].
-    pub fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+    pub fn new(
+        best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> Self {
         Self {
             best: Box::new(best),
+            tx,
         }
     }
 }
@@ -272,7 +278,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
-        let Self { best } = self;
+        let Self { best, tx } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // NOTE: we do not need to init this every time
@@ -283,36 +289,47 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
         let mut builder = ctx.block_builder(&mut db)?;
 
-        // NOTE: this can be calculated once
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes().map_err(|err| {
             warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
             PayloadBuilderError::Internal(err.into())
         })?;
 
-        // NOTE: this can be calculated once
         // 2. execute sequencer transactions
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
-        // 3. if mem pool transactions are requested we execute them
-
-        // TODO: the gas limit for each flashblock should be enforced. We can add this by passing it into the `execute_best_transactions` function
         if !ctx.attributes().no_tx_pool {
-            let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs)?
-                .is_some()
-            {
-                return Ok(BuildOutcomeKind::Cancelled);
+            // let flashblock_gas_limit =
+            //     ctx.block_gas_limit() / (self.chain_block_time / self.flashblock_block_time);
+
+            // TODO: make this dynamic
+            let num_flashblocks = 4;
+
+            for _ in 0..num_flashblocks {
+                let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
+                if ctx
+                    .execute_best_transactions(&mut info, &mut builder, best_txs)?
+                    .is_some()
+                {
+                    return Ok(BuildOutcomeKind::Cancelled);
+                }
             }
 
-            // check if the new payload is even more valuable
-            if !ctx.is_better_payload(info.total_fees) {
-                // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted {
-                    fees: info.total_fees,
-                });
-            }
+            // TODO: this should be builder.finish_flashblock(), updates the bundle state, etc.
+            let (_, fb_payload, mut bundle_state) =
+                build_flashblock(&mut builder, &ctx, &mut info)?;
+
+            // TODO: need to update db with bundle state
+            tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
+                .expect("TODO: handle error");
+        }
+
+        // check if the new payload is even more valuable
+        if !ctx.is_better_payload(info.total_fees) {
+            // can skip building the block
+            return Ok(BuildOutcomeKind::Aborted {
+                fees: info.total_fees,
+            });
         }
 
         let BlockBuilderOutcome {
@@ -366,187 +383,190 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 // It looks like we only need to do some of thes calculations once when building the final block. This
 // function should be updated and return all the necessary components needed to seal the block.
 // */
-// pub fn build_flashblock<Evm, ChainSpec, DB, P>(
-//     mut state: State<DB>,
-//     ctx: &OpPayloadBuilderCtx<Evm, ChainSpec>,
-//     info: &mut ExecutionInfo,
-// ) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
-// where
-//     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-//     ChainSpec: EthChainSpec + OpHardforks,
-//     DB: Database<Error = ProviderError> + AsRef<P>,
-//     P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
-// {
-//     // NOTE: ctx.withdrawals_root does not exist in latest reth
-//     // let withdrawals_root = ctx.commit_withdrawals(&mut state)?;
+pub fn build_flashblock<Evm, ChainSpec>(
+    builder: &mut impl BlockBuilder,
+    // builder: &mut impl BlockBuilder<Primitives = impl PoolTransaction>,
+    ctx: &OpPayloadBuilderCtx<Evm, ChainSpec>,
+    info: &mut ExecutionInfo,
+) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
+where
+    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    ChainSpec: EthChainSpec + OpHardforks,
+    // DB: Database<Error = ProviderError> + AsRef<P>,
+    // P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
+{
+    // // NOTE: ctx.withdrawals_root does not exist in latest reth
+    // // let withdrawals_root = ctx.commit_withdrawals(&mut state)?;
 
-//     // TODO: We must run this only once per block, but we are running it on every flashblock
-//     // merge all transitions into bundle state, this would apply the withdrawal balance changes
-//     // and 4788 contract call
-//     state.merge_transitions(BundleRetention::Reverts);
+    // // TODO: We must run this only once per block, but we are running it on every flashblock
+    // // merge all transitions into bundle state, this would apply the withdrawal balance changes
+    // // and 4788 contract call
+    // state.merge_transitions(BundleRetention::Reverts);
 
-//     let new_bundle = state.take_bundle();
+    // let new_bundle = state.take_bundle();
 
-//     // NOTE: ctx.block_number does not exist in latest reth
-//     // let block_number = ctx.block_number();
-//     // assert_eq!(block_number, ctx.parent().number + 1);
+    // // NOTE: ctx.block_number does not exist in latest reth
+    // // let block_number = ctx.block_number();
+    // // assert_eq!(block_number, ctx.parent().number + 1);
 
-//     let block_number = ctx.parent().number + 1;
-//     let execution_outcome = ExecutionOutcome::new(
-//         new_bundle.clone(),
-//         vec![info.receipts.clone()],
-//         block_number,
-//         vec![],
-//     );
-//     let receipts_root = execution_outcome
-//         .generic_receipts_root_slow(block_number, |receipts| {
-//             calculate_receipt_root_no_memo_optimism(
-//                 receipts,
-//                 &ctx.chain_spec,
-//                 ctx.attributes().timestamp(),
-//             )
-//         })
-//         .expect("Number is in range");
-//     let logs_bloom = execution_outcome
-//         .block_logs_bloom(block_number)
-//         .expect("Number is in range");
+    // let block_number = ctx.parent().number + 1;
+    // let execution_outcome = ExecutionOutcome::new(
+    //     new_bundle.clone(),
+    //     vec![info.receipts.clone()],
+    //     block_number,
+    //     vec![],
+    // );
+    // let receipts_root = execution_outcome
+    //     .generic_receipts_root_slow(block_number, |receipts| {
+    //         calculate_receipt_root_no_memo_optimism(
+    //             receipts,
+    //             &ctx.chain_spec,
+    //             ctx.attributes().timestamp(),
+    //         )
+    //     })
+    //     .expect("Number is in range");
+    // let logs_bloom = execution_outcome
+    //     .block_logs_bloom(block_number)
+    //     .expect("Number is in range");
 
-//     // // calculate the state root
-//     let state_provider = state.database.as_ref();
-//     let hashed_state = state_provider.hashed_post_state(execution_outcome.state());
-//     let (state_root, _trie_output) = {
-//         state
-//             .database
-//             .as_ref()
-//             .state_root_with_updates(hashed_state.clone())
-//             .inspect_err(|err| {
-//                 warn!(target: "payload_builder",
-//                 parent_header=%ctx.parent().hash(),
-//                     %err,
-//                     "failed to calculate state root for payload"
-//                 );
-//             })?
-//     };
+    // // // calculate the state root
+    // let state_provider = state.database.as_ref();
+    // let hashed_state = state_provider.hashed_post_state(execution_outcome.state());
+    // let (state_root, _trie_output) = {
+    //     state
+    //         .database
+    //         .as_ref()
+    //         .state_root_with_updates(hashed_state.clone())
+    //         .inspect_err(|err| {
+    //             warn!(target: "payload_builder",
+    //             parent_header=%ctx.parent().hash(),
+    //                 %err,
+    //                 "failed to calculate state root for payload"
+    //             );
+    //         })?
+    // };
 
-//     // create the block header
-//     let transactions_root = proofs::calculate_transaction_root(&info.executed_transactions);
+    // // create the block header
+    // let transactions_root = proofs::calculate_transaction_root(&info.executed_transactions);
 
-//     // OP doesn't support blobs/EIP-4844.
-//     // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
-//     // Need [Some] or [None] based on hardfork to match block hash.
-//     let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
-//     let extra_data = ctx.extra_data()?;
+    // // OP doesn't support blobs/EIP-4844.
+    // // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
+    // // Need [Some] or [None] based on hardfork to match block hash.
+    // let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
+    // let extra_data = ctx.extra_data()?;
 
-//     let header = Header {
-//         parent_hash: ctx.parent().hash(),
-//         ommers_hash: EMPTY_OMMER_ROOT_HASH,
-//         beneficiary: ctx.evm_env.block_env.coinbase,
-//         state_root,
-//         transactions_root,
-//         receipts_root,
-//         withdrawals_root,
-//         logs_bloom,
-//         timestamp: ctx.attributes().payload_attributes.timestamp,
-//         mix_hash: ctx.attributes().payload_attributes.prev_randao,
-//         nonce: BEACON_NONCE.into(),
-//         base_fee_per_gas: Some(ctx.base_fee()),
-//         number: ctx.parent().number + 1,
-//         gas_limit: ctx.block_gas_limit(),
-//         difficulty: U256::ZERO,
-//         gas_used: info.cumulative_gas_used,
-//         extra_data,
-//         parent_beacon_block_root: ctx.attributes().payload_attributes.parent_beacon_block_root,
-//         blob_gas_used,
-//         excess_blob_gas,
-//         requests_hash: None,
-//     };
+    // let header = Header {
+    //     parent_hash: ctx.parent().hash(),
+    //     ommers_hash: EMPTY_OMMER_ROOT_HASH,
+    //     beneficiary: ctx.evm_env.block_env.coinbase,
+    //     state_root,
+    //     transactions_root,
+    //     receipts_root,
+    //     withdrawals_root,
+    //     logs_bloom,
+    //     timestamp: ctx.attributes().payload_attributes.timestamp,
+    //     mix_hash: ctx.attributes().payload_attributes.prev_randao,
+    //     nonce: BEACON_NONCE.into(),
+    //     base_fee_per_gas: Some(ctx.base_fee()),
+    //     number: ctx.parent().number + 1,
+    //     gas_limit: ctx.block_gas_limit(),
+    //     difficulty: U256::ZERO,
+    //     gas_used: info.cumulative_gas_used,
+    //     extra_data,
+    //     parent_beacon_block_root: ctx.attributes().payload_attributes.parent_beacon_block_root,
+    //     blob_gas_used,
+    //     excess_blob_gas,
+    //     requests_hash: None,
+    // };
 
-//     // seal the block
-//     let block = N::Block::new(
-//         header,
-//         BlockBody {
-//             transactions: info.executed_transactions.clone(),
-//             ommers: vec![],
-//             withdrawals: ctx.withdrawals().cloned(),
-//         },
-//     );
+    // // seal the block
+    // let block = N::Block::new(
+    //     header,
+    //     BlockBody {
+    //         transactions: info.executed_transactions.clone(),
+    //         ommers: vec![],
+    //         withdrawals: ctx.withdrawals().cloned(),
+    //     },
+    // );
 
-//     let sealed_block = Arc::new(block.seal_slow());
-//     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+    // let sealed_block = Arc::new(block.seal_slow());
+    // debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-//     let block_hash = sealed_block.hash();
+    // let block_hash = sealed_block.hash();
 
-//     // pick the new transactions from the info field and update the last flashblock index
-//     let new_transactions = info.executed_transactions[info.last_flashblock_index..].to_vec();
+    // // pick the new transactions from the info field and update the last flashblock index
+    // let new_transactions = info.executed_transactions[info.last_flashblock_index..].to_vec();
 
-//     let new_transactions_encoded = new_transactions
-//         .clone()
-//         .into_iter()
-//         .map(|tx| tx.encoded_2718().into())
-//         .collect::<Vec<_>>();
+    // let new_transactions_encoded = new_transactions
+    //     .clone()
+    //     .into_iter()
+    //     .map(|tx| tx.encoded_2718().into())
+    //     .collect::<Vec<_>>();
 
-//     let new_receipts = info.receipts[info.last_flashblock_index..].to_vec();
-//     info.last_flashblock_index = info.executed_transactions.len();
-//     let receipts_with_hash = new_transactions
-//         .iter()
-//         .zip(new_receipts.iter())
-//         .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
-//         .collect::<HashMap<B256, N::Receipt>>();
-//     let new_account_balances = new_bundle
-//         .state
-//         .iter()
-//         .filter_map(|(address, account)| account.info.as_ref().map(|info| (*address, info.balance)))
-//         .collect::<HashMap<Address, U256>>();
+    // let new_receipts = info.receipts[info.last_flashblock_index..].to_vec();
+    // info.last_flashblock_index = info.executed_transactions.len();
+    // let receipts_with_hash = new_transactions
+    //     .iter()
+    //     .zip(new_receipts.iter())
+    //     .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
+    //     .collect::<HashMap<B256, N::Receipt>>();
+    // let new_account_balances = new_bundle
+    //     .state
+    //     .iter()
+    //     .filter_map(|(address, account)| account.info.as_ref().map(|info| (*address, info.balance)))
+    //     .collect::<HashMap<Address, U256>>();
 
-//     let metadata = FlashblocksMetadata {
-//         receipts: receipts_with_hash,
-//         new_account_balances,
-//         block_number: ctx.parent().number + 1,
-//     };
+    // let metadata = FlashblocksMetadata {
+    //     receipts: receipts_with_hash,
+    //     new_account_balances,
+    //     block_number: ctx.parent().number + 1,
+    // };
 
-//     // Prepare the flashblocks message
-//     let fb_payload = FlashblocksPayloadV1 {
-//         payload_id: ctx.payload_id(),
-//         index: 0, // TODO: fix this
-//         base: Some(ExecutionPayloadBaseV1 {
-//             parent_beacon_block_root: ctx
-//                 .attributes()
-//                 .payload_attributes
-//                 .parent_beacon_block_root
-//                 .unwrap(),
-//             parent_hash: ctx.parent().hash(),
-//             fee_recipient: ctx.attributes().suggested_fee_recipient(),
-//             prev_randao: ctx.attributes().payload_attributes.prev_randao,
-//             block_number: ctx.parent().number + 1,
-//             gas_limit: ctx.block_gas_limit(),
-//             timestamp: ctx.attributes().payload_attributes.timestamp,
-//             extra_data: ctx.extra_data()?,
-//             base_fee_per_gas: ctx.base_fee().try_into().unwrap(),
-//         }),
-//         diff: ExecutionPayloadFlashblockDeltaV1 {
-//             state_root,
-//             receipts_root,
-//             logs_bloom,
-//             gas_used: info.cumulative_gas_used,
-//             block_hash,
-//             transactions: new_transactions_encoded,
-//             withdrawals: ctx.withdrawals().cloned().unwrap_or_default().to_vec(),
-//         },
-//         metadata: serde_json::to_value(&metadata).unwrap_or_default(),
-//     };
+    // // Prepare the flashblocks message
+    // let fb_payload = FlashblocksPayloadV1 {
+    //     payload_id: ctx.payload_id(),
+    //     index: 0, // TODO: fix this
+    //     base: Some(ExecutionPayloadBaseV1 {
+    //         parent_beacon_block_root: ctx
+    //             .attributes()
+    //             .payload_attributes
+    //             .parent_beacon_block_root
+    //             .unwrap(),
+    //         parent_hash: ctx.parent().hash(),
+    //         fee_recipient: ctx.attributes().suggested_fee_recipient(),
+    //         prev_randao: ctx.attributes().payload_attributes.prev_randao,
+    //         block_number: ctx.parent().number + 1,
+    //         gas_limit: ctx.block_gas_limit(),
+    //         timestamp: ctx.attributes().payload_attributes.timestamp,
+    //         extra_data: ctx.extra_data()?,
+    //         base_fee_per_gas: ctx.base_fee().try_into().unwrap(),
+    //     }),
+    //     diff: ExecutionPayloadFlashblockDeltaV1 {
+    //         state_root,
+    //         receipts_root,
+    //         logs_bloom,
+    //         gas_used: info.cumulative_gas_used,
+    //         block_hash,
+    //         transactions: new_transactions_encoded,
+    //         withdrawals: ctx.withdrawals().cloned().unwrap_or_default().to_vec(),
+    //     },
+    //     metadata: serde_json::to_value(&metadata).unwrap_or_default(),
+    // };
 
-//     Ok((
-//         OpBuiltPayload::new(
-//             ctx.payload_id(),
-//             sealed_block,
-//             info.total_fees,
-//             // This must be set to NONE for now because we are doing merge transitions on every flashblock
-//             // when it should only happen once per block, thus, it returns a confusing state back to op-reth.
-//             // We can live without this for now because Op syncs up the executed block using new_payload
-//             // calls, but eventually we would want to return the executed block here.
-//             None,
-//         ),
-//         fb_payload,
-//         new_bundle,
-//     ))
-// }
+    // Ok((
+    //     OpBuiltPayload::new(
+    //         ctx.payload_id(),
+    //         sealed_block,
+    //         info.total_fees,
+    //         // This must be set to NONE for now because we are doing merge transitions on every flashblock
+    //         // when it should only happen once per block, thus, it returns a confusing state back to op-reth.
+    //         // We can live without this for now because Op syncs up the executed block using new_payload
+    //         // calls, but eventually we would want to return the executed block here.
+    //         None,
+    //     ),
+    //     fb_payload,
+    //     new_bundle,
+    // ))
+
+    todo!()
+}
