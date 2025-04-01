@@ -316,7 +316,6 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub pbh_signature_aggregator: Address,
 
     /// Sets the private key of the builder
-    /// used for signing the stampBlock transaction
     pub builder_private_key: String,
 }
 

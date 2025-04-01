@@ -32,7 +32,6 @@ pub struct WorldChainArgs {
     pub signature_aggregator: Address,
 
     /// Sets the private key of the builder
-    /// used for signing the stampBlock transaction
     #[arg(long = "builder.private_key", env = "BUILDER_PRIVATE_KEY")]
     pub builder_private_key: String,
 }
