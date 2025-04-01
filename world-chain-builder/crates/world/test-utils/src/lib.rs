@@ -7,12 +7,12 @@ const MNEMONIC: &str = "test test test test test test test test test test test j
 
 /// Devnet Test Safes
 pub const TEST_SAFES: [Address; 6] = [
-    address!("b35520e3D456b91FBEf36D8CB83fF7847937Ad26"),
-    address!("52E5544fF7D6e1449E03Ade54a7fDc950Bb85CaB"),
-    address!("D0968D7f1B3AEEB1904615d8c65C128682D2F457"),
-    address!("48aA6040f470b8edeb23CD4B83dB1e7b45B7b530"),
-    address!("68A8A253e27b42825E3d47Eb637433CAFf1B5310"),
-    address!("58AF3b6E40603C9498fC28344DD2128a6F7FE510"),
+    address!("cA070997F849985e99aF2Bab872009863cA94Ae1"),
+    address!("835356Caa344aa7212F939CD3a951C6BB5e7bA05"),
+    address!("53098E16a5b936021Aa320d364C823B24d7Fa00e"),
+    address!("1435B7e344366a83AAaDD63523B085074C055643"),
+    address!("93E9b3EF9BB350f1898Fe373b504129cE792830d"),
+    address!("0995dd3e0dBAC55D2C3Fd360bAdC0b487fFAfA44"),
 ];
 
 /// Devnet Test 4337 Modules

@@ -11,7 +11,7 @@ import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IAccount} from "@account-abstraction/contracts/interfaces/IAccount.sol";
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
-import {PBHEntryPoint} from "../src/PBHEntryPoint.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {SafeProxyFactory} from "@safe-global/safe-contracts/contracts/proxies/SafeProxyFactory.sol";
 import {SafeProxy} from "@safe-global/safe-contracts/contracts/proxies/SafeProxy.sol";
@@ -38,7 +38,7 @@ contract TestSetup is Test {
 
     /// @notice The 4337 Entry Point.
     IEntryPoint internal entryPoint;
-    /// @notice The PBHEntryPoint contract.
+    /// @notice The ERC1967Proxy contract.
     IPBHEntryPoint public pbhEntryPoint;
     /// @notice The PBHSignatureAggregator contract.
     IAggregator public pbhAggregator;
@@ -137,7 +137,7 @@ contract TestSetup is Test {
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
             initialGroupAddress, initialEntryPoint, MAX_NUM_PBH_PER_MONTH, maxPbhGasLimit, authorizedBuilders, OWNER
         );
-        pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        pbhEntryPoint = IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
     }
 
     /// @notice Deploys a new EIP1271 Signature Validator.
@@ -221,7 +221,7 @@ contract TestSetup is Test {
     /// @dev Note that the owner will not be set without initilizing.
     function makeUninitPBHEntryPoint() public {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
-        pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, new bytes(0x0))));
+        pbhEntryPoint = IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, new bytes(0x0))));
     }
 
     // TODO: remove these
