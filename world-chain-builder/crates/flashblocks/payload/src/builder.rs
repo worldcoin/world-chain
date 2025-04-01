@@ -303,8 +303,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
         if !ctx.attributes().no_tx_pool {
-            let flashblock_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit)
-                / (self.block_time / self.flashblock_interval);
+            let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+            let mut flashblock_gas_limit = gas_limit;
 
             let num_flashblocks = self.block_time / self.flashblock_interval;
             for _ in 0..num_flashblocks {
@@ -320,6 +320,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 {
                     return Ok(BuildOutcomeKind::Cancelled);
                 }
+
+                flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
             }
 
             // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
