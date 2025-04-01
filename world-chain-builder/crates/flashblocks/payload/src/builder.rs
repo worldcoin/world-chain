@@ -1,22 +1,19 @@
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::BEACON_NONCE;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Bytes, U256};
 use futures_util::{sink::SinkExt, FutureExt};
 use reth::{
-    api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
+    api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
     payload::PayloadId,
-    revm::{database::StateProviderDatabase, db::BundleState, Database, State},
+    revm::{database::StateProviderDatabase, Database, State},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_evm::block::{BlockExecutionError, BlockExecutorFactory};
+use reth_evm::block::BlockExecutionError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
 };
-use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpNextBlockEnvAttributes;
 use reth_optimism_payload_builder::{
@@ -28,34 +25,22 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     OpPayloadPrimitives,
 };
-use reth_optimism_primitives::OpTransactionSigned;
-use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{BlockBody, NodePrimitives, SealedHeader, TxTy};
-use reth_primitives_traits::proofs;
+use reth_payload_util::PayloadTransactions;
+use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
-    StateProviderFactory, StateRootProvider, StorageRootProvider,
+    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
-use revm::{context::BlockEnv, database::states::bundle_state::BundleRetention};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use revm::context::BlockEnv;
+use std::sync::{Arc, Mutex};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
 };
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use tracing::{debug, info, warn};
-
-use crate::payload::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
-    FlashblocksPayloadV1,
-};
+use tracing::{debug, warn};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
@@ -83,10 +68,6 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs = ()> {
 }
 
 impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
-    pub fn new() -> Self {
-        todo!()
-    }
-
     /// Start the WebSocket server
     pub async fn start_ws(subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>, addr: &str) {
         let listener = TcpListener::bind(addr).await.unwrap();
