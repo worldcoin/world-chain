@@ -323,9 +323,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             let flashblock_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit)
                 / (self.block_time / self.flashblock_interval);
 
-            // TODO: make this dynamic
-            let num_flashblocks = 4;
-
+            let num_flashblocks = self.block_time / self.flashblock_interval;
             for _ in 0..num_flashblocks {
                 let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
                 if ctx
