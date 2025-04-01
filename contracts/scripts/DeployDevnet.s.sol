@@ -43,7 +43,7 @@ contract DeployDevnet is Script {
 
     function run() public {
         console.log(
-            "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module, WorldChainBlockRegistry"
+            "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module"
         );
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");

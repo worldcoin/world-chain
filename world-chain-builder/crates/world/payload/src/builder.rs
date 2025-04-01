@@ -684,16 +684,18 @@ where
         }
 
         if !spent_nullifier_hashes.is_empty() {
-            let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(|e| {
-            error!(target: "payload_builder", %e, "failed to create stamp block transaction");
-            PayloadBuilderError::Other(e.into())
-        })?;
+            let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(
+                |e| {
+                    error!(target: "payload_builder", %e, "failed to build spend nullifiers transaction");
+                    PayloadBuilderError::Other(e.into())
+                },
+            )?;
             let gas_used = builder.execute_transaction(tx.clone()).map_err(
-            |e: BlockExecutionError| {
-                error!(target: "payload_builder", %e, "failed to execute stamp block transaction");
-                PayloadBuilderError::evm(e)
-            },
-        )?;
+                |e: BlockExecutionError| {
+                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed");
+                    PayloadBuilderError::evm(e)
+                },
+            )?;
 
             self.commit_changes(info, base_fee, gas_used, tx);
         }
