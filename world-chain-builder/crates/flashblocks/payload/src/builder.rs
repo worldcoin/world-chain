@@ -25,7 +25,7 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     OpPayloadPrimitives,
 };
-use reth_payload_util::PayloadTransactions;
+use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
@@ -217,7 +217,17 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        todo!()
+        let args = BuildArguments {
+            config,
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+        self.build_payload(args, |_| {
+            NoopPayloadTransactions::<Pool::Transaction>::default()
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
