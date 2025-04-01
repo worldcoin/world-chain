@@ -10,7 +10,7 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_evm::block::BlockExecutorFactory;
+use reth_evm::block::{BlockExecutionError, BlockExecutorFactory};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
@@ -42,6 +42,7 @@ use revm::database::states::bundle_state::BundleRetention;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -74,6 +75,10 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs = ()> {
     pub best_transactions: Txs,
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
+    /// Block time in milliseconds
+    pub block_time: u64,
+    /// Flashblock interval in milliseconds
+    pub flashblock_interval: u64,
 }
 
 impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
@@ -176,7 +181,12 @@ where
             best_payload,
         };
 
-        let builder = FlashblockBuilder::new(best, self.tx.clone());
+        let builder = FlashblockBuilder::new(
+            best,
+            self.tx.clone(),
+            self.block_time,
+            self.flashblock_interval,
+        );
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
 
@@ -248,6 +258,8 @@ pub struct FlashblockBuilder<'a, Txs> {
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
+    pub block_time: u64,
+    pub flashblock_interval: u64,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs> {
@@ -255,10 +267,14 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
         tx: mpsc::UnboundedSender<String>,
+        block_time: u64,
+        flashblock_interval: u64,
     ) -> Self {
         Self {
             best: Box::new(best),
             tx,
+            block_time,
+            flashblock_interval,
         }
     }
 }
@@ -278,7 +294,12 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
-        let Self { best, tx } = self;
+        let Self {
+            best,
+            tx,
+            block_time,
+            flashblock_interval,
+        } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // NOTE: we do not need to init this every time
@@ -299,8 +320,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
         if !ctx.attributes().no_tx_pool {
-            // let flashblock_gas_limit =
-            //     ctx.block_gas_limit() / (self.chain_block_time / self.flashblock_block_time);
+            let flashblock_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit)
+                / (self.block_time / self.flashblock_interval);
 
             // TODO: make this dynamic
             let num_flashblocks = 4;
@@ -315,13 +336,10 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 }
             }
 
-            // TODO: this should be builder.finish_flashblock(), updates the bundle state, etc.
-            let (_, fb_payload, mut bundle_state) =
-                build_flashblock(&mut builder, &ctx, &mut info)?;
+            // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
 
-            // TODO: need to update db with bundle state
-            tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
-                .expect("TODO: handle error");
+            // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
+            //     .expect("TODO: handle error");
         }
 
         // check if the new payload is even more valuable
@@ -569,4 +587,11 @@ where
     // ))
 
     todo!()
+}
+
+pub trait Flashblock<N: NodePrimitives> {
+    fn finish_flashblock(
+        self,
+        state: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError>;
 }
