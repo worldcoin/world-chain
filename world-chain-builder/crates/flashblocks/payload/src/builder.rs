@@ -36,7 +36,7 @@ use reth_transaction_pool::{
 use revm::context::BlockEnv;
 use std::{
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -315,6 +315,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
             let num_flashblocks = self.block_time / self.flashblock_interval;
             for _ in 0..num_flashblocks {
+                let now = Instant::now();
+
                 let best_txs =
                     (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
 
@@ -331,14 +333,16 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 }
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
+
+                // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
+
+                // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
+                //     .expect("TODO: handle error");
+
+                let elapsed = now.elapsed().as_millis() as u64;
+                let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+                std::thread::sleep(Duration::from_millis(sleep_time));
             }
-
-            // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
-
-            // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
-            //     .expect("TODO: handle error");
-
-            std::thread::sleep(Duration::from_secs(self.flashblock_interval));
         }
 
         // check if the new payload is even more valuable
