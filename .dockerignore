@@ -1,0 +1,16 @@
+target/
+.env/
+contracts/
+assets/
+docs/
+devnet/
+specs/
+.config/
+Justfile
+book.toml
+.gitmodules
+CODEOWNERS
+
+# Added by SEC-1406 patch
+.git
+.gitignore

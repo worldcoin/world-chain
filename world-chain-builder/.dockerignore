@@ -1,6 +1,0 @@
-target/
-.env/
-
-# Added by SEC-1406 patch
-.git
-.gitignore
