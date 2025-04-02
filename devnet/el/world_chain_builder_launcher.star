@@ -20,10 +20,10 @@ ethereum_package_input_parser = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/input_parser.star"
 )
 
-constants = import_module("github.com/dzejkop/optimism-package/src/package_io/constants.star")
-observability = import_module("github.com/dzejkop/optimism-package/src/observability/observability.star")
+constants = import_module("github.com/ethpandaops/optimism-package/src/package_io/constants.star")
+observability = import_module("github.com/ethpandaops/optimism-package/src/observability/observability.star")
 
-util = import_module("github.com/dzejkop/optimism-package/src/util.star")
+util = import_module("github.com/ethpandaops/optimism-package/src/util.star")
 
 RPC_PORT_NUM = 8545
 WS_PORT_NUM = 8546

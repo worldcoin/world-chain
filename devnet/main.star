@@ -1,4 +1,4 @@
-optimism_package = import_module("github.com/dzejkop/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee")
+optimism_package = import_module("github.com/ethpandaops/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee")
 
 world_chain_builder = import_module("./el/world_chain_builder_launcher.star")
 
