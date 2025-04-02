@@ -34,7 +34,10 @@ use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
 use revm::context::BlockEnv;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
@@ -287,12 +290,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
-        let Self {
-            best,
-            tx,
-            block_time,
-            flashblock_interval,
-        } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // NOTE: we do not need to init this every time
@@ -318,7 +315,11 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
             let num_flashblocks = self.block_time / self.flashblock_interval;
             for _ in 0..num_flashblocks {
-                let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
+                let now = Instant::now();
+
+                let best_txs =
+                    (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+
                 if ctx
                     .execute_best_transactions(
                         &mut info,
@@ -332,12 +333,16 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 }
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
+
+                // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
+
+                // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
+                //     .expect("TODO: handle error");
+
+                let elapsed = now.elapsed().as_millis() as u64;
+                let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+                std::thread::sleep(Duration::from_millis(sleep_time));
             }
-
-            // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
-
-            // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
-            //     .expect("TODO: handle error");
         }
 
         // check if the new payload is even more valuable
