@@ -86,12 +86,14 @@ def get_tx_proxy_config(
         "--l2-url-1={0}".format(l2_rpc_1),
         "--l2-url-2={0}".format(l2_rpc_2),
         "--l2-jwt-path={0}".format(ethereum_constants.JWT_MOUNT_PATH_ON_CONTAINER),
-        "--http.port={0}".format(TX_PROXY_HTTP_PORT),
-        "--http.addr={0}".format(TX_PROXY_HTTP_ADDRESS),
+        "--http-port={0}".format(TX_PROXY_HTTP_PORT),
+        "--http-addr={0}".format(TX_PROXY_HTTP_ADDRESS),
+        "--tracing",
+        "--log-level={0}".format("debug"),
     ]
 
     env_vars = {
-        "RUST_LOG": "INFO",
+        "RUST_LOG": "info, tx-proxy=debug",
     }
 
     ports = get_used_ports()
