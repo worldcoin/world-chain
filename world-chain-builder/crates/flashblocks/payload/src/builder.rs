@@ -34,7 +34,10 @@ use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
 use revm::context::BlockEnv;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
@@ -131,7 +134,7 @@ where
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
-    /// Constructs an Optimism payload from the transactions sent via the
+    /// Constrjcts an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
     /// included in the payload will be those sent through the attributes.
@@ -287,12 +290,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
-        let Self {
-            best,
-            tx,
-            block_time,
-            flashblock_interval,
-        } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // NOTE: we do not need to init this every time
@@ -318,7 +315,9 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
             let num_flashblocks = self.block_time / self.flashblock_interval;
             for _ in 0..num_flashblocks {
-                let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
+                let best_txs =
+                    (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+
                 if ctx
                     .execute_best_transactions(
                         &mut info,
@@ -338,6 +337,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
             // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
             //     .expect("TODO: handle error");
+
+            std::thread::sleep(Duration::from_secs(self.flashblock_interval));
         }
 
         // check if the new payload is even more valuable
