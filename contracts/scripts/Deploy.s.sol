@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script} from "@forge-std/Script.sol";
-import {PBHEntryPoint} from "../src/PBHEntryPoint.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 import {console} from "forge-std/console.sol";
@@ -29,7 +29,7 @@ contract Deploy is Create2Factory, Script {
 
     function run() public {
         console.log(
-            "Deploying: PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator"
+            "Deploying: ERC1967Proxy, PBHEntryPointImplV1, PBHSignatureAggregator"
         );
         bytes32 implSalt = vm.envBytes32("IMPL_SALT");
         bytes32 proxySalt = vm.envBytes32("PROXY_SALT");
@@ -64,14 +64,14 @@ contract Deploy is Create2Factory, Script {
         );
 
         bytes memory initCode = abi.encodePacked(
-            type(PBHEntryPoint).creationCode,
+            type(ERC1967Proxy).creationCode,
             abi.encode(pbhEntryPointImpl, initCallData)
         );
 
         // Note: Theoretically this tx could be front-run which would result in a revert on 
         //       the deployment of the proxy. This is low-risk, and minimal impact as we can just redeploy.
         pbhEntryPoint = deploy(proxySalt, initCode); 
-        console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
+        console.log("ERC1967Proxy Deployed at: ", pbhEntryPoint);
     }
 
     function deployPBHSignatureAggregator(bytes32 salt) public {

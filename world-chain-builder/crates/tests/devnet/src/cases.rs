@@ -134,13 +134,14 @@ where
     N: Network,
     P: Provider<N>,
 {
+    info!("Stopping world chain builder");
     run_command(
         "kurtosis",
         &[
             "service",
             "stop",
             "world-chain",
-            "op-el-builder-1-world-chain-builder-op-node-op-kurtosis",
+            "op-el-builder-1-custom-op-node-op-kurtosis",
         ],
         env!("CARGO_MANIFEST_DIR"),
     )
@@ -148,15 +149,18 @@ where
 
     sleep(Duration::from_secs(5)).await;
 
+    info!("Getting block number from sequencer node");
     // Grab the latest block number
     let block_number = sequencer_provider.get_block_number().await?;
 
     let retries = 3;
     let mut tries = 0;
     loop {
+        info!("Checking that chain has progressed ({tries}/{retries})");
         // Assert the chain has progressed
         let new_block_number = sequencer_provider.get_block_number().await?;
         if new_block_number > block_number {
+            info!("Success!");
             break;
         }
 

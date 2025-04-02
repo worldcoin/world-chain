@@ -6,9 +6,13 @@ ethereum_constants = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/constants.star"
 )
 
-rundler_constants = import_module(
-    "../../package_io/constants.star"
-)
+RUNDLER_MEMPOOL_CONFIG_MOUNT = "/mempool_config"
+RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH = RUNDLER_MEMPOOL_CONFIG_MOUNT + "/mempool_config.json"
+RUNDLER_BUILDER_CONFIG_MOUNT = "/builder_config"
+RUNDLER_BUILDER_CONFIG_MOUNT_PATH = RUNDLER_BUILDER_CONFIG_MOUNT + "/builder_config.json"
+RUNDLER_CHAIN_SPEC_MOUNT = "/chain_spec"
+RUNDLER_CHAIN_SPEC_MOUNT_PATH = RUNDLER_CHAIN_SPEC_MOUNT + "/chain_spec.json"
+
 
 #
 #  ---------------------------------- Rundler client -------------------------------------
@@ -35,7 +39,7 @@ def launch(
     plan,
     service_name,
     image,
-    el_context,
+    rpc_http_url,
     builder_config_file,
     mempool_config_file,
     chain_spec_file,
@@ -46,7 +50,7 @@ def launch(
         plan,
         image,
         service_name,
-        el_context,
+        rpc_http_url,
         builder_config_file,
         mempool_config_file,
         chain_spec_file,
@@ -65,22 +69,22 @@ def get_rundler_config(
     plan,
     image,
     service_name,
-    el_context,
+    rpc_http_url,
     builder_config_file,
     mempool_config_file,
     chain_spec_file,
 ):
     cmd = [
         "node",
-        "--chain_spec={0}".format(rundler_constants.RUNDLER_CHAIN_SPEC_MOUNT_PATH),
+        "--chain_spec={0}".format(RUNDLER_CHAIN_SPEC_MOUNT_PATH),
         "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        "--node_http={0}".format(el_context.rpc_http_url), # rollup-boost RPC server
+        "--node_http={0}".format(rpc_http_url), # rollup-boost RPC server
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
         "--builder.dropped_status_unsupported",
         "--unsafe",
         "--da_gas_tracking_enabled",
-        "--builders_config_path={0}".format(rundler_constants.RUNDLER_BUILDER_CONFIG_MOUNT_PATH),
-        "--mempool_config_path={0}".format(rundler_constants.RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH),
+        "--builders_config_path={0}".format(RUNDLER_BUILDER_CONFIG_MOUNT_PATH),
+        "--mempool_config_path={0}".format(RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH),
         "--min_stake_value={0}".format("1"),
         "--min_unstake_delay={0}".format("0"),
         "--disable_entry_point_v0_6",
@@ -90,9 +94,9 @@ def get_rundler_config(
     ]
 
     files = {
-        rundler_constants.RUNDLER_MEMPOOL_CONFIG_MOUNT: mempool_config_file,
-        rundler_constants.RUNDLER_BUILDER_CONFIG_MOUNT: builder_config_file,
-        rundler_constants.RUNDLER_CHAIN_SPEC_MOUNT: chain_spec_file,
+        RUNDLER_MEMPOOL_CONFIG_MOUNT: mempool_config_file,
+        RUNDLER_BUILDER_CONFIG_MOUNT: builder_config_file,
+        RUNDLER_CHAIN_SPEC_MOUNT: chain_spec_file,
     }
 
     env_vars = {
@@ -108,3 +112,4 @@ def get_rundler_config(
         env_vars=env_vars,
         private_ip_address_placeholder=ethereum_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
     )
+

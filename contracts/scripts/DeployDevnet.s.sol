@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script} from "@forge-std/Script.sol";
-import {PBHEntryPoint} from "../src/PBHEntryPoint.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 import {console} from "forge-std/console.sol";
@@ -43,7 +43,7 @@ contract DeployDevnet is Script {
 
     function run() public {
         console.log(
-            "Deploying: EntryPoint, PBHEntryPoint, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module"
+            "Deploying: EntryPoint, ERC1967Proxy, PBHEntryPointImplV1, PBHSignatureAggregator, PBHSafe4337Module"
         );
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
@@ -70,9 +70,9 @@ contract DeployDevnet is Script {
             )
         );
         pbhEntryPoint = address(
-            new PBHEntryPoint(pbhEntryPointImpl, initCallData)
+            new ERC1967Proxy(pbhEntryPointImpl, initCallData)
         );
-        console.log("PBHEntryPoint Deployed at: ", pbhEntryPoint);
+        console.log("ERC1967Proxy Deployed at: ", pbhEntryPoint);
     }
 
     function deployPBHSignatureAggregator() public {

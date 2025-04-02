@@ -10,7 +10,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {PBHEntryPoint} from "../src/PBHEntryPoint.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {IMulticall3} from "../src/interfaces/IMulticall3.sol";
@@ -25,7 +25,7 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
 
     function setUp() public override {
         address pbhEntryPointImpl = address(new PBHEntryPointImplV1());
-        uninitializedPBHEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, new bytes(0x0))));
+        uninitializedPBHEntryPoint = IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, new bytes(0x0))));
     }
 
     function test_initialize(IWorldID worldId, IEntryPoint entryPoint, uint8 numPbh) public {
@@ -41,7 +41,7 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
             worldId, entryPoint, numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER
         );
-        IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
     }
 
     function test_initialize_RevertIf_AddressZero() public {
@@ -56,14 +56,14 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
             (worldId, IEntryPoint(address(0)), numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER)
         );
         vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
-        IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
 
         // Expect revert when multicall3 is address(0)
         initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER)
         );
         vm.expectRevert(PBHEntryPointImplV1.AddressZero.selector);
-        IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
     }
 
     function test_initialize_RevertIf_InvalidNumPbhPerMonth() public {
@@ -77,7 +77,7 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
             PBHEntryPointImplV1.initialize, (worldId, entryPoint, numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER)
         );
         vm.expectRevert(PBHEntryPointImplV1.InvalidNumPbhPerMonth.selector);
-        IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
     }
 
     function test_initialize_RevertIf_AlreadyInitialized() public {
@@ -94,7 +94,7 @@ contract PBHEntryPointImplV1InitTest is Test, TestSetup {
         emit PBHEntryPointImplV1.PBHEntryPointImplInitialized(
             worldId, entryPoint, numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER
         );
-        IPBHEntryPoint pbhEntryPoint = IPBHEntryPoint(address(new PBHEntryPoint(pbhEntryPointImpl, initCallData)));
+        IPBHEntryPoint pbhEntryPoint = IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, initCallData)));
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         pbhEntryPoint.initialize(worldId, entryPoint, numPbh, MAX_PBH_GAS_LIMIT, AUTHORIZED_BUILDERS, OWNER);

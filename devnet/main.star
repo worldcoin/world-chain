@@ -1,198 +1,45 @@
-ethereum_package = import_module("github.com/ethpandaops/ethereum-package/main.star")
-contract_deployer = import_module("./src/contracts/contract_deployer.star")
-l2_launcher = import_module("./src/l2.star")
-op_supervisor_launcher = import_module(
-    "./src/interop/op-supervisor/op_supervisor_launcher.star"
-)
-op_challenger_launcher = import_module(
-    "./src/challenger/op-challenger/op_challenger_launcher.star"
-)
+optimism_package = import_module("github.com/ethpandaops/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee")
 
-observability = import_module("./src/observability/observability.star")
-prometheus = import_module("./src/observability/prometheus/prometheus_launcher.star")
-grafana = import_module("./src/observability/grafana/grafana_launcher.star")
+world_chain_builder = import_module("./el/world_chain_builder_launcher.star")
 
-wait_for_sync = import_module("./src/wait/wait_for_sync.star")
-input_parser = import_module("./src/package_io/input_parser.star")
-ethereum_package_static_files = import_module(
-    "github.com/ethpandaops/ethereum-package/src/static_files/static_files.star"
-)
-rundler_static = import_module("./src/static/static_files.star")
+rundler = import_module("./bundler/rundler/rundler_launcher.star")
+rundler_static = import_module("./static_files/static_files.star")
 
+def run(plan, args={}):
+  optimism_package.run(plan, args, custom_launchers={
+      "el_builder_launcher": {
+        "launcher": world_chain_builder.new_op_reth_builder_launcher,
+        "launch_method": world_chain_builder.launch,
+      },
+    }
+  )
 
-def run(plan, args):
-    """Deploy Optimism L2s on an Ethereum L1.
+  rundler_builder_config_file = plan.upload_files(
+      src=rundler_static.RUNDLER_BUILDER_CONFIG_FILE_PATH,
+      name="builder_config.json",
+  )
+  rundler_mempool_config_file = plan.upload_files(
+      src=rundler_static.RUNDLER_MEMPOOL_CONFIG_FILE_PATH,
+      name="mempool_config.json",
+  )
+  rundler_chain_spec = plan.upload_files(
+      src=rundler_static.RUNDLER_CHAIN_SPEC_FILE_PATH,
+      name="chain_spec.json",
+  )
 
-    Args:
-        args(json): Configures other aspects of the environment.
-    Returns:
-        A full deployment of Optimism L2(s)
-    """
-    plan.print("Parsing the L1 input args")
-    # If no args are provided, use the default values with minimal preset
-    ethereum_args = args.get("ethereum_package", {})
-    external_l1_args = args.get("external_l1_network_params", {})
-    if external_l1_args:
-        external_l1_args = input_parser.external_l1_network_params_input_parser(
-            plan, external_l1_args
-        )
-    else:
-        if "network_params" not in ethereum_args:
-            ethereum_args.update(input_parser.default_ethereum_package_network_params())
+  # Extract HTTP RPC url of the builder
+  builder_srv = plan.get_service("op-el-builder-1-custom-op-node-op-kurtosis")
+  builder_rpc_port = builder_srv.ports["rpc"].number
+  builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
-    # need to do a raw get here in case only optimism_package is provided.
-    # .get will return None if the key is in the config with a None value.
-    optimism_args = args.get("optimism_package") or input_parser.default_optimism_args()
-    optimism_args_with_right_defaults = input_parser.input_parser(plan, optimism_args)
-    global_tolerations = optimism_args_with_right_defaults.global_tolerations
-    global_node_selectors = optimism_args_with_right_defaults.global_node_selectors
-    global_log_level = optimism_args_with_right_defaults.global_log_level
-    persistent = optimism_args_with_right_defaults.persistent
-    altda_deploy_config = optimism_args_with_right_defaults.altda_deploy_config
+  plan.print(builder_rpc_url)
 
-    observability_params = optimism_args_with_right_defaults.observability
-    interop_params = optimism_args_with_right_defaults.interop
+  rundler.launch(plan, 
+      service_name="rundler", 
+      image="alchemyplatform/rundler:v0.6.0-alpha.3",
+      rpc_http_url=builder_rpc_url,
+      builder_config_file=rundler_builder_config_file,
+      mempool_config_file=rundler_mempool_config_file,
+      chain_spec_file=rundler_chain_spec,
+  )
 
-    observability_helper = observability.make_helper(observability_params)
-
-    # Deploy the L1
-    l1_network = ""
-    if external_l1_args:
-        plan.print("Using external L1")
-        plan.print(external_l1_args)
-
-        l1_rpc_url = external_l1_args.el_rpc_url
-        l1_priv_key = external_l1_args.priv_key
-
-        l1_config_env_vars = {
-            "L1_RPC_KIND": external_l1_args.rpc_kind,
-            "L1_RPC_URL": l1_rpc_url,
-            "CL_RPC_URL": external_l1_args.cl_rpc_url,
-            "L1_WS_URL": external_l1_args.el_ws_url,
-            "L1_CHAIN_ID": external_l1_args.network_id,
-        }
-
-        plan.print("Waiting for network to sync")
-        wait_for_sync.wait_for_sync(plan, l1_config_env_vars)
-    else:
-        plan.print("Deploying a local L1")
-        l1 = ethereum_package.run(plan, ethereum_args)
-        plan.print(l1.network_params)
-        # Get L1 info
-        all_l1_participants = l1.all_participants
-        l1_network = "local"
-        l1_network_params = l1.network_params
-        l1_network_id = l1.network_id
-        l1_rpc_url = all_l1_participants[0].el_context.rpc_http_url
-        l1_priv_key = l1.pre_funded_accounts[
-            12
-        ].private_key  # reserved for L2 contract deployers
-        l1_config_env_vars = get_l1_config(
-            all_l1_participants, l1_network_params, l1_network_id
-        )
-        plan.print("Waiting for L1 to start up")
-        wait_for_sync.wait_for_startup(plan, l1_config_env_vars)
-
-    deployment_output = contract_deployer.deploy_contracts(
-        plan,
-        l1_priv_key,
-        l1_config_env_vars,
-        optimism_args_with_right_defaults,
-        l1_network,
-        altda_deploy_config,
-    )
-
-    jwt_file = plan.upload_files(
-        src=ethereum_package_static_files.JWT_PATH_FILEPATH,
-        name="op_jwt_file",
-    )
-
-    rundler_builder_config_file = plan.upload_files(
-        src=rundler_static.RUNDLER_BUILDER_CONFIG_FILE_PATH,
-        name="builder_config.json",
-    )
-
-    rundler_mempool_config_file = plan.upload_files(
-        src=rundler_static.RUNDLER_MEMPOOL_CONFIG_FILE_PATH,
-        name="mempool_config.json",
-    )
-
-    rundler_chain_spec = plan.upload_files(
-        src=rundler_static.RUNDLER_CHAIN_SPEC_FILE_PATH,
-        name="chain_spec.json",
-    )
-
-    l2s = []
-    for l2_num, chain in enumerate(optimism_args_with_right_defaults.chains):
-        l2s.append(
-            l2_launcher.launch_l2(
-                plan,
-                l2_num,
-                chain.network_params.name,
-                chain,
-                jwt_file,
-                deployment_output,
-                l1_config_env_vars,
-                l1_priv_key,
-                l1_rpc_url,
-                global_log_level,
-                global_node_selectors,
-                global_tolerations,
-                persistent,
-                observability_helper,
-                interop_params,
-                rundler_builder_config_file,
-                rundler_mempool_config_file,
-                rundler_chain_spec,
-            )
-        )
-
-    if interop_params.enabled:
-        op_supervisor_launcher.launch(
-            plan,
-            l1_config_env_vars,
-            optimism_args_with_right_defaults.chains,
-            l2s,
-            jwt_file,
-            interop_params.supervisor_params,
-            observability_helper,
-        )
-
-    # challenger must launch after supervisor because it depends on it for interop
-    for l2_num, l2 in enumerate(l2s):
-        chain = optimism_args_with_right_defaults.chains[l2_num]
-        op_challenger_image = (
-            chain.challenger_params.image
-            if chain.challenger_params.image != ""
-            else input_parser.DEFAULT_CHALLENGER_IMAGES["op-challenger"]
-        )
-        op_challenger_launcher.launch(
-            plan,
-            l2_num,
-            "op-challenger-{0}".format(chain.network_params.name),
-            chain.challenger_params.image,
-            l2.participants[0].el_context,
-            l2.participants[0].cl_context,
-            l1_config_env_vars,
-            deployment_output,
-            chain.network_params,
-            chain.challenger_params,
-            interop_params,
-            observability_helper,
-        )
-
-    observability.launch(
-        plan, observability_helper, global_node_selectors, observability_params
-    )
-
-
-def get_l1_config(all_l1_participants, l1_network_params, l1_network_id):
-    env_vars = {}
-    env_vars["L1_RPC_KIND"] = "standard"
-    env_vars["WEB3_RPC_URL"] = str(all_l1_participants[0].el_context.rpc_http_url)
-    env_vars["L1_RPC_URL"] = str(all_l1_participants[0].el_context.rpc_http_url)
-    env_vars["CL_RPC_URL"] = str(all_l1_participants[0].cl_context.beacon_http_url)
-    env_vars["L1_WS_URL"] = str(all_l1_participants[0].el_context.ws_url)
-    env_vars["L1_CHAIN_ID"] = str(l1_network_id)
-    env_vars["L1_BLOCK_TIME"] = str(l1_network_params.seconds_per_slot)
-    return env_vars

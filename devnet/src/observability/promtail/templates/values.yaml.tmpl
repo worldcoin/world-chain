@@ -1,9 +1,0 @@
-config:
-  serverPort: {{ .Ports.http }}
-  clients:
-    - url: {{ .LokiURL }}/loki/api/v1/push
-
-nodeSelector:
-  {{ range .NodeSelectors }}
-  - {{ .Key }}: {{ .Value }}
-  {{ end }}

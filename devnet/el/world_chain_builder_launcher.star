@@ -20,10 +20,10 @@ ethereum_package_input_parser = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/input_parser.star"
 )
 
-constants = import_module("../../package_io/constants.star")
-observability = import_module("../../observability/observability.star")
+constants = import_module("github.com/ethpandaops/optimism-package/src/package_io/constants.star")
+observability = import_module("github.com/ethpandaops/optimism-package/src/observability/observability.star")
 
-util = import_module("../../util.star")
+util = import_module("github.com/ethpandaops/optimism-package/src/util.star")
 
 RPC_PORT_NUM = 8545
 WS_PORT_NUM = 8546
@@ -130,10 +130,7 @@ def launch(
         plan, service_name, RPC_PORT_ID
     )
 
-    metric_url = "{0}:{1}".format(service.ip_address, METRICS_PORT_NUM)
-    op_reth_metrics_info = ethereum_package_node_metrics.new_node_metrics_info(
-        service_name, METRICS_PATH, metric_url
-    )
+    metrics_info = observability.new_metrics_info(observability_helper, service)
 
     http_url = "http://{0}:{1}".format(service.ip_address, RPC_PORT_NUM)
 
@@ -146,7 +143,7 @@ def launch(
         engine_rpc_port_num=ENGINE_RPC_PORT_NUM,
         rpc_http_url=http_url,
         service_name=service_name,
-        el_metrics_info=[op_reth_metrics_info],
+        el_metrics_info=[metrics_info],
     )
 
 
