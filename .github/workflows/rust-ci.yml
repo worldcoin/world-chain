@@ -25,7 +25,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            world-chain-builder/target/
+            target/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - uses: taiki-e/install-action@nextest
@@ -50,7 +50,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            world-chain-builder/target/
+            target/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt + lint
