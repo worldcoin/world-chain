@@ -83,7 +83,7 @@ def get_rundler_config(
         "node",
         "--chain_spec={0}".format(RUNDLER_CHAIN_SPEC_MOUNT_PATH),
         "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        "--node_http={0}".format(rpc_http_url),  # rollup-boost RPC server
+        "--node_http={0}".format(rpc_http_url),
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
         "--builder.dropped_status_unsupported",
         "--unsafe",
