@@ -1,5 +1,5 @@
 name: github.com/worldcoin/world-chain-package
 description: |-
   # github.com/example-org/example-package
-  Enter description Markdown here.
+This is a Kurtosis package for deploying the World Chain Builder in an Optimism Rollup
 replace: {}
