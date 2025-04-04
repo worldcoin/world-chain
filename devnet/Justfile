@@ -21,3 +21,7 @@ build-world-chain:
 
 fmt: 
     kurtosis lint --format
+
+stress-test *args='':
+    chmod +x ./stress/stress.sh \
+    && ./stress/stress.sh $@

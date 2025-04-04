@@ -2,12 +2,12 @@ optimism_package = import_module(
     "github.com/ethpandaops/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee"
 )
 
-world_chain_builder = import_module("./el/world_chain_builder_launcher.star")
+world_chain_builder = import_module("./src/el/world_chain_builder_launcher.star")
 
-rundler = import_module("./bundler/rundler/rundler_launcher.star")
-static_files = import_module("./static_files/static_files.star")
+rundler = import_module("./src/bundler/rundler/rundler_launcher.star")
+static_files = import_module("./src/static_files/static_files.star")
 
-tx_proxy = import_module("./tx-proxy/tx_proxy_launcher.star")
+tx_proxy = import_module("./src/tx-proxy/tx_proxy_launcher.star")
 
 
 # TODO: HA Deployment with op-conductor
@@ -46,6 +46,15 @@ def run(plan, args={}):
     builder_rpc_port = builder_srv.ports["rpc"].number
     builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
+    # Extract HTTP RPC url of 2 Reth nodes
+    reth_srv_0 = plan.get_service("op-el-2-op-reth-op-node-op-kurtosis")
+    reth_rpc_port_0 = reth_srv_0.ports["rpc"].number
+    reth_rpc_url_0 = "http://{0}:{1}".format(reth_srv_0.ip_address, reth_rpc_port_0)
+
+    reth_srv_1 = plan.get_service("op-el-3-op-reth-op-node-op-kurtosis")
+    reth_rpc_port_1 = reth_srv_1.ports["rpc"].number
+    reth_rpc_url_1 = "http://{0}:{1}".format(reth_srv_1.ip_address, reth_rpc_port_1)
+
     l2_srv = plan.get_service("op-el-1-op-geth-op-node-op-kurtosis")
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
@@ -53,10 +62,10 @@ def run(plan, args={}):
     tx_proxy_http_url = tx_proxy.launch(
         plan,
         service_name="tx-proxy",
-        image="leytont/tx-proxy:latest",
+        image="ghcr.io/worldcoin/tx-proxy:latest",
         builder_rpc_0=builder_rpc_url,
-        builder_rpc_1=builder_rpc_url,
-        builder_rpc_2=builder_rpc_url,
+        builder_rpc_1=reth_rpc_url_0,  # need to be separate client to prevent validation errors
+        builder_rpc_2=reth_rpc_url_1,
         l2_rpc_0=l2_rpc_url,
         l2_rpc_1=l2_rpc_url,
         l2_rpc_2=l2_rpc_url,
