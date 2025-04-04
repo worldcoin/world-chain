@@ -1,9 +1,7 @@
-use alloy_primitives::{Bytes, U256};
 use futures_util::{sink::SinkExt, FutureExt};
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    payload::PayloadId,
     revm::{database::StateProviderDatabase, Database, State},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
@@ -17,23 +15,20 @@ use reth_evm::{
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpNextBlockEnvAttributes;
 use reth_optimism_payload_builder::{
+    builder::OpPayloadBuilderCtx, config::OpBuilderConfig, OpPayloadPrimitives,
+};
+use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use reth_optimism_payload_builder::{
-    builder::{ExecutionInfo, OpPayloadBuilderCtx},
-    config::OpBuilderConfig,
-    OpPayloadPrimitives,
-};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
-use revm::context::BlockEnv;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -45,9 +40,11 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
+use crate::ctx::PayloadBuilderCtx;
+
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
-pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs = ()> {
+pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -68,6 +65,8 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs = ()> {
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
+    /// The payload builder context
+    pub ctx: Ctx,
 }
 
 impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
@@ -408,123 +407,4 @@ pub trait Flashblock<N: NodePrimitives> {
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError>;
-}
-
-pub trait PayloadBuilderCtx {
-    type Evm: ConfigureEvm;
-    type ChainSpec: EthChainSpec + OpHardforks;
-
-    fn parent(&self) -> &SealedHeader;
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>>;
-
-    fn extra_data(&self) -> Result<Bytes, PayloadBuilderError>;
-
-    fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes;
-
-    fn payload_id(&self) -> PayloadId;
-
-    fn is_holocene_active(&self) -> bool;
-
-    fn is_better_payload(&self, total_fees: U256) -> bool;
-
-    fn block_builder<'a, DB: reth::revm::Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
-    where
-        DB: Database,
-        DB::Error: Send + Sync + 'static;
-
-    fn execute_sequencer_transactions(
-        &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>;
-
-    fn execute_best_transactions(
-        &self,
-        info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>,
-        >,
-        gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>;
-}
-
-impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
-where
-    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Chainspec: EthChainSpec + OpHardforks,
-{
-    type Evm = Evm;
-    type ChainSpec = Chainspec;
-
-    fn parent(&self) -> &SealedHeader {
-        self.parent()
-    }
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>> {
-        self.attributes()
-    }
-
-    fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        self.extra_data()
-    }
-
-    fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes {
-        self.best_transaction_attributes(block_env)
-    }
-
-    fn payload_id(&self) -> PayloadId {
-        self.payload_id()
-    }
-
-    fn is_holocene_active(&self) -> bool {
-        self.is_holocene_active()
-    }
-
-    fn is_better_payload(&self, total_fees: U256) -> bool {
-        self.is_better_payload(total_fees)
-    }
-
-    fn block_builder<'a, DB: Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
-    where
-        DB: Database,
-        DB::Error: Send + Sync + 'static,
-    {
-        self.block_builder(db)
-    }
-
-    fn execute_sequencer_transactions(
-        &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError> {
-        self.execute_sequencer_transactions(builder)
-    }
-
-    fn execute_best_transactions(
-        &self,
-        info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>,
-        >,
-        _gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError> {
-        self.execute_best_transactions(info, builder, best_txs)
-    }
 }
