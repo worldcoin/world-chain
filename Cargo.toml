@@ -19,7 +19,7 @@ members = [
   "crates/world/test-utils",
   "crates/tests/sepolia",
   "crates/tests/devnet",
-  "crates/flashblocks/payload",
+  "crates/world/flashblocks",
 ]
 
 default-members = ["crates/world/bin"]
@@ -44,6 +44,7 @@ world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7", features = [
@@ -55,6 +56,7 @@ reth-rpc-server-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
@@ -62,6 +64,8 @@ reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "v
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
+reth-payload-builder-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
+reth-payload-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7", default-features = false }
@@ -113,6 +117,7 @@ alloy-rpc-types-debug = "0.13.0"
 alloy-signer = { version = "0.13.0", default-features = false }
 alloy-signer-local = { version = "0.13.0", default-features = false }
 alloy-sol-types = "0.8.25"
+alloy-serde = { version = "0.13.0", default-features = false }
 
 # revm
 revm = { version = "21.0.0", default-features = false }
@@ -153,3 +158,48 @@ rand = { version = "0.8", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
 bon = "3.3.0"
 rayon = "1.10.0"
+
+# WIP
+# [patch."https://github.com/paradigmxyz/reth"]
+# reth = { path = "../../paradigmxyz/reth/bin/reth" }
+# reth-cli-util
+# reth-evm
+# reth-db
+# reth-db-api
+# reth-provider
+# reth-basic-payload-builder
+# reth-transaction-pool
+# reth-rpc-server-types
+# reth-prune-types
+# reth-trie
+# reth-chain-state
+# reth-chainspec
+# reth-eth-wire-types
+# reth-execution-types
+# reth-stages-types
+# reth-trie-db
+# reth-primitives-traits
+# reth-node-builder
+# reth-node-api
+# reth-payload-builder
+# reth-payload-builder-primitives
+# reth-payload-util
+# reth-payload-validator
+# reth-revm
+# reth-tasks
+# reth-primitives
+# reth-optimism-evm
+# reth-optimism-node
+# reth-optimism-cli
+# reth-optimism-rpc
+# reth-optimism-consensus
+# reth-optimism-chainspec
+# reth_payload_util
+# reth-optimism-payload-builder
+# reth-optimism-forks
+# reth-optimism-primitives
+# reth-e2e-test-utils
+# reth-consensus
+# reth-node-core
+# reth-tracing
+# reth-rpc-layer
