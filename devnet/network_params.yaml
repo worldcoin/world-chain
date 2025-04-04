@@ -41,8 +41,3 @@ ethereum_package:
         }
       }
     '
-contender_params:
-  interval: 5
-  duration: 10
-  num_txs: 500
-  scenario: "stress"
