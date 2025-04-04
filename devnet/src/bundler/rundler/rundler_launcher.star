@@ -7,9 +7,13 @@ ethereum_constants = import_module(
 )
 
 RUNDLER_MEMPOOL_CONFIG_MOUNT = "/mempool_config"
-RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH = RUNDLER_MEMPOOL_CONFIG_MOUNT + "/mempool_config.json"
+RUNDLER_MEMPOOL_CONFIG_MOUNT_PATH = (
+    RUNDLER_MEMPOOL_CONFIG_MOUNT + "/mempool_config.json"
+)
 RUNDLER_BUILDER_CONFIG_MOUNT = "/builder_config"
-RUNDLER_BUILDER_CONFIG_MOUNT_PATH = RUNDLER_BUILDER_CONFIG_MOUNT + "/builder_config.json"
+RUNDLER_BUILDER_CONFIG_MOUNT_PATH = (
+    RUNDLER_BUILDER_CONFIG_MOUNT + "/builder_config.json"
+)
 RUNDLER_CHAIN_SPEC_MOUNT = "/chain_spec"
 RUNDLER_CHAIN_SPEC_MOUNT_PATH = RUNDLER_CHAIN_SPEC_MOUNT + "/chain_spec.json"
 
@@ -20,6 +24,7 @@ RUNDLER_CHAIN_SPEC_MOUNT_PATH = RUNDLER_CHAIN_SPEC_MOUNT + "/chain_spec.json"
 RUNDLER_HTTP_PORT_ID = 8453
 DISCOVERY_PORT_NUM = 30303
 RPC_PORT_ID = "rpc"
+
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -78,7 +83,7 @@ def get_rundler_config(
         "node",
         "--chain_spec={0}".format(RUNDLER_CHAIN_SPEC_MOUNT_PATH),
         "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        "--node_http={0}".format(rpc_http_url), # rollup-boost RPC server
+        "--node_http={0}".format(rpc_http_url),
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
         "--builder.dropped_status_unsupported",
         "--unsafe",
@@ -90,7 +95,7 @@ def get_rundler_config(
         "--disable_entry_point_v0_6",
         "--enabled_aggregators=PBH",
         "--aggregator_options=PBH_ADDRESS=0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
-        "--pool.same_sender_mempool_count=255"
+        "--pool.same_sender_mempool_count=255",
     ]
 
     files = {
@@ -112,4 +117,3 @@ def get_rundler_config(
         env_vars=env_vars,
         private_ip_address_placeholder=ethereum_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
     )
-

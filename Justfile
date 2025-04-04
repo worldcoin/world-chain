@@ -35,3 +35,6 @@ fmt:
 # Installs the world-chain-builder
 install *args='':
     @just ./world-chain-builder/install $@
+
+stress-test *args='':
+    @just ./devnet/stress-test $@

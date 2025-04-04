@@ -20,8 +20,12 @@ ethereum_package_input_parser = import_module(
     "github.com/ethpandaops/ethereum-package/src/package_io/input_parser.star"
 )
 
-constants = import_module("github.com/ethpandaops/optimism-package/src/package_io/constants.star")
-observability = import_module("github.com/ethpandaops/optimism-package/src/observability/observability.star")
+constants = import_module(
+    "github.com/ethpandaops/optimism-package/src/package_io/constants.star"
+)
+observability = import_module(
+    "github.com/ethpandaops/optimism-package/src/observability/observability.star"
+)
 
 util = import_module("github.com/ethpandaops/optimism-package/src/util.star")
 
@@ -53,6 +57,7 @@ EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER = "/data/op-reth/execution-data"
 PBH_ENTRY_POINT = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 PBH_SIGNATURE_AGGREGATOR = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 WORLD_ID = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -88,6 +93,7 @@ VERBOSITY_LEVELS = {
     ethereum_package_constants.GLOBAL_LOG_LEVEL.trace: "vvvvv",
 }
 
+
 def launch(
     plan,
     launcher,
@@ -122,7 +128,7 @@ def launch(
         cl_client_name,
         sequencer_enabled,
         sequencer_context,
-        observability_helper
+        observability_helper,
     )
 
     service = plan.add_service(service_name, config)
@@ -160,8 +166,7 @@ def get_config(
     cl_client_name,
     sequencer_enabled,
     sequencer_context,
-    observability_helper
-
+    observability_helper,
 ):
     public_ports = {}
     discovery_port = DISCOVERY_PORT_NUM
@@ -200,7 +205,7 @@ def get_config(
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
     ]
-    
+
     observability.expose_metrics_port(ports)
 
     if not sequencer_enabled:
@@ -235,7 +240,9 @@ def get_config(
 
     cmd += participant.el_builder_extra_params
     env_vars = participant.el_builder_extra_env_vars
-    env_vars["BUILDER_PRIVATE_KEY"] = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    env_vars[
+        "BUILDER_PRIVATE_KEY"
+    ] = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
     config_args = {
         "image": participant.el_builder_image,
         "ports": used_ports,
