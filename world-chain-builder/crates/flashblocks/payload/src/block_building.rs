@@ -1,65 +1,38 @@
-use crate::payload::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+use crate::{
+    builder::PayloadBuilderCtx,
+    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
-use crate::primitives::reth::ExecutionInfo;
-use alloy_consensus::{Eip658Value, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{merge::BEACON_NONCE, Encodable2718};
-use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
-use alloy_rpc_types_eth::Withdrawals;
-use futures_util::{FutureExt, SinkExt};
-use reth::{
-    builder::{
-        components::{PayloadBuilderBuilder, PayloadServiceBuilder},
-        node::FullNodeTypes,
-        BuilderContext,
-    },
-    payload::PayloadBuilderHandle,
-};
-use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, BuildOutcome, PayloadConfig};
+use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_eips::merge::BEACON_NONCE;
+use alloy_primitives::{map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{
-    env::EvmEnv, eth::receipt_builder::ReceiptBuilderCtx, execute::BlockBuilder, ConfigureEvm,
-    Database, Evm, EvmError, InvalidTxError,
-};
+use reth_evm::{ConfigureEvm, Database};
 use reth_execution_types::ExecutionOutcome;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::OpEngineTypes;
-use reth_optimism_payload_builder::{
-    error::OpPayloadBuilderError,
-    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
-};
+use reth_optimism_payload_builder::payload::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
-use reth_primitives::{BlockBody, SealedHeader};
+use reth_primitives::BlockBody;
 use reth_primitives_traits::{proofs, Block as _, SignedTransaction};
 use reth_provider::{
-    CanonStateSubscriptions, HashedPostStateProvider, ProviderError, StateProviderFactory,
-    StateRootProvider, StorageRootProvider,
+    HashedPostStateProvider, ProviderError, StateRootProvider, StorageRootProvider,
 };
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{
-    context::{result::ResultAndState, Block as _},
+    context::Block as _,
     database::{states::bundle_state::BundleRetention, BundleState, State},
-    DatabaseCommit,
 };
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::mpsc,
-};
-use tokio_tungstenite::{accept_async, WebSocketStream};
-use tracing::{debug, trace, warn};
+use std::sync::Arc;
+use tracing::{debug, warn};
 
-pub fn build_block<ChainSpec, DB, P>(
+pub fn build_block<Ctx, Evm, ChainSpec, DB, P>(
     mut state: State<DB>,
-    ctx: &OpPayloadBuilderCtx<ChainSpec>,
+    ctx: &Ctx,
     info: &mut ExecutionInfo<OpPrimitives>,
 ) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
 where
+    Ctx: PayloadBuilderCtx,
+    Evm: ConfigureEvm,
     ChainSpec: EthChainSpec + OpHardforks,
     DB: Database<Error = ProviderError> + AsRef<P>,
     P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
