@@ -334,6 +334,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
 
+                // crate::block_building::build_block(&mut builder)
+
                 // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
 
                 // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())

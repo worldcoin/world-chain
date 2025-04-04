@@ -55,13 +55,16 @@ reth-rpc-server-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
+reth-payload-builder-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0" }
 reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.0", default-features = false }
