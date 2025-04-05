@@ -19,7 +19,7 @@ generate_report() {
 }
 
 case "$1" in
-"precompile-stress")
+"stress-precompile")
     stress_precompile
     ;;
 "stress")
