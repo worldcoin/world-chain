@@ -58,6 +58,16 @@ pub enum PBHValidationError {
     InvalidProof,
     #[error(transparent)]
     ProofError(#[from] ProofError),
+    #[error("Invalid calldata encoding")]
+    InvalidCalldata,
+    #[error("Missing PBH Payload")]
+    MissingPbhPayload,
+    #[error("InvalidSignatureAggregator")]
+    InvalidSignatureAggregator,
+    #[error("PBH call tracer error")]
+    PBHCallTracerError,
+    #[error("pbh gas limit exceeded")]
+    PbhGasLimitExceeded,
 }
 
 /// The payload of a PBH transaction

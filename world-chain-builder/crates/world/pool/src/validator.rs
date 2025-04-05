@@ -23,7 +23,7 @@ use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
-use world_chain_builder_pbh::payload::PBHPayload as PbhPayload;
+use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -128,7 +128,8 @@ where
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
         else {
-            return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx);
+            return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
+                .to_outcome(tx);
         };
 
         if !calldata
@@ -136,7 +137,10 @@ where
             .iter()
             .all(|aggregator| aggregator.aggregator == self.pbh_signature_aggregator)
         {
-            return WorldChainPoolTransactionError::InvalidSignatureAggregator.to_outcome(tx);
+            return WorldChainPoolTransactionError::from(
+                PBHValidationError::InvalidSignatureAggregator,
+            )
+            .to_outcome(tx);
         }
 
         // Validate all proofs associated with each UserOp
@@ -145,11 +149,14 @@ where
             let buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
                 Ok(pbh_payloads) => pbh_payloads,
-                Err(_) => return WorldChainPoolTransactionError::InvalidCalldata.to_outcome(tx),
+                Err(_) => {
+                    return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
+                        .to_outcome(tx)
+                }
             };
 
             if pbh_payloads.len() != aggregated_ops.userOps.len() {
-                return WorldChainPoolTransactionError::MissingPbhPayload.to_outcome(tx);
+                return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload).to_outcome(tx);
             }
 
             let valid_roots = self.root_validator.roots();
@@ -160,7 +167,7 @@ where
                 .map(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
                     let Ok(payload) = PbhPayload::try_from(payload) else {
-                        return Err(WorldChainPoolTransactionError::InvalidCalldata);
+                        return Err(PBHValidationError::InvalidCalldata.into());
                     };
                     payload.validate(
                         signal,
@@ -196,7 +203,8 @@ where
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         if tx.gas_limit() > self.max_pbh_gas_limit.load(Ordering::Relaxed) {
-            return WorldChainPoolTransactionError::PbhGasLimitExceeded.to_outcome(tx);
+            return WorldChainPoolTransactionError::from(PBHValidationError::PbhGasLimitExceeded)
+                .to_outcome(tx);
         }
 
         let function_signature: [u8; 4] = tx

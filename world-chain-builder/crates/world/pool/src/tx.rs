@@ -220,18 +220,8 @@ impl PoolTransaction for WorldChainPooledTransaction {
 pub enum WorldChainPoolTransactionError {
     #[error("Conditional Validation Failed: {0}")]
     ConditionalValidationFailed(B256),
-    #[error(transparent)]
-    PBHValidationError(#[from] PBHValidationError),
-    #[error("Invalid calldata encoding")]
-    InvalidCalldata,
-    #[error("Missing PBH Payload")]
-    MissingPbhPayload,
-    #[error("InvalidSignatureAggregator")]
-    InvalidSignatureAggregator,
-    #[error("PBH call tracer error")]
-    PBHCallTracerError,
-    #[error("pbh gas limit exceeded")]
-    PbhGasLimitExceeded,
+    #[error("PBH Transaction Validation Failed: {0}")]
+    PBH(#[from] PBHValidationError),
 }
 
 impl WorldChainPoolTransactionError {
