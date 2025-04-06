@@ -15,3 +15,7 @@ devnet-down:
 
 fmt: 
     kurtosis lint --format
+
+stress-test *args='':
+    chmod +x ./stress/stress.sh \
+    && ./stress/stress.sh $@

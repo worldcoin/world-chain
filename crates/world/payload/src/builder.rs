@@ -778,7 +778,7 @@ where
 }
 
 pub const COLD_SSTORE_GAS: u64 = 20000;
-pub const FIXED_GAS: u64 = 21000;
+pub const FIXED_GAS: u64 = 100_000;
 
 pub const fn dyn_gas_limit(len: u64) -> u64 {
     FIXED_GAS + len * COLD_SSTORE_GAS

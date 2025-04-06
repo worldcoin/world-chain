@@ -10,6 +10,8 @@ optimism_package:
         cl_type: op-node
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
+      - el_type: op-reth
+      - el_type: op-reth
       mev_params:
         rollup_boost_image: "flashbots/rollup-boost:latest"
       additional_services:
