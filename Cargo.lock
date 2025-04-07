@@ -11120,7 +11120,7 @@ dependencies = [
 
 [[package]]
 name = "tests-devnet"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
@@ -11145,7 +11145,7 @@ dependencies = [
 
 [[package]]
 name = "tests-sepolia"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -12611,7 +12611,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -12666,7 +12666,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-node"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-eips",
  "alloy-genesis",
@@ -12714,7 +12714,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-payload"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -12752,7 +12752,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-pbh"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -12770,7 +12770,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-pool"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -12814,7 +12814,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-rpc"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -12835,7 +12835,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder-test-utils"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
