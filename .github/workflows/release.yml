@@ -181,7 +181,7 @@ jobs:
             tar -czf ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}*
             echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
             mv *tar.gz* ..
-            shell: bash
+      shell: bash
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
