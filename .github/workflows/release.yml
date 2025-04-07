@@ -50,11 +50,16 @@ jobs:
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
-      - name: Docker meta
+      - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+                type=ref,event=branch
+                type=ref,event=tag
+                type=sha
+                type=raw,value=latest
 
       - name: Log in to Registry
         uses: docker/login-action@v3
@@ -75,13 +80,13 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
           tags: |
               ${{ env.IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
               ${{ env.IMAGE_NAME }}:latest
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
       - name: Export digest
         run: |
             mkdir -p ${{ runner.temp }}/digests
@@ -122,7 +127,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -164,7 +169,8 @@ jobs:
         targets: ${{ matrix.target }}
     - uses: Swatinem/rust-cache@v2  
     - name: Cargo Build Release
-      run: cargo build --release --target ${{ matrix.target }}
+      run: cargo build --release --bin ${{ matrix.binary }} --target ${{ matrix.target }}
+    
     - name: Move binary
       run: |
             mkdir artifacts

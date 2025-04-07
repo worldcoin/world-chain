@@ -29,14 +29,14 @@ ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --release --recipe-path recipe.json
+    cargo chef cook --release --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
 
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --release --features="$FEATURES" --package=${WORLD_CHAIN_BUILDER_BIN}
+    cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
