@@ -36,6 +36,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::TxKind;
+use std::fmt::Debug;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::PathBuf,
@@ -641,9 +642,10 @@ impl ForkChoiceSubscriptions for WorldChainNoopProvider {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct WorldChainNoopValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt + Debug,
 {
     _inner: WorldChainTransactionValidator<Client, Tx>,
 }
@@ -658,7 +660,7 @@ impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction
 
 impl<Client, Tx> TransactionValidator for WorldChainNoopValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt,
+    Client: StateProviderFactory + BlockReaderIdExt + Debug,
     Tx: WorldChainPoolTransaction,
 {
     type Transaction = Tx;

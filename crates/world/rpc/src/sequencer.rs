@@ -1,13 +1,14 @@
 use alloy_primitives::hex;
 use alloy_rpc_types::erc4337::TransactionConditional;
 use reqwest::Client;
-use reth_optimism_rpc::SequencerClientError;
 use serde_json::json;
 use std::sync::{
     atomic::{self, AtomicUsize},
     Arc,
 };
 use tracing::warn;
+
+use crate::SequencerClientError;
 
 /// A client to interact with a Sequencer
 #[derive(Debug, Clone)]
