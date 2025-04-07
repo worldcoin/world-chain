@@ -39,7 +39,7 @@ jobs:
         include:
           - runner: ubuntu-latest
             platform: linux/amd64
-          - runner: arm64-ubuntu-22.04-8core
+          - runner: ubuntu-24.04-arm
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -95,7 +95,7 @@ jobs:
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
-          
+
   merge:
     runs-on: ubuntu-latest
     needs:
