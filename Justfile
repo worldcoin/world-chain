@@ -7,8 +7,11 @@ default:
 # Spawns the devnet
 devnet-up: deploy-devnet deploy-contracts
 
-deploy-devnet:
+deploy-devnet: build
     @just ./devnet/devnet-up
+
+build:
+    docker buildx build -t world-chain-builder:latest .
 
 deploy-contracts:
     @just ./contracts/deploy-contracts
@@ -17,24 +20,20 @@ deploy-contracts:
 devnet-down:
     @just ./devnet/devnet-down
 
-e2e-test *args='':
-    @just ./world-chain-builder/e2e-test $@
-
-# Builds and tags the world-chain-builder image
-build:
-    @just ./devnet/build
-
-# Tests the world-chain-builder
-test:
-    @just ./world-chain-builder/test
+test: 
+  cargo nextest run --workspace
 
 # Formats the world-chain-builder
-fmt: 
-    @just ./world-chain-builder/fmt
+fmt: fmt-fix fmt-check
 
-# Installs the world-chain-builder
+fmt-fix:
+  cargo +nightly fmt --all
+
+fmt-check:
+  cargo +nightly fmt --all -- --check
+
+e2e-test *args='':
+    RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
+
 install *args='':
-    @just ./world-chain-builder/install $@
-
-stress-test *args='':
-    @just ./devnet/stress-test $@
+  cargo install --path crates/world/bin --locked $@

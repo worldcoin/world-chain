@@ -150,13 +150,16 @@ where
             let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => {
-                    return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
-                        .to_outcome(tx)
+                    return WorldChainPoolTransactionError::from(
+                        PBHValidationError::InvalidCalldata,
+                    )
+                    .to_outcome(tx)
                 }
             };
 
             if pbh_payloads.len() != aggregated_ops.userOps.len() {
-                return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload).to_outcome(tx);
+                return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload)
+                    .to_outcome(tx);
             }
 
             let valid_roots = self.root_validator.roots();
