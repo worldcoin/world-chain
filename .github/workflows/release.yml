@@ -78,6 +78,8 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ github.repository }}-${{ github.ref_name }}-${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ github.repository }}-${{ github.ref_name }}-${{ matrix.platform }},mode=max
           outputs: type=registry,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -181,7 +183,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
-        path: ${{ matrix.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+        path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
 
   draft-release:
     name: draft release
