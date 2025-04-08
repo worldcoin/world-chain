@@ -45,8 +45,8 @@ use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
 use crate::{
-    payload::PayloadBuilderCtx,
     payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    payload_builder_ctx::PayloadBuilderCtx,
 };
 
 /// Optimism's payload builder
