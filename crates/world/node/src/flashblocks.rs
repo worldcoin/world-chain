@@ -5,11 +5,11 @@ use reth::builder::components::{
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
+    NodeTypesWithEngine,
 };
 
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
-
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
@@ -33,11 +33,12 @@ use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::args::WorldChainArgs;
+use crate::node::WorldChainPoolBuilder;
 
 /// Type configuration for a regular World Chain node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct WorldChainNode {
+pub struct WorldChainFlashblocksNode {
     /// Additional World Chain args
     pub args: WorldChainArgs,
     /// Data availability configuration for the OP builder.
@@ -49,7 +50,7 @@ pub struct WorldChainNode {
     pub da_config: OpDAConfig,
 }
 
-impl WorldChainNode {
+impl WorldChainFlashblocksNode {
     /// Creates a new instance of the World Chain node type.
     pub fn new(args: WorldChainArgs) -> Self {
         Self {
@@ -70,15 +71,15 @@ impl WorldChainNode {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
+        BasicPayloadServiceBuilder<FlashblocksPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
@@ -109,12 +110,12 @@ impl WorldChainNode {
                 world_id,
             ))
             .payload(BasicPayloadServiceBuilder::new(
-                WorldChainPayloadBuilder::new(
+                FlashblocksPayloadBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
                     pbh_entrypoint,
                     signature_aggregator,
-                    builder_private_key,
+                    builder_private_key.clone(),
                 )
                 .with_da_config(self.da_config.clone()),
             ))
@@ -127,11 +128,11 @@ impl WorldChainNode {
     }
 }
 
-impl<N> Node<N> for WorldChainNode
+impl<N> Node<N> for WorldChainFlashblocksNode
 where
     N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
@@ -141,7 +142,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
+        BasicPayloadServiceBuilder<FlashblocksPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -162,7 +163,7 @@ where
     }
 }
 
-impl NodeTypes for WorldChainNode {
+impl NodeTypes for WorldChainFlashblocksNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
@@ -170,130 +171,14 @@ impl NodeTypes for WorldChainNode {
     type Payload = OpEngineTypes;
 }
 
-/// A basic World Chain transaction pool.
-///
-/// This contains various settings that can be configured and take precedence over the node's
-/// config.
-#[derive(Debug, Clone)]
-pub struct WorldChainPoolBuilder {
-    pub pbh_entrypoint: Address,
-    pub pbh_signature_aggregator: Address,
-    pub world_id: Address,
-    /// Enforced overrides that are applied to the pool config.
-    pub pool_config_overrides: PoolBuilderConfigOverrides,
+impl NodeTypesWithEngine for WorldChainFlashblocksNode {
+    type Engine = OpEngineTypes;
 }
 
-impl WorldChainPoolBuilder {
-    pub fn new(
-        pbh_entrypoint: Address,
-        pbh_signature_aggregator: Address,
-        world_id: Address,
-    ) -> Self {
-        Self {
-            pbh_entrypoint,
-            pbh_signature_aggregator,
-            world_id,
-            pool_config_overrides: Default::default(),
-        }
-    }
-}
-
-impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
-where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
-{
-    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
-
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let Self {
-            pbh_entrypoint,
-            pbh_signature_aggregator,
-            world_id,
-            pool_config_overrides,
-            ..
-        } = self;
-
-        let data_dir = ctx.config().datadir();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .no_eip4844()
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(
-                pool_config_overrides
-                    .additional_validation_tasks
-                    .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
-            )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
-            .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator.clone())
-                    // In --dev mode we can't require gas fees because we're unable to decode the L1
-                    // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator =
-                    WorldChainRootValidator::new(validator.client().clone(), world_id)
-                        .expect("failed to initialize root validator");
-
-                WorldChainTransactionValidator::new(
-                    op_tx_validator,
-                    root_validator,
-                    pbh_entrypoint,
-                    pbh_signature_aggregator,
-                )
-                .expect("failed to create world chain validator")
-            });
-
-        let transaction_pool = reth_transaction_pool::Pool::new(
-            validator,
-            WorldChainOrdering::default(),
-            blob_store,
-            pool_config_overrides.apply(ctx.pool_config()),
-        );
-        info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
-
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = ctx.provider().canonical_state_stream();
-            let client = ctx.provider().clone();
-            let transactions_backup_config =
-                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-            ctx.task_executor()
-                .spawn_critical_with_graceful_shutdown_signal(
-                    "local transactions backup task",
-                    |shutdown| {
-                        reth_transaction_pool::maintain::backup_local_transactions_task(
-                            shutdown,
-                            pool.clone(),
-                            transactions_backup_config,
-                        )
-                    },
-                );
-
-            // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    ctx.task_executor().clone(),
-                    Default::default(),
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
-
-        Ok(transaction_pool)
-    }
-}
-
+// TODO: NOTE: update this struct
 /// A basic World Chain payload service builder
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadBuilder<Txs = ()> {
+pub struct FlashblocksPayloadBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -314,10 +199,11 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub pbh_signature_aggregator: Address,
 
     /// Sets the private key of the builder
+    /// used for signing the stampBlock transaction
     pub builder_private_key: String,
 }
 
-impl WorldChainPayloadBuilder {
+impl FlashblocksPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
     pub fn new(
@@ -345,10 +231,10 @@ impl WorldChainPayloadBuilder {
     }
 }
 
-impl<Txs> WorldChainPayloadBuilder<Txs> {
+impl<Txs> FlashblocksPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> FlashblocksPayloadBuilder<T> {
         let Self {
             compute_pending_block,
             da_config,
@@ -359,7 +245,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             ..
         } = self;
 
-        WorldChainPayloadBuilder {
+        FlashblocksPayloadBuilder {
             compute_pending_block,
             da_config,
             verified_blockspace_capacity,
@@ -382,8 +268,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
+            Types: NodeTypesWithEngine<
+                Engine = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
@@ -412,11 +298,11 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
 }
 
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
-    for WorldChainPayloadBuilder<Txs>
+    for FlashblocksPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
+        Types: NodeTypesWithEngine<
+            Engine = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,
@@ -425,6 +311,7 @@ where
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
+    // TODO: NOTE: update this toflashblocks payload builder
     type PayloadBuilder =
         world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>;
 

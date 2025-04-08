@@ -34,4 +34,8 @@ pub struct WorldChainArgs {
     /// Sets the private key of the builder
     #[arg(long = "builder.private_key", env = "BUILDER_PRIVATE_KEY")]
     pub builder_private_key: String,
+
+    /// Flashblock args
+    #[command(flatten)]
+    pub flashblock_args: Option<FlashblockArgs>,
 }
