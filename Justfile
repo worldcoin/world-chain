@@ -43,3 +43,6 @@ e2e-test *args='':
 
 install *args='':
   cargo install --path crates/world/bin --locked $@
+
+stress-test *args='':
+  @just ./devnet/stress-test $@
