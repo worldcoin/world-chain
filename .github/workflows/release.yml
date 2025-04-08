@@ -50,23 +50,23 @@ jobs:
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-                type=ref,event=branch
-                type=ref,event=tag
-                type=sha
-                type=raw,value=latest
-
       - name: Log in to Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+            images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            tags: |
+                  type=ref,event=branch
+                  type=ref,event=tag
+                  type=sha
+                  type=raw,value=latest
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -76,16 +76,15 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
-          tags: |
-              ${{ env.IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
-              ${{ env.IMAGE_NAME }}:latest
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: push-by-digest=true,${{steps.meta.outputs}}
 
       - name: Export digest
         run: |
@@ -129,20 +128,21 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+                type=ref,event=branch
+                type=ref,event=tag
+                type=sha
+                type=raw,value=latest
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
   build-binaries:
     name: build binaries
     needs: [extract-version]
@@ -176,16 +176,10 @@ jobs:
             mkdir artifacts
             mv "target/${{ matrix.target }}/release/${{ matrix.binary }}" ./artifacts
 
-    - name: Configure GPG and create artifacts
-      env:
-        GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    - name: Create artifacts
       run: |
-            export GPG_TTY=$(tty)
-            echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
             cd artifacts
             tar -czf ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}*
-            echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
             mv *tar.gz* ..
       shell: bash
 
@@ -194,12 +188,6 @@ jobs:
       with:
         name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
         path: ${{ matrix.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
-
-    - name: Upload signature
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
-        path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
 
   draft-release:
     name: draft release
@@ -235,10 +223,10 @@ jobs:
 
           ## Binaries
 
-          | System | Architecture | Binary | PGP Signature |
+          | System | Architecture | Binary |
           |:---:|:---:|:---:|:---|
-          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) |
+          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) |
           | | | | |
           | **System** | **Option** | - | **Resource** |
           | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | | [${{ env.IMAGE_NAME }}](https://github.com/worldcoin/world-chain/pkgs/container/world-chain) |
