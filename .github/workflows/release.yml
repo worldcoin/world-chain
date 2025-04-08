@@ -220,12 +220,12 @@ jobs:
           ## Binaries
 
           | System | Architecture | Binary |
-          |:---:|:---:|:---:|:---|
+          |:---:|:---:|:---|
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) |
           | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/${{ env.REPO_NAME }}-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) |
-          | | | | |
-          | **System** | **Option** | - | **Resource** |
-          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | | [${{ env.IMAGE_NAME }}](https://github.com/worldcoin/world-chain/pkgs/container/world-chain) |
+          | | | |
+          | **System** | **Option** | **Resource** |
+          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | [${{ env.IMAGE_NAME }}](https://github.com/worldcoin/world-chain/pkgs/container/world-chain) |
           ENDBODY
           )
           assets=()
