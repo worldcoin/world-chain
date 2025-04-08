@@ -7,7 +7,6 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_evm::block::BlockExecutionError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
@@ -24,7 +23,6 @@ use reth_optimism_payload_builder::{
     OpPayloadPrimitives,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::NodePrimitives;
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
     StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -44,10 +42,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::{
-    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
-    payload_builder_ctx::PayloadBuilderCtx,
-};
+use crate::{payload::FlashblocksPayloadV1, payload_builder_ctx::PayloadBuilderCtx};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
@@ -412,14 +407,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             Ok(BuildOutcomeKind::Better { payload })
         }
     }
-}
-
-// TODO: impl Flashblock for BasicBlock builder
-pub trait Flashblock<N: NodePrimitives> {
-    fn finish_flashblock(
-        self,
-        state: impl StateProvider,
-    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError>;
 }
 
 pub fn build_block<Ctx, Evm, Builder, ChainSpec, DB, P>(
