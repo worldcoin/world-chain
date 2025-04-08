@@ -24,7 +24,7 @@ use reth_optimism_payload_builder::{
     OpPayloadPrimitives,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::NodePrimitives;
+use reth_primitives::{NodePrimitives, TxTy};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
     StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -287,11 +287,12 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
 
 impl<Txs> FlashblockBuilder<'_, Txs> {
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, ChainSpec, N, Ctx>(
+    pub fn build<EvmConfig, ChainSpec, N, Ctx, Pool>(
         self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: Ctx,
+        pool: &Pool,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
@@ -300,7 +301,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Ctx: PayloadBuilderCtx<EvmConfig, ChainSpec, Txs = Txs>,
+        Pool: TransactionPool<Transaction = Txs>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
@@ -338,6 +340,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                         &mut builder,
                         best_txs,
                         flashblock_gas_limit,
+                        pool,
                     )?
                     .is_some()
                 {
@@ -429,7 +432,7 @@ pub fn build_block<Ctx, Evm, Builder, ChainSpec, DB, P>(
     _info: &mut ExecutionInfo,
 ) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
 where
-    Ctx: PayloadBuilderCtx,
+    // Ctx: PayloadBuilderCtx<Evm, ChainSpec>,
     Evm: ConfigureEvm,
     Builder: BlockBuilder,
     ChainSpec: EthChainSpec + OpHardforks,

@@ -12,6 +12,7 @@ use reth::{
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
+use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_node::OpNextBlockEnvAttributes;
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
@@ -19,7 +20,8 @@ use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::NodePrimitives;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
+use reth_primitives_traits::Transaction;
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::BlockEnv;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -98,15 +100,16 @@ pub struct FlashblocksMetadata<N: NodePrimitives> {
     pub block_number: u64,
 }
 
-pub trait PayloadBuilderCtx {
-    type Evm: ConfigureEvm;
-    type ChainSpec: EthChainSpec + OpHardforks;
+pub trait PayloadBuilderCtx<Evm, Chainspec>
+where
+    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Chainspec: EthChainSpec + OpHardforks,
+{
+    type Txs: PoolTransaction<Consensus = TxTy<Evm::Primitives>> + MaybeInteropTransaction;
 
     fn parent(&self) -> &SealedHeader;
 
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>>;
+    fn attributes(&self) -> &OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>;
 
     fn extra_data(&self) -> Result<Bytes, PayloadBuilderError>;
 
@@ -121,10 +124,7 @@ pub trait PayloadBuilderCtx {
     fn block_builder<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
+    ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError>
     where
         DB: Database,
         DB::Error: Send + Sync + 'static,
@@ -132,37 +132,32 @@ pub trait PayloadBuilderCtx {
 
     fn execute_sequencer_transactions(
         &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
+        builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
-    fn execute_best_transactions(
+    fn execute_best_transactions<Pool>(
         &self,
         info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
-            > + MaybeInteropTransaction,
-        >,
+        builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
+        best_txs: impl PayloadTransactions<Transaction = Self::Txs>,
         gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>;
+        pool: &Pool,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Pool: TransactionPool<Transaction = Self::Txs>;
 }
 
-impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
+impl<Evm, Chainspec> PayloadBuilderCtx<Evm, Chainspec> for OpPayloadBuilderCtx<Evm, Chainspec>
 where
     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {
-    type Evm = Evm;
-    type ChainSpec = Chainspec;
+    type Txs = OpPooledTransaction;
 
     fn parent(&self) -> &SealedHeader {
         self.parent()
     }
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>> {
+    fn attributes(&self) -> &OpPayloadBuilderAttributes<TxTy<Evm::Primitives>> {
         self.attributes()
     }
 
@@ -189,10 +184,7 @@ where
     fn block_builder<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
+    ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError>
     where
         DB::Error: Send + Sync + 'static,
         DB: Database,
@@ -202,21 +194,22 @@ where
 
     fn execute_sequencer_transactions(
         &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
+        builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
     ) -> Result<ExecutionInfo, PayloadBuilderError> {
         self.execute_sequencer_transactions(builder)
     }
 
-    fn execute_best_transactions(
+    fn execute_best_transactions<Pool>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
-        best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>
-                             + MaybeInteropTransaction,
-        >,
-        _gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError> {
+        best_txs: impl PayloadTransactions<Transaction = Self::Txs>,
+        gas_limit: u64,
+        pool: &Pool,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Pool: TransactionPool<Transaction = Self::Txs>,
+    {
         self.execute_best_transactions(info, builder, best_txs)
     }
 }
