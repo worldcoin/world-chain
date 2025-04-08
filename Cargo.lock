@@ -3568,6 +3568,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-serde",
+ "clap",
  "futures-util",
  "reth",
  "reth-basic-payload-builder",

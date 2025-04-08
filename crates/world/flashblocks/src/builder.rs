@@ -15,20 +15,24 @@ use reth_evm::{
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{txpool::interop::MaybeInteropTransaction, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::{
-    builder::OpPayloadBuilderCtx, config::OpBuilderConfig, OpPayloadPrimitives,
-};
-use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+};
+use reth_optimism_payload_builder::{
+    builder::{ExecutionInfo, OpPayloadBuilderCtx},
+    config::OpBuilderConfig,
+    OpPayloadPrimitives,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
+    StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
+use revm::database::BundleState;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -40,7 +44,10 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::ctx::PayloadBuilderCtx;
+use crate::{
+    payload::PayloadBuilderCtx,
+    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
@@ -413,4 +420,21 @@ pub trait Flashblock<N: NodePrimitives> {
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError>;
+}
+
+pub fn build_block<Ctx, Evm, Builder, ChainSpec, DB, P>(
+    mut _state: State<DB>,
+    _ctx: &Ctx,
+    _builder: Builder,
+    _info: &mut ExecutionInfo,
+) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
+where
+    Ctx: PayloadBuilderCtx,
+    Evm: ConfigureEvm,
+    Builder: BlockBuilder,
+    ChainSpec: EthChainSpec + OpHardforks,
+    DB: Database<Error = ProviderError> + AsRef<P>,
+    P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
+{
+    todo!()
 }
