@@ -62,11 +62,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
             images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            tags: |
-                  type=ref,event=branch
-                  type=ref,event=tag
-                  type=sha
-                  type=raw,value=latest
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -80,7 +75,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=registry,push-by-digest=true,name-canonical=true,push=true
@@ -190,7 +185,7 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [build-and-push, extract-version, build-binaries]
+    needs: [build-and-push, merge, extract-version, build-binaries]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
