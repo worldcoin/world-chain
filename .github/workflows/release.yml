@@ -80,11 +80,10 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
           tags: ${{ steps.meta.outputs.tags }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: push-by-digest=true,${{steps.meta.outputs}}
+          outputs: type=registry,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
