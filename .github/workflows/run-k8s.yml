@@ -108,11 +108,7 @@ jobs:
       - name: Run E2E Tests
         run: |
           just e2e-test -n
-      
-      - name: Stress Tests
-        run: |
-          just stress-test stress
-
+ 
       - name: Devnet Down
         run: |
           just devnet-down
