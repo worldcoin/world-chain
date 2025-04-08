@@ -17,7 +17,6 @@ reth.workspace = true
 
 reth-provider.workspace = true
 revm-primitives.workspace = true
-reth-optimism-rpc.workspace = true
 reth-optimism-node.workspace = true
 alloy-consensus.workspace = true
 
@@ -30,4 +29,5 @@ jsonrpsee-types.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 

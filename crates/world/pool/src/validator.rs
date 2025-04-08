@@ -117,13 +117,13 @@ where
     /// Validates a PBH bundle transaction
     ///
     /// If the transaction is valid marks it for priority inclusion
-    pub fn validate_pbh_bundle(
+    pub async fn validate_pbh_bundle(
         &self,
         origin: TransactionOrigin,
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
-        let mut tx_outcome = self.inner.validate_one(origin, tx.clone());
+        let mut tx_outcome = self.inner.validate_one(origin, tx.clone()).await;
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
@@ -200,7 +200,7 @@ where
         tx_outcome
     }
 
-    pub fn validate_pbh(
+    pub async fn validate_pbh(
         &self,
         origin: TransactionOrigin,
         tx: Tx,
@@ -218,9 +218,9 @@ where
 
         match function_signature {
             IPBHEntryPoint::handleAggregatedOpsCall::SELECTOR => {
-                self.validate_pbh_bundle(origin, tx)
+                self.validate_pbh_bundle(origin, tx).await
             }
-            _ => self.inner.validate_one(origin, tx.clone()),
+            _ => self.inner.validate_one(origin, tx.clone()).await,
         }
     }
 }
@@ -240,10 +240,10 @@ where
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.to().unwrap_or_default() != self.pbh_entrypoint {
-            return self.inner.validate_one(origin, transaction.clone());
+            return self.inner.validate_one(origin, transaction.clone()).await;
         }
 
-        self.validate_pbh(origin, transaction)
+        self.validate_pbh(origin, transaction).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

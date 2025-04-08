@@ -8,7 +8,9 @@ use reth::transaction_pool::{
     error::{InvalidPoolTransactionError, PoolTransactionError},
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
 };
-use reth_optimism_node::txpool::{conditional::MaybeConditionalTransaction, OpPooledTransaction};
+use reth_optimism_node::txpool::{
+    conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction, OpPooledTransaction,
+};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
@@ -22,7 +24,7 @@ pub struct WorldChainPooledTransaction {
     pub payload: Option<Vec<PBHPayload>>,
 }
 
-pub trait WorldChainPoolTransaction: EthPoolTransaction {
+pub trait WorldChainPoolTransaction: EthPoolTransaction + MaybeInteropTransaction {
     fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
     fn pbh_payload(&self) -> Option<&Vec<PBHPayload>>;
@@ -39,6 +41,23 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
 
     fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
         self.payload.as_ref()
+    }
+}
+
+impl MaybeInteropTransaction for WorldChainPooledTransaction {
+    fn interop_deadline(&self) -> Option<u64> {
+        self.inner.interop_deadline()
+    }
+
+    fn set_interop_deadlone(&self, deadline: u64) {
+        self.inner.set_interop_deadlone(deadline)
+    }
+
+    fn with_interop_deadline(self, interop: u64) -> Self
+    where
+        Self: Sized,
+    {
+        self.inner.with_interop_deadline(interop).into()
     }
 }
 

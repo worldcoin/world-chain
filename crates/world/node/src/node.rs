@@ -5,7 +5,6 @@ use reth::builder::components::{
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
-    NodeTypesWithEngine,
 };
 
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
@@ -78,8 +77,8 @@ impl WorldChainNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
-                Engine = OpEngineTypes,
+            Types: NodeTypes<
+                Payload = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
@@ -130,8 +129,8 @@ impl WorldChainNode {
 impl<N> Node<N> for WorldChainNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
@@ -167,11 +166,9 @@ impl NodeTypes for WorldChainNode {
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
+    type Payload = OpEngineTypes;
 }
 
-impl NodeTypesWithEngine for WorldChainNode {
-    type Engine = OpEngineTypes;
-}
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
@@ -384,8 +381,8 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
-                Engine = OpEngineTypes,
+            Types: NodeTypes<
+                Payload = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
             >,
@@ -417,8 +414,8 @@ impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::P
     for WorldChainPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,

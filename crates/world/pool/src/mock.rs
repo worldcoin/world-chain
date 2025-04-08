@@ -24,6 +24,7 @@ use reth_db::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_node_ethereum::EthEngineTypes;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{
@@ -172,7 +173,7 @@ impl MockEthProvider {
 }
 
 /// Mock node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockNode;
 
 impl NodeTypes for MockNode {
@@ -180,6 +181,7 @@ impl NodeTypes for MockNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
+    type Payload = EthEngineTypes;
 }
 
 impl StateCommitmentProvider for MockEthProvider {
