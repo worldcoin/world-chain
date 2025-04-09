@@ -57,7 +57,9 @@ EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER = "/data/op-reth/execution-data"
 PBH_ENTRY_POINT = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 PBH_SIGNATURE_AGGREGATOR = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 WORLD_ID = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-BUILDER_PRIVATE_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+BUILDER_PRIVATE_KEY = (
+    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+)
 
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
@@ -241,9 +243,7 @@ def get_config(
 
     cmd += participant.el_builder_extra_params
     env_vars = participant.el_builder_extra_env_vars
-    env_vars[
-        "BUILDER_PRIVATE_KEY"
-    ] = BUILDER_PRIVATE_KEY
+    env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
     env_vars["RUST_LOG"] = "info,payload_builder=trace"
     config_args = {

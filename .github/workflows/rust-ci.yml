@@ -54,5 +54,5 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt + lint
-        run: just fmt
+        run: cargo +nightly fmt --all -- --check
 

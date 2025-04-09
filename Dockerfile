@@ -1,4 +1,4 @@
-FROM rust:1.85.1 AS base
+FROM rust:1.86 AS base
 
 ARG FEATURES
 

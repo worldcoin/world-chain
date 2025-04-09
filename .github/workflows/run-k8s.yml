@@ -1,11 +1,11 @@
 name: K8s CI
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 1'
   push:
     tags:
         - v*
+  pull_request:
+    branches: [main]    
 
 env:
   CARGO_TERM_COLOR: always
@@ -108,7 +108,7 @@ jobs:
       - name: Run E2E Tests
         run: |
           just e2e-test -n
-
+ 
       - name: Devnet Down
         run: |
           just devnet-down

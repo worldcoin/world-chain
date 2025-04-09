@@ -49,8 +49,8 @@ impl MaybeInteropTransaction for WorldChainPooledTransaction {
         self.inner.interop_deadline()
     }
 
-    fn set_interop_deadlone(&self, deadline: u64) {
-        self.inner.set_interop_deadlone(deadline)
+    fn set_interop_deadline(&self, deadline: u64) {
+        self.inner.set_interop_deadline(deadline);
     }
 
     fn with_interop_deadline(self, interop: u64) -> Self
@@ -264,7 +264,7 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
-        todo!("TODO:")
+        self
     }
 }
 
