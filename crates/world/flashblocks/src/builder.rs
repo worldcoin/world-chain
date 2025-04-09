@@ -34,6 +34,7 @@ use reth_transaction_pool::{
 };
 use revm::database::BundleState;
 use std::{
+    marker::PhantomData,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -51,7 +52,7 @@ use crate::{
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
-pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
+pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -76,7 +77,7 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     pub ctx: Ctx,
 }
 
-impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
+impl<Pool, Client, Evm, Ctx, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs> {
     /// Start the WebSocket server
     pub async fn start_ws(subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>, addr: &str) {
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -133,7 +134,7 @@ impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
     }
 }
 
-impl<Pool, Client, Evm, N, T> FlashBlocksPayloadBuilder<Pool, Client, Evm, T>
+impl<Pool, Client, Evm, Ctx, N, T> FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, T>
 where
     Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
@@ -194,7 +195,8 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs>
+impl<Pool, Client, Evm, Ctx, N, Txs> PayloadBuilder
+    for FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
@@ -202,6 +204,7 @@ where
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Ctx: PayloadBuilderCtx<Evm, <Client as ChainSpecProvider>::ChainSpec> + Clone + Send + Sync,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -259,19 +262,26 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-pub struct FlashblockBuilder<'a, Txs> {
+pub struct FlashblockBuilder<'a, Evm>
+where
+    Evm: ConfigureEvm,
+{
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
+    best: Box<dyn Fn(BestTransactionsAttributes) -> TxTy<Evm::Primitives> + 'a>,
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
     pub block_time: u64,
     pub flashblock_interval: u64,
+    _evm: PhantomData<Evm>,
 }
 
-impl<'a, Txs> FlashblockBuilder<'a, Txs> {
+impl<'a, Evm> FlashblockBuilder<'a, Evm>
+where
+    Evm: ConfigureEvm,
+{
     /// Creates a new [`OpBuilder`].
     pub fn new(
-        best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        best: impl Fn(BestTransactionsAttributes) -> TxTy<Evm::Primitives> + Send + Sync + 'a,
         tx: mpsc::UnboundedSender<String>,
         block_time: u64,
         flashblock_interval: u64,
@@ -281,11 +291,15 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
             tx,
             block_time,
             flashblock_interval,
+            _evm: PhantomData,
         }
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs> {
+impl<Evm> FlashblockBuilder<'_, Evm>
+where
+    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+{
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx, Pool>(
         self,
@@ -298,11 +312,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        >,
-        Ctx: PayloadBuilderCtx<EvmConfig, ChainSpec, Txs = Txs>,
-        Pool: TransactionPool<Transaction = Txs>,
+        Ctx: PayloadBuilderCtx<EvmConfig, ChainSpec>,
+        Pool: TransactionPool<Transaction = TxTy<Evm::Primitives>>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
@@ -334,18 +345,21 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 let best_txs =
                     (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
 
-                if ctx
-                    .execute_best_transactions(
-                        &mut info,
-                        &mut builder,
-                        best_txs,
-                        flashblock_gas_limit,
-                        pool,
-                    )?
-                    .is_some()
-                {
-                    return Ok(BuildOutcomeKind::Cancelled);
-                }
+                // TODO: This doesn't work because we need to preprocess `best_txs` from attributes
+                // to actual txs
+                //
+                // if ctx
+                //     .execute_best_transactions(
+                //         &mut info,
+                //         &mut builder,
+                //         best_txs,
+                //         flashblock_gas_limit,
+                //         pool,
+                //     )?
+                //     .is_some()
+                // {
+                //     return Ok(BuildOutcomeKind::Cancelled);
+                // }
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
 
