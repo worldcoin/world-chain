@@ -20,7 +20,6 @@ use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::NodePrimitives;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_primitives_traits::Transaction;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::BlockEnv;
 use serde::{Deserialize, Serialize};
@@ -105,8 +104,6 @@ where
     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {
-    type Txs: PoolTransaction<Consensus = TxTy<Evm::Primitives>> + MaybeInteropTransaction;
-
     fn parent(&self) -> &SealedHeader;
 
     fn attributes(&self) -> &OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>;
@@ -139,21 +136,21 @@ where
         &self,
         info: &mut ExecutionInfo,
         builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
-        best_txs: impl PayloadTransactions<Transaction = Self::Txs>,
+        best_txs: impl PayloadTransactions<Transaction = TxTy<Evm::Primitives>>,
         gas_limit: u64,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Pool: TransactionPool<Transaction = Self::Txs>;
+        Pool: TransactionPool<Transaction = TxTy<Evm::Primitives>>;
 }
 
 impl<Evm, Chainspec> PayloadBuilderCtx<Evm, Chainspec> for OpPayloadBuilderCtx<Evm, Chainspec>
 where
+    // Cons: SignedTransaction + From<Pooled>,
+    // Pooled: SignedTransaction + TryFrom<Cons, Error: core::error::Error>,
     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {
-    type Txs = OpPooledTransaction;
-
     fn parent(&self) -> &SealedHeader {
         self.parent()
     }
@@ -203,13 +200,14 @@ where
         &self,
         info: &mut ExecutionInfo,
         builder: &mut impl BlockBuilder<Primitives = Evm::Primitives>,
-        best_txs: impl PayloadTransactions<Transaction = Self::Txs>,
+        best_txs: impl PayloadTransactions<Transaction = TxTy<Evm::Primitives>>,
         gas_limit: u64,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Pool: TransactionPool<Transaction = Self::Txs>,
+        Pool: TransactionPool<Transaction = TxTy<Evm::Primitives>>,
     {
-        self.execute_best_transactions(info, builder, best_txs)
+        // self.execute_best_transactions(info, builder, best_txs)
+        todo!()
     }
 }
