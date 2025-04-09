@@ -10373,7 +10373,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b47ba971a6088a498d78316854aab2f3833ca031722d369378220cdbbc75ca2"
 dependencies = [
  "alloy-core",
  "ark-bn254 0.4.0",
@@ -10418,7 +10419,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-ark-circom"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "590c00fa015e2f7f03f4f0f4123bbe38a7cded0f4497cdd67b7874e8a37887f3"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-crypto-primitives",
@@ -10438,7 +10440,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-ark-zkey"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c5486a113b07b9f4c003a81f4efaca98159498bb7acff34b3b8c6fb022132b"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-ec 0.4.2",
@@ -10454,12 +10457,14 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-depth-config"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b250534726c9a2785bfb8fcb498540ef47fb0f732824bb640994dcaa40547f6"
 
 [[package]]
 name = "semaphore-rs-depth-macros"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fa8ad8e24071abbc3c554db3c940e2af2dd676259ab702b8b7f516d162986fb"
 dependencies = [
  "itertools 0.13.0",
  "proc-macro2",
@@ -10471,7 +10476,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-hasher"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11442fee48d178242d0e22715253821fb23ee0a770cf7ce3d13079718f4231e9"
 dependencies = [
  "bytemuck",
 ]
@@ -10479,7 +10485,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-keccak"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9d5efcb970e069bd434c7dc1dad4d715e0ec9208c10d66d81076cc5d57f7b78"
 dependencies = [
  "semaphore-rs-hasher",
  "tiny-keccak",
@@ -10488,7 +10495,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-poseidon"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d26e9b66d2fcf52621d2d86786bca4e09f080c902d6c9f53587bb3c97dd812e"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-ff 0.4.2",
@@ -10500,7 +10508,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-proof"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bf4c50a78e3ce61761e6c5bdd21f1f640845cf416bc4d9705f0657c3b1a931"
 dependencies = [
  "alloy-core",
  "ark-bn254 0.4.0",
@@ -10519,7 +10528,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-storage"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7843420192065a5a4789285e984df9239a294e9553631717c03cbb66b141ff91"
 dependencies = [
  "bytemuck",
  "color-eyre",
@@ -10530,7 +10540,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-trees"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca2a2bc89c277b8761b46ed6953a6995d01ecadb87164f5b499a2c67846ea517"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-ec 0.4.2",
@@ -10559,7 +10570,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-utils"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb67bdd9e07446957225c963228a4be98a60bf80389fbb335eda61e749a15306"
 dependencies = [
  "hex",
  "serde",
@@ -10569,7 +10581,8 @@ dependencies = [
 [[package]]
 name = "semaphore-rs-witness"
 version = "0.3.2"
-source = "git+https://github.com/worldcoin/semaphore-rs.git?rev=aa8e76d#aa8e76d90f958c47f9cb4973f8aa9c9794f9a39c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "014e1212ea105aa3be44b7c0d318234794dec47e23a926b088e742cfc9f89fa3"
 dependencies = [
  "ark-bn254 0.4.0",
  "ark-ff 0.4.2",
