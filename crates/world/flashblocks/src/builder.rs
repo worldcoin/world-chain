@@ -341,7 +341,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
 
-                // crate::block_building::build_block(&mut builder)
+                crate::finish_flashblock::finish_flashblock(&ctx, &mut builder);
 
                 // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
 

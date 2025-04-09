@@ -21,11 +21,24 @@ use super::PayloadBuilderCtx;
 
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
-    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: reth_evm::Evm
+        + ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {
     type Evm = Evm;
     type ChainSpec = Chainspec;
+
+    fn evm(&self) -> &Self::Evm {
+        &self.evm_config
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        &mut self.evm_config
+    }
+
+    fn spec(&self) -> &Self::ChainSpec {
+        &self.chain_spec
+    }
 
     fn parent(&self) -> &SealedHeader {
         self.parent()
@@ -68,6 +81,7 @@ where
         DB::Error: Send + Sync + 'static,
         DB: Database,
     {
+        // self.evm.builder_for_next_block(db, parent, attributes)
         self.block_builder(db)
     }
 

@@ -5,7 +5,7 @@ use reth::{
     payload::PayloadId,
     revm::{Database, State},
 };
-use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{execute::BlockBuilder, ConfigureEvm, Evm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_payload_builder::builder::ExecutionInfo;
@@ -18,8 +18,14 @@ use revm::context::BlockEnv;
 mod op;
 
 pub trait PayloadBuilderCtx {
-    type Evm: ConfigureEvm;
+    type Evm: Evm + ConfigureEvm;
     type ChainSpec: EthChainSpec + OpHardforks;
+
+    fn evm(&self) -> &Self::Evm;
+
+    fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    fn spec(&self) -> &Self::ChainSpec;
 
     fn parent(&self) -> &SealedHeader;
 
