@@ -5,7 +5,7 @@ use reth_payload_util::PayloadTransactions;
 /// This type exists to yield bes transactions from the tx pool
 /// while doing bookkeping so we can deterministically replay them on the following
 /// flashblock
-pub struct RetainingBestTransactions<I>
+pub struct RetainingBestTxs<I>
 where
     I: PayloadTransactions,
 {
@@ -19,7 +19,14 @@ where
     observed: Vec<I::Transaction>,
 }
 
-impl<I> RetainingBestTransactions<I>
+pub struct RetainingBestTxsGuard<'a, I>
+where
+    I: PayloadTransactions,
+{
+    retaining: &'a mut RetainingBestTxs<I>,
+}
+
+impl<I> RetainingBestTxs<I>
 where
     I: PayloadTransactions,
 {
@@ -39,19 +46,24 @@ where
     pub fn take_observed(self) -> Vec<I::Transaction> {
         self.observed
     }
+
+    pub fn guard(&mut self) -> RetainingBestTxsGuard<'_, I> {
+        RetainingBestTxsGuard { retaining: self }
+    }
 }
 
-impl<I> PayloadTransactions for RetainingBestTransactions<I>
+impl<'a, I> PayloadTransactions for RetainingBestTxsGuard<'a, I>
 where
     I: PayloadTransactions,
 {
     type Transaction = I::Transaction;
 
     fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
-        self.inner.next(ctx)
+        // TODO: Implement
+        self.retaining.inner.next(ctx)
     }
 
     fn mark_invalid(&mut self, sender: alloy_primitives::Address, nonce: u64) {
-        self.inner.mark_invalid(sender, nonce);
+        self.retaining.inner.mark_invalid(sender, nonce);
     }
 }

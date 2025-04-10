@@ -1,4 +1,5 @@
 use futures_util::{sink::SinkExt, FutureExt};
+use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
@@ -329,13 +330,21 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         // 2.3. Execute transactions for the first block
         // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
         let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+        let mut best_txs = RetainingBestTxs::new(best_txs);
 
         if ctx
-            .execute_best_transactions(&mut info, &mut builder, best_txs, flashblock_gas_limit)?
+            .execute_best_transactions(
+                &mut info,
+                &mut builder,
+                best_txs.guard(),
+                flashblock_gas_limit,
+            )?
             .is_some()
         {
             return Ok(BuildOutcomeKind::Cancelled);
         }
+
+        let executed_txs = best_txs.take_observed();
 
         // 3.4. Finish first block
         let BlockBuilderOutcome {
@@ -343,7 +352,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             hashed_state,
             trie_updates,
             block,
-        } = builder.finish(state_provider)?;
+        } = builder.finish(&state_provider)?;
 
         if !ctx.attributes().no_tx_pool {
             let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
