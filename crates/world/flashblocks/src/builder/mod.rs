@@ -44,6 +44,8 @@ use tracing::{debug, warn};
 
 use crate::{payload::FlashblocksPayloadV1, payload_builder_ctx::PayloadBuilderCtx};
 
+mod retaining_payload_txs;
+
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
 pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
