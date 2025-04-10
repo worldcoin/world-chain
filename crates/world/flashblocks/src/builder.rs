@@ -305,16 +305,43 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             .with_bundle_update()
             .build();
 
+        // db.take_bundle()
+
+        // 1. Setup relevant variables
+        let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+        let num_flashblocks = self.block_time / self.flashblock_interval;
+        let flashblock_gas_limit = total_gas_limit / num_flashblocks;
+
+        // 2. Create the first block
         let mut builder = ctx.block_builder(&mut db)?;
 
-        // 1. apply pre-execution changes
+        // 2.1. apply pre-execution changes
         builder.apply_pre_execution_changes().map_err(|err| {
             warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
             PayloadBuilderError::Internal(err.into())
         })?;
 
-        // 2. execute sequencer transactions
+        // 2.2. execute sequencer transactions
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+
+        // 2.3. Execute transactions for the first block
+        // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
+        let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+
+        if ctx
+            .execute_best_transactions(&mut info, &mut builder, best_txs, flashblock_gas_limit)?
+            .is_some()
+        {
+            return Ok(BuildOutcomeKind::Cancelled);
+        }
+
+        // 3.4. Finish first block
+        let BlockBuilderOutcome {
+            execution_result,
+            hashed_state,
+            trie_updates,
+            block,
+        } = builder.finish(state_provider)?;
 
         if !ctx.attributes().no_tx_pool {
             let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
@@ -326,18 +353,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
                 let best_txs =
                     (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
-
-                if ctx
-                    .execute_best_transactions(
-                        &mut info,
-                        &mut builder,
-                        best_txs,
-                        flashblock_gas_limit,
-                    )?
-                    .is_some()
-                {
-                    return Ok(BuildOutcomeKind::Cancelled);
-                }
 
                 flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
 
