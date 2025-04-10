@@ -308,8 +308,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             .with_bundle_update()
             .build();
 
-        // db.take_bundle()
-
         // 1. Setup relevant variables
         let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
         let num_flashblocks = self.block_time / self.flashblock_interval;
@@ -317,6 +315,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
         // 2. Create the first block
         let mut builder = ctx.block_builder(&mut db)?;
+        let now = Instant::now();
 
         // 2.1. apply pre-execution changes
         builder.apply_pre_execution_changes().map_err(|err| {
@@ -327,24 +326,26 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         // 2.2. execute sequencer transactions
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
-        // 2.3. Execute transactions for the first block
-        // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
-        let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
-        let mut best_txs = RetainingBestTxs::new(best_txs);
+        if !ctx.attributes().no_tx_pool {
+            // 2.3. Execute transactions for the first block
+            // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
+            let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+            let mut best_txs = RetainingBestTxs::new(best_txs);
 
-        if ctx
-            .execute_best_transactions(
-                &mut info,
-                &mut builder,
-                best_txs.guard(),
-                flashblock_gas_limit,
-            )?
-            .is_some()
-        {
-            return Ok(BuildOutcomeKind::Cancelled);
+            if ctx
+                .execute_best_transactions(
+                    &mut info,
+                    &mut builder,
+                    best_txs.guard(),
+                    flashblock_gas_limit,
+                )?
+                .is_some()
+            {
+                return Ok(BuildOutcomeKind::Cancelled);
+            }
+
+            let executed_txs = best_txs.take_observed();
         }
-
-        let executed_txs = best_txs.take_observed();
 
         // 3.4. Finish first block
         let BlockBuilderOutcome {
@@ -354,30 +355,68 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             block,
         } = builder.finish(&state_provider)?;
 
-        if !ctx.attributes().no_tx_pool {
-            let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
-            let mut flashblock_gas_limit = gas_limit;
+        // TODO: Prep & emit initial flashblock payload
 
-            let num_flashblocks = self.block_time / self.flashblock_interval;
-            for _ in 0..num_flashblocks {
-                let now = Instant::now();
+        // 3.5. Sleep for flashblock interval
+        let elapsed = now.elapsed().as_millis() as u64;
+        let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+        std::thread::sleep(Duration::from_millis(sleep_time));
 
+        // 4. Build intermediate flashblocks
+        if ctx.attributes().no_tx_pool {
+            // TODO: What do do here? Clearly no reason to produce flashblocks
+            // should we just return early?
+        }
+
+        for flashblock_idx in 1..num_flashblocks {
+            // TODO: Do we need to reinitialize the db?
+
+            let mut builder = ctx.block_builder(&mut db)?;
+            let now = Instant::now();
+
+            // 2.1. apply pre-execution changes
+            builder.apply_pre_execution_changes().map_err(|err| {
+                warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+                PayloadBuilderError::Internal(err.into())
+            })?;
+
+            // 2.2. execute sequencer transactions
+            let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+
+            if !ctx.attributes().no_tx_pool {
+                // 2.3. Execute transactions for the first block
+                // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
                 let best_txs =
                     (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+                let mut best_txs = RetainingBestTxs::new(best_txs);
+                // TODO: Push back already executed txs & save new ones
 
-                flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
+                if ctx
+                    .execute_best_transactions(
+                        &mut info,
+                        &mut builder,
+                        best_txs.guard(),
+                        flashblock_gas_limit,
+                    )?
+                    .is_some()
+                {
+                    return Ok(BuildOutcomeKind::Cancelled);
+                }
 
-                crate::finish_flashblock::finish_flashblock(&ctx, &mut builder);
-
-                // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
-
-                // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
-                //     .expect("TODO: handle error");
-
-                let elapsed = now.elapsed().as_millis() as u64;
-                let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-                std::thread::sleep(Duration::from_millis(sleep_time));
+                let executed_txs = best_txs.take_observed();
             }
+
+            // 3.4. Finish first block
+            let BlockBuilderOutcome {
+                execution_result,
+                hashed_state,
+                trie_updates,
+                block,
+            } = builder.finish(&state_provider)?;
+
+            let elapsed = now.elapsed().as_millis() as u64;
+            let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+            std::thread::sleep(Duration::from_millis(sleep_time));
         }
 
         // check if the new payload is even more valuable
@@ -388,50 +427,52 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             });
         }
 
-        let BlockBuilderOutcome {
-            execution_result,
-            hashed_state,
-            trie_updates,
-            block,
-        } = builder.finish(state_provider)?;
+        // let BlockBuilderOutcome {
+        //     execution_result,
+        //     hashed_state,
+        //     trie_updates,
+        //     block,
+        // } = builder.finish(state_provider)?;
+        //
+        // let sealed_block = Arc::new(block.sealed_block().clone());
+        // debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
+        //
+        // let execution_outcome = ExecutionOutcome::new(
+        //     db.take_bundle(),
+        //     vec![execution_result.receipts],
+        //     block.number,
+        //     Vec::new(),
+        // );
+        //
+        // // create the executed block data
+        // let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
+        //     block: ExecutedBlock {
+        //         recovered_block: Arc::new(block),
+        //         execution_output: Arc::new(execution_outcome),
+        //         hashed_state: Arc::new(hashed_state),
+        //     },
+        //     trie: Arc::new(trie_updates),
+        // };
+        //
+        // let no_tx_pool = ctx.attributes().no_tx_pool;
+        //
+        // let payload = OpBuiltPayload::new(
+        //     ctx.payload_id(),
+        //     sealed_block,
+        //     info.total_fees,
+        //     Some(executed),
+        // );
+        //
+        // if no_tx_pool {
+        //     // if `no_tx_pool` is set only transactions from the payload attributes will be included
+        //     // in the payload. In other words, the payload is deterministic and we can
+        //     // freeze it once we've successfully built it.
+        //     Ok(BuildOutcomeKind::Freeze(payload))
+        // } else {
+        //     Ok(BuildOutcomeKind::Better { payload })
+        // }
 
-        let sealed_block = Arc::new(block.sealed_block().clone());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
-
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![execution_result.receipts],
-            block.number,
-            Vec::new(),
-        );
-
-        // create the executed block data
-        let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
-            },
-            trie: Arc::new(trie_updates),
-        };
-
-        let no_tx_pool = ctx.attributes().no_tx_pool;
-
-        let payload = OpBuiltPayload::new(
-            ctx.payload_id(),
-            sealed_block,
-            info.total_fees,
-            Some(executed),
-        );
-
-        if no_tx_pool {
-            // if `no_tx_pool` is set only transactions from the payload attributes will be included
-            // in the payload. In other words, the payload is deterministic and we can
-            // freeze it once we've successfully built it.
-            Ok(BuildOutcomeKind::Freeze(payload))
-        } else {
-            Ok(BuildOutcomeKind::Better { payload })
-        }
+        todo!()
     }
 }
 

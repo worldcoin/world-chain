@@ -81,7 +81,6 @@ where
         DB::Error: Send + Sync + 'static,
         DB: Database,
     {
-        // self.evm.builder_for_next_block(db, parent, attributes)
         self.block_builder(db)
     }
 
