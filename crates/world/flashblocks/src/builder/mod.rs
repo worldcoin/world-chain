@@ -33,6 +33,7 @@ use reth_transaction_pool::{
 };
 use revm::database::BundleState;
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -264,6 +265,12 @@ pub struct FlashblockBuilder<'a, Txs> {
     pub tx: mpsc::UnboundedSender<String>,
     pub block_time: u64,
     pub flashblock_interval: u64,
+
+    total_gas_limit: u64,
+    num_flashblocks: u64,
+    flashblock_gas_limit: u64,
+
+    executed_txs: VecDeque<()>,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs> {
@@ -279,14 +286,25 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
             tx,
             block_time,
             flashblock_interval,
+
+            total_gas_limit: 0,
+            num_flashblocks: 0,
+            flashblock_gas_limit: 0,
+
+            executed_txs: VecDeque::new(),
         }
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs> {
+impl<Txs> FlashblockBuilder<'_, Txs>
+where
+    Txs: PayloadTransactions<
+        Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+    >,
+{
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
-        self,
+        mut self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: Ctx,
@@ -295,9 +313,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        >,
         Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
@@ -312,6 +327,10 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
         let num_flashblocks = self.block_time / self.flashblock_interval;
         let flashblock_gas_limit = total_gas_limit / num_flashblocks;
+
+        self.total_gas_limit = total_gas_limit;
+        self.num_flashblocks = num_flashblocks;
+        self.flashblock_gas_limit = flashblock_gas_limit;
 
         // 2. Create the first block
         let mut builder = ctx.block_builder(&mut db)?;
@@ -474,21 +493,63 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
 
         todo!()
     }
-}
 
-pub fn build_block<Ctx, Evm, Builder, ChainSpec, DB, P>(
-    mut _state: State<DB>,
-    _ctx: &Ctx,
-    _builder: Builder,
-    _info: &mut ExecutionInfo,
-) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
-where
-    Ctx: PayloadBuilderCtx,
-    Evm: ConfigureEvm,
-    Builder: BlockBuilder,
-    ChainSpec: EthChainSpec + OpHardforks,
-    DB: Database<Error = ProviderError> + AsRef<P>,
-    P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
-{
-    todo!()
+    fn build_flashblock<Ctx, Evm, ChainSpec, DB, P>(
+        &mut self,
+        db: &mut State<DB>,
+        state_provider: impl StateProvider,
+        ctx: &Ctx,
+        idx: usize,
+    ) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
+    where
+        Ctx: PayloadBuilderCtx,
+        Evm: ConfigureEvm,
+        ChainSpec: EthChainSpec + OpHardforks,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
+    {
+        // 2. Create the first block
+        let mut builder = ctx.block_builder(&mut db)?;
+        let now = Instant::now();
+
+        // 2.1. apply pre-execution changes
+        builder.apply_pre_execution_changes().map_err(|err| {
+            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+            PayloadBuilderError::Internal(err.into())
+        })?;
+
+        // 2.2. execute sequencer transactions
+        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+
+        if !ctx.attributes().no_tx_pool {
+            // 2.3. Execute transactions for the first block
+            // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
+            let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+            let mut best_txs = RetainingBestTxs::new(best_txs);
+
+            if ctx
+                .execute_best_transactions(
+                    &mut info,
+                    &mut builder,
+                    best_txs.guard(),
+                    self.flashblock_gas_limit,
+                )?
+                .is_some()
+            {
+                return Ok(BuildOutcomeKind::Cancelled);
+            }
+
+            let executed_txs = best_txs.take_observed();
+        }
+
+        // 3.4. Finish first block
+        let BlockBuilderOutcome {
+            execution_result,
+            hashed_state,
+            trie_updates,
+            block,
+        } = builder.finish(&state_provider)?;
+
+        todo!()
+    }
 }
