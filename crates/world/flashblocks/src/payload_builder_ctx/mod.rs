@@ -1,3 +1,4 @@
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Bytes, U256};
 use reth::builder::PayloadBuilderError;
 use reth::{
@@ -5,6 +6,7 @@ use reth::{
     payload::PayloadId,
     revm::{Database, State},
 };
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, Evm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
@@ -18,7 +20,7 @@ use revm::context::BlockEnv;
 mod op;
 
 pub trait PayloadBuilderCtx {
-    type Evm: Evm + ConfigureEvm;
+    type Evm: EthereumHardforks + Evm + ConfigureEvm;
     type ChainSpec: EthChainSpec + OpHardforks;
 
     fn evm(&self) -> &Self::Evm;
@@ -71,4 +73,10 @@ pub trait PayloadBuilderCtx {
         >,
         gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>;
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.spec()
+            .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
+            .then(|| &self.attributes().payload_attributes.withdrawals)
+    }
 }
