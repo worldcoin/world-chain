@@ -286,8 +286,6 @@ pub mod tests {
     use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
-    use ethers_core::rand::rngs::SmallRng;
-    use ethers_core::rand::{Rng, SeedableRng};
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
@@ -416,8 +414,6 @@ pub mod tests {
 
     #[tokio::test]
     async fn validate_bundle_no_pbh() {
-        let mut rng = SmallRng::seed_from_u64(42);
-
         const USER_ACCOUNT: u32 = 0;
 
         let pool = setup().await;
@@ -435,11 +431,7 @@ pub mod tests {
 
         let calldata = bundle.abi_encode();
 
-        let tx = eip1559()
-            // NOTE: Random receiving account
-            .to(rng.gen::<Address>())
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(Address::random()).input(calldata).call();
 
         let tx = eth_tx(USER_ACCOUNT, tx).await;
 

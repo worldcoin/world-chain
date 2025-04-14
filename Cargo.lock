@@ -11688,7 +11688,7 @@ dependencies = [
  "color-eyre",
  "dotenvy",
  "hex",
- "rand 0.8.5",
+ "rand 0.9.0",
  "reqwest 0.12.14",
  "semaphore-rs",
  "serde",
