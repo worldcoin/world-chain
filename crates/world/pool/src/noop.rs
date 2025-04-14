@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use super::tx::WorldChainPooledTransaction;
 use alloy_consensus::BlobTransactionSidecar;
 use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, B256};
 use reth::transaction_pool::{
     error::PoolError, noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents,
     BestTransactions, BestTransactionsAttributes, BlobStoreError, BlockInfo,
@@ -13,7 +13,6 @@ use reth::transaction_pool::{
 };
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::Recovered;
-use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
 #[derive(Debug, Clone, Default)]

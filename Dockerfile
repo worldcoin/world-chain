@@ -44,4 +44,6 @@ WORKDIR /app
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=builder /app/target/release/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
+EXPOSE 30303 30303/udp 9001 8545 8546
+
 ENTRYPOINT ["/usr/local/bin/world-chain-builder"]

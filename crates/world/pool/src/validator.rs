@@ -126,7 +126,7 @@ where
         let mut tx_outcome = self.inner.validate_one(origin, tx.clone()).await;
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
-        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
+        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input())
         else {
             return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
                 .to_outcome(tx);
@@ -147,7 +147,7 @@ where
         let mut aggregated_payloads = vec![];
         for aggregated_ops in calldata._0 {
             let buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
+            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => {
                     return WorldChainPoolTransactionError::from(
