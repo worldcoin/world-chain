@@ -1,5 +1,5 @@
 [package]
-name = "flashblocks-payload"
+name = "flashblocks"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -36,8 +36,8 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-serde.workspace = true
-
 
 # tokio
 tokio.workspace = true

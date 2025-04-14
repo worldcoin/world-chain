@@ -1,4 +1,6 @@
+use alloy_primitives::{map::HashMap, B256, U256};
 use futures_util::{sink::SinkExt, FutureExt};
+use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
@@ -7,7 +9,7 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_evm::block::BlockExecutionError;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
@@ -23,8 +25,8 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     OpPayloadPrimitives,
 };
+use reth_optimism_primitives::OpReceipt;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::NodePrimitives;
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
     StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -34,6 +36,7 @@ use reth_transaction_pool::{
 };
 use revm::database::BundleState;
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -45,9 +48,14 @@ use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
 use crate::{
-    payload::PayloadBuilderCtx,
-    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    payload::{
+        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
+        FlashblocksPayloadV1,
+    },
+    payload_builder_ctx::PayloadBuilderCtx,
 };
+
+mod retaining_payload_txs;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
@@ -138,7 +146,9 @@ where
     Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: reth_evm::Evm
+        + EthereumHardforks
+        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -201,7 +211,9 @@ where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
-    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: reth_evm::Evm
+        + EthereumHardforks
+        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -262,10 +274,17 @@ where
 pub struct FlashblockBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
+
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
     pub block_time: u64,
     pub flashblock_interval: u64,
+
+    total_gas_limit: u64,
+    num_flashblocks: u64,
+    flashblock_gas_limit: u64,
+
+    executed_txs: VecDeque<()>,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs> {
@@ -281,6 +300,12 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
             tx,
             block_time,
             flashblock_interval,
+
+            total_gas_limit: 0,
+            num_flashblocks: 0,
+            flashblock_gas_limit: 0,
+
+            executed_txs: VecDeque::new(),
         }
     }
 }
@@ -288,7 +313,7 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
 impl<Txs> FlashblockBuilder<'_, Txs> {
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
-        self,
+        mut self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: Ctx,
@@ -310,54 +335,46 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             .with_bundle_update()
             .build();
 
-        let mut builder = ctx.block_builder(&mut db)?;
+        // 1. Setup relevant variables
+        let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+        let num_flashblocks = self.block_time / self.flashblock_interval;
+        let flashblock_gas_limit = total_gas_limit / num_flashblocks;
 
-        // 1. apply pre-execution changes
-        builder.apply_pre_execution_changes().map_err(|err| {
-            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
-            PayloadBuilderError::Internal(err.into())
-        })?;
+        self.total_gas_limit = total_gas_limit;
+        self.num_flashblocks = num_flashblocks;
+        self.flashblock_gas_limit = flashblock_gas_limit;
 
-        // 2. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+        // 1. Build initial flashblock
+        let now = Instant::now();
 
-        if !ctx.attributes().no_tx_pool {
-            let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
-            let mut flashblock_gas_limit = gas_limit;
+        self.build_flashblock(&mut db, &state_provider, &ctx, 0)?;
 
-            let num_flashblocks = self.block_time / self.flashblock_interval;
-            for _ in 0..num_flashblocks {
-                let now = Instant::now();
+        let elapsed = now.elapsed().as_millis() as u64;
+        let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+        std::thread::sleep(Duration::from_millis(sleep_time));
 
-                let best_txs =
-                    (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
-
-                if ctx
-                    .execute_best_transactions(
-                        &mut info,
-                        &mut builder,
-                        best_txs,
-                        flashblock_gas_limit,
-                    )?
-                    .is_some()
-                {
-                    return Ok(BuildOutcomeKind::Cancelled);
-                }
-
-                flashblock_gas_limit = gas_limit - info.cumulative_gas_used;
-
-                // crate::block_building::build_block(&mut builder)
-
-                // builder.finish_flashblock(&mut builder, &ctx, &mut info)?;
-
-                // tx.send(serde_json::to_string(&fb_payload).unwrap_or_default())
-                //     .expect("TODO: handle error");
-
-                let elapsed = now.elapsed().as_millis() as u64;
-                let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-                std::thread::sleep(Duration::from_millis(sleep_time));
-            }
+        if ctx.attributes().no_tx_pool {
+            // TODO: What do do here? Clearly no reason to produce flashblocks
+            // should we just return early?
         }
+
+        // Produce intermediate flashblocks
+        for flashblock_idx in 1..num_flashblocks - 1 {
+            let now = Instant::now();
+
+            self.build_flashblock(&mut db, &state_provider, &ctx, flashblock_idx)?;
+
+            let elapsed = now.elapsed().as_millis() as u64;
+            let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
+            std::thread::sleep(Duration::from_millis(sleep_time));
+        }
+
+        // Produce the final block
+        let Some((info, outcome)) =
+            self.build_flashblock(&mut db, &state_provider, &ctx, num_flashblocks - 1)?
+        else {
+            return Ok(BuildOutcomeKind::Cancelled);
+        };
 
         // check if the new payload is even more valuable
         if !ctx.is_better_payload(info.total_fees) {
@@ -372,7 +389,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             hashed_state,
             trie_updates,
             block,
-        } = builder.finish(state_provider)?;
+        } = outcome;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -412,29 +429,125 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             Ok(BuildOutcomeKind::Better { payload })
         }
     }
-}
 
-// TODO: impl Flashblock for BasicBlock builder
-pub trait Flashblock<N: NodePrimitives> {
-    fn finish_flashblock(
-        self,
-        state: impl StateProvider,
-    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError>;
-}
+    fn build_flashblock<EvmConfig, ChainSpec, N, Ctx, DB>(
+        &mut self,
+        db: &mut State<DB>,
+        state_provider: impl StateProvider,
+        ctx: &Ctx,
+        idx: u64,
+    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>)>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        ChainSpec: EthChainSpec + OpHardforks,
+        DB: Database<Error = ProviderError>,
+        N: OpPayloadPrimitives,
+        Txs: PayloadTransactions<
+            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        >,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+    {
+        let mut builder = ctx.block_builder(db)?;
 
-pub fn build_block<Ctx, Evm, Builder, ChainSpec, DB, P>(
-    mut _state: State<DB>,
-    _ctx: &Ctx,
-    _builder: Builder,
-    _info: &mut ExecutionInfo,
-) -> Result<(OpBuiltPayload, FlashblocksPayloadV1, BundleState), PayloadBuilderError>
-where
-    Ctx: PayloadBuilderCtx,
-    Evm: ConfigureEvm,
-    Builder: BlockBuilder,
-    ChainSpec: EthChainSpec + OpHardforks,
-    DB: Database<Error = ProviderError> + AsRef<P>,
-    P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
-{
-    todo!()
+        builder.apply_pre_execution_changes().map_err(|err| {
+            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+            PayloadBuilderError::Internal(err.into())
+        })?;
+
+        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+
+        let gas_limit = (idx + 1) * self.flashblock_gas_limit;
+
+        if !ctx.attributes().no_tx_pool {
+            // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
+            let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
+            let mut best_txs = RetainingBestTxs::new(best_txs);
+
+            if ctx
+                .execute_best_transactions(&mut info, &mut builder, best_txs.guard(), gas_limit)?
+                .is_some()
+            {
+                return Ok(None);
+            }
+
+            let _executed_txs = best_txs.take_observed();
+        }
+
+        // builder.executor_mut().
+        let outcome = builder.finish(&state_provider)?;
+
+        return Ok(Some((info, outcome)));
+    }
+
+    fn construct_payload<Primitives, EvmConfig, ChainSpec, Ctx>(
+        &self,
+        ctx: &Ctx,
+        index: u64,
+        info: ExecutionInfo,
+        outcome: BlockBuilderOutcome<Primitives>,
+    ) -> Result<FlashblocksPayloadV1, PayloadBuilderError>
+    where
+        Primitives: OpPayloadPrimitives,
+        EvmConfig:
+            Evm + ConfigureEvm<Primitives = Primitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        ChainSpec: EthChainSpec + OpHardforks,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+    {
+        let base = if index == 0 {
+            None
+        } else {
+            Some(ExecutionPayloadBaseV1 {
+                parent_beacon_block_root: ctx.parent().parent_beacon_block_root.unwrap(),
+                parent_hash: ctx.parent().hash(),
+                fee_recipient: ctx.attributes().suggested_fee_recipient(),
+                prev_randao: ctx.attributes().prev_randao(),
+                block_number: ctx.parent().number + 1,
+                gas_limit: ctx.attributes().gas_limit.unwrap(),
+                timestamp: ctx.attributes().payload_attributes.timestamp,
+                extra_data: ctx.extra_data().expect("No extra data"),
+                base_fee_per_gas: U256::from(ctx.evm().block().basefee),
+            })
+        };
+
+        let BlockBuilderOutcome {
+            execution_result,
+            hashed_state,
+            trie_updates,
+            block,
+            ..
+        } = outcome;
+
+        // TODO: Fill from retained txs
+        let new_transactions = vec![];
+
+        let fb_payload = FlashblocksPayloadV1 {
+            payload_id: ctx.payload_id(),
+            index,
+            base,
+            diff: ExecutionPayloadFlashblockDeltaV1 {
+                state_root: block.header().state_root,
+                receipts_root: block.header().receipts_root,
+                logs_bloom: block.header().logs_bloom,
+                gas_used: block.header().gas_used,
+                block_hash: block.hash(),
+                // TODO: Fill from retained txs
+                transactions: new_transactions,
+                withdrawals: ctx.withdrawals().cloned().unwrap_or_default().to_vec(),
+            },
+            // The type suggested for the metadata is
+            //
+            // #[derive(Debug, Serialize, Deserialize)]
+            // pub struct FlashblocksMetadata<N: NodePrimitives> {
+            //     pub receipts: HashMap<B256, N::Receipt>,
+            //     pub new_account_balances: HashMap<Address, U256>,
+            //     pub block_number: u64,
+            // }
+            //
+            // we could extract this data (especially the new account balances) by hooking
+            // into the executore with set_state_hook
+            metadata: serde_json::Value::Null,
+        };
+
+        Ok(fb_payload)
+    }
 }

@@ -112,6 +112,7 @@ alloy-rpc-types = { version = "0.13.0", features = [
 alloy-rpc-types-engine = { version = "0.13.0" }
 alloy-rlp = "0.3.10"
 alloy-eips = { version = "0.13.0", default-features = false }
+alloy-evm = { version = "0.3.1" }
 alloy-genesis = { version = "0.13.0", default-features = false }
 alloy-rpc-types-debug = "0.13.0"
 alloy-signer = { version = "0.13.0", default-features = false }
