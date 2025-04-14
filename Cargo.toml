@@ -40,6 +40,8 @@ world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
 world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 
+flashblocks = { path = "crates/world/flashblocks" }
+
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.7" }

@@ -1,35 +1,25 @@
 use alloy_primitives::Address;
 use reth::builder::components::{
-    BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder,
-    PoolBuilderConfigOverrides,
+    BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder,
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
-    NodeTypesWithEngine,
 };
 
-use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::TransactionValidationTaskExecutor;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
     OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpStorage,
 };
-use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
 
-use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StateProviderFactory};
+use reth_provider::{BlockReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
-use tracing::{debug, info};
-use world_chain_builder_pool::ordering::WorldChainOrdering;
-use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::args::WorldChainArgs;
@@ -77,13 +67,7 @@ impl WorldChainFlashblocksNode {
         OpConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
-                Engine = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
-            >,
-        >,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     {
         let WorldChainArgs {
             rollup_args,
@@ -131,12 +115,7 @@ impl WorldChainFlashblocksNode {
 impl<N> Node<N> for WorldChainFlashblocksNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-        >,
+        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
@@ -169,10 +148,6 @@ impl NodeTypes for WorldChainFlashblocksNode {
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
-}
-
-impl NodeTypesWithEngine for WorldChainFlashblocksNode {
-    type Engine = OpEngineTypes;
 }
 
 // TODO: NOTE: update this struct
@@ -267,13 +242,7 @@ impl<Txs> FlashblocksPayloadBuilder<Txs> {
         world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>,
     >
     where
-        Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
-                Engine = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
-            >,
-        >,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
@@ -300,13 +269,7 @@ impl<Txs> FlashblocksPayloadBuilder<Txs> {
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for FlashblocksPayloadBuilder<Txs>
 where
-    Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-        >,
-    >,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
