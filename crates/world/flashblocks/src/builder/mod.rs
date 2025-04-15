@@ -9,7 +9,6 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
@@ -143,9 +142,7 @@ where
     Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    Evm: reth_evm::Evm
-        + EthereumHardforks
-        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -208,9 +205,7 @@ where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
-    Evm: reth_evm::Evm
-        + EthereumHardforks
-        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -317,7 +312,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
+        ChainSpec: EthChainSpec,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
@@ -436,7 +431,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
     ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>)>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
+        ChainSpec: EthChainSpec,
         DB: Database<Error = ProviderError>,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<
@@ -474,77 +469,5 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         let outcome = builder.finish(&state_provider)?;
 
         return Ok(Some((info, outcome)));
-    }
-
-    fn construct_payload<Primitives, EvmConfig, ChainSpec, Ctx>(
-        &self,
-        ctx: &Ctx,
-        index: u64,
-        info: ExecutionInfo,
-        outcome: BlockBuilderOutcome<Primitives>,
-    ) -> Result<FlashblocksPayloadV1, PayloadBuilderError>
-    where
-        Primitives: OpPayloadPrimitives,
-        EvmConfig:
-            Evm + ConfigureEvm<Primitives = Primitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
-    {
-        let base = if index == 0 {
-            None
-        } else {
-            Some(ExecutionPayloadBaseV1 {
-                parent_beacon_block_root: ctx.parent().parent_beacon_block_root.unwrap(),
-                parent_hash: ctx.parent().hash(),
-                fee_recipient: ctx.attributes().suggested_fee_recipient(),
-                prev_randao: ctx.attributes().prev_randao(),
-                block_number: ctx.parent().number + 1,
-                gas_limit: ctx.attributes().gas_limit.unwrap(),
-                timestamp: ctx.attributes().payload_attributes.timestamp,
-                extra_data: ctx.extra_data().expect("No extra data"),
-                base_fee_per_gas: U256::from(ctx.evm().block().basefee),
-            })
-        };
-
-        let BlockBuilderOutcome {
-            execution_result,
-            hashed_state,
-            trie_updates,
-            block,
-            ..
-        } = outcome;
-
-        // TODO: Fill from retained txs
-        let new_transactions = vec![];
-
-        let fb_payload = FlashblocksPayloadV1 {
-            payload_id: ctx.payload_id(),
-            index,
-            base,
-            diff: ExecutionPayloadFlashblockDeltaV1 {
-                state_root: block.header().state_root,
-                receipts_root: block.header().receipts_root,
-                logs_bloom: block.header().logs_bloom,
-                gas_used: block.header().gas_used,
-                block_hash: block.hash(),
-                // TODO: Fill from retained txs
-                transactions: new_transactions,
-                withdrawals: ctx.withdrawals().cloned().unwrap_or_default().to_vec(),
-            },
-            // The type suggested for the metadata is
-            //
-            // #[derive(Debug, Serialize, Deserialize)]
-            // pub struct FlashblocksMetadata<N: NodePrimitives> {
-            //     pub receipts: HashMap<B256, N::Receipt>,
-            //     pub new_account_balances: HashMap<Address, U256>,
-            //     pub block_number: u64,
-            // }
-            //
-            // we could extract this data (especially the new account balances) by hooking
-            // into the executore with set_state_hook
-            metadata: serde_json::Value::Null,
-        };
-
-        Ok(fb_payload)
     }
 }

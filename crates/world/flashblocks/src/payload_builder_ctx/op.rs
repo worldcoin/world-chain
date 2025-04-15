@@ -5,7 +5,6 @@ use reth::{
     payload::PayloadId,
     revm::{Database, State},
 };
-use reth_chainspec::EthereumHardforks;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
@@ -23,7 +22,6 @@ use super::PayloadBuilderCtx;
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
     Evm: reth_evm::Evm
-        + EthereumHardforks
         + ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {

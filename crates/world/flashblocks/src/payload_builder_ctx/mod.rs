@@ -20,7 +20,7 @@ use revm::context::BlockEnv;
 mod op;
 
 pub trait PayloadBuilderCtx {
-    type Evm: EthereumHardforks + Evm + ConfigureEvm;
+    type Evm: Evm + ConfigureEvm;
     type ChainSpec: EthChainSpec + OpHardforks;
 
     fn evm(&self) -> &Self::Evm;
