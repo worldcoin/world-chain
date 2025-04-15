@@ -1,5 +1,6 @@
 use crate::args::WorldChainArgs;
 use crate::node::WorldChainPoolBuilder;
+use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::{BasicPayloadServiceBuilder, ComponentsBuilder};
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
@@ -49,7 +50,7 @@ impl WorldChainFlashblocksNode {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<FlashblocksPayloadBuilder>,
+        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -82,7 +83,7 @@ impl WorldChainFlashblocksNode {
                 world_id,
             ))
             .payload(BasicPayloadServiceBuilder::new(
-                FlashblocksPayloadBuilder::new(
+                FlashblocksPayloadBuilderBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
                     pbh_entrypoint,
@@ -109,7 +110,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<FlashblocksPayloadBuilder>,
+        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
