@@ -52,7 +52,9 @@ use crate::{
 
 mod retaining_payload_txs;
 
-/// Optimism's payload builder
+/// Flashblocks Paylod builder
+///
+/// A payload builder
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// The rollup's compute pending block configuration option.

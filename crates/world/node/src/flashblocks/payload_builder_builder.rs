@@ -1,13 +1,19 @@
 use alloy_primitives::Address;
+use flashblocks::builder::FlashblocksPayloadBuilder;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
+use reth::chainspec::EthChainSpec;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
+use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
-use reth_provider::{BlockReader, BlockReaderIdExt, StateProviderFactory};
-use reth_transaction_pool::BlobStore;
+use reth_provider::{BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
+use reth_transaction_pool::{BlobStore, PoolTransaction, TransactionPool};
+use world_chain_builder_payload::builder::WorldChainPayloadBuilderCtx;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
@@ -129,14 +135,31 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
 
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for FlashblocksPayloadBuilderBuilder<Txs>
+// where
+//     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+//     Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
+//     S: BlobStore + Clone,
+//     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
-    S: BlobStore + Clone,
+    Node::Provider:
+        StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    // Pool: TransactionPool<
+    //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = OpPrimitives::SignedTx>,
+    // >,
+    // Evm: reth_evm::Evm
+    //     + EthereumHardforks
+    //     + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
     // TODO: NOTE: update this toflashblocks payload builder
-    type PayloadBuilder = FlashblocksPayloadBuilderBuilder<Node::Provider, S, Txs>;
+    type PayloadBuilder = FlashblocksPayloadBuilder<
+        WorldChainTransactionPool<Node::Provider, S>,
+        Node::Provider,
+        OpEvmConfig,
+        WorldChainPayloadBuilderCtx<Node::Provider>,
+        Txs,
+    >;
 
     async fn build_payload_builder(
         self,
