@@ -126,8 +126,7 @@ where
         let mut tx_outcome = self.inner.validate_one(origin, tx.clone()).await;
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
-        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
-        else {
+        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input()) else {
             return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
                 .to_outcome(tx);
         };
@@ -147,7 +146,7 @@ where
         let mut aggregated_payloads = vec![];
         for aggregated_ops in calldata._0 {
             let buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
+            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => {
                     return WorldChainPoolTransactionError::from(
@@ -287,8 +286,6 @@ pub mod tests {
     use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
-    use ethers_core::rand::rngs::SmallRng;
-    use ethers_core::rand::{Rng, SeedableRng};
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
@@ -417,8 +414,6 @@ pub mod tests {
 
     #[tokio::test]
     async fn validate_bundle_no_pbh() {
-        let mut rng = SmallRng::seed_from_u64(42);
-
         const USER_ACCOUNT: u32 = 0;
 
         let pool = setup().await;
@@ -436,11 +431,7 @@ pub mod tests {
 
         let calldata = bundle.abi_encode();
 
-        let tx = eip1559()
-            // NOTE: Random receiving account
-            .to(rng.gen::<Address>())
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(Address::random()).input(calldata).call();
 
         let tx = eth_tx(USER_ACCOUNT, tx).await;
 
