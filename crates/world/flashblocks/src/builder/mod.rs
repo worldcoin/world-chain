@@ -1,4 +1,4 @@
-use alloy_primitives::{map::HashMap, B256, U256};
+use alloy_primitives::U256;
 use futures_util::{sink::SinkExt, FutureExt};
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
@@ -25,16 +25,14 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     OpPayloadPrimitives,
 };
-use reth_optimism_primitives::OpReceipt;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
-    StateProviderFactory, StateRootProvider, StorageRootProvider,
+    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_transaction_pool::{
     BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
-use revm::database::BundleState;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -48,10 +46,7 @@ use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
 use crate::{
-    payload::{
-        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
-        FlashblocksPayloadV1,
-    },
+    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     payload_builder_ctx::PayloadBuilderCtx,
 };
 
@@ -59,7 +54,7 @@ mod retaining_payload_txs;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
-pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
+pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -84,7 +79,7 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     pub ctx: Ctx,
 }
 
-impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
+impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
     /// Start the WebSocket server
     pub async fn start_ws(subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>, addr: &str) {
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -141,7 +136,7 @@ impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
     }
 }
 
-impl<Pool, Client, Evm, N, T> FlashBlocksPayloadBuilder<Pool, Client, Evm, T>
+impl<Pool, Client, Evm, N, T> FlashblocksPayloadBuilder<Pool, Client, Evm, T>
 where
     Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
@@ -204,7 +199,7 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs>
+impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashblocksPayloadBuilder<Pool, Client, Evm, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
