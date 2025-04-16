@@ -44,10 +44,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::{
-    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
-    payload_builder_ctx::PayloadBuilderCtx,
-};
+use crate::payload_builder_ctx::PayloadBuilderCtx;
 
 mod retaining_payload_txs;
 
@@ -56,9 +53,6 @@ mod retaining_payload_txs;
 /// A payload builder
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
-    /// The rollup's compute pending block configuration option.
-    // TODO(clabby): Implement this feature.
-    pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
     /// Transaction pool.

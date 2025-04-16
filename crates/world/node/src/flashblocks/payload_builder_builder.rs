@@ -5,14 +5,12 @@ use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
-use reth_optimism_payload_builder::OpPayloadPrimitives;
-use reth_optimism_primitives::{OpBlock, OpPrimitives};
-use reth_provider::{BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use reth_transaction_pool::{BlobStore, PoolTransaction, TransactionPool};
+use reth_optimism_primitives::OpPrimitives;
+use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_transaction_pool::BlobStore;
 use world_chain_builder_payload::builder::WorldChainPayloadBuilderCtx;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
@@ -142,8 +140,9 @@ impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::P
 //     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Node::Provider:
+    <Node as FullNodeTypes>::Provider:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    S: BlobStore + Clone,
     // Pool: TransactionPool<
     //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = OpPrimitives::SignedTx>,
     // >,

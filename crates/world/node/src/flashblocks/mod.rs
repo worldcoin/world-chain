@@ -104,7 +104,12 @@ impl WorldChainFlashblocksNode {
 impl<N> Node<N> for WorldChainFlashblocksNode
 where
     N: FullNodeTypes<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+        >,
     >,
 {
     type ComponentsBuilder = ComponentsBuilder<
