@@ -7,7 +7,7 @@ use reth::{
     revm::{Database, State},
 };
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm, Evm};
+use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_payload_builder::builder::ExecutionInfo;
@@ -20,8 +20,8 @@ use revm::context::BlockEnv;
 mod op;
 
 pub trait PayloadBuilderCtx {
-    type Evm: Evm + ConfigureEvm;
-    type ChainSpec: EthChainSpec + OpHardforks;
+    type Evm: ConfigureEvm;
+    type ChainSpec: OpHardforks + EthChainSpec;
 
     fn evm(&self) -> &Self::Evm;
 

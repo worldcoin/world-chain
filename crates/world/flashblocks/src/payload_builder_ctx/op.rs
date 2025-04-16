@@ -21,8 +21,7 @@ use super::PayloadBuilderCtx;
 
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
-    Evm: reth_evm::Evm
-        + ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
 {
     type Evm = Evm;
