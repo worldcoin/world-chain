@@ -7,6 +7,7 @@ use reth::{
     revm::{Database, State},
 };
 use reth_chainspec::EthereumHardforks;
+use reth_evm::block::BlockExecutor;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
@@ -14,12 +15,12 @@ use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::BlockEnv;
 
 mod op;
 
-pub trait PayloadBuilderCtx {
+pub trait PayloadBuilderCtx<Pool> {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
 
@@ -62,17 +63,24 @@ pub trait PayloadBuilderCtx {
         builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
-    fn execute_best_transactions(
+    fn execute_best_transactions<Builder, Txs>(
         &self,
         info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
+        builder: &mut Builder,
+        best_txs: Txs,
+        gas_limit: u64,
+        pool: &Pool,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Txs: PayloadTransactions<
             Transaction: PoolTransaction<
                 Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
             > + MaybeInteropTransaction,
         >,
-        gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>;
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor,
+        >;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

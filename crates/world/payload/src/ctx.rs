@@ -16,13 +16,14 @@ use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::{
     OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{Block, Recovered, SealedHeader};
+use reth_primitives::{Block, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
@@ -57,11 +58,11 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<TXS, DB, Builder, Pool>(
+    pub fn execute_best_transactions_inner<Txs, DB, Builder, Pool>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
-        mut best_txs: TXS,
+        mut best_txs: Txs,
         pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
@@ -70,7 +71,7 @@ where
             Primitives = OpPrimitives,
             Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
         >,
-        TXS: PayloadTransactions<
+        Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
         Pool: TransactionPool<
@@ -276,21 +277,21 @@ where
     }
 }
 
-impl<Client> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client> {
+impl<Pool, Client> PayloadBuilderCtx<Pool> for WorldChainPayloadBuilderCtx<Client> {
     type Evm = OpEvmConfig;
 
     type ChainSpec = OpChainSpec;
 
     fn evm(&self) -> &Self::Evm {
-        self.inner.evm()
+        PayloadBuilderCtx::<Pool>::evm(&self.inner)
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
-        self.inner.evm_mut()
+        PayloadBuilderCtx::<Pool>::evm_mut(&mut self.inner)
     }
 
     fn spec(&self) -> &Self::ChainSpec {
-        self.inner.spec()
+        PayloadBuilderCtx::<Pool>::spec(&self.inner)
     }
 
     fn parent(&self) -> &SealedHeader {
@@ -349,18 +350,27 @@ impl<Client> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client> {
         self.inner.execute_sequencer_transactions(builder)
     }
 
-    fn execute_best_transactions(
+    fn execute_best_transactions<Builder, Txs>(
         &self,
         info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<
-                Consensus = reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
-            > + reth_optimism_node::txpool::interop::MaybeInteropTransaction,
-        >,
+        builder: &mut Builder,
+        best_txs: Txs,
         _gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError> {
+        _pool: &Pool,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Txs: PayloadTransactions<
+            Transaction: PoolTransaction<
+                Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
+            > + MaybeInteropTransaction,
+        >,
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor,
+        >,
+    {
         // TODO: Implement PBH functionality & handle gas limit
+        // self.execute_best_transactions_inner(...)
         self.inner
             .execute_best_transactions(info, builder, best_txs)
     }

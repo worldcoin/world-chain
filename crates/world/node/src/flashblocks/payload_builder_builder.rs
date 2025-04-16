@@ -11,7 +11,7 @@ use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
-use world_chain_builder_payload::builder::WorldChainPayloadBuilderCtx;
+use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtx;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 

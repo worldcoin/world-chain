@@ -178,6 +178,7 @@ where
             self.tx.clone(),
             self.block_time,
             self.flashblock_interval,
+            &self.pool,
         );
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
@@ -194,7 +195,7 @@ where
 
 impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashblocksPayloadBuilder<Pool, Client, Evm, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
@@ -257,9 +258,11 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-pub struct FlashblockBuilder<'a, Txs> {
+pub struct FlashblockBuilder<'a, Txs, Pool> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
+
+    pool: &'a Pool,
 
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
@@ -273,16 +276,18 @@ pub struct FlashblockBuilder<'a, Txs> {
     executed_txs: VecDeque<()>,
 }
 
-impl<'a, Txs> FlashblockBuilder<'a, Txs> {
+impl<'a, Txs, Pool> FlashblockBuilder<'a, Txs, Pool> {
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
         tx: mpsc::UnboundedSender<String>,
         block_time: u64,
         flashblock_interval: u64,
+        pool: &'a Pool,
     ) -> Self {
         Self {
             best: Box::new(best),
+            pool,
             tx,
             block_time,
             flashblock_interval,
@@ -296,7 +301,7 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs> {
+impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
         mut self,
@@ -311,7 +316,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Ctx: PayloadBuilderCtx<Pool, Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
@@ -431,7 +436,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Ctx: PayloadBuilderCtx<Pool, Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
         let mut builder = ctx.block_builder(db)?;
 
@@ -450,7 +455,13 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
             let mut best_txs = RetainingBestTxs::new(best_txs);
 
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs.guard(), gas_limit)?
+                .execute_best_transactions(
+                    &mut info,
+                    &mut builder,
+                    best_txs.guard(),
+                    gas_limit,
+                    self.pool,
+                )?
                 .is_some()
             {
                 return Ok(None);

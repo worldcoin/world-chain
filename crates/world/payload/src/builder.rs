@@ -396,7 +396,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.inner.parent().hash(), parent_number = ctx.inner.parent().number, "building new payload");
 
         // Prepare block builder.
-        let mut builder = ctx.block_builder(&mut state)?;
+        let mut builder = PayloadBuilderCtx::<Pool>::block_builder(&ctx, &mut state)?;
 
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
@@ -407,8 +407,9 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
+            // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs, pool)?
+                .execute_best_transactions(&mut info, &mut builder, best_txs, 0, pool)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -494,7 +495,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build();
-        let mut builder = ctx.block_builder(&mut db)?;
+        let mut builder = PayloadBuilderCtx::<Pool>::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
         let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
@@ -503,7 +504,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                 ctx.inner
                     .best_transaction_attributes(builder.evm_mut().block()),
             );
-            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, pool)?;
+            // TODO: Validate gas limit
+            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, 0, pool)?;
         }
         builder.into_executor().apply_post_execution_changes()?;
 
