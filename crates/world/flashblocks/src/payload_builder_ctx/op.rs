@@ -15,7 +15,7 @@ use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
 
 use super::PayloadBuilderCtx;

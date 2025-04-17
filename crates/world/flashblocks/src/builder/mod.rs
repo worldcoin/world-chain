@@ -1,4 +1,3 @@
-use alloy_primitives::U256;
 use futures_util::{sink::SinkExt, FutureExt};
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
@@ -27,11 +26,8 @@ use reth_optimism_payload_builder::{
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
-    StateRootProvider,
 };
-use reth_transaction_pool::{
-    BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
-};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -149,8 +145,8 @@ where
             config: self.config.clone(),
             best_transactions: self.best_transactions.clone(),
             tx: self.tx.clone(),
-            block_time: self.block_time.clone(),
-            flashblock_interval: self.flashblock_interval.clone(),
+            block_time: self.block_time,
+            flashblock_interval: self.flashblock_interval,
             ctx: self.ctx.clone(),
         }
     }
@@ -161,13 +157,9 @@ where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
-    // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    // Txs: PayloadTransactions<
-    //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-    // >,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -178,7 +170,7 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<'a, F, T>(
+    fn build_payload<F, T>(
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
         best: F,
