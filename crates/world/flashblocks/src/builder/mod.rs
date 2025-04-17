@@ -164,7 +164,7 @@ where
     // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     // Txs: PayloadTransactions<
     //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     // >,
@@ -236,13 +236,14 @@ where
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
     // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
-    Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Ctx: PayloadBuilderCtx,
 
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
     type BuiltPayload = OpBuiltPayload<N>;
+    // type BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
 
     fn try_build(
         &self,

@@ -2,6 +2,7 @@ use clap::Parser;
 use reth_optimism_cli::chainspec::OpChainSpecParser;
 use reth_optimism_cli::Cli;
 use reth_tracing::tracing::info;
+use world_chain_builder_node::flashblocks::WorldChainFlashblocksNode;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;

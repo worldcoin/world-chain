@@ -56,7 +56,13 @@ impl WorldChainFlashblocksNode {
         OpConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+        Node: FullNodeTypes<
+            Types: NodeTypes<
+                Payload = OpEngineTypes,
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+            >,
+        >,
     {
         let WorldChainArgs {
             rollup_args,

@@ -5,7 +5,7 @@ use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::OpEvmConfig;
+use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
@@ -104,7 +104,18 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         evm_config: OpEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<WorldChainPayloadBuilder<Node::Provider, S, Txs>>
+    ) -> eyre::Result<
+        FlashblocksPayloadBuilder<
+            WorldChainTransactionPool<Node::Provider, S>,
+            Node::Provider,
+            OpEvmConfig,
+            WorldChainPayloadBuilderCtx<
+                Node::Provider,
+                WorldChainTransactionPool<Node::Provider, S>,
+            >,
+            Txs,
+        >,
+    >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
         S: BlobStore + Clone,
@@ -125,14 +136,21 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         )
         .with_transactions(self.best_transactions.clone());
 
-        Ok(payload_builder)
+        Ok(todo!())
     }
 }
 
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    // Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+        >,
+    >,
     <Node as FullNodeTypes>::Provider:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     S: BlobStore + Clone,
