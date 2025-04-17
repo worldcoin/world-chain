@@ -51,7 +51,7 @@ mod retaining_payload_txs;
 /// Flashblocks Paylod builder
 ///
 /// A payload builder
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
@@ -71,7 +71,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
     /// The payload builder context
-    pub ctx: Ctx,
+    pub ctx: Arc<Ctx>,
 }
 
 impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
@@ -131,12 +131,44 @@ impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
     }
 }
 
-impl<Pool, Client, Evm, N, T> FlashblocksPayloadBuilder<Pool, Client, Evm, T>
+// TODO: This manual impl is required because we can't require PayloadBuilderCtx
+//       to be Clone, because OpPayloadBuilderCtx is not Clone.
+//       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
+impl<Pool, Client, Evm, Ctx, Txs> Clone for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
 where
-    Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
+    Pool: Clone,
+    Client: Clone,
+    Evm: Clone,
+    Txs: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            client: self.client.clone(),
+            config: self.config.clone(),
+            best_transactions: self.best_transactions.clone(),
+            tx: self.tx.clone(),
+            block_time: self.block_time.clone(),
+            flashblock_interval: self.flashblock_interval.clone(),
+            ctx: self.ctx.clone(),
+        }
+    }
+}
+
+impl<Pool, Client, Evm, N, Ctx, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
+where
+    Pool: TransactionPool<
+        Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+    >,
+    // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    // Txs: PayloadTransactions<
+    //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+    // >,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -146,13 +178,15 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<'a, Txs>(
+    fn build_payload<'a, F, T>(
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
-        best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        best: F,
+        // best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
+        F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
+        T: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
     {
@@ -193,14 +227,18 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashblocksPayloadBuilder<Pool, Client, Evm, Txs>
+impl<Pool, Client, Evm, N, Ctx, Txs> PayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
 where
     Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
+    // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Evm: reth_evm::Evm + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Ctx: PayloadBuilderCtx,
+
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;

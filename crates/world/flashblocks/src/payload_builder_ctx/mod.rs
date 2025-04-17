@@ -20,7 +20,7 @@ use revm::context::BlockEnv;
 
 mod op;
 
-pub trait PayloadBuilderCtx {
+pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
 

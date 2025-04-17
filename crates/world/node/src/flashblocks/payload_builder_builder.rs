@@ -131,22 +131,11 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
 
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for FlashblocksPayloadBuilderBuilder<Txs>
-// where
-//     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-//     Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
-//     S: BlobStore + Clone,
-//     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     <Node as FullNodeTypes>::Provider:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     S: BlobStore + Clone,
-    // Pool: TransactionPool<
-    //     Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = OpPrimitives::SignedTx>,
-    // >,
-    // Evm: reth_evm::Evm
-    //     + EthereumHardforks
-    //     + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
     // TODO: NOTE: update this toflashblocks payload builder
