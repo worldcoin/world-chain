@@ -20,7 +20,7 @@ use revm::context::BlockEnv;
 
 use super::PayloadBuilderCtx;
 
-impl<Evm, Chainspec, Pool> PayloadBuilderCtx<Pool> for OpPayloadBuilderCtx<Evm, Chainspec>
+impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Chainspec: EthChainSpec + OpHardforks,
@@ -97,7 +97,6 @@ where
         builder: &mut Builder,
         best_txs: Txs,
         _gas_limit: u64,
-        _pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<

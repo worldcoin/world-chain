@@ -316,7 +316,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
-        Ctx: PayloadBuilderCtx<Pool, Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
@@ -436,7 +436,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
-        Ctx: PayloadBuilderCtx<Pool, Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
     {
         let mut builder = ctx.block_builder(db)?;
 
@@ -455,13 +455,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
             let mut best_txs = RetainingBestTxs::new(best_txs);
 
             if ctx
-                .execute_best_transactions(
-                    &mut info,
-                    &mut builder,
-                    best_txs.guard(),
-                    gas_limit,
-                    self.pool,
-                )?
+                .execute_best_transactions(&mut info, &mut builder, best_txs.guard(), gas_limit)?
                 .is_some()
             {
                 return Ok(None);
@@ -473,6 +467,6 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
         // builder.executor_mut().
         let outcome = builder.finish(&state_provider)?;
 
-        return Ok(Some((info, outcome)));
+        Ok(Some((info, outcome)))
     }
 }

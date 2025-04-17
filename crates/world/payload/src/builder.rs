@@ -215,6 +215,7 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
+            pool: self.inner.pool.clone(),
         };
 
         let op_ctx = &ctx.inner;
@@ -268,6 +269,7 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
+            pool: self.inner.pool.clone(),
         };
 
         let state_provider = self
@@ -278,7 +280,7 @@ where
         let builder: WorldChainBuilder<'_, NoopPayloadTransactions<WorldChainPooledTransaction>> =
             WorldChainBuilder::new(|_| NoopPayloadTransactions::default());
 
-        builder.witness(state_provider, &ctx, &self.inner.pool)
+        builder.witness(state_provider, &ctx)
     }
 }
 
@@ -370,7 +372,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
-        ctx: WorldChainPayloadBuilderCtx<Client>,
+        ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
         pool: &Pool,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
@@ -396,7 +398,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         debug!(target: "payload_builder", id=%op_ctx.payload_id(), parent_header = ?ctx.inner.parent().hash(), parent_number = ctx.inner.parent().number, "building new payload");
 
         // Prepare block builder.
-        let mut builder = PayloadBuilderCtx::<Pool>::block_builder(&ctx, &mut state)?;
+        let mut builder = PayloadBuilderCtx::block_builder(&ctx, &mut state)?;
 
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
@@ -409,7 +411,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
             // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs, 0, pool)?
+                .execute_best_transactions(&mut info, &mut builder, best_txs, 0)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -474,8 +476,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     pub fn witness<Pool, Client>(
         self,
         state_provider: impl StateProvider,
-        ctx: &WorldChainPayloadBuilderCtx<Client>,
-        pool: &Pool,
+        ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
         Txs: PayloadTransactions<
@@ -495,7 +496,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build();
-        let mut builder = PayloadBuilderCtx::<Pool>::block_builder(ctx, &mut db)?;
+        let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
         let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
@@ -505,7 +506,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                     .best_transaction_attributes(builder.evm_mut().block()),
             );
             // TODO: Validate gas limit
-            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, 0, pool)?;
+            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, 0)?;
         }
         builder.into_executor().apply_post_execution_changes()?;
 

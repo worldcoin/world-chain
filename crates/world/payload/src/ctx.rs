@@ -39,31 +39,32 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct WorldChainPayloadBuilderCtx<Client> {
+pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
+    pub pool: Pool,
 }
 
-impl<Client> WorldChainPayloadBuilderCtx<Client>
+impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone,
+    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
 {
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions_inner<Txs, DB, Builder, Pool>(
+    pub fn execute_best_transactions_inner<Txs, DB, Builder>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database + DatabaseCommit,
@@ -72,9 +73,6 @@ where
             Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
         >,
         Txs: PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
-        Pool: TransactionPool<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
@@ -201,7 +199,7 @@ where
         }
 
         if !invalid_txs.is_empty() {
-            pool.remove_transactions(invalid_txs);
+            self.pool.remove_transactions(invalid_txs);
         }
 
         Ok(None)
@@ -277,21 +275,21 @@ where
     }
 }
 
-impl<Pool, Client> PayloadBuilderCtx<Pool> for WorldChainPayloadBuilderCtx<Client> {
+impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool> {
     type Evm = OpEvmConfig;
 
     type ChainSpec = OpChainSpec;
 
     fn evm(&self) -> &Self::Evm {
-        PayloadBuilderCtx::<Pool>::evm(&self.inner)
+        self.inner.evm()
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
-        PayloadBuilderCtx::<Pool>::evm_mut(&mut self.inner)
+        self.inner.evm_mut()
     }
 
     fn spec(&self) -> &Self::ChainSpec {
-        PayloadBuilderCtx::<Pool>::spec(&self.inner)
+        self.inner.spec()
     }
 
     fn parent(&self) -> &SealedHeader {
@@ -356,7 +354,6 @@ impl<Pool, Client> PayloadBuilderCtx<Pool> for WorldChainPayloadBuilderCtx<Clien
         builder: &mut Builder,
         best_txs: Txs,
         _gas_limit: u64,
-        _pool: &Pool,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<
@@ -383,8 +380,8 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
     FIXED_GAS + len * COLD_SSTORE_GAS
 }
 
-pub fn spend_nullifiers_tx<DB, I, Client>(
-    ctx: &WorldChainPayloadBuilderCtx<Client>,
+pub fn spend_nullifiers_tx<DB, I, Client, Pool>(
+    ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
     evm: &mut OpEvm<DB, I>,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>

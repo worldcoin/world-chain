@@ -20,7 +20,7 @@ use revm::context::BlockEnv;
 
 mod op;
 
-pub trait PayloadBuilderCtx<Pool> {
+pub trait PayloadBuilderCtx {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
 
@@ -68,8 +68,7 @@ pub trait PayloadBuilderCtx<Pool> {
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         best_txs: Txs,
-        gas_limit: u64,
-        pool: &Pool,
+        _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<
