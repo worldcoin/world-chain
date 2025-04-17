@@ -40,6 +40,7 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
+    // TODO: Make Evm and ChainSpec generic here?
     pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
@@ -275,7 +276,11 @@ where
     }
 }
 
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool> {
+impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Send + Sync,
+    Pool: Send + Sync,
+{
     type Evm = OpEvmConfig;
 
     type ChainSpec = OpChainSpec;
