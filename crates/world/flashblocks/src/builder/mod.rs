@@ -182,7 +182,6 @@ where
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
         best: F,
-        // best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
@@ -235,7 +234,6 @@ where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
-    // Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Ctx: PayloadBuilderCtx,
 
@@ -243,7 +241,6 @@ where
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
     type BuiltPayload = OpBuiltPayload<N>;
-    // type BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
 
     fn try_build(
         &self,

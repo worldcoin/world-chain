@@ -16,8 +16,6 @@ use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtx;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
-// TODO: NOTE: update this struct
-/// A basic World Chain payload service builder
 #[derive(Debug, Default, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
@@ -121,7 +119,7 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
-        let payload_builder = WorldChainPayloadBuilder::with_builder_config(
+        let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
             pool,
             ctx.provider().clone(),
             evm_config,
@@ -143,7 +141,6 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
-    // Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Node: FullNodeTypes<
         Types: NodeTypes<
             Payload = OpEngineTypes,
@@ -156,7 +153,6 @@ where
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
-    // TODO: NOTE: update this toflashblocks payload builder
     type PayloadBuilder = FlashblocksPayloadBuilder<
         WorldChainTransactionPool<Node::Provider, S>,
         Node::Provider,
