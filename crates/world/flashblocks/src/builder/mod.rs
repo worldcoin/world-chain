@@ -1,4 +1,3 @@
-use alloy_primitives::{map::HashMap, B256, U256};
 use futures_util::{sink::SinkExt, FutureExt};
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
@@ -9,7 +8,6 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
@@ -25,16 +23,11 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     OpPayloadPrimitives,
 };
-use reth_optimism_primitives::OpReceipt;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
-    StateProviderFactory, StateRootProvider, StorageRootProvider,
+    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
-use reth_transaction_pool::{
-    BestTransactionsAttributes, EthPoolTransaction, PoolTransaction, TransactionPool,
-};
-use revm::database::BundleState;
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -47,22 +40,15 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::{
-    payload::{
-        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
-        FlashblocksPayloadV1,
-    },
-    payload_builder_ctx::PayloadBuilderCtx,
-};
+use crate::payload_builder_ctx::PayloadBuilderCtx;
 
 mod retaining_payload_txs;
 
-/// Optimism's payload builder
-#[derive(Debug, Clone)]
-pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
-    /// The rollup's compute pending block configuration option.
-    // TODO(clabby): Implement this feature.
-    pub compute_pending_block: bool,
+/// Flashblocks Paylod builder
+///
+/// A payload builder
+#[derive(Debug)]
+pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
     /// Transaction pool.
@@ -81,10 +67,10 @@ pub struct FlashBlocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
     /// The payload builder context
-    pub ctx: Ctx,
+    pub ctx: Arc<Ctx>,
 }
 
-impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
+impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
     /// Start the WebSocket server
     pub async fn start_ws(subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>, addr: &str) {
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -141,14 +127,40 @@ impl<Pool, Client, Evm, Txs> FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs> {
     }
 }
 
-impl<Pool, Client, Evm, N, T> FlashBlocksPayloadBuilder<Pool, Client, Evm, T>
+// TODO: This manual impl is required because we can't require PayloadBuilderCtx
+//       to be Clone, because OpPayloadBuilderCtx is not Clone.
+//       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
+impl<Pool, Client, Evm, Ctx, Txs> Clone for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
 where
-    Pool: TransactionPool<Transaction: EthPoolTransaction<Consensus = N::SignedTx>>,
+    Pool: Clone,
+    Client: Clone,
+    Evm: Clone,
+    Txs: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            client: self.client.clone(),
+            config: self.config.clone(),
+            best_transactions: self.best_transactions.clone(),
+            tx: self.tx.clone(),
+            block_time: self.block_time,
+            flashblock_interval: self.flashblock_interval,
+            ctx: self.ctx.clone(),
+        }
+    }
+}
+
+impl<Pool, Client, Evm, N, Ctx, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
+where
+    Pool: TransactionPool<
+        Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    Evm: reth_evm::Evm
-        + EthereumHardforks
-        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -158,13 +170,14 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<'a, Txs>(
+    fn build_payload<F, T>(
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
-        best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        best: F,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
+        F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
+        T: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         >,
     {
@@ -190,6 +203,7 @@ where
             self.tx.clone(),
             self.block_time,
             self.flashblock_interval,
+            &self.pool,
         );
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
@@ -204,16 +218,17 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Txs> PayloadBuilder for FlashBlocksPayloadBuilder<Pool, Client, Evm, Txs>
+impl<Pool, Client, Evm, N, Ctx, Txs> PayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
-    Evm: reth_evm::Evm
-        + EthereumHardforks
-        + ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Ctx: PayloadBuilderCtx,
+
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -271,9 +286,11 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-pub struct FlashblockBuilder<'a, Txs> {
+pub struct FlashblockBuilder<'a, Txs, Pool> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
+
+    pool: &'a Pool,
 
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
@@ -287,16 +304,18 @@ pub struct FlashblockBuilder<'a, Txs> {
     executed_txs: VecDeque<()>,
 }
 
-impl<'a, Txs> FlashblockBuilder<'a, Txs> {
+impl<'a, Txs, Pool> FlashblockBuilder<'a, Txs, Pool> {
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
         tx: mpsc::UnboundedSender<String>,
         block_time: u64,
         flashblock_interval: u64,
+        pool: &'a Pool,
     ) -> Self {
         Self {
             best: Box::new(best),
+            pool,
             tx,
             block_time,
             flashblock_interval,
@@ -310,7 +329,7 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs> {
+impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
         mut self,
@@ -320,7 +339,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
+        ChainSpec: EthChainSpec,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<
             Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
@@ -439,7 +458,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
     ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>)>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
+        ChainSpec: EthChainSpec,
         DB: Database<Error = ProviderError>,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<
@@ -476,78 +495,6 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         // builder.executor_mut().
         let outcome = builder.finish(&state_provider)?;
 
-        return Ok(Some((info, outcome)));
-    }
-
-    fn construct_payload<Primitives, EvmConfig, ChainSpec, Ctx>(
-        &self,
-        ctx: &Ctx,
-        index: u64,
-        info: ExecutionInfo,
-        outcome: BlockBuilderOutcome<Primitives>,
-    ) -> Result<FlashblocksPayloadV1, PayloadBuilderError>
-    where
-        Primitives: OpPayloadPrimitives,
-        EvmConfig:
-            Evm + ConfigureEvm<Primitives = Primitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
-    {
-        let base = if index == 0 {
-            None
-        } else {
-            Some(ExecutionPayloadBaseV1 {
-                parent_beacon_block_root: ctx.parent().parent_beacon_block_root.unwrap(),
-                parent_hash: ctx.parent().hash(),
-                fee_recipient: ctx.attributes().suggested_fee_recipient(),
-                prev_randao: ctx.attributes().prev_randao(),
-                block_number: ctx.parent().number + 1,
-                gas_limit: ctx.attributes().gas_limit.unwrap(),
-                timestamp: ctx.attributes().payload_attributes.timestamp,
-                extra_data: ctx.extra_data().expect("No extra data"),
-                base_fee_per_gas: U256::from(ctx.evm().block().basefee),
-            })
-        };
-
-        let BlockBuilderOutcome {
-            execution_result,
-            hashed_state,
-            trie_updates,
-            block,
-            ..
-        } = outcome;
-
-        // TODO: Fill from retained txs
-        let new_transactions = vec![];
-
-        let fb_payload = FlashblocksPayloadV1 {
-            payload_id: ctx.payload_id(),
-            index,
-            base,
-            diff: ExecutionPayloadFlashblockDeltaV1 {
-                state_root: block.header().state_root,
-                receipts_root: block.header().receipts_root,
-                logs_bloom: block.header().logs_bloom,
-                gas_used: block.header().gas_used,
-                block_hash: block.hash(),
-                // TODO: Fill from retained txs
-                transactions: new_transactions,
-                withdrawals: ctx.withdrawals().cloned().unwrap_or_default().to_vec(),
-            },
-            // The type suggested for the metadata is
-            //
-            // #[derive(Debug, Serialize, Deserialize)]
-            // pub struct FlashblocksMetadata<N: NodePrimitives> {
-            //     pub receipts: HashMap<B256, N::Receipt>,
-            //     pub new_account_balances: HashMap<Address, U256>,
-            //     pub block_number: u64,
-            // }
-            //
-            // we could extract this data (especially the new account balances) by hooking
-            // into the executore with set_state_hook
-            metadata: serde_json::Value::Null,
-        };
-
-        Ok(fb_payload)
+        Ok(Some((info, outcome)))
     }
 }

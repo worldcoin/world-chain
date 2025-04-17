@@ -70,7 +70,7 @@ impl WorldChainNode {
     ) -> ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -109,7 +109,7 @@ impl WorldChainNode {
                 world_id,
             ))
             .payload(BasicPayloadServiceBuilder::new(
-                WorldChainPayloadBuilder::new(
+                WorldChainPayloadBuilderBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
                     pbh_entrypoint,
@@ -141,7 +141,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>,
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -293,7 +293,7 @@ where
 
 /// A basic World Chain payload service builder
 #[derive(Debug, Default, Clone)]
-pub struct WorldChainPayloadBuilder<Txs = ()> {
+pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -317,7 +317,7 @@ pub struct WorldChainPayloadBuilder<Txs = ()> {
     pub builder_private_key: String,
 }
 
-impl WorldChainPayloadBuilder {
+impl WorldChainPayloadBuilderBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
     pub fn new(
@@ -345,10 +345,10 @@ impl WorldChainPayloadBuilder {
     }
 }
 
-impl<Txs> WorldChainPayloadBuilder<Txs> {
+impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilderBuilder<T> {
         let Self {
             compute_pending_block,
             da_config,
@@ -359,7 +359,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
             ..
         } = self;
 
-        WorldChainPayloadBuilder {
+        WorldChainPayloadBuilderBuilder {
             compute_pending_block,
             da_config,
             verified_blockspace_capacity,
@@ -412,7 +412,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
 }
 
 impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
-    for WorldChainPayloadBuilder<Txs>
+    for WorldChainPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypes<

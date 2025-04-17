@@ -7,7 +7,8 @@ use reth::{
     revm::{Database, State},
 };
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm, Evm};
+use reth_evm::block::BlockExecutor;
+use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_payload_builder::builder::ExecutionInfo;
@@ -19,9 +20,9 @@ use revm::context::BlockEnv;
 
 mod op;
 
-pub trait PayloadBuilderCtx {
-    type Evm: EthereumHardforks + Evm + ConfigureEvm;
-    type ChainSpec: EthChainSpec + OpHardforks;
+pub trait PayloadBuilderCtx: Send + Sync {
+    type Evm: ConfigureEvm;
+    type ChainSpec: OpHardforks + EthChainSpec;
 
     fn evm(&self) -> &Self::Evm;
 
@@ -62,17 +63,23 @@ pub trait PayloadBuilderCtx {
         builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
-    fn execute_best_transactions(
+    fn execute_best_transactions<Builder, Txs>(
         &self,
         info: &mut ExecutionInfo,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        best_txs: impl PayloadTransactions<
+        builder: &mut Builder,
+        best_txs: Txs,
+        _gas_limit: u64,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Txs: PayloadTransactions<
             Transaction: PoolTransaction<
                 Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
             > + MaybeInteropTransaction,
         >,
-        gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>;
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor,
+        >;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

@@ -1,5 +1,6 @@
 use alloy_primitives::Address;
 use clap::value_parser;
+use flashblocks::args::FlashblockArgs;
 use reth_optimism_node::args::RollupArgs;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
