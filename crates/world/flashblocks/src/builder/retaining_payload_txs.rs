@@ -1,6 +1,8 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 
+use alloy_primitives::TxHash;
 use reth_payload_util::PayloadTransactions;
+use reth_transaction_pool::PoolTransaction;
 
 /// This type exists to yield bes transactions from the tx pool
 /// while doing bookkeping so we can deterministically replay them on the following
@@ -9,7 +11,9 @@ pub struct RetainingBestTxs<I>
 where
     I: PayloadTransactions,
 {
+    /// The inner payload transactions iterator
     inner: I,
+
     /// Transactions that were previously observed, they have to be yielded prior to other pool in
     /// the exact same order. Furthermore we should discard duplicate txs
     prev: VecDeque<I::Transaction>,
@@ -17,6 +21,10 @@ where
     /// Transactions observed during the lifetime of this struct
     /// They should be fed back during the construction of the next flashblock
     observed: Vec<I::Transaction>,
+
+    /// The observed tx hashes. It's a separate container because
+    /// the order of transactions in `observed` must remain consistent
+    observed_hashes: HashSet<TxHash>,
 }
 
 pub struct RetainingBestTxsGuard<'a, I>
@@ -35,6 +43,7 @@ where
             inner,
             prev: VecDeque::new(),
             observed: Vec::new(),
+            observed_hashes: HashSet::new(),
         }
     }
 
@@ -54,21 +63,29 @@ where
 
 impl<'a, I> PayloadTransactions for RetainingBestTxsGuard<'a, I>
 where
-    I: PayloadTransactions<Transaction: Clone>,
+    I: PayloadTransactions<Transaction: PoolTransaction + Clone>,
 {
     type Transaction = I::Transaction;
 
     fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
         if let Some(n) = self.inner.prev.pop_front() {
+            self.inner.observed_hashes.insert(*n.hash());
             self.inner.observed.push(n.clone());
 
             return Some(n);
         }
 
-        if let Some(n) = self.inner.inner.next(ctx) {
-            self.inner.observed.push(n.clone());
+        loop {
+            let Some(n) = self.inner.inner.next(ctx) else {
+                break;
+            };
 
-            return Some(n);
+            if !self.inner.observed_hashes.contains(n.hash()) {
+                self.inner.observed_hashes.insert(*n.hash());
+                self.inner.observed.push(n.clone());
+
+                return Some(n);
+            }
         }
 
         None
@@ -77,9 +94,4 @@ where
     fn mark_invalid(&mut self, sender: alloy_primitives::Address, nonce: u64) {
         self.inner.inner.mark_invalid(sender, nonce);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }
