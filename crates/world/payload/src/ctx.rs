@@ -225,19 +225,59 @@ where
             .expect("fee is always valid; execution succeeded");
         info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
     }
+}
 
-    /// Prepares [`BlockBuilder`] for the payload. This will configure the underlying EVM with [`PBHCallTracer`],
-    /// but disable it by default. It will get enabled by [`WorldChainPayloadBuilderCtx::execute_best_transactions`].
-    fn block_builder<'a, DB: Database>(
+impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Send + Sync,
+    Pool: Send + Sync,
+{
+    type Evm = OpEvmConfig;
+
+    type ChainSpec = OpChainSpec;
+
+    fn spec(&self) -> &Self::ChainSpec {
+        self.inner.spec()
+    }
+
+    fn parent(&self) -> &SealedHeader {
+        self.inner.parent()
+    }
+
+    fn attributes(
+        &self,
+    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
+    {
+        self.inner.attributes()
+    }
+
+    fn best_transaction_attributes(
+        &self,
+        block_env: &revm::context::BlockEnv,
+    ) -> BestTransactionsAttributes {
+        self.inner.best_transaction_attributes(block_env)
+    }
+
+    fn payload_id(&self) -> reth::payload::PayloadId {
+        self.inner.payload_id()
+    }
+
+    fn is_better_payload(&self, total_fees: U256) -> bool {
+        self.inner.is_better_payload(total_fees)
+    }
+
+    fn block_builder<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<
-        impl BlockBuilder<
-            Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector>>,
-        >,
+        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
         PayloadBuilderError,
-    > {
+    >
+    where
+        DB: revm::Database,
+        DB::Error: Send + Sync + 'static,
+        DB: reth::revm::Database,
+    {
         // Prepare attributes for next block environment.
         let attributes = OpNextBlockEnvAttributes {
             timestamp: self.inner.attributes().timestamp(),
@@ -273,77 +313,6 @@ where
             .inner
             .evm_config
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
-    }
-}
-
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
-where
-    Client: Send + Sync,
-    Pool: Send + Sync,
-{
-    type Evm = OpEvmConfig;
-
-    type ChainSpec = OpChainSpec;
-
-    fn evm(&self) -> &Self::Evm {
-        self.inner.evm()
-    }
-
-    fn evm_mut(&mut self) -> &mut Self::Evm {
-        self.inner.evm_mut()
-    }
-
-    fn spec(&self) -> &Self::ChainSpec {
-        self.inner.spec()
-    }
-
-    fn parent(&self) -> &SealedHeader {
-        self.inner.parent()
-    }
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
-    {
-        self.inner.attributes()
-    }
-
-    fn extra_data(&self) -> Result<revm_primitives::Bytes, PayloadBuilderError> {
-        self.inner.extra_data()
-    }
-
-    fn best_transaction_attributes(
-        &self,
-        block_env: &revm::context::BlockEnv,
-    ) -> BestTransactionsAttributes {
-        self.inner.best_transaction_attributes(block_env)
-    }
-
-    fn payload_id(&self) -> reth::payload::PayloadId {
-        self.inner.payload_id()
-    }
-
-    fn is_holocene_active(&self) -> bool {
-        self.inner.is_holocene_active()
-    }
-
-    fn is_better_payload(&self, total_fees: U256) -> bool {
-        self.inner.is_better_payload(total_fees)
-    }
-
-    fn block_builder<'a, DB>(
-        &'a self,
-        db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
-    where
-        DB: revm::Database,
-        DB::Error: Send + Sync + 'static,
-        DB: reth::revm::Database,
-    {
-        self.inner.block_builder(db)
     }
 
     fn execute_sequencer_transactions(

@@ -1,4 +1,4 @@
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::U256;
 use reth::builder::PayloadBuilderError;
 use reth::{
     chainspec::EthChainSpec,
@@ -28,14 +28,6 @@ where
     type Evm = Evm;
     type ChainSpec = Chainspec;
 
-    fn evm(&self) -> &Self::Evm {
-        &self.evm_config
-    }
-
-    fn evm_mut(&mut self) -> &mut Self::Evm {
-        &mut self.evm_config
-    }
-
     fn spec(&self) -> &Self::ChainSpec {
         &self.chain_spec
     }
@@ -50,20 +42,12 @@ where
         self.attributes()
     }
 
-    fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        self.extra_data()
-    }
-
     fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes {
         self.best_transaction_attributes(block_env)
     }
 
     fn payload_id(&self) -> PayloadId {
         self.payload_id()
-    }
-
-    fn is_holocene_active(&self) -> bool {
-        self.is_holocene_active()
     }
 
     fn is_better_payload(&self, total_fees: U256) -> bool {

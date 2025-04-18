@@ -24,10 +24,6 @@ pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
 
-    fn evm(&self) -> &Self::Evm;
-
-    fn evm_mut(&mut self) -> &mut Self::Evm;
-
     fn spec(&self) -> &Self::ChainSpec;
 
     fn parent(&self) -> &SealedHeader;
@@ -36,13 +32,9 @@ pub trait PayloadBuilderCtx: Send + Sync {
         &self,
     ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>>;
 
-    fn extra_data(&self) -> Result<Bytes, PayloadBuilderError>;
-
     fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes;
 
     fn payload_id(&self) -> PayloadId;
-
-    fn is_holocene_active(&self) -> bool;
 
     fn is_better_payload(&self, total_fees: U256) -> bool;
 

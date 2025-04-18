@@ -15,13 +15,11 @@ use reth_evm::{
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{txpool::interop::MaybeInteropTransaction, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::{
-    builder::OpPayloadTransactions,
-    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    builder::ExecutionInfo, config::OpBuilderConfig, OpPayloadPrimitives,
 };
 use reth_optimism_payload_builder::{
-    builder::{ExecutionInfo, OpPayloadBuilderCtx},
-    config::OpBuilderConfig,
-    OpPayloadPrimitives,
+    builder::OpPayloadTransactions,
+    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
@@ -161,6 +159,7 @@ where
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
+    Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = Client::ChainSpec>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -182,37 +181,27 @@ where
         >,
     {
         let BuildArguments {
-            mut cached_reads,
-            config,
-            cancel,
-            best_payload,
+            mut cached_reads, ..
         } = args;
-
-        // TODO: make ctx generic
-        let ctx = OpPayloadBuilderCtx {
-            evm_config: self.evm_config.clone(),
-            da_config: self.config.da_config.clone(),
-            chain_spec: self.client.chain_spec(),
-            config,
-            cancel,
-            best_payload,
-        };
 
         let builder = FlashblockBuilder::new(
             best,
             self.tx.clone(),
             self.block_time,
             self.flashblock_interval,
-            &self.pool,
         );
-        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self.client.state_by_block_hash(self.ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
 
-        if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, ctx)
+        if self.ctx.attributes().no_tx_pool {
+            builder.build(state, &state_provider, self.ctx.as_ref())
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx)
+            builder.build(
+                cached_reads.as_db_mut(state),
+                &state_provider,
+                self.ctx.as_ref(),
+            )
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -227,7 +216,7 @@ where
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Ctx: PayloadBuilderCtx,
+    Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = Client::ChainSpec>,
 
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -286,11 +275,9 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-pub struct FlashblockBuilder<'a, Txs, Pool> {
+pub struct FlashblockBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
-
-    pool: &'a Pool,
 
     /// Channel sender for publishing messages
     pub tx: mpsc::UnboundedSender<String>,
@@ -304,18 +291,16 @@ pub struct FlashblockBuilder<'a, Txs, Pool> {
     executed_txs: VecDeque<()>,
 }
 
-impl<'a, Txs, Pool> FlashblockBuilder<'a, Txs, Pool> {
+impl<'a, Txs> FlashblockBuilder<'a, Txs> {
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
         tx: mpsc::UnboundedSender<String>,
         block_time: u64,
         flashblock_interval: u64,
-        pool: &'a Pool,
     ) -> Self {
         Self {
             best: Box::new(best),
-            pool,
             tx,
             block_time,
             flashblock_interval,
@@ -329,13 +314,13 @@ impl<'a, Txs, Pool> FlashblockBuilder<'a, Txs, Pool> {
     }
 }
 
-impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
+impl<Txs> FlashblockBuilder<'_, Txs> {
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
         mut self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
-        ctx: Ctx,
+        ctx: &Ctx,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
@@ -348,7 +333,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
-        // NOTE: we do not need to init this every time
+        // NOTE: Do we need to init this every time?
         let mut db = State::builder()
             .with_database(db)
             .with_bundle_update()
@@ -366,7 +351,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
         // 1. Build initial flashblock
         let now = Instant::now();
 
-        self.build_flashblock(&mut db, &state_provider, &ctx, 0)?;
+        self.build_flashblock(&mut db, &state_provider, ctx, 0)?;
 
         let elapsed = now.elapsed().as_millis() as u64;
         let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
@@ -381,7 +366,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
         for flashblock_idx in 1..num_flashblocks - 1 {
             let now = Instant::now();
 
-            self.build_flashblock(&mut db, &state_provider, &ctx, flashblock_idx)?;
+            self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
 
             let elapsed = now.elapsed().as_millis() as u64;
             let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
@@ -390,7 +375,7 @@ impl<Txs, Pool> FlashblockBuilder<'_, Txs, Pool> {
 
         // Produce the final block
         let Some((info, outcome)) =
-            self.build_flashblock(&mut db, &state_provider, &ctx, num_flashblocks - 1)?
+            self.build_flashblock(&mut db, &state_provider, ctx, num_flashblocks - 1)?
         else {
             return Ok(BuildOutcomeKind::Cancelled);
         };
