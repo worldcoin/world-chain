@@ -23,7 +23,7 @@ pub struct RetainingBestTxsGuard<'a, I>
 where
     I: PayloadTransactions,
 {
-    retaining: &'a mut RetainingBestTxs<I>,
+    inner: &'a mut RetainingBestTxs<I>,
 }
 
 impl<I> RetainingBestTxs<I>
@@ -48,22 +48,38 @@ where
     }
 
     pub fn guard(&mut self) -> RetainingBestTxsGuard<'_, I> {
-        RetainingBestTxsGuard { retaining: self }
+        RetainingBestTxsGuard { inner: self }
     }
 }
 
 impl<'a, I> PayloadTransactions for RetainingBestTxsGuard<'a, I>
 where
-    I: PayloadTransactions,
+    I: PayloadTransactions<Transaction: Clone>,
 {
     type Transaction = I::Transaction;
 
     fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
-        // TODO: Implement
-        self.retaining.inner.next(ctx)
+        if let Some(n) = self.inner.prev.pop_front() {
+            self.inner.observed.push(n.clone());
+
+            return Some(n);
+        }
+
+        if let Some(n) = self.inner.inner.next(ctx) {
+            self.inner.observed.push(n.clone());
+
+            return Some(n);
+        }
+
+        None
     }
 
     fn mark_invalid(&mut self, sender: alloy_primitives::Address, nonce: u64) {
-        self.retaining.inner.mark_invalid(sender, nonce);
+        self.inner.inner.mark_invalid(sender, nonce);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 }
