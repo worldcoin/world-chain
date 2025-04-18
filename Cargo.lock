@@ -3570,6 +3570,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "clap",
+ "color-eyre",
  "futures-util",
  "reth",
  "reth-basic-payload-builder",

@@ -1,4 +1,7 @@
-use futures_util::{sink::SinkExt, FutureExt};
+use crate::{
+    payload::FlashblocksPayloadV1,
+    payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
+};
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
@@ -28,17 +31,11 @@ use reth_provider::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::mpsc,
-};
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio::sync::mpsc;
 use tracing::{debug, warn};
-
-use crate::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 mod retaining_payload_txs;
 
@@ -59,69 +56,12 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs = ()> {
     /// transactions are allowed.
     pub best_transactions: Txs,
     /// Channel sender for publishing messages
-    pub tx: mpsc::UnboundedSender<String>,
+    pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
     /// Block time in milliseconds
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
     pub ctx_builder: CtxBuilder,
-}
-
-impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
-    /// Start the WebSocket server
-    pub async fn start_ws(subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>, addr: &str) {
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let subscribers = subscribers.clone();
-
-        tracing::info!("Starting WebSocket server on {}", addr);
-
-        while let Ok((stream, _)) = listener.accept().await {
-            tracing::info!("Accepted websocket connection");
-            let subscribers = subscribers.clone();
-
-            tokio::spawn(async move {
-                match accept_async(stream).await {
-                    Ok(ws_stream) => {
-                        let mut subs = subscribers.lock().unwrap();
-                        subs.push(ws_stream);
-                    }
-                    Err(e) => eprintln!("Error accepting websocket connection: {}", e),
-                }
-            });
-        }
-    }
-
-    /// Background task that handles publishing messages to WebSocket subscribers
-    fn publish_task(
-        mut rx: mpsc::UnboundedReceiver<String>,
-        subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
-    ) {
-        tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
-                let mut subscribers = subscribers.lock().unwrap();
-
-                // Remove disconnected subscribers and send message to connected ones
-                subscribers.retain_mut(|ws_stream| {
-                    let message = message.clone();
-                    async move {
-                        ws_stream
-                            .send(tokio_tungstenite::tungstenite::Message::Text(
-                                message.into(),
-                            ))
-                            .await
-                            .is_ok()
-                    }
-                    .now_or_never()
-                    .unwrap_or(false)
-                });
-            }
-        });
-    }
-
-    /// Send a message to be published
-    pub fn send_message(&self, message: String) -> Result<(), Box<dyn std::error::Error>> {
-        self.tx.send(message).map_err(|e| e.into())
-    }
 }
 
 // TODO: This manual impl is required because we can't require PayloadBuilderCtx
@@ -298,7 +238,7 @@ where
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
     /// Channel sender for publishing messages
-    pub tx: mpsc::UnboundedSender<String>,
+    pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
     pub block_time: u64,
     pub flashblock_interval: u64,
 
@@ -316,7 +256,7 @@ where
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-        tx: mpsc::UnboundedSender<String>,
+        tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
         block_time: u64,
         flashblock_interval: u64,
     ) -> Self {

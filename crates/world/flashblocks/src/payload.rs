@@ -8,6 +8,21 @@ use reth_primitives::NodePrimitives;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FlashblocksPayloadV1 {
+    /// The payload id of the flashblock
+    pub payload_id: PayloadId,
+    /// The index of the flashblock in the block
+    pub index: u64,
+    /// The base execution payload configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<ExecutionPayloadBaseV1>,
+    /// The delta/diff containing modified portions of the execution payload
+    pub diff: ExecutionPayloadFlashblockDeltaV1,
+    /// Additional metadata associated with the flashblock
+    pub metadata: Value,
+}
+
 /// Represents the base configuration of an execution payload that remains constant
 /// throughout block construction. This includes fundamental block properties like
 /// parent hash, block number, and other header fields that are determined at
@@ -35,21 +50,6 @@ pub struct ExecutionPayloadBaseV1 {
     pub extra_data: Bytes,
     /// The base fee per gas of the block.
     pub base_fee_per_gas: U256,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct FlashblocksPayloadV1 {
-    /// The payload id of the flashblock
-    pub payload_id: PayloadId,
-    /// The index of the flashblock in the block
-    pub index: u64,
-    /// The base execution payload configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base: Option<ExecutionPayloadBaseV1>,
-    /// The delta/diff containing modified portions of the execution payload
-    pub diff: ExecutionPayloadFlashblockDeltaV1,
-    /// Additional metadata associated with the flashblock
-    pub metadata: Value,
 }
 
 /// Represents the modified portions of an execution payload within a flashblock.
