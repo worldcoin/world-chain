@@ -4,13 +4,16 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::payload_builder_ctx::PayloadBuilderCtx;
+use flashblocks::builder::FlashblocksPayloadBuilder;
+use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
+use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::{BlockExecutionError, BlockValidationError};
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::Evm;
@@ -18,7 +21,7 @@ use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::{
-    OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -49,6 +52,8 @@ pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     pub builder_private_key: PrivateKeySigner,
     pub pool: Pool,
 }
+
+pub struct WorldchainPayloadBuilderCtxBuilder {}
 
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
@@ -344,6 +349,25 @@ where
         // self.execute_best_transactions_inner(...)
         self.inner
             .execute_best_transactions(info, builder, best_txs)
+    }
+}
+
+impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec>
+    for WorldchainPayloadBuilderCtxBuilder
+{
+    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
+
+    fn build<Txs>(
+        payload_builder: &FlashblocksPayloadBuilder<Pool, Client, OpEvmConfig, Self, Txs>,
+        config: PayloadConfig<OpPayloadBuilderAttributes<N::SignedTx>, N::BlockHeader>,
+        cancel: CancelOnDrop,
+        best_payload: Option<OpBuiltPayload<N>>,
+    ) -> Self::PayloadBuilderCtx
+    where
+        Self: Sized,
+        N: reth_primitives::NodePrimitives,
+    {
+        todo!()
     }
 }
 

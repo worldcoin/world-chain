@@ -22,6 +22,7 @@ use reth_optimism_payload_builder::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
@@ -150,14 +151,14 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Builder, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
+impl<Pool, Client, Evm, Builder, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
 where
     Pool: TransactionPool<
-        Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Transaction: MaybeInteropTransaction
+                         + PoolTransaction<Consensus = <Evm::Primitives as NodePrimitives>::SignedTx>,
     >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
-    N: OpPayloadPrimitives,
-    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     Builder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec>,
 {
@@ -171,13 +172,19 @@ where
     /// a result indicating success with the payload or an error in case of failure.
     fn build_payload<F, T>(
         &self,
-        args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
+        args: BuildArguments<
+            OpPayloadBuilderAttributes<<Evm::Primitives as NodePrimitives>::SignedTx>,
+            OpBuiltPayload<Evm::Primitives>,
+        >,
         best: F,
-    ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload<Evm::Primitives>>, PayloadBuilderError>
     where
         F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
         T: PayloadTransactions<
-            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+            Transaction: MaybeInteropTransaction
+                             + PoolTransaction<
+                Consensus = <Evm::Primitives as NodePrimitives>::SignedTx,
+            >,
         >,
     {
         let BuildArguments {
@@ -187,7 +194,12 @@ where
             best_payload,
         } = args;
 
-        let ctx = Builder::build::<Pool, Client, Txs, N>(self, config, cancel, best_payload);
+        let ctx = Builder::build::<Pool, Client, Txs, Evm::Primitives>(
+            self,
+            config,
+            cancel,
+            best_payload,
+        );
 
         let builder = FlashblockBuilder::new(
             best,
