@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use alloy_primitives::Address;
+use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
@@ -6,7 +9,7 @@ use reth::chainspec::EthChainSpec;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
-use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_payload_builder::builder::{OpPayloadBuilderCtx, OpPayloadTransactions};
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
@@ -119,6 +122,17 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
+        let payload_builder = FlashblocksPayloadBuilder {
+            evm_config,
+            pool,
+            client: todo!(),
+            config: todo!(),
+            best_transactions: todo!(),
+            tx: todo!(),
+            block_time: todo!(),
+            flashblock_interval: todo!(),
+        };
+
         let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
             pool,
             ctx.provider().clone(),

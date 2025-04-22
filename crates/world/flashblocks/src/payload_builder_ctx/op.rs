@@ -5,11 +5,12 @@ use reth::{
     payload::PayloadId,
     revm::{Database, State},
 };
+use reth_basic_payload_builder::BuildArguments;
 use reth_evm::block::BlockExecutor;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
-use reth_optimism_node::OpNextBlockEnvAttributes;
+use reth_optimism_node::{OpBuiltPayload, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpPayloadPrimitives;
@@ -18,7 +19,45 @@ use reth_primitives::{SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
 
-use super::PayloadBuilderCtx;
+use crate::builder::FlashblocksPayloadBuilder;
+
+use super::{PayloadBuilderCtx, PaylodBuilderCtxBuilder};
+
+pub struct OpPayloadBuilderCtxBuilder;
+
+// impl<Evm, ChainSpec> PaylodBuilderCtxBuilder<Evm, ChainSpec> for OpPayloadBuilderCtxBuilder
+// where
+//     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+//     ChainSpec: EthChainSpec + OpHardforks,
+// {
+//     type PayloadBuilderCtx = OpPayloadBuilderCtx<Evm, ChainSpec>;
+//
+//     fn build<N>(
+//         payload_builder: FlashblocksPayloadBuilder,
+//         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
+//     ) -> Self::PayloadBuilderCtx
+//     where
+//         N: reth_primitives::NodePrimitives,
+//     {
+//         let BuildArguments {
+//             mut cached_reads,
+//             config,
+//             cancel,
+//             best_payload,
+//         } = args;
+//
+//         let ctx = OpPayloadBuilderCtx {
+//             evm_config: self.evm_config.clone(),
+//             da_config: self.config.da_config.clone(),
+//             chain_spec: self.client.chain_spec(),
+//             config,
+//             cancel,
+//             best_payload,
+//         };
+//
+//         ctx
+//     }
+// }
 
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where

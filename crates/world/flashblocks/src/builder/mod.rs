@@ -27,7 +27,7 @@ use reth_provider::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
-    collections::VecDeque,
+    marker::PhantomData,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -38,7 +38,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::payload_builder_ctx::PayloadBuilderCtx;
+use crate::payload_builder_ctx::{PayloadBuilderCtx, PaylodBuilderCtxBuilder};
 
 mod retaining_payload_txs;
 
@@ -46,7 +46,7 @@ mod retaining_payload_txs;
 ///
 /// A payload builder
 #[derive(Debug)]
-pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
+pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
     /// Transaction pool.
@@ -64,8 +64,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs = ()> {
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
-    /// The payload builder context
-    pub ctx: Arc<Ctx>,
+    pub ctx_builder: PhantomData<Builder>,
 }
 
 impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
@@ -128,7 +127,8 @@ impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
 // TODO: This manual impl is required because we can't require PayloadBuilderCtx
 //       to be Clone, because OpPayloadBuilderCtx is not Clone.
 //       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
-impl<Pool, Client, Evm, Ctx, Txs> Clone for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
+impl<Pool, Client, Evm, Builder, Txs> Clone
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
 where
     Pool: Clone,
     Client: Clone,
@@ -145,12 +145,12 @@ where
             tx: self.tx.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
-            ctx: self.ctx.clone(),
+            ctx_builder: PhantomData,
         }
     }
 }
 
-impl<Pool, Client, Evm, N, Ctx, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
+impl<Pool, Client, Evm, N, Builder, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
 where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
@@ -159,7 +159,7 @@ where
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
-    Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = Client::ChainSpec>,
+    Builder: PaylodBuilderCtxBuilder<Evm, Client::ChainSpec>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -184,24 +184,22 @@ where
             mut cached_reads, ..
         } = args;
 
+        let ctx = Builder::build::<Pool, Client, Txs, N>(self, args);
+
         let builder = FlashblockBuilder::new(
             best,
             self.tx.clone(),
             self.block_time,
             self.flashblock_interval,
         );
-        let state_provider = self.client.state_by_block_hash(self.ctx.parent().hash())?;
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
 
-        if self.ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, self.ctx.as_ref())
+        if ctx.attributes().no_tx_pool {
+            builder.build(state, &state_provider, &ctx)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(
-                cached_reads.as_db_mut(state),
-                &state_provider,
-                self.ctx.as_ref(),
-            )
+            builder.build(cached_reads.as_db_mut(state), &state_provider, &ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -275,7 +273,10 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-pub struct FlashblockBuilder<'a, Txs> {
+pub struct FlashblockBuilder<'a, Txs>
+where
+    Txs: PayloadTransactions,
+{
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
@@ -288,10 +289,13 @@ pub struct FlashblockBuilder<'a, Txs> {
     num_flashblocks: u64,
     flashblock_gas_limit: u64,
 
-    executed_txs: VecDeque<()>,
+    executed_txs: Vec<Txs::Transaction>,
 }
 
-impl<'a, Txs> FlashblockBuilder<'a, Txs> {
+impl<'a, Txs> FlashblockBuilder<'a, Txs>
+where
+    Txs: PayloadTransactions,
+{
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
@@ -309,12 +313,15 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs> {
             num_flashblocks: 0,
             flashblock_gas_limit: 0,
 
-            executed_txs: VecDeque::new(),
+            executed_txs: Vec::new(),
         }
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs> {
+impl<Txs> FlashblockBuilder<'_, Txs>
+where
+    Txs: PayloadTransactions,
+{
     /// Builds the payload on top of the state.
     pub fn build<EvmConfig, ChainSpec, N, Ctx>(
         mut self,
@@ -465,7 +472,8 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
         if !ctx.attributes().no_tx_pool {
             // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
             let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            let mut best_txs = RetainingBestTxs::new(best_txs);
+            let mut best_txs =
+                RetainingBestTxs::new(best_txs).with_prev(self.executed_txs.drain(..).collect());
 
             if ctx
                 .execute_best_transactions(&mut info, &mut builder, best_txs.guard(), gas_limit)?
@@ -474,7 +482,7 @@ impl<Txs> FlashblockBuilder<'_, Txs> {
                 return Ok(None);
             }
 
-            let _executed_txs = best_txs.take_observed();
+            self.executed_txs = best_txs.take_observed();
         }
 
         // builder.executor_mut().
