@@ -1,6 +1,3 @@
-use std::marker::PhantomData;
-use std::sync::Arc;
-
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
@@ -10,15 +7,12 @@ use reth::chainspec::EthChainSpec;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{OpEngineTypes, OpEvmConfig};
-use reth_optimism_payload_builder::builder::{OpPayloadBuilderCtx, OpPayloadTransactions};
-use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
+use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
-use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
-use world_chain_builder_payload::ctx::{
-    WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder,
-};
+use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 

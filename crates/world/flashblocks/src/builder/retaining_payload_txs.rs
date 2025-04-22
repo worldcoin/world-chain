@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 use alloy_primitives::TxHash;
 use reth_payload_util::PayloadTransactions;

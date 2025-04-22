@@ -28,7 +28,6 @@ use reth_provider::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
-    marker::PhantomData,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
