@@ -74,27 +74,14 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
-    client: PhantomData<Client>,
-    pool: PhantomData<Pool>,
-}
-
-impl<Client, Pool> Default for WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
-    fn default() -> Self {
-        Self {
-            client: PhantomData,
-            pool: PhantomData,
-        }
-    }
-}
-
-impl<Client, Pool> Clone for WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
-    fn clone(&self) -> Self {
-        Self {
-            client: PhantomData,
-            pool: PhantomData,
-        }
-    }
+    pub client: Client,
+    pub pool: Pool,
+    pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
@@ -404,7 +391,7 @@ where
 
     fn build<Txs>(
         &self,
-        evm: OpEvmConfig,
+        evm_config: OpEvmConfig,
         da_config: OpDAConfig,
         chain_spec: Arc<OpChainSpec>,
         config: PayloadConfig<
@@ -419,7 +406,24 @@ where
     where
         Self: Sized,
     {
-        todo!()
+        let inner = OpPayloadBuilderCtx {
+            evm_config,
+            da_config,
+            chain_spec,
+            config,
+            cancel,
+            best_payload,
+        };
+
+        WorldChainPayloadBuilderCtx {
+            inner: Arc::new(inner),
+            client: self.client.clone(),
+            pool: self.pool.clone(),
+            verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+        }
     }
 }
 

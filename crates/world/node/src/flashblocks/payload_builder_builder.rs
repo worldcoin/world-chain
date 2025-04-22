@@ -106,7 +106,7 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
     pub fn build<Node, S>(
         &self,
         evm_config: OpEvmConfig,
-        _ctx: &BuilderContext<Node>,
+        ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<
         FlashblocksPayloadBuilder<
@@ -128,13 +128,23 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
             pool,
-            client: todo!(),
+            client: ctx.provider().clone(),
             config: todo!(),
             best_transactions: todo!(),
             tx: todo!(),
             block_time: todo!(),
             flashblock_interval: todo!(),
-            ctx_builder: WorldChainPayloadBuilderCtxBuilder::default(),
+            ctx_builder: WorldChainPayloadBuilderCtxBuilder {
+                client: ctx.provider().clone(),
+                pool,
+                verified_blockspace_capacity: self.verified_blockspace_capacity,
+                pbh_entry_point: self.pbh_entry_point,
+                pbh_signature_aggregator: self.pbh_signature_aggregator,
+                builder_private_key: self
+                    .builder_private_key
+                    .parse()
+                    .context("Failed to parse builder private key")?,
+            },
         };
 
         Ok(payload_builder)
