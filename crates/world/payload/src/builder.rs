@@ -202,14 +202,14 @@ where
         } = args;
 
         let ctx = WorldChainPayloadBuilderCtx {
-            inner: OpPayloadBuilderCtx {
+            inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel,
                 best_payload,
-            },
+            }),
             client: self.inner.client.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
@@ -256,14 +256,14 @@ where
 
         let client = self.inner.client.clone();
         let ctx = WorldChainPayloadBuilderCtx {
-            inner: OpPayloadBuilderCtx {
+            inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel: Default::default(),
                 best_payload: Default::default(),
-            },
+            }),
             client,
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,

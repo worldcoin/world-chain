@@ -24,9 +24,10 @@ use reth_optimism_node::{
     OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{Block, Recovered, SealedHeader, TxTy};
+use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
@@ -35,6 +36,8 @@ use revm::{DatabaseCommit, Inspector};
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::sync::Arc;
 use tracing::{error, trace};
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
@@ -44,7 +47,7 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     // TODO: Make Evm and ChainSpec generic here?
-    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>,
+    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -53,7 +56,46 @@ pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     pub pool: Pool,
 }
 
-pub struct WorldchainPayloadBuilderCtxBuilder {}
+impl<Client, Pool> Clone for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Clone,
+    Pool: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
+            client: self.client.clone(),
+            builder_private_key: self.builder_private_key.clone(),
+            pool: self.pool.clone(),
+        }
+    }
+}
+
+pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
+    client: PhantomData<Client>,
+    pool: PhantomData<Pool>,
+}
+
+impl<Client, Pool> Default for WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
+    fn default() -> Self {
+        Self {
+            client: PhantomData,
+            pool: PhantomData,
+        }
+    }
+}
+
+impl<Client, Pool> Clone for WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
+    fn clone(&self) -> Self {
+        Self {
+            client: PhantomData,
+            pool: PhantomData,
+        }
+    }
+}
 
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
@@ -353,19 +395,29 @@ where
 }
 
 impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec>
-    for WorldchainPayloadBuilderCtxBuilder
+    for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
+where
+    Client: Clone + Send + Sync,
+    Pool: Clone + Send + Sync,
 {
     type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
 
     fn build<Txs>(
-        payload_builder: &FlashblocksPayloadBuilder<Pool, Client, OpEvmConfig, Self, Txs>,
-        config: PayloadConfig<OpPayloadBuilderAttributes<N::SignedTx>, N::BlockHeader>,
+        &self,
+        evm: OpEvmConfig,
+        da_config: OpDAConfig,
+        chain_spec: Arc<OpChainSpec>,
+        config: PayloadConfig<
+            OpPayloadBuilderAttributes<
+                <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
+            >,
+            <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+        >,
         cancel: CancelOnDrop,
-        best_payload: Option<OpBuiltPayload<N>>,
+        best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
     ) -> Self::PayloadBuilderCtx
     where
         Self: Sized,
-        N: reth_primitives::NodePrimitives,
     {
         todo!()
     }

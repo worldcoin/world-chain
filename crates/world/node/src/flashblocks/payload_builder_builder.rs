@@ -16,7 +16,9 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
-use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtx;
+use world_chain_builder_payload::ctx::{
+    WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder,
+};
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
@@ -104,14 +106,14 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
     pub fn build<Node, S>(
         &self,
         evm_config: OpEvmConfig,
-        ctx: &BuilderContext<Node>,
+        _ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
     ) -> eyre::Result<
         FlashblocksPayloadBuilder<
             WorldChainTransactionPool<Node::Provider, S>,
             Node::Provider,
             OpEvmConfig,
-            WorldChainPayloadBuilderCtx<
+            WorldChainPayloadBuilderCtxBuilder<
                 Node::Provider,
                 WorldChainTransactionPool<Node::Provider, S>,
             >,
@@ -132,23 +134,8 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             tx: todo!(),
             block_time: todo!(),
             flashblock_interval: todo!(),
-            ctx_builder: PhantomData,
+            ctx_builder: WorldChainPayloadBuilderCtxBuilder::default(),
         };
-
-        // let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
-        //     pool,
-        //     ctx.provider().clone(),
-        //     evm_config,
-        //     OpBuilderConfig {
-        //         da_config: self.da_config.clone(),
-        //     },
-        //     self.compute_pending_block,
-        //     self.verified_blockspace_capacity,
-        //     self.pbh_entry_point,
-        //     self.pbh_signature_aggregator,
-        //     self.builder_private_key.clone(),
-        // )
-        // .with_transactions(self.best_transactions.clone());
 
         Ok(payload_builder)
     }
@@ -173,7 +160,10 @@ where
         WorldChainTransactionPool<Node::Provider, S>,
         Node::Provider,
         OpEvmConfig,
-        WorldChainPayloadBuilderCtx<Node::Provider, WorldChainTransactionPool<Node::Provider, S>>,
+        WorldChainPayloadBuilderCtxBuilder<
+            Node::Provider,
+            WorldChainTransactionPool<Node::Provider, S>,
+        >,
         Txs,
     >;
 

@@ -47,7 +47,7 @@ mod retaining_payload_txs;
 ///
 /// A payload builder
 #[derive(Debug)]
-pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs = ()> {
+pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
     /// Transaction pool.
@@ -65,7 +65,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs = ()> {
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
-    pub ctx_builder: PhantomData<Builder>,
+    pub ctx_builder: CtxBuilder,
 }
 
 impl<Pool, Client, Evm, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Txs> {
@@ -135,6 +135,7 @@ where
     Client: Clone,
     Evm: Clone,
     Txs: Clone,
+    Builder: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -146,7 +147,7 @@ where
             tx: self.tx.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
-            ctx_builder: PhantomData,
+            ctx_builder: self.ctx_builder.clone(),
         }
     }
 }
@@ -194,8 +195,10 @@ where
             best_payload,
         } = args;
 
-        let ctx = Builder::build::<Pool, Client, Txs, Evm::Primitives>(
-            self,
+        let ctx = self.ctx_builder.build::<Txs>(
+            self.evm_config.clone(),
+            self.config.da_config.clone(),
+            self.client.chain_spec(),
             config,
             cancel,
             best_payload,
