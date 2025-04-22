@@ -38,7 +38,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::payload_builder_ctx::{PayloadBuilderCtx, PaylodBuilderCtxBuilder};
+use crate::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 mod retaining_payload_txs;
 
@@ -159,7 +159,7 @@ where
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
-    Builder: PaylodBuilderCtxBuilder<Evm, Client::ChainSpec>,
+    Builder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -208,8 +208,8 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Ctx, Txs> PayloadBuilder
-    for FlashblocksPayloadBuilder<Pool, Client, Evm, Ctx, Txs>
+impl<Pool, Client, Evm, N, Builder, Txs> PayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
 where
     Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
@@ -217,7 +217,7 @@ where
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = Client::ChainSpec>,
+    Builder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec>,
 
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {

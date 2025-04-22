@@ -21,7 +21,7 @@ use revm::context::BlockEnv;
 
 use crate::builder::FlashblocksPayloadBuilder;
 
-use super::{PayloadBuilderCtx, PaylodBuilderCtxBuilder};
+use super::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 pub struct OpPayloadBuilderCtxBuilder;
 

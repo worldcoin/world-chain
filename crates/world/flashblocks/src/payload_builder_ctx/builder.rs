@@ -7,7 +7,7 @@ use crate::builder::FlashblocksPayloadBuilder;
 
 use super::PayloadBuilderCtx;
 
-pub trait PaylodBuilderCtxBuilder<Evm, ChainSpec> {
+pub trait PayloadBuilderCtxBuilder<Evm, ChainSpec>: Send + Sync {
     type PayloadBuilderCtx: PayloadBuilderCtx<Evm = Evm, ChainSpec = ChainSpec>;
 
     fn build<Pool, Client, Txs, N>(
