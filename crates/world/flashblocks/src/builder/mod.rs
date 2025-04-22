@@ -181,10 +181,13 @@ where
         >,
     {
         let BuildArguments {
-            mut cached_reads, ..
+            mut cached_reads,
+            config,
+            cancel,
+            best_payload,
         } = args;
 
-        let ctx = Builder::build::<Pool, Client, Txs, N>(self, args);
+        let ctx = Builder::build::<Pool, Client, Txs, N>(self, config, cancel, best_payload);
 
         let builder = FlashblockBuilder::new(
             best,

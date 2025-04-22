@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use alloy_primitives::Address;
@@ -131,24 +132,25 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             tx: todo!(),
             block_time: todo!(),
             flashblock_interval: todo!(),
+            ctx_builder: PhantomData,
         };
 
-        let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
-            evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
-            },
-            self.compute_pending_block,
-            self.verified_blockspace_capacity,
-            self.pbh_entry_point,
-            self.pbh_signature_aggregator,
-            self.builder_private_key.clone(),
-        )
-        .with_transactions(self.best_transactions.clone());
+        // let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
+        //     pool,
+        //     ctx.provider().clone(),
+        //     evm_config,
+        //     OpBuilderConfig {
+        //         da_config: self.da_config.clone(),
+        //     },
+        //     self.compute_pending_block,
+        //     self.verified_blockspace_capacity,
+        //     self.pbh_entry_point,
+        //     self.pbh_signature_aggregator,
+        //     self.builder_private_key.clone(),
+        // )
+        // .with_transactions(self.best_transactions.clone());
 
-        Ok(todo!())
+        Ok(payload_builder)
     }
 }
 
