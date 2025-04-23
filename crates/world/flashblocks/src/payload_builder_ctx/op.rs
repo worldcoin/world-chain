@@ -1,63 +1,64 @@
+use std::sync::Arc;
+
 use alloy_primitives::U256;
 use reth::builder::PayloadBuilderError;
+use reth::revm::cancelled::CancelOnDrop;
 use reth::{
     chainspec::EthChainSpec,
     payload::PayloadId,
     revm::{Database, State},
 };
-use reth_basic_payload_builder::BuildArguments;
+use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::BlockExecutor;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
-use reth_optimism_node::{OpBuiltPayload, OpNextBlockEnvAttributes};
+use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{SealedHeader, TxTy};
+use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
 
-use crate::builder::FlashblocksPayloadBuilder;
-
 use super::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
+#[derive(Debug, Clone, Copy)]
 pub struct OpPayloadBuilderCtxBuilder;
 
-// impl<Evm, ChainSpec> PaylodBuilderCtxBuilder<Evm, ChainSpec> for OpPayloadBuilderCtxBuilder
-// where
-//     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-//     ChainSpec: EthChainSpec + OpHardforks,
-// {
-//     type PayloadBuilderCtx = OpPayloadBuilderCtx<Evm, ChainSpec>;
-//
-//     fn build<N>(
-//         payload_builder: FlashblocksPayloadBuilder,
-//         args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
-//     ) -> Self::PayloadBuilderCtx
-//     where
-//         N: reth_primitives::NodePrimitives,
-//     {
-//         let BuildArguments {
-//             mut cached_reads,
-//             config,
-//             cancel,
-//             best_payload,
-//         } = args;
-//
-//         let ctx = OpPayloadBuilderCtx {
-//             evm_config: self.evm_config.clone(),
-//             da_config: self.config.da_config.clone(),
-//             chain_spec: self.client.chain_spec(),
-//             config,
-//             cancel,
-//             best_payload,
-//         };
-//
-//         ctx
-//     }
-// }
+impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec> for OpPayloadBuilderCtxBuilder {
+    type PayloadBuilderCtx = OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>;
+
+    fn build<Txs>(
+        &self,
+        evm_config: OpEvmConfig,
+        da_config: OpDAConfig,
+        chain_spec: Arc<OpChainSpec>,
+        config: PayloadConfig<
+            OpPayloadBuilderAttributes<
+                <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
+            >,
+            <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+        >,
+        cancel: CancelOnDrop,
+        best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
+    ) -> Self::PayloadBuilderCtx
+    where
+        Self: Sized,
+    {
+        OpPayloadBuilderCtx {
+            evm_config,
+            da_config,
+            chain_spec,
+            config,
+            cancel,
+            best_payload,
+        }
+    }
+}
 
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
