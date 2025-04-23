@@ -37,24 +37,21 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_flashblocks_block_time_arg() {
+    fn parse_args() {
         let expected_args = FlashblockArgs {
             block_time: 1,
-            ..Default::default()
-        };
-        let args =
-            CommandParser::<FlashblockArgs>::parse_from(["--flashblock.block_time", "1"]).args;
-        assert_eq!(args, expected_args);
-    }
-
-    #[test]
-    fn test_parse_flashblocks_interval() {
-        let expected_args = FlashblockArgs {
             interval: 200,
-            ..Default::default()
         };
-        let args =
-            CommandParser::<FlashblockArgs>::parse_from(["--flashblock.interval", "200"]).args;
+
+        let args = CommandParser::<FlashblockArgs>::parse_from([
+            "bin",
+            "--flashblock.block_time",
+            "1",
+            "--flashblock.interval",
+            "200",
+        ])
+        .args;
+
         assert_eq!(args, expected_args);
     }
 }
