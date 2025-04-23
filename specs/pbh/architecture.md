@@ -76,7 +76,7 @@ sequenceDiagram
     rollup-boost->>sequencer-el: engine_newPayloadV3(ExecutionPayload)
     sequencer-el->>rollup-boost: {status: VALID, ...}
 
-    Note over rollup-boost: Propose exectuion payload
+    Note over rollup-boost: Propose execution payload
     rollup-boost->>sequencer-cl: {executionPayload, blockValue}
     
     Note over sequencer-cl: Propagate new block
