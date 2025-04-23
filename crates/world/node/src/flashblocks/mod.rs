@@ -81,6 +81,11 @@ impl WorldChainFlashblocksNode {
             ..
         } = rollup_args;
 
+        let flashblock_args = self.args.flashblock_args.as_ref().unwrap();
+
+        // TODO: Connect to a flashblock receiver & WS streaming service
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder::new(
@@ -95,6 +100,9 @@ impl WorldChainFlashblocksNode {
                     pbh_entrypoint,
                     signature_aggregator,
                     builder_private_key.clone(),
+                    flashblock_args.block_time,
+                    flashblock_args.interval,
+                    tx,
                 )
                 .with_da_config(self.da_config.clone()),
             ))
