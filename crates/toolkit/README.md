@@ -14,7 +14,7 @@ For the wallet we'll use the default test mnemonic used by both Anvil and Reth `
 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-The identity secret is a little weird since we never actually access it directly. Instead we use a seed to deterministicly generate an identity. For the purpose of testing we can use `11ff11` as our testing seed (the associated identity commitment is included in the staging sequencer).
+The identity secret is a little weird since we never actually access it directly. Instead we use a seed to deterministically generate an identity. For the purpose of testing we can use `11ff11` as our testing seed (the associated identity commitment is included in the staging sequencer).
 
 ## 1. Craft a transaction with `cast mktx`
 
