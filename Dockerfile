@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
     cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
-FROM gcr.io/distroless/cc-debian12
+FROM debian:bookworm-slim
 WORKDIR /app
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
