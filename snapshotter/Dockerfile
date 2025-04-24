@@ -7,6 +7,7 @@ RUN apt-get update && \
         lz4 \
         awscli \
         curl \
+        wget \
         tzdata && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

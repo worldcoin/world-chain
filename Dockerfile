@@ -38,6 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
     cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
+# Deployments depend on sh and wget
 FROM debian:bookworm-slim
 WORKDIR /app
 
