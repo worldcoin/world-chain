@@ -5,7 +5,7 @@ use reth_payload_util::PayloadTransactions;
 use reth_transaction_pool::PoolTransaction;
 
 /// This type exists to yield best transactions from the tx pool
-/// while doing bookkeping so we can deterministically replay them on the following
+/// while doing bookkeeping so we can deterministically replay them on the following
 /// flashblock
 pub struct RetainingBestTxs<I>
 where
