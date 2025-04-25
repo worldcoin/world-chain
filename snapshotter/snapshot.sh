@@ -11,6 +11,11 @@ if [ -z "${BUCKET:-}" ]; then
   exit 1
 fi
 
+if [ -z "${EXTERNAL_RPC:-}" ]; then
+  echo "[ERROR] EXTERNAL_RPC environment variable is not set."
+  exit 1
+fi
+
 AWS_REGION="${AWS_REGION:=eu-central-2}"
 export AWS_REGION
 
@@ -33,19 +38,39 @@ stop_main_bin() {
   wait "$MAIN_PID" || true
 }
 
-is_synced() {
-  local result
-  result=$(curl -s --max-time 5 -X POST http://localhost:$RPC_PORT \
+get_block_number() {
+  local rpc_url="$1"
+  local hex_block=$(curl -s -X POST "$rpc_url" \
     -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"eth_syncing","params":[]}' || true)
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result)
 
-  echo -e "\n\n[INFO] Sync status: $result"
+  # Fallback if the result is null or jq fails
+  if [[ "$hex_block" == "null" || -z "$hex_block" ]]; then
+    echo "Error: Could not retrieve block number" >&2
+    return 2
+  fi
 
-  if echo "$result" | grep -q '"result":false'; then
+  # Convert hex to decimal
+  echo $((hex_block))
+}
+
+is_synced() {
+  echo "[INFO] Checking sync status..."
+
+  LOCAL_RPC=http://localhost:$RPC_PORT
+  LOCAL_BLOCK=$(get_block_number "$LOCAL_RPC")
+  EXTERNAL_BLOCK=$(get_block_number "$EXTERNAL_RPC")
+
+  echo "[INFO] Local block number: $LOCAL_BLOCK"
+  echo "[INFO] External block number: $EXTERNAL_BLOCK"
+
+  DELTA=$((EXTERNAL_BLOCK - LOCAL_BLOCK))
+
+  if [ "$DELTA" -lt 5 ]; then
     echo "[INFO] Node is synced."
     return 0
   else
-    echo "[INFO] Node is not synced."
+    echo "[INFO] Node is behind by $DELTA blocks. Skipping snapshot."
     return 1
   fi
 }
@@ -84,11 +109,9 @@ while true; do
     exit $EXIT_CODE
   fi
 
-  # echo "[INFO] Checking sync status..."
-  # if ! is_synced; then
-  #   echo "[INFO] Node is still syncing. Skipping snapshot."
-  #   continue
-  # fi
+  if ! is_synced; then
+    continue
+  fi
 
   take_snapshot
 done

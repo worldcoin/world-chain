@@ -8,6 +8,7 @@ RUN apt-get update && \
         awscli \
         curl \
         wget \
+        jq \
         tzdata && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
