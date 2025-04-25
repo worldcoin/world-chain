@@ -1,24 +1,64 @@
-use alloy_primitives::{Bytes, U256};
+use std::sync::Arc;
+
+use alloy_primitives::U256;
 use reth::builder::PayloadBuilderError;
+use reth::revm::cancelled::CancelOnDrop;
 use reth::{
     chainspec::EthChainSpec,
     payload::PayloadId,
     revm::{Database, State},
 };
+use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::BlockExecutor;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
-use reth_optimism_node::OpNextBlockEnvAttributes;
+use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpPayloadPrimitives;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{SealedHeader, TxTy};
+use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
 
-use super::PayloadBuilderCtx;
+use super::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+
+#[derive(Debug, Clone, Copy)]
+pub struct OpPayloadBuilderCtxBuilder;
+
+impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec> for OpPayloadBuilderCtxBuilder {
+    type PayloadBuilderCtx = OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>;
+
+    fn build<Txs>(
+        &self,
+        evm_config: OpEvmConfig,
+        da_config: OpDAConfig,
+        chain_spec: Arc<OpChainSpec>,
+        config: PayloadConfig<
+            OpPayloadBuilderAttributes<
+                <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
+            >,
+            <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+        >,
+        cancel: CancelOnDrop,
+        best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
+    ) -> Self::PayloadBuilderCtx
+    where
+        Self: Sized,
+    {
+        OpPayloadBuilderCtx {
+            evm_config,
+            da_config,
+            chain_spec,
+            config,
+            cancel,
+            best_payload,
+        }
+    }
+}
 
 impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
 where
@@ -27,14 +67,6 @@ where
 {
     type Evm = Evm;
     type ChainSpec = Chainspec;
-
-    fn evm(&self) -> &Self::Evm {
-        &self.evm_config
-    }
-
-    fn evm_mut(&mut self) -> &mut Self::Evm {
-        &mut self.evm_config
-    }
 
     fn spec(&self) -> &Self::ChainSpec {
         &self.chain_spec
@@ -50,20 +82,12 @@ where
         self.attributes()
     }
 
-    fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
-        self.extra_data()
-    }
-
     fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes {
         self.best_transaction_attributes(block_env)
     }
 
     fn payload_id(&self) -> PayloadId {
         self.payload_id()
-    }
-
-    fn is_holocene_active(&self) -> bool {
-        self.is_holocene_active()
     }
 
     fn is_better_payload(&self, total_fees: U256) -> bool {

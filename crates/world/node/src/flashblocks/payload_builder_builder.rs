@@ -1,4 +1,5 @@
 use alloy_primitives::Address;
+use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
@@ -11,12 +12,12 @@ use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
-use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
-use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtx;
+use tokio::sync::mpsc::UnboundedSender;
+use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
@@ -40,6 +41,14 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// Sets the private key of the builder
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
+
+    /// flashblocks building params
+    pub block_time: u64,
+    pub flashblock_interval: u64,
+
+    /// the channel to send flashblocks
+    // TODO: Change to typed
+    pub flashblock_sender: UnboundedSender<String>,
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -51,6 +60,9 @@ impl FlashblocksPayloadBuilderBuilder {
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
+        block_time: u64,
+        flashblock_interval: u64,
+        flashblock_sender: UnboundedSender<String>,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -60,6 +72,11 @@ impl FlashblocksPayloadBuilderBuilder {
             best_transactions: (),
             builder_private_key,
             da_config: OpDAConfig::default(),
+
+            block_time,
+            flashblock_interval,
+
+            flashblock_sender,
         }
     }
 
@@ -81,7 +98,13 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-            ..
+
+            block_time,
+            flashblock_interval,
+
+            flashblock_sender,
+
+            best_transactions: _,
         } = self;
 
         FlashblocksPayloadBuilderBuilder {
@@ -92,13 +115,18 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             pbh_signature_aggregator,
             best_transactions,
             builder_private_key,
+
+            block_time,
+            flashblock_interval,
+
+            flashblock_sender,
         }
     }
 
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
     /// given EVM config.
     pub fn build<Node, S>(
-        &self,
+        self,
         evm_config: OpEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
@@ -107,7 +135,7 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             WorldChainTransactionPool<Node::Provider, S>,
             Node::Provider,
             OpEvmConfig,
-            WorldChainPayloadBuilderCtx<
+            WorldChainPayloadBuilderCtxBuilder<
                 Node::Provider,
                 WorldChainTransactionPool<Node::Provider, S>,
             >,
@@ -119,22 +147,32 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
-        let _payload_builder = WorldChainPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
+        let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
+            pool: pool.clone(),
+            client: ctx.provider().clone(),
+            // TODO: Allow overriding
+            config: OpBuilderConfig {
+                da_config: self.da_config,
             },
-            self.compute_pending_block,
-            self.verified_blockspace_capacity,
-            self.pbh_entry_point,
-            self.pbh_signature_aggregator,
-            self.builder_private_key.clone(),
-        )
-        .with_transactions(self.best_transactions.clone());
+            best_transactions: self.best_transactions.clone(),
+            tx: self.flashblock_sender,
+            block_time: self.block_time,
+            flashblock_interval: self.flashblock_interval,
+            ctx_builder: WorldChainPayloadBuilderCtxBuilder {
+                client: ctx.provider().clone(),
+                pool,
+                verified_blockspace_capacity: self.verified_blockspace_capacity,
+                pbh_entry_point: self.pbh_entry_point,
+                pbh_signature_aggregator: self.pbh_signature_aggregator,
+                builder_private_key: self
+                    .builder_private_key
+                    .parse()
+                    .context("Failed to parse builder private key")?,
+            },
+        };
 
-        Ok(todo!())
+        Ok(payload_builder)
     }
 }
 
@@ -157,7 +195,10 @@ where
         WorldChainTransactionPool<Node::Provider, S>,
         Node::Provider,
         OpEvmConfig,
-        WorldChainPayloadBuilderCtx<Node::Provider, WorldChainTransactionPool<Node::Provider, S>>,
+        WorldChainPayloadBuilderCtxBuilder<
+            Node::Provider,
+            WorldChainTransactionPool<Node::Provider, S>,
+        >,
         Txs,
     >;
 

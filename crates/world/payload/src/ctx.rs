@@ -4,13 +4,15 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::payload_builder_ctx::PayloadBuilderCtx;
+use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
+use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::{BlockExecutionError, BlockValidationError};
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::Evm;
@@ -18,12 +20,13 @@ use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::{
-    OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{Block, Recovered, SealedHeader, TxTy};
+use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
@@ -32,6 +35,7 @@ use revm::{DatabaseCommit, Inspector};
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tracing::{error, trace};
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::WorldChainPoolTransaction;
@@ -41,13 +45,41 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 #[derive(Debug)]
 pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     // TODO: Make Evm and ChainSpec generic here?
-    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>,
+    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
     pub pool: Pool,
+}
+
+impl<Client, Pool> Clone for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Clone,
+    Pool: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
+            client: self.client.clone(),
+            builder_private_key: self.builder_private_key.clone(),
+            pool: self.pool.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
+    pub client: Client,
+    pub pool: Pool,
+    pub verified_blockspace_capacity: u8,
+    pub pbh_entry_point: Address,
+    pub pbh_signature_aggregator: Address,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
@@ -225,19 +257,59 @@ where
             .expect("fee is always valid; execution succeeded");
         info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
     }
+}
 
-    /// Prepares [`BlockBuilder`] for the payload. This will configure the underlying EVM with [`PBHCallTracer`],
-    /// but disable it by default. It will get enabled by [`WorldChainPayloadBuilderCtx::execute_best_transactions`].
-    fn block_builder<'a, DB: Database>(
+impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Send + Sync,
+    Pool: Send + Sync,
+{
+    type Evm = OpEvmConfig;
+
+    type ChainSpec = OpChainSpec;
+
+    fn spec(&self) -> &Self::ChainSpec {
+        self.inner.spec()
+    }
+
+    fn parent(&self) -> &SealedHeader {
+        self.inner.parent()
+    }
+
+    fn attributes(
+        &self,
+    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
+    {
+        self.inner.attributes()
+    }
+
+    fn best_transaction_attributes(
+        &self,
+        block_env: &revm::context::BlockEnv,
+    ) -> BestTransactionsAttributes {
+        self.inner.best_transaction_attributes(block_env)
+    }
+
+    fn payload_id(&self) -> reth::payload::PayloadId {
+        self.inner.payload_id()
+    }
+
+    fn is_better_payload(&self, total_fees: U256) -> bool {
+        self.inner.is_better_payload(total_fees)
+    }
+
+    fn block_builder<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<
-        impl BlockBuilder<
-            Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector>>,
-        >,
+        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
         PayloadBuilderError,
-    > {
+    >
+    where
+        DB: revm::Database,
+        DB::Error: Send + Sync + 'static,
+        DB: reth::revm::Database,
+    {
         // Prepare attributes for next block environment.
         let attributes = OpNextBlockEnvAttributes {
             timestamp: self.inner.attributes().timestamp(),
@@ -274,77 +346,6 @@ where
             .evm_config
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
-}
-
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
-where
-    Client: Send + Sync,
-    Pool: Send + Sync,
-{
-    type Evm = OpEvmConfig;
-
-    type ChainSpec = OpChainSpec;
-
-    fn evm(&self) -> &Self::Evm {
-        self.inner.evm()
-    }
-
-    fn evm_mut(&mut self) -> &mut Self::Evm {
-        self.inner.evm_mut()
-    }
-
-    fn spec(&self) -> &Self::ChainSpec {
-        self.inner.spec()
-    }
-
-    fn parent(&self) -> &SealedHeader {
-        self.inner.parent()
-    }
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
-    {
-        self.inner.attributes()
-    }
-
-    fn extra_data(&self) -> Result<revm_primitives::Bytes, PayloadBuilderError> {
-        self.inner.extra_data()
-    }
-
-    fn best_transaction_attributes(
-        &self,
-        block_env: &revm::context::BlockEnv,
-    ) -> BestTransactionsAttributes {
-        self.inner.best_transaction_attributes(block_env)
-    }
-
-    fn payload_id(&self) -> reth::payload::PayloadId {
-        self.inner.payload_id()
-    }
-
-    fn is_holocene_active(&self) -> bool {
-        self.inner.is_holocene_active()
-    }
-
-    fn is_better_payload(&self, total_fees: U256) -> bool {
-        self.inner.is_better_payload(total_fees)
-    }
-
-    fn block_builder<'a, DB>(
-        &'a self,
-        db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
-    where
-        DB: revm::Database,
-        DB::Error: Send + Sync + 'static,
-        DB: reth::revm::Database,
-    {
-        self.inner.block_builder(db)
-    }
 
     fn execute_sequencer_transactions(
         &self,
@@ -375,6 +376,52 @@ where
         // self.execute_best_transactions_inner(...)
         self.inner
             .execute_best_transactions(info, builder, best_txs)
+    }
+}
+
+impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec>
+    for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
+where
+    Client: Clone + Send + Sync,
+    Pool: Clone + Send + Sync,
+{
+    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
+
+    fn build<Txs>(
+        &self,
+        evm_config: OpEvmConfig,
+        da_config: OpDAConfig,
+        chain_spec: Arc<OpChainSpec>,
+        config: PayloadConfig<
+            OpPayloadBuilderAttributes<
+                <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
+            >,
+            <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+        >,
+        cancel: CancelOnDrop,
+        best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
+    ) -> Self::PayloadBuilderCtx
+    where
+        Self: Sized,
+    {
+        let inner = OpPayloadBuilderCtx {
+            evm_config,
+            da_config,
+            chain_spec,
+            config,
+            cancel,
+            best_payload,
+        };
+
+        WorldChainPayloadBuilderCtx {
+            inner: Arc::new(inner),
+            client: self.client.clone(),
+            pool: self.pool.clone(),
+            verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self.builder_private_key.clone(),
+        }
     }
 }
 

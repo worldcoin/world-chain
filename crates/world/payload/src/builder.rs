@@ -202,14 +202,14 @@ where
         } = args;
 
         let ctx = WorldChainPayloadBuilderCtx {
-            inner: OpPayloadBuilderCtx {
+            inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel,
                 best_payload,
-            },
+            }),
             client: self.inner.client.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
@@ -227,15 +227,10 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if op_ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, ctx, &self.inner.pool)
+            builder.build(state, &state_provider, ctx)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(
-                cached_reads.as_db_mut(state),
-                &state_provider,
-                ctx,
-                &self.inner.pool,
-            )
+            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -256,14 +251,14 @@ where
 
         let client = self.inner.client.clone();
         let ctx = WorldChainPayloadBuilderCtx {
-            inner: OpPayloadBuilderCtx {
+            inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
                 da_config: self.inner.config.da_config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel: Default::default(),
                 best_payload: Default::default(),
-            },
+            }),
             client,
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
@@ -373,7 +368,6 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
-        pool: &Pool,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<
