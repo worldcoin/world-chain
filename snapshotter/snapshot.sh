@@ -84,11 +84,11 @@ while true; do
     exit $EXIT_CODE
   fi
 
-  echo "[INFO] Checking sync status..."
-  if ! is_synced; then
-    echo "[INFO] Node is still syncing. Skipping snapshot."
-    continue
-  fi
+  # echo "[INFO] Checking sync status..."
+  # if ! is_synced; then
+  #   echo "[INFO] Node is still syncing. Skipping snapshot."
+  #   continue
+  # fi
 
   take_snapshot
 done
