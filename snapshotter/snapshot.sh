@@ -81,7 +81,7 @@ take_snapshot() {
 
   echo "[INFO] Copying DB file"
   mkdir -p "$DATA_DIR/snapshots"
-  cp "$DATA_DIR/db/mdbx.dat" "$DATA_DIR/snapshots/mdbx-copy.dat"
+  cp "$DATA_DIR/reth/db/mdbx.dat" "$DATA_DIR/snapshots/mdbx-copy.dat"
 
   start_main_bin
 
