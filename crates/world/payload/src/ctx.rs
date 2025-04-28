@@ -18,6 +18,7 @@ use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::txpool::conditional::MaybeConditionalTransaction;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
@@ -37,7 +38,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
@@ -84,10 +85,12 @@ pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
     Client: StateProviderFactory
-        + BlockReaderIdExt
         + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Send
+        + Sync
+        + BlockReaderIdExt
         + Clone,
-    Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
+    Pool: Send + Sync + TransactionPool,
 {
     /// After computing the execution result and state we can commit changes to the database
     fn commit_changes(
@@ -112,8 +115,13 @@ where
 
 impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
 where
-    Client: Send + Sync,
-    Pool: Send + Sync,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Send
+        + Sync
+        + BlockReaderIdExt
+        + Clone,
+    Pool: Send + Sync + TransactionPool,
 {
     type Evm = OpEvmConfig;
     type ChainSpec = OpChainSpec;
@@ -352,8 +360,13 @@ where
 impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, WorldChainPooledTransaction>
     for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
 where
-    Client: Clone + Send + Sync,
-    Pool: Clone + Send + Sync,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Send
+        + Sync
+        + BlockReaderIdExt
+        + Clone,
+    Pool: Send + Sync + TransactionPool,
 {
     type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
 
