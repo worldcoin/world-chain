@@ -21,6 +21,8 @@ use revm::context::BlockEnv;
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
+    type Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
+        + MaybeInteropTransaction;
 
     fn spec(&self) -> &Self::ChainSpec;
 
@@ -61,11 +63,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
-            > + MaybeInteropTransaction,
-        >,
+        Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             Executor: BlockExecutor,

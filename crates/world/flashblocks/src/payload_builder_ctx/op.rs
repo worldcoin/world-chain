@@ -14,11 +14,13 @@ use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
+use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpPayloadPrimitives;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
@@ -29,7 +31,9 @@ use super::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 #[derive(Debug, Clone, Copy)]
 pub struct OpPayloadBuilderCtxBuilder;
 
-impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec> for OpPayloadBuilderCtxBuilder {
+impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, OpPooledTransaction>
+    for OpPayloadBuilderCtxBuilder
+{
     type PayloadBuilderCtx = OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>;
 
     fn build<Txs>(
@@ -60,16 +64,13 @@ impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec> for OpPayloadBuilderCtxB
     }
 }
 
-impl<Evm, Chainspec> PayloadBuilderCtx for OpPayloadBuilderCtx<Evm, Chainspec>
-where
-    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Chainspec: EthChainSpec + OpHardforks,
-{
-    type Evm = Evm;
-    type ChainSpec = Chainspec;
+impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
+    type Evm = OpEvmConfig;
+    type ChainSpec = OpChainSpec;
+    type Transaction = OpPooledTransaction;
 
     fn spec(&self) -> &Self::ChainSpec {
-        &self.chain_spec
+        self.chain_spec.as_ref()
     }
 
     fn parent(&self) -> &SealedHeader {
@@ -123,11 +124,7 @@ where
         _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
-            > + MaybeInteropTransaction,
-        >,
+        Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             Executor: BlockExecutor,

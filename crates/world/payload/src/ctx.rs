@@ -24,21 +24,20 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::config::OpDAConfig;
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
+use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
-use revm::inspector::NoOpInspector;
-use revm::{DatabaseCommit, Inspector};
+use revm::Inspector;
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
-use world_chain_builder_pool::tx::WorldChainPoolTransaction;
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
@@ -85,28 +84,139 @@ pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
     Client: StateProviderFactory
-        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + BlockReaderIdExt
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone,
-    Pool: TransactionPool<Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>>,
+    Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
 {
-    /// Executes the given best transactions and updates the execution info.
-    ///
-    /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions_inner<Txs, DB, Builder>(
+    /// After computing the execution result and state we can commit changes to the database
+    fn commit_changes(
+        &self,
+        info: &mut ExecutionInfo,
+        base_fee: u64,
+        gas_used: u64,
+        tx: Recovered<OpTransactionSigned>,
+    ) {
+        // add gas used by the transaction to cumulative gas used, before creating the
+        // receipt
+        info.cumulative_gas_used += gas_used;
+        info.cumulative_da_bytes_used += tx.length() as u64;
+
+        // update add to total fees
+        let miner_fee = tx
+            .effective_tip_per_gas(base_fee)
+            .expect("fee is always valid; execution succeeded");
+        info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+    }
+}
+
+impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: Send + Sync,
+    Pool: Send + Sync,
+{
+    type Evm = OpEvmConfig;
+    type ChainSpec = OpChainSpec;
+    type Transaction = WorldChainPooledTransaction;
+
+    fn spec(&self) -> &Self::ChainSpec {
+        self.inner.spec()
+    }
+
+    fn parent(&self) -> &SealedHeader {
+        self.inner.parent()
+    }
+
+    fn attributes(
+        &self,
+    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
+    {
+        self.inner.attributes()
+    }
+
+    fn best_transaction_attributes(
+        &self,
+        block_env: &revm::context::BlockEnv,
+    ) -> BestTransactionsAttributes {
+        self.inner.best_transaction_attributes(block_env)
+    }
+
+    fn payload_id(&self) -> reth::payload::PayloadId {
+        self.inner.payload_id()
+    }
+
+    fn is_better_payload(&self, total_fees: U256) -> bool {
+        self.inner.is_better_payload(total_fees)
+    }
+
+    fn block_builder<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+    ) -> Result<
+        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
+        PayloadBuilderError,
+    >
+    where
+        DB: revm::Database,
+        DB::Error: Send + Sync + 'static,
+        DB: reth::revm::Database,
+    {
+        // Prepare attributes for next block environment.
+        let attributes = OpNextBlockEnvAttributes {
+            timestamp: self.inner.attributes().timestamp(),
+            suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
+            prev_randao: self.inner.attributes().prev_randao(),
+            gas_limit: self
+                .inner
+                .attributes()
+                .gas_limit
+                .unwrap_or(self.inner.parent().gas_limit),
+            parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
+            extra_data: self.inner.extra_data()?,
+        };
+
+        // Prepare EVM environment.
+        let evm_env = self
+            .inner
+            .evm_config
+            .next_evm_env(self.inner.parent(), &attributes)
+            .map_err(PayloadBuilderError::other)?;
+
+        // Prepare EVM.
+        let evm = self.inner.evm_config.evm_with_env(db, evm_env);
+
+        // Prepare block execution context.
+        let execution_ctx = self
+            .inner
+            .evm_config
+            .context_for_next_block(self.inner.parent(), attributes);
+
+        // Prepare block builder.
+        Ok(self
+            .inner
+            .evm_config
+            .create_block_builder(evm, self.inner.parent(), execution_ctx))
+    }
+
+    fn execute_sequencer_transactions(
+        &self,
+        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
+    ) -> Result<ExecutionInfo, PayloadBuilderError> {
+        self.inner.execute_sequencer_transactions(builder)
+    }
+
+    fn execute_best_transactions<Builder, Txs>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
-        mut best_txs: Txs,
+        best_txs: Txs,
+        _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        DB: Database + DatabaseCommit,
+        Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<
-            Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
-        >,
-        Txs: PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor,
         >,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit;
@@ -128,7 +238,7 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.conditional_options() {
+            if let Some(conditional_options) = pooled_tx.inner.conditional() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
@@ -237,149 +347,9 @@ where
 
         Ok(None)
     }
-
-    /// After computing the execution result and state we can commit changes to the database
-    fn commit_changes(
-        &self,
-        info: &mut ExecutionInfo,
-        base_fee: u64,
-        gas_used: u64,
-        tx: Recovered<OpTransactionSigned>,
-    ) {
-        // add gas used by the transaction to cumulative gas used, before creating the
-        // receipt
-        info.cumulative_gas_used += gas_used;
-        info.cumulative_da_bytes_used += tx.length() as u64;
-
-        // update add to total fees
-        let miner_fee = tx
-            .effective_tip_per_gas(base_fee)
-            .expect("fee is always valid; execution succeeded");
-        info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-    }
 }
 
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
-where
-    Client: Send + Sync,
-    Pool: Send + Sync,
-{
-    type Evm = OpEvmConfig;
-
-    type ChainSpec = OpChainSpec;
-
-    fn spec(&self) -> &Self::ChainSpec {
-        self.inner.spec()
-    }
-
-    fn parent(&self) -> &SealedHeader {
-        self.inner.parent()
-    }
-
-    fn attributes(
-        &self,
-    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
-    {
-        self.inner.attributes()
-    }
-
-    fn best_transaction_attributes(
-        &self,
-        block_env: &revm::context::BlockEnv,
-    ) -> BestTransactionsAttributes {
-        self.inner.best_transaction_attributes(block_env)
-    }
-
-    fn payload_id(&self) -> reth::payload::PayloadId {
-        self.inner.payload_id()
-    }
-
-    fn is_better_payload(&self, total_fees: U256) -> bool {
-        self.inner.is_better_payload(total_fees)
-    }
-
-    fn block_builder<'a, DB>(
-        &'a self,
-        db: &'a mut State<DB>,
-    ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
-        PayloadBuilderError,
-    >
-    where
-        DB: revm::Database,
-        DB::Error: Send + Sync + 'static,
-        DB: reth::revm::Database,
-    {
-        // Prepare attributes for next block environment.
-        let attributes = OpNextBlockEnvAttributes {
-            timestamp: self.inner.attributes().timestamp(),
-            suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
-            prev_randao: self.inner.attributes().prev_randao(),
-            gas_limit: self
-                .inner
-                .attributes()
-                .gas_limit
-                .unwrap_or(self.inner.parent().gas_limit),
-            parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: self.inner.extra_data()?,
-        };
-
-        // Prepare EVM environment.
-        let evm_env = self
-            .inner
-            .evm_config
-            .next_evm_env(self.inner.parent(), &attributes)
-            .map_err(PayloadBuilderError::other)?;
-
-        // Prepare EVM.
-        let evm = self.inner.evm_config.evm_with_env(db, evm_env);
-
-        // Prepare block execution context.
-        let execution_ctx = self
-            .inner
-            .evm_config
-            .context_for_next_block(self.inner.parent(), attributes);
-
-        // Prepare block builder.
-        Ok(self
-            .inner
-            .evm_config
-            .create_block_builder(evm, self.inner.parent(), execution_ctx))
-    }
-
-    fn execute_sequencer_transactions(
-        &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError> {
-        self.inner.execute_sequencer_transactions(builder)
-    }
-
-    fn execute_best_transactions<Builder, Txs>(
-        &self,
-        info: &mut ExecutionInfo,
-        builder: &mut Builder,
-        best_txs: Txs,
-        _gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>
-    where
-        Txs: PayloadTransactions<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>,
-            > + MaybeInteropTransaction,
-        >,
-        Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor,
-        >,
-    {
-        // TODO: Implement PBH functionality & handle gas limit
-        // self.execute_best_transactions_inner(...)
-        self.inner
-            .execute_best_transactions(info, builder, best_txs)
-    }
-}
-
-impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec>
+impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, WorldChainPooledTransaction>
     for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
 where
     Client: Clone + Send + Sync,

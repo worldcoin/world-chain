@@ -67,14 +67,14 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs = ()> {
 // TODO: This manual impl is required because we can't require PayloadBuilderCtx
 //       to be Clone, because OpPayloadBuilderCtx is not Clone.
 //       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
-impl<Pool, Client, Evm, Builder, Txs> Clone
-    for FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
+impl<Pool, Client, Evm, CtxBuilder, Txs> Clone
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
     Pool: Clone,
     Client: Clone,
     Evm: Clone,
     Txs: Clone,
-    Builder: Clone,
+    CtxBuilder: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -91,7 +91,8 @@ where
     }
 }
 
-impl<Pool, Client, Evm, Builder, Txs> FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
+impl<Pool, Client, Evm, CtxBuilder, Txs>
+    FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
     Pool: TransactionPool<
         Transaction: MaybeInteropTransaction
@@ -100,7 +101,7 @@ where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
-    Builder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec>,
+    CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -120,12 +121,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload<Evm::Primitives>>, PayloadBuilderError>
     where
         F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
-        T: PayloadTransactions<
-            Transaction: MaybeInteropTransaction
-                             + PoolTransaction<
-                Consensus = <Evm::Primitives as NodePrimitives>::SignedTx,
-            >,
-        >,
+        T: PayloadTransactions<Transaction = Pool::Transaction>,
     {
         let BuildArguments {
             mut cached_reads,
@@ -162,8 +158,8 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, Builder, Txs> PayloadBuilder
-    for FlashblocksPayloadBuilder<Pool, Client, Evm, Builder, Txs>
+impl<Pool, Client, Evm, N, CtxBuilder, Txs> PayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
     Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
@@ -171,7 +167,7 @@ where
         Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
     >,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Builder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec>,
+    CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
 
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -280,7 +276,7 @@ where
     Txs: PayloadTransactions,
 {
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, ChainSpec, N, Ctx>(
+    pub fn build<EvmConfig, ChainSpec, N, Ctx, Tx>(
         mut self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
@@ -290,10 +286,9 @@ where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        >,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction = Tx>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
@@ -398,7 +393,7 @@ where
         }
     }
 
-    fn build_flashblock<EvmConfig, ChainSpec, N, Ctx, DB>(
+    fn build_flashblock<EvmConfig, ChainSpec, N, Ctx, DB, Tx>(
         &mut self,
         db: &mut State<DB>,
         state_provider: impl StateProvider,
@@ -410,10 +405,9 @@ where
         ChainSpec: EthChainSpec,
         DB: Database<Error = ProviderError>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<
-            Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        >,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>,
+        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction = Tx>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
     {
         let mut builder = ctx.block_builder(db)?;
 
