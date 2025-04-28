@@ -44,7 +44,7 @@ WORKDIR /app
 
 # Install wget in the final image
 RUN apt-get update && \
-    apt-get install -y wget && \
+    apt-get install -y wget netcat-traditional && \
     rm -rf /var/lib/apt/lists/*
 
 
