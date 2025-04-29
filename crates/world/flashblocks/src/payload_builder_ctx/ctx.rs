@@ -8,6 +8,7 @@ use reth::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_evm::block::BlockExecutor;
+use reth_evm::Evm;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
@@ -64,10 +65,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
-        Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor,
-        >;
+        Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

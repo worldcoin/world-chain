@@ -8,6 +8,7 @@ use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuild
 use op_alloy_rpc_types::OpTransactionRequest;
 use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
+use reth::chainspec::EthChainSpec;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
@@ -217,15 +218,12 @@ where
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
-        best_txs: Txs,
+        mut best_txs: Txs,
         _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
-        Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor,
-        >,
+        Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
@@ -415,14 +413,21 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
     FIXED_GAS + len * COLD_SSTORE_GAS
 }
 
-pub fn spend_nullifiers_tx<DB, I, Client, Pool>(
+pub fn spend_nullifiers_tx<DB, EVM, Client, Pool>(
     ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
-    evm: &mut OpEvm<DB, I>,
+    evm: &mut EVM,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
-    I: Inspector<OpContext<DB>>,
-    DB: revm::Database + revm::DatabaseCommit,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Send
+        + Sync
+        + BlockReaderIdExt
+        + Clone,
+    Pool: Send + Sync + TransactionPool,
+    EVM: Evm<DB = DB>,
+    DB: revm::Database,
     <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
 {
     let nonce = evm
@@ -434,9 +439,9 @@ where
     let mut tx = OpTransactionRequest::default()
         .nonce(nonce)
         .gas_limit(dyn_gas_limit(nullifier_hashes.len() as u64))
-        .max_priority_fee_per_gas(evm.ctx().block.basefee.into())
-        .max_fee_per_gas(evm.ctx().block.basefee.into())
-        .with_chain_id(evm.ctx().cfg.chain_id)
+        .max_priority_fee_per_gas(evm.block().basefee.into())
+        .max_fee_per_gas(evm.block().basefee.into())
+        .with_chain_id(ctx.spec().chain_id())
         .with_call(&spendNullifierHashesCall {
             _nullifierHashes: nullifier_hashes.into_iter().collect(),
         })
