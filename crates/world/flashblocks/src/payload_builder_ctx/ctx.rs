@@ -43,7 +43,10 @@ pub trait PayloadBuilderCtx: Send + Sync {
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
+        impl BlockBuilder<
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
         PayloadBuilderError,
     >
     where
@@ -65,7 +68,8 @@ pub trait PayloadBuilderCtx: Send + Sync {
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
-        Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>;
+        Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
+        <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

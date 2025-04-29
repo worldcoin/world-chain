@@ -6,7 +6,6 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
-use op_revm::OpContext;
 use reth::api::PayloadBuilderError;
 use reth::chainspec::EthChainSpec;
 use reth::payload::PayloadBuilderAttributes;
@@ -16,23 +15,21 @@ use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::{BlockExecutionError, BlockValidationError};
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
+use reth_evm::ConfigureEvm;
 use reth_evm::Evm;
-use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::txpool::conditional::MaybeConditionalTransaction;
-use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
+use reth_primitives::{NodePrimitives, Recovered, SealedHeader};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
-use revm::Inspector;
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
@@ -129,7 +126,9 @@ where
     type Transaction = WorldChainPooledTransaction;
 
     fn spec(&self) -> &Self::ChainSpec {
-        self.inner.spec()
+        // TODO: Replace this is `self.inner.spec()` once PayloadBuilderCtx is implemented for
+        // inner
+        self.inner.chain_spec.as_ref()
     }
 
     fn parent(&self) -> &SealedHeader {
@@ -162,7 +161,10 @@ where
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
+        impl BlockBuilder<
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
         PayloadBuilderError,
     >
     where
@@ -224,6 +226,7 @@ where
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
+        <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
@@ -416,6 +419,7 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
 pub fn spend_nullifiers_tx<DB, EVM, Client, Pool>(
     ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
     evm: &mut EVM,
+    // evm: &mut OpEvm<DB, I>,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
@@ -428,11 +432,11 @@ where
     Pool: Send + Sync + TransactionPool,
     EVM: Evm<DB = DB>,
     DB: revm::Database,
-    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
 {
     let nonce = evm
         .db_mut()
-        .basic(ctx.builder_private_key.address())?
+        .basic(ctx.builder_private_key.address())
+        .expect("idk")
         .unwrap_or_default()
         .nonce;
 
