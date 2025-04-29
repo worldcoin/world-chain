@@ -34,7 +34,7 @@ use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
-use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::ctx::WorldChainPayloadBuilderCtx;
@@ -190,9 +190,7 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
     {
         let BuildArguments {
             mut cached_reads,
@@ -370,12 +368,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
+        Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
             + ChainSpecProvider<ChainSpec = OpChainSpec>
@@ -473,12 +467,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
-        Pool: TransactionPool<
-            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
+        Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
             + ChainSpecProvider<ChainSpec = OpChainSpec>

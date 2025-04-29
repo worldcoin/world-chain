@@ -26,6 +26,7 @@ use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, Stat
 use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
 use tracing::{debug, info};
+use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
@@ -377,9 +378,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
         evm_config: OpEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<
-        world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>,
-    >
+    ) -> eyre::Result<WorldChainPayloadBuilder<Node::Provider, S, Txs>>
     where
         Node: FullNodeTypes<
             Types: NodeTypes<
@@ -391,21 +390,20 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
-        let payload_builder =
-            world_chain_builder_payload::builder::WorldChainPayloadBuilder::with_builder_config(
-                pool,
-                ctx.provider().clone(),
-                evm_config,
-                OpBuilderConfig {
-                    da_config: self.da_config.clone(),
-                },
-                self.compute_pending_block,
-                self.verified_blockspace_capacity,
-                self.pbh_entry_point,
-                self.pbh_signature_aggregator,
-                self.builder_private_key.clone(),
-            )
-            .with_transactions(self.best_transactions.clone());
+        let payload_builder = WorldChainPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
+            evm_config,
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+            },
+            self.compute_pending_block,
+            self.verified_blockspace_capacity,
+            self.pbh_entry_point,
+            self.pbh_signature_aggregator,
+            self.builder_private_key.clone(),
+        )
+        .with_transactions(self.best_transactions.clone());
 
         Ok(payload_builder)
     }
@@ -425,8 +423,7 @@ where
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
-    type PayloadBuilder =
-        world_chain_builder_payload::builder::WorldChainPayloadBuilder<Node::Provider, S, Txs>;
+    type PayloadBuilder = WorldChainPayloadBuilder<Node::Provider, S, Txs>;
 
     async fn build_payload_builder(
         self,
