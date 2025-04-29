@@ -1,6 +1,7 @@
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
+use flashblocks::payload::FlashblocksPayloadV1;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
@@ -48,7 +49,7 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
 
     /// the channel to send flashblocks
     // TODO: Change to typed
-    pub flashblock_sender: UnboundedSender<String>,
+    pub flashblock_sender: UnboundedSender<FlashblocksPayloadV1>,
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -62,7 +63,7 @@ impl FlashblocksPayloadBuilderBuilder {
         builder_private_key: String,
         block_time: u64,
         flashblock_interval: u64,
-        flashblock_sender: UnboundedSender<String>,
+        flashblock_sender: UnboundedSender<FlashblocksPayloadV1>,
     ) -> Self {
         Self {
             compute_pending_block,

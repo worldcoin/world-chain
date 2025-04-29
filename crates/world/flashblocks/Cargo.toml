@@ -47,5 +47,6 @@ tokio-tungstenite = "0.26.2"
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+eyre.workspace = true
 futures-util = "0.3"
 clap.workspace = true
