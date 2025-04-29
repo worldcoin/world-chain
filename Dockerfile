@@ -38,8 +38,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
     cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
-FROM gcr.io/distroless/cc-debian12
+# Deployments depend on sh and wget
+FROM debian:bookworm-slim
 WORKDIR /app
+
+# Install wget in the final image
+RUN apt-get update && \
+    apt-get install -y wget netcat-traditional && \
+    rm -rf /var/lib/apt/lists/*
+
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=builder /app/target/release/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
