@@ -419,7 +419,6 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
 pub fn spend_nullifiers_tx<DB, EVM, Client, Pool>(
     ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
     evm: &mut EVM,
-    // evm: &mut OpEvm<DB, I>,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
