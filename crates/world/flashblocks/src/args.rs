@@ -13,6 +13,9 @@ pub struct FlashblockArgs {
     /// Interval in milliseconds to wait before computing the next pending block.
     #[arg(long = "flashblock.interval")]
     pub flashblock_interval: u64,
+
+    #[arg(long = "flashblock.port", default_value = "9002")]
+    pub flashblock_port: u16,
 }
 
 impl Default for FlashblockArgs {
@@ -20,6 +23,7 @@ impl Default for FlashblockArgs {
         Self {
             flashblock_block_time: 2,
             flashblock_interval: 250,
+            flashblock_port: 9002,
         }
     }
 }
@@ -41,6 +45,7 @@ mod tests {
         let expected_args = FlashblockArgs {
             flashblock_block_time: 1,
             flashblock_interval: 200,
+            flashblock_port: 9002,
         };
 
         let args = CommandParser::<FlashblockArgs>::parse_from([

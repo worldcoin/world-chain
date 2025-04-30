@@ -10,6 +10,10 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 use crate::payload::FlashblocksPayloadV1;
 
+pub fn new_subscribers() -> Arc<Mutex<Vec<WebSocketStream<TcpStream>>>> {
+    Arc::new(Mutex::new(Vec::default()))
+}
+
 /// Starts the websocket server that listens for incoming subscriber connections
 pub fn start_ws(
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
@@ -50,8 +54,8 @@ async fn ws_server(
 pub fn publish_task(
     rx: mpsc::UnboundedReceiver<FlashblocksPayloadV1>,
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
-) {
-    tokio::spawn(publish_task_inner(rx, subscribers));
+) -> JoinHandle<eyre::Result<()>> {
+    tokio::spawn(publish_task_inner(rx, subscribers))
 }
 
 async fn publish_task_inner(
