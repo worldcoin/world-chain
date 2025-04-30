@@ -100,8 +100,8 @@ impl WorldChainFlashblocksNode {
                     pbh_entrypoint,
                     signature_aggregator,
                     builder_private_key.clone(),
-                    flashblock_args.block_time,
-                    flashblock_args.interval,
+                    flashblock_args.flashblock_block_time,
+                    flashblock_args.flashblock_interval,
                     tx,
                 )
                 .with_da_config(self.da_config.clone()),

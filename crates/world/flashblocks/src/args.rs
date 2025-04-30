@@ -8,18 +8,18 @@
 pub struct FlashblockArgs {
     /// The Chain's block time
     #[arg(long = "flashblock.block_time")]
-    pub block_time: u64,
+    pub flashblock_block_time: u64,
 
     /// Interval in milliseconds to wait before computing the next pending block.
     #[arg(long = "flashblock.interval")]
-    pub interval: u64,
+    pub flashblock_interval: u64,
 }
 
 impl Default for FlashblockArgs {
     fn default() -> Self {
         Self {
-            block_time: 2,
-            interval: 250,
+            flashblock_block_time: 2,
+            flashblock_interval: 250,
         }
     }
 }
@@ -39,8 +39,8 @@ mod tests {
     #[test]
     fn parse_args() {
         let expected_args = FlashblockArgs {
-            block_time: 1,
-            interval: 200,
+            flashblock_block_time: 1,
+            flashblock_interval: 200,
         };
 
         let args = CommandParser::<FlashblockArgs>::parse_from([
