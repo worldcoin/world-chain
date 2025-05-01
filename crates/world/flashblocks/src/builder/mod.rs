@@ -1,7 +1,9 @@
 use crate::{
-    payload::FlashblocksPayloadV1,
+    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+use alloy_primitives::U256;
+use eyre::eyre::ContextCompat;
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
@@ -15,6 +17,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
 };
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{txpool::interop::MaybeInteropTransaction, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::{
@@ -27,7 +30,8 @@ use reth_optimism_payload_builder::{
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
+    StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
@@ -284,7 +288,7 @@ where
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec,
+        ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         Txs: PayloadTransactions<Transaction = Tx>,
@@ -310,7 +314,13 @@ where
         // 1. Build initial flashblock
         let now = Instant::now();
 
-        self.build_flashblock(&mut db, &state_provider, ctx, 0)?;
+        let outcome = self
+            .build_flashblock(&mut db, &state_provider, ctx, 0)?
+            .expect("Missing outcome");
+
+        let payload = Self::create_initial_payload(outcome, ctx, 0).unwrap();
+
+        let _ = self.tx.send(payload);
 
         let elapsed = now.elapsed().as_millis() as u64;
         let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
@@ -440,5 +450,68 @@ where
         let outcome = builder.finish(&state_provider)?;
 
         Ok(Some((info, outcome)))
+    }
+
+    pub fn create_initial_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
+        (_exec_info, outcome): (ExecutionInfo, BlockBuilderOutcome<N>),
+        ctx: &Ctx,
+        idx: u64,
+    ) -> eyre::Result<FlashblocksPayloadV1>
+    where
+        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        ChainSpec: EthChainSpec + OpHardforks,
+        N: OpPayloadPrimitives,
+        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction = Tx>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
+    {
+        let block_number = ctx.parent().number + 1;
+
+        let block_header = outcome.block.sealed_block().header();
+
+        let base = ExecutionPayloadBaseV1 {
+            parent_beacon_block_root: ctx
+                .parent()
+                .parent_beacon_block_root
+                .context("Missing parent beacon block root")?,
+            parent_hash: ctx.parent().hash(),
+            fee_recipient: ctx.attributes().suggested_fee_recipient(),
+            prev_randao: ctx.attributes().prev_randao(),
+            block_number,
+            gas_limit: ctx.attributes().gas_limit.context("Missing gas limit")?,
+            timestamp: ctx.attributes().timestamp(),
+            extra_data: block_header.extra_data.clone(),
+            base_fee_per_gas: U256::from(
+                block_header
+                    .base_fee_per_gas
+                    .context("Missing base fee per gas")?,
+            ),
+        };
+
+        // let new_bundle = state.take_bundle();
+
+        let diff = ExecutionPayloadFlashblockDeltaV1 {
+            state_root: block_header.state_root,
+            receipts_root: block_header.receipts_root,
+            logs_bloom: block_header.logs_bloom,
+            gas_used: block_header.gas_used,
+
+            block_hash: outcome.block.sealed_block().hash(),
+
+            // TODO: Pass in transactions
+            transactions: vec![],
+            // TODO: Pass in withdrawals
+            withdrawals: vec![],
+        };
+
+        let payload = FlashblocksPayloadV1 {
+            payload_id: ctx.attributes().payload_id(),
+            index: idx,
+            base: Some(base),
+            diff,
+            metadata: serde_json::Value::Null,
+        };
+
+        Ok(payload)
     }
 }
