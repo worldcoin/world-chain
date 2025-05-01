@@ -36,9 +36,6 @@ def launch(
     builder_rpc_0,
     builder_rpc_1,
     builder_rpc_2,
-    l2_rpc_0,
-    l2_rpc_1,
-    l2_rpc_2,
     jwt_file,
 ):
     tx_proxy_service_name = "{0}".format(service_name)
@@ -50,9 +47,6 @@ def launch(
         builder_rpc_0,
         builder_rpc_1,
         builder_rpc_2,
-        l2_rpc_0,
-        l2_rpc_1,
-        l2_rpc_2,
         jwt_file,
     )
 
@@ -72,9 +66,6 @@ def get_tx_proxy_config(
     builder_rpc_0,
     builder_rpc_1,
     builder_rpc_2,
-    l2_rpc_0,
-    l2_rpc_1,
-    l2_rpc_2,
     jwt_file,
 ):
     cmd = [
@@ -82,10 +73,6 @@ def get_tx_proxy_config(
         "--builder-url-1={0}".format(builder_rpc_1),
         "--builder-url-2={0}".format(builder_rpc_2),
         "--builder-jwt-path={0}".format(ethereum_constants.JWT_MOUNT_PATH_ON_CONTAINER),
-        "--l2-url-0={0}".format(l2_rpc_0),
-        "--l2-url-1={0}".format(l2_rpc_1),
-        "--l2-url-2={0}".format(l2_rpc_2),
-        "--l2-jwt-path={0}".format(ethereum_constants.JWT_MOUNT_PATH_ON_CONTAINER),
         "--http-port={0}".format(TX_PROXY_HTTP_PORT),
         "--http-addr={0}".format(TX_PROXY_HTTP_ADDRESS),
         "--tracing",
