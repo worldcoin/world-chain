@@ -1,7 +1,10 @@
 use crate::{
-    payload::FlashblocksPayloadV1,
+    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+use alloy_eips::Encodable2718;
+use alloy_primitives::U256;
+use eyre::eyre::ContextCompat;
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
@@ -15,6 +18,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
 };
+use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{txpool::interop::MaybeInteropTransaction, OpNextBlockEnvAttributes};
 use reth_optimism_payload_builder::{
@@ -27,7 +31,8 @@ use reth_optimism_payload_builder::{
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
+    StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
@@ -284,7 +289,7 @@ where
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec,
+        ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
         Txs: PayloadTransactions<Transaction = Tx>,
@@ -310,7 +315,12 @@ where
         // 1. Build initial flashblock
         let now = Instant::now();
 
-        self.build_flashblock(&mut db, &state_provider, ctx, 0)?;
+        let outcome = self
+            .build_flashblock(&mut db, &state_provider, ctx, 0)?
+            .expect("Missing outcome");
+
+        let payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+        let _ = self.tx.send(payload);
 
         let elapsed = now.elapsed().as_millis() as u64;
         let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
@@ -327,17 +337,26 @@ where
 
             self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
 
+            let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+            payload.base = None;
+            let _ = self.tx.send(payload);
+
             let elapsed = now.elapsed().as_millis() as u64;
             let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
             std::thread::sleep(Duration::from_millis(sleep_time));
         }
 
         // Produce the final block
-        let Some((info, outcome)) =
+        let Some(outcome) =
             self.build_flashblock(&mut db, &state_provider, ctx, num_flashblocks - 1)?
         else {
             return Ok(BuildOutcomeKind::Cancelled);
         };
+        let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+        payload.base = None;
+        let _ = self.tx.send(payload);
+
+        let (info, outcome, _diff_txs) = outcome;
 
         // check if the new payload is even more valuable
         if !ctx.is_better_payload(info.total_fees) {
@@ -399,7 +418,7 @@ where
         state_provider: impl StateProvider,
         ctx: &Ctx,
         idx: u64,
-    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>)>, PayloadBuilderError>
+    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>)>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec,
@@ -420,6 +439,8 @@ where
 
         let gas_limit = (idx + 1) * self.flashblock_gas_limit;
 
+        let mut diff_txs = vec![];
+
         if !ctx.attributes().no_tx_pool {
             // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
             let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
@@ -433,12 +454,85 @@ where
                 return Ok(None);
             }
 
-            self.executed_txs = best_txs.take_observed();
+            let (prev, observed) = best_txs.take_observed();
+
+            diff_txs.extend_from_slice(&observed);
+
+            self.executed_txs.extend_from_slice(&prev);
+            self.executed_txs.extend_from_slice(&observed);
         }
 
-        // builder.executor_mut().
         let outcome = builder.finish(&state_provider)?;
 
-        Ok(Some((info, outcome)))
+        Ok(Some((info, outcome, diff_txs)))
+    }
+
+    pub fn create_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
+        (_exec_info, outcome, diff_txs): &(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>),
+        ctx: &Ctx,
+        idx: u64,
+    ) -> eyre::Result<FlashblocksPayloadV1>
+    where
+        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        ChainSpec: EthChainSpec + OpHardforks,
+        N: OpPayloadPrimitives,
+        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction = Tx>,
+        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
+    {
+        let block_number = ctx.parent().number + 1;
+
+        let block_header = outcome.block.sealed_block().header();
+
+        let base = ExecutionPayloadBaseV1 {
+            parent_beacon_block_root: ctx
+                .parent()
+                .parent_beacon_block_root
+                .context("Missing parent beacon block root")?,
+            parent_hash: ctx.parent().hash(),
+            fee_recipient: ctx.attributes().suggested_fee_recipient(),
+            prev_randao: ctx.attributes().prev_randao(),
+            block_number,
+            gas_limit: ctx.attributes().gas_limit.context("Missing gas limit")?,
+            timestamp: ctx.attributes().timestamp(),
+            extra_data: block_header.extra_data.clone(),
+            base_fee_per_gas: U256::from(
+                block_header
+                    .base_fee_per_gas
+                    .context("Missing base fee per gas")?,
+            ),
+        };
+
+        let transactions = diff_txs
+            .iter()
+            .cloned()
+            .map(|tx| tx.into_consensus().encoded_2718())
+            .map(|tx_bytes| tx_bytes.into())
+            .collect();
+
+        let withdrawals = ctx.attributes().payload_attributes.withdrawals.clone().0;
+
+        let diff = ExecutionPayloadFlashblockDeltaV1 {
+            state_root: block_header.state_root,
+            receipts_root: block_header.receipts_root,
+            logs_bloom: block_header.logs_bloom,
+            gas_used: block_header.gas_used,
+
+            block_hash: outcome.block.sealed_block().hash(),
+
+            transactions,
+            withdrawals,
+        };
+
+        let payload = FlashblocksPayloadV1 {
+            payload_id: ctx.attributes().payload_id(),
+            index: idx,
+            base: Some(base),
+            diff,
+            // TODO: Fill out metadata
+            metadata: serde_json::Value::Null,
+        };
+
+        Ok(payload)
     }
 }

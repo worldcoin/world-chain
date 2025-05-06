@@ -40,7 +40,7 @@ alloy-rpc-types = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true, optional = true }
 revm-primitives = { workspace = true, optional = true }
 
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true, optional = true }
 clap.workspace = true
@@ -88,5 +88,4 @@ test = [
   "dep:revm-primitives",
   "dep:futures",
   "dep:chrono",
-  "dep:tokio",
 ]

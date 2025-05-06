@@ -34,6 +34,7 @@ WS_PORT_NUM = 8546
 DISCOVERY_PORT_NUM = 30303
 ENGINE_RPC_PORT_NUM = 9551
 METRICS_PORT_NUM = 9001
+FLASHBLOCKS_WS_PORT_NUM = 9002
 
 # The min/max CPU/memory that the execution node can use
 EXECUTION_MIN_CPU = 100
@@ -46,6 +47,7 @@ TCP_DISCOVERY_PORT_ID = "tcp-discovery"
 UDP_DISCOVERY_PORT_ID = "udp-discovery"
 ENGINE_RPC_PORT_ID = "engine-rpc"
 METRICS_PORT_ID = "metrics"
+FLASHBLOCKS_WS_PORT_ID = "flashblocks"
 
 # Paths
 METRICS_PATH = "/metrics"
@@ -82,6 +84,9 @@ def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
         METRICS_PORT_ID: ethereum_package_shared_utils.new_port_spec(
             METRICS_PORT_NUM, ethereum_package_shared_utils.TCP_PROTOCOL
         ),
+        FLASHBLOCKS_WS_PORT_ID: ethereum_package_shared_utils.new_port_spec(
+            FLASHBLOCKS_WS_PORT_NUM, ethereum_package_shared_utils.TCP_PROTOCOL
+        )
     }
     return used_ports
 
@@ -205,6 +210,8 @@ def get_config(
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
+        "--flashblock.block_time={0}".format(2000),
+        "--flashblock.interval={0}".format(250),
     ]
 
     observability.expose_metrics_port(ports)
