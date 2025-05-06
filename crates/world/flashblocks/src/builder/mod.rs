@@ -529,6 +529,7 @@ where
             index: idx,
             base: Some(base),
             diff,
+            // TODO: Fill out metadata
             metadata: serde_json::Value::Null,
         };
 
