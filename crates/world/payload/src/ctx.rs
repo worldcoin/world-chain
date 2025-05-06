@@ -8,7 +8,7 @@ use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuild
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::chainspec::EthChainSpec;
-use reth::payload::PayloadBuilderAttributes;
+use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
@@ -26,7 +26,7 @@ use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx}
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{NodePrimitives, Recovered, SealedHeader};
+use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
@@ -137,8 +137,7 @@ where
 
     fn attributes(
         &self,
-    ) -> &OpPayloadBuilderAttributes<reth_primitives::TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
-    {
+    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>> {
         self.inner.attributes()
     }
 
@@ -149,7 +148,7 @@ where
         self.inner.best_transaction_attributes(block_env)
     }
 
-    fn payload_id(&self) -> reth::payload::PayloadId {
+    fn payload_id(&self) -> PayloadId {
         self.inner.payload_id()
     }
 

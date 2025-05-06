@@ -511,6 +511,8 @@ where
             .map(|tx_bytes| tx_bytes.into())
             .collect();
 
+        let withdrawals = ctx.attributes().payload_attributes.withdrawals.clone().0;
+
         let diff = ExecutionPayloadFlashblockDeltaV1 {
             state_root: block_header.state_root,
             receipts_root: block_header.receipts_root,
@@ -520,8 +522,7 @@ where
             block_hash: outcome.block.sealed_block().hash(),
 
             transactions,
-            // TODO: Pass in withdrawals
-            withdrawals: vec![],
+            withdrawals,
         };
 
         let payload = FlashblocksPayloadV1 {
