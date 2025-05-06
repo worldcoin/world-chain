@@ -2,6 +2,7 @@ use crate::{
     payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+use alloy_eips::Encodable2718;
 use alloy_primitives::U256;
 use eyre::eyre::ContextCompat;
 use retaining_payload_txs::RetainingBestTxs;
@@ -318,8 +319,7 @@ where
             .build_flashblock(&mut db, &state_provider, ctx, 0)?
             .expect("Missing outcome");
 
-        let payload = Self::create_initial_payload(outcome, ctx, 0).unwrap();
-
+        let payload = Self::create_payload(&outcome, ctx, 0).unwrap();
         let _ = self.tx.send(payload);
 
         let elapsed = now.elapsed().as_millis() as u64;
@@ -337,17 +337,26 @@ where
 
             self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
 
+            let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+            payload.base = None;
+            let _ = self.tx.send(payload);
+
             let elapsed = now.elapsed().as_millis() as u64;
             let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
             std::thread::sleep(Duration::from_millis(sleep_time));
         }
 
         // Produce the final block
-        let Some((info, outcome)) =
+        let Some(outcome) =
             self.build_flashblock(&mut db, &state_provider, ctx, num_flashblocks - 1)?
         else {
             return Ok(BuildOutcomeKind::Cancelled);
         };
+        let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+        payload.base = None;
+        let _ = self.tx.send(payload);
+
+        let (info, outcome, _diff_txs) = outcome;
 
         // check if the new payload is even more valuable
         if !ctx.is_better_payload(info.total_fees) {
@@ -409,7 +418,7 @@ where
         state_provider: impl StateProvider,
         ctx: &Ctx,
         idx: u64,
-    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>)>, PayloadBuilderError>
+    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>)>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec,
@@ -430,6 +439,8 @@ where
 
         let gas_limit = (idx + 1) * self.flashblock_gas_limit;
 
+        let mut diff_txs = vec![];
+
         if !ctx.attributes().no_tx_pool {
             // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
             let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
@@ -443,17 +454,22 @@ where
                 return Ok(None);
             }
 
-            self.executed_txs = best_txs.take_observed();
+            let (prev, observed) = best_txs.take_observed();
+
+            diff_txs.extend_from_slice(&observed);
+
+            self.executed_txs.extend_from_slice(&prev);
+            self.executed_txs.extend_from_slice(&observed);
         }
 
         // builder.executor_mut().
         let outcome = builder.finish(&state_provider)?;
 
-        Ok(Some((info, outcome)))
+        Ok(Some((info, outcome, diff_txs)))
     }
 
-    pub fn create_initial_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
-        (_exec_info, outcome): (ExecutionInfo, BlockBuilderOutcome<N>),
+    pub fn create_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
+        (_exec_info, outcome, diff_txs): &(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>),
         ctx: &Ctx,
         idx: u64,
     ) -> eyre::Result<FlashblocksPayloadV1>
@@ -488,7 +504,12 @@ where
             ),
         };
 
-        // let new_bundle = state.take_bundle();
+        let transactions = diff_txs
+            .iter()
+            .cloned()
+            .map(|tx| tx.into_consensus().encoded_2718())
+            .map(|tx_bytes| tx_bytes.into())
+            .collect();
 
         let diff = ExecutionPayloadFlashblockDeltaV1 {
             state_root: block_header.state_root,
@@ -498,8 +519,7 @@ where
 
             block_hash: outcome.block.sealed_block().hash(),
 
-            // TODO: Pass in transactions
-            transactions: vec![],
+            transactions,
             // TODO: Pass in withdrawals
             withdrawals: vec![],
         };
