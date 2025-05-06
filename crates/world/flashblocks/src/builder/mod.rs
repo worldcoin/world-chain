@@ -462,7 +462,6 @@ where
             self.executed_txs.extend_from_slice(&observed);
         }
 
-        // builder.executor_mut().
         let outcome = builder.finish(&state_provider)?;
 
         Ok(Some((info, outcome, diff_txs)))
