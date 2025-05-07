@@ -12939,8 +12939,24 @@ dependencies = [
  "serde_json",
  "tikv-jemallocator",
  "tokio",
+ "world-chain-builder-chainspec",
  "world-chain-builder-node",
  "world-chain-builder-rpc",
+]
+
+[[package]]
+name = "world-chain-builder-chainspec"
+version = "0.1.0"
+dependencies = [
+ "alloy-chains",
+ "alloy-op-hardforks",
+ "alloy-primitives 1.0.0",
+ "color-eyre",
+ "reth",
+ "reth-cli",
+ "reth-optimism-chainspec",
+ "reth-optimism-cli",
+ "serde_json",
 ]
 
 [[package]]

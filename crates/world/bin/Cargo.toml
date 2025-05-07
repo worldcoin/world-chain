@@ -14,6 +14,7 @@ workspace = true
 # world-chain
 world-chain-builder-node.workspace = true
 world-chain-builder-rpc.workspace = true
+world-chain-builder-chainspec.workspace = true
 
 # reth
 reth-db.workspace = true
