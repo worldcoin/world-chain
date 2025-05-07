@@ -88,7 +88,7 @@ pub static ALCHEMY_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
         (
             EthereumHardfork::Shanghai.boxed(),
-            ForkCondition::Timestamp(1717675200),
+            ForkCondition::Timestamp(0),
         ),
         (
             OpHardfork::Canyon.boxed(),
@@ -96,7 +96,7 @@ pub static ALCHEMY_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|
         ),
         (
             EthereumHardfork::Cancun.boxed(),
-            ForkCondition::Timestamp(1717675200),
+            ForkCondition::Timestamp(0),
         ),
         (
             OpHardfork::Ecotone.boxed(),
