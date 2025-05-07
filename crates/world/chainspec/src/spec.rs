@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_cli::chainspec::OpChainSpecParser;
+use std::sync::Arc;
 
 use crate::alchemy_sepolia::ALCHEMY_SEPOLIA;
 

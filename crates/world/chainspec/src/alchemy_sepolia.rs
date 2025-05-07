@@ -3,7 +3,13 @@ use std::sync::{Arc, LazyLock};
 use alloy_chains::Chain;
 use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{b256, U256};
-use reth::{chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition, Hardfork}, primitives::SealedHeader};
+use reth::{
+    chainspec::{
+        BaseFeeParams, BaseFeeParamsKind, ChainHardforks, ChainSpec, EthereumHardfork,
+        ForkCondition, Hardfork,
+    },
+    primitives::SealedHeader,
+};
 use reth_optimism_chainspec::{make_op_genesis_header, OpChainSpec};
 
 pub const CHAIN_ID: u64 = 69420;
@@ -36,23 +42,40 @@ pub static ALCHEMY_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-
 /// Base Sepolia list of hardforks.
 pub static ALCHEMY_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::MuirGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::ArrowGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::GrayGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
@@ -63,13 +86,33 @@ pub static ALCHEMY_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1717675200)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1717675200)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1721309400)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1727110800)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1737540000)),
-        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(1717675200),
+        ),
+        (
+            OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(1717675200),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(1717675200),
+        ),
+        (
+            OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(1717675200),
+        ),
+        (
+            OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(1721309400),
+        ),
+        (
+            OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(1727110800),
+        ),
+        (
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1737540000),
+        ),
     ])
 });
