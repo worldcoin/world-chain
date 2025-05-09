@@ -607,15 +607,6 @@ where
                 }
             }
 
-            // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as
-                // invalid which also removes all dependent transaction from
-                // the iterator before we can continue
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
-            }
-
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
