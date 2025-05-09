@@ -142,35 +142,37 @@ where
         .map_err(|e| ErrorObject::owned(ErrorCode::InternalError.code(), e.to_string(), Some("")))?
         .ok_or(ErrorObjectOwned::from(ErrorCode::InternalError))?;
 
-    validate_known_accounts(
-        &options.known_accounts,
-        latest.header().number().into(),
-        provider,
-    )?;
-
+    let block_number = latest.header().number();
+    let block_timestamp = latest.header().timestamp();
     if let Some(min_block) = options.block_number_min {
-        if min_block > latest.header().number() {
+        if min_block > block_number {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(max_block) = options.block_number_max {
-        if max_block < latest.header().number() {
+        if max_block < block_number {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(min_timestamp) = options.timestamp_min {
-        if min_timestamp > latest.header().timestamp() {
+        if min_timestamp > block_timestamp {
             return Err(ErrorCode::from(-32003).into());
         }
     }
 
     if let Some(max_timestamp) = options.timestamp_max {
-        if max_timestamp < latest.header().timestamp() {
+        if max_timestamp < block_timestamp {
             return Err(ErrorCode::from(-32003).into());
         }
     }
+
+    validate_known_accounts(
+        &options.known_accounts,
+        latest.header().number().into(),
+        provider,
+    )?;
 
     Ok(())
 }
