@@ -124,6 +124,9 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
         let mut tx_outcome = self.inner.validate_one(origin, tx.clone()).await;
+        if !tx_outcome.is_valid() {
+            return tx_outcome;
+        }
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
         let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input()) else {
