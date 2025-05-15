@@ -33,7 +33,7 @@ optimism_package:
   persistent: false
 ethereum_package:
   participants:
-  - el_type: geth 
+  - el_type: geth
     cl_type: teku
   network_params:
     preset: minimal
