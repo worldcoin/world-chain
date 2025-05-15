@@ -620,6 +620,10 @@ where
 
             // If the transaction is verified, check if it can be added within the verified gas limit
             if let Some(payloads) = pooled_tx.pbh_payload() {
+                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue;
+                }
                 // Step 1: Collect all nullifier_hashes for this transaction
                 let mut same_tx_nullifiers = std::collections::HashSet::new();
                 let has_duplicate_nullifier_in_same_tx = payloads
