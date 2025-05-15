@@ -2,4 +2,4 @@ name: github.com/worldcoin/world-chain-package
 description: |-
   This is a Kurtosis package for deploying the World Chain Builder in an Optimism Rollup
 replace:
-  github.com/ethpandaops/optimism-package: github.com/dzejkop/optimism-package
+  github.com/ethpandaops/optimism-package: github.com/dzejkop/optimism-package@5b46ce33ca331fd595d5b9dc9eea004ab3522f1b

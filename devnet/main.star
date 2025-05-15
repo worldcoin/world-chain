@@ -1,5 +1,5 @@
 optimism_package = import_module(
-    "github.com/ethpandaops/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee"
+    "github.com/ethpandaops/optimism-package/main.star@5b46ce33ca331fd595d5b9dc9eea004ab3522f1b"
 )
 
 world_chain_builder = import_module("./src/el/world_chain_builder_launcher.star")
@@ -42,20 +42,20 @@ def run(plan, args={}):
     )
 
     # Extract HTTP RPC url of the builder
-    builder_srv = plan.get_service("op-el-builder-1-custom-op-node-op-kurtosis")
+    builder_srv = plan.get_service("op-el-builder-2151908-1-custom-op-node-op-kurtosis")
     builder_rpc_port = builder_srv.ports["rpc"].number
     builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
     # Extract HTTP RPC url of 2 Reth nodes
-    reth_srv_0 = plan.get_service("op-el-2-op-reth-op-node-op-kurtosis")
+    reth_srv_0 = plan.get_service("op-el-2151908-2-op-reth-op-node-op-kurtosis")
     reth_rpc_port_0 = reth_srv_0.ports["rpc"].number
     reth_rpc_url_0 = "http://{0}:{1}".format(reth_srv_0.ip_address, reth_rpc_port_0)
 
-    reth_srv_1 = plan.get_service("op-el-3-op-reth-op-node-op-kurtosis")
+    reth_srv_1 = plan.get_service("op-el-2151908-3-op-reth-op-node-op-kurtosis")
     reth_rpc_port_1 = reth_srv_1.ports["rpc"].number
     reth_rpc_url_1 = "http://{0}:{1}".format(reth_srv_1.ip_address, reth_rpc_port_1)
 
-    l2_srv = plan.get_service("op-el-1-op-geth-op-node-op-kurtosis")
+    l2_srv = plan.get_service("op-el-2151908-1-op-geth-op-node-op-kurtosis")
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
 
@@ -76,7 +76,7 @@ def run(plan, args={}):
         plan,
         service_name="rundler",
         image="alchemyplatform/rundler:v0.6.0-alpha.3",
-        rpc_http_url=tx_proxy_http_url,
+        rpc_http_url=builder_rpc_url,
         builder_config_file=rundler_builder_config_file,
         mempool_config_file=rundler_mempool_config_file,
         chain_spec_file=rundler_chain_spec,
