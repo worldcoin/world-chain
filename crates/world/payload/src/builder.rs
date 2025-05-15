@@ -651,10 +651,11 @@ where
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
+                        // For the first PBH transaction in the block, apply FIXED_GAS cost to call the nullifier contract
                         if spent_nullifier_hashes.len() == payloads.len() {
                             block_gas_limit -= FIXED_GAS
                         }
-
+                        // Add cost of SSTORE for storing each PBH nullifier in the transaction
                         block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                     }
                     res
@@ -685,7 +686,6 @@ where
                     }
                 }
             };
-
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
