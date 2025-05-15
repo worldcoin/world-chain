@@ -62,7 +62,7 @@ def run(plan, args={}):
     tx_proxy_http_url = tx_proxy.launch(
         plan,
         service_name="tx-proxy",
-        image="ghcr.io/worldcoin/tx-proxy:latest",
+        image="ghcr.io/worldcoin/tx-proxy:sha-7b4770d",
         builder_rpc_0=builder_rpc_url,
         builder_rpc_1=reth_rpc_url_0,  # need to be separate client to prevent validation errors
         builder_rpc_2=reth_rpc_url_1,
