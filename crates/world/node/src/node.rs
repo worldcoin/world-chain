@@ -64,7 +64,7 @@ impl WorldChainNode {
         self
     }
 
-    /// Returns the components for the given [`RollupArgs`].
+    /// Returns the components for the given [`WorldChainArgs`].
     pub fn components<Node>(
         &self,
     ) -> ComponentsBuilder<
@@ -369,7 +369,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
         }
     }
 
-    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
+    /// A helper method to initialize WorldChainPayloadBuilder with the
     /// given EVM config.
     pub fn build<Node, S>(
         &self,

@@ -192,7 +192,7 @@ where
 
     S: BlobStore + Clone,
 {
-    /// Constructs an Optimism payload from the transactions sent via the
+    /// Constructs an Worldchain payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
     /// included in the payload will be those sent through the attributes.
