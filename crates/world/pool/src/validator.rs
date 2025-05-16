@@ -252,29 +252,25 @@ where
     where
         B: reth_primitives_traits::Block,
     {
-        if self.max_pbh_gas_limit.load(Ordering::Relaxed) == 0
-            && self.max_pbh_nonce.load(Ordering::Relaxed) == 0
-        {
-            // Try and fetch the max pbh nonce and gas limit from the state at the latest block
-            if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
-                if let Some(max_pbh_nonce) = state
-                    .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
-                    .ok()
-                    .flatten()
-                {
-                    let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
-                    self.max_pbh_nonce
-                        .store(max_pbh_nonce.to(), Ordering::Relaxed);
-                }
+        // Try and fetch the max pbh nonce and gas limit from the state at the latest block
+        if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
+            if let Some(max_pbh_nonce) = state
+                .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
+                .ok()
+                .flatten()
+            {
+                let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
+                self.max_pbh_nonce
+                    .store(max_pbh_nonce.to(), Ordering::Relaxed);
+            }
 
-                if let Some(max_pbh_gas_limit) = state
-                    .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
-                    .ok()
-                    .flatten()
-                {
-                    self.max_pbh_gas_limit
-                        .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
-                }
+            if let Some(max_pbh_gas_limit) = state
+                .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
+                .ok()
+                .flatten()
+            {
+                self.max_pbh_gas_limit
+                    .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
             }
         }
         self.inner.on_new_head_block(new_tip_block);
