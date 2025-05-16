@@ -280,8 +280,6 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use std::u16;
-
     use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
