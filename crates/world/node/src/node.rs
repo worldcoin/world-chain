@@ -369,7 +369,7 @@ impl<Txs> WorldChainPayloadBuilder<Txs> {
         }
     }
 
-    /// A helper method to initialize WorldChainPayloadBuilder with the
+    /// A helper method to initialize [`WorldChainPayloadBuilder`] with the
     /// given EVM config.
     pub fn build<Node, S>(
         &self,
