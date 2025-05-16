@@ -625,7 +625,7 @@ where
                     continue;
                 }
                 // Step 1: Collect all nullifier_hashes for this transaction
-                let mut same_tx_nullifiers = std::collections::HashSet::new();
+                let mut same_tx_nullifiers = HashSet::new();
                 let has_duplicate_nullifier_in_same_tx = payloads
                     .iter()
                     .any(|payload| !same_tx_nullifiers.insert(payload.nullifier_hash));
