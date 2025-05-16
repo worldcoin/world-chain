@@ -69,7 +69,7 @@ pub struct BundleArgs {
     #[clap(long, default_value_t = 4801)]
     pub chain_id: u64,
     /// The `PBHEntryPoint` address
-    #[clap(long, default_value = "0x6e37bAB9d23bd8Bdb42b773C58ae43C6De43A590")]
+    #[clap(long, default_value = "0x0000000000A21818Ee9F93BB4f2AAad305b5397C")]
     pub pbh_entry_point: String,
     /// The file path to write the generated bundle.
     #[clap(long, short, default_value = "pbh_bundle.json")]
