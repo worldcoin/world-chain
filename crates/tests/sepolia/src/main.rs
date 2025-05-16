@@ -8,7 +8,7 @@ use cli::Cli;
 
 mod cli;
 
-pub const PBH_SIGNATURE_AGGREGATOR: Address = address!("f07d3efadD82A1F0b4C5Cc3476806d9a170147Ba");
+pub const PBH_SIGNATURE_AGGREGATOR: Address = address!("8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489");
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
