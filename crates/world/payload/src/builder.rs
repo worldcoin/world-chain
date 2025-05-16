@@ -683,14 +683,17 @@ where
                     PayloadBuilderError::Other(e.into())
                 },
             )?;
-            let gas_used = builder.execute_transaction(tx.clone()).map_err(
-                |e: BlockExecutionError| {
-                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed");
-                    PayloadBuilderError::evm(e)
-                },
-            )?;
 
-            self.commit_changes(info, base_fee, gas_used, tx);
+            // Try to execute the builder tx. In the event that execution fails due to
+            // insufficient funds, continue with the built payload. This ensures that
+            // PBH transactions still receive priority inclusion, even if the PBH nullifier
+            // is not spent rather than sitting in the default execution client's mempool.
+            match builder.execute_transaction(tx.clone()) {
+                Ok(gas_used) => self.commit_changes(info, base_fee, gas_used, tx),
+                Err(e) => {
+                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
+                }
+            }
         }
 
         if !invalid_txs.is_empty() {
