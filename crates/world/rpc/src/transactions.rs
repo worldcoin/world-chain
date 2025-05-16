@@ -91,7 +91,7 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
-            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to sequencer");
             let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                         tracing::debug!(target: "rpc::eth", %err, hash=?*hash, "failed to forward raw transaction");
                     });
