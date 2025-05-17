@@ -624,7 +624,20 @@ where
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }
+                // Step 1: Collect all nullifier_hashes for this transaction
+                let mut same_tx_nullifiers = HashSet::new();
+                let has_duplicate_nullifier_in_same_tx = payloads
+                    .iter()
+                    .any(|payload| !same_tx_nullifiers.insert(payload.nullifier_hash));
 
+                // Step 2: If there are duplicates within the transaction, mark as invalid and don't add to spent_nullifier_hashes
+                if has_duplicate_nullifier_in_same_tx {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    invalid_txs.push(*pooled_tx.hash());
+                    continue;
+                }
+
+                // Step 3: Check for duplicates across all transactions.
                 if payloads
                     .iter()
                     .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
@@ -638,10 +651,11 @@ where
             let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
+                        // For the first PBH transaction in the block, apply FIXED_GAS cost to call the nullifier contract
                         if spent_nullifier_hashes.len() == payloads.len() {
                             block_gas_limit -= FIXED_GAS
                         }
-
+                        // Add cost of SSTORE for storing each PBH nullifier in the transaction
                         block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                     }
                     res
@@ -672,7 +686,6 @@ where
                     }
                 }
             };
-
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
