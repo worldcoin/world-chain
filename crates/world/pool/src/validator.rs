@@ -1,4 +1,5 @@
 //! World Chain transaction pool types
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -147,6 +148,8 @@ where
 
         // Validate all proofs associated with each UserOp
         let mut aggregated_payloads = vec![];
+        let mut seen_nullifier_hashes = HashSet::new();
+
         for aggregated_ops in calldata._0 {
             let buff = aggregated_ops.signature.as_ref();
             let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff) {
@@ -166,7 +169,7 @@ where
 
             let valid_roots = self.root_validator.roots();
 
-            match pbh_payloads
+            let payloads: Vec<PbhPayload> = match pbh_payloads
                 .into_par_iter()
                 .zip(aggregated_ops.userOps)
                 .map(|(payload, op)| {
@@ -179,16 +182,25 @@ where
                         &valid_roots,
                         self.max_pbh_nonce.load(Ordering::Relaxed),
                     )?;
-
                     Ok::<PbhPayload, WorldChainPoolTransactionError>(payload)
                 })
                 .collect::<Result<Vec<PbhPayload>, WorldChainPoolTransactionError>>()
             {
-                Ok(payloads) => {
-                    aggregated_payloads.extend(payloads);
-                }
+                Ok(payloads) => payloads,
                 Err(err) => return err.to_outcome(tx),
+            };
+
+            // Now check for duplicate nullifier_hashes
+            for payload in &payloads {
+                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
+                    return WorldChainPoolTransactionError::from(
+                        PBHValidationError::DuplicateNullifierHash,
+                    )
+                    .to_outcome(tx);
+                }
             }
+
+            aggregated_payloads.extend(payloads);
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -407,6 +419,40 @@ pub mod tests {
         pool.add_external_transaction(tx.clone().into())
             .await
             .expect("Failed to add transaction");
+    }
+
+    #[tokio::test]
+    async fn validate_pbh_bundle_duplicate_nullifier_hash() {
+        const BUNDLER_ACCOUNT: u32 = 9;
+        const USER_ACCOUNT: u32 = 0;
+
+        let pool = setup().await;
+
+        let (user_op, proof) = user_op()
+            .acc(USER_ACCOUNT)
+            .external_nullifier(ExternalNullifier::with_date_marker(
+                DateMarker::from(chrono::Utc::now()),
+                0,
+            ))
+            .call();
+
+        // Lets add two of the same userOp in the bundle so the nullifier hash is the same and we should expect an error
+        let bundle = pbh_bundle(
+            vec![user_op.clone(), user_op],
+            vec![proof.clone().into(), proof.into()],
+        );
+        let calldata = bundle.abi_encode();
+
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
+
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
+
+        let res = pool
+            .add_external_transaction(tx.clone().into())
+            .await
+            .expect_err("Failed to add transaction");
+
+        assert!(res.to_string().contains("Duplicate nullifier hash"),);
     }
 
     #[tokio::test]
