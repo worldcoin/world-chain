@@ -356,7 +356,7 @@ pub async fn stake_aa(args: StakeAAArgs) -> eyre::Result<()> {
 
     let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
         to: DEVNET_ENTRYPOINT,
-        value: alloy_primitives::uint!(100000000000000000_U256),
+        value: args.stake_amount,
         data: inner_calldata,
         operation: 0,
     })

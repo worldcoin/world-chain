@@ -1,4 +1,4 @@
-use alloy_primitives::Address;
+use alloy_primitives::{uint, Address, U256};
 use clap::{Parser, ValueEnum};
 use reth_rpc_layer::JwtSecret;
 
@@ -173,6 +173,9 @@ pub struct StakeAAArgs {
     /// The Chain ID of the network.
     #[clap(long, default_value_t = 4801)]
     pub chain_id: u64,
+    /// The value to stake in the EntryPoint.
+    #[clap(long, default_value_t = uint!(100000000000000000_U256))]
+    pub stake_amount: U256,
     /// The private key signer.
     #[clap(long, required = true)]
     pub pbh_private_key: String,
