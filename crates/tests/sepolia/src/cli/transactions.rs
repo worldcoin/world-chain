@@ -9,7 +9,7 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{sol, SolCall};
 use alloy_sol_types::{SolInterface, SolValue};
 use alloy_transport_http::Http;
-use eyre::eyre::Context;
+use eyre::eyre::{bail, Context};
 use futures::{stream, StreamExt, TryStreamExt};
 use rand::Rng;
 use reqwest::header::{HeaderMap, AUTHORIZATION};
@@ -19,9 +19,12 @@ use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
+use std::usize;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use world_chain_builder_pbh::{
     date_marker::DateMarker,
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
@@ -389,8 +392,111 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
     .abi_encode()
     .into();
 
+    let pbh_nonce = args
+        .pbh_nonce
+        .map(|n| n as u16)
+        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
+    let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
+    let date = chrono::Utc::now().naive_utc().date();
+    let date_marker = DateMarker::from(date);
+
+    let semaphore = Arc::new(Semaphore::new(args.concurrency));
+    let total = args.pbh_batch_size as usize * identities.len();
+
+    for i in 0..total {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("Failed to acquire semaphore");
+
+        let identity = &identities[i % identities.len()];
+        let proof = &proofs[i % proofs.len()];
+        let round = i / identities.len();
+
+        info!(
+            "Sending User Operation {} in of {} in round {}",
+            i,
+            total - 1,
+            round
+        );
+
+        let external_nullifier =
+            ExternalNullifier::with_date_marker(date_marker, pbh_nonce + round as u16);
+
+        let provider = provider.clone();
+        let signer = signer.clone();
+        let calldata = calldata.clone();
+        let proof = proof.clone();
+        let identity = identity.clone();
+
+        let _ = tokio::spawn(async move {
+            send_uo_task(
+                i,
+                provider,
+                permit,
+                signer,
+                args.safe,
+                args.module,
+                external_nullifier,
+                proof,
+                identity,
+                calldata,
+            )
+            .await;
+        });
+    }
+
+    // Wait for all the User Operations to be mined
+    let _ = semaphore
+        .acquire_many(args.concurrency as u32)
+        .await
+        .expect("Failed to acquire semaphore");
+
+    Ok(())
+}
+
+async fn send_uo_task(
+    index: usize,
+    provider: impl Provider,
+    _permit: OwnedSemaphorePermit,
+
+    signer: PrivateKeySigner,
+    safe: Address,
+    module: Address,
+    external_nullifier: ExternalNullifier,
+    proof: InclusionProof,
+    identity: Identity,
+    calldata: Bytes,
+) {
+    if let Err(e) = send_uo_task_inner(
+        provider,
+        signer,
+        safe,
+        module,
+        external_nullifier,
+        proof,
+        identity,
+        calldata,
+    )
+    .await
+    {
+        error!("UO {index} failed: {e}");
+    }
+}
+
+async fn send_uo_task_inner(
+    provider: impl Provider,
+    signer: PrivateKeySigner,
+    safe: Address,
+    module: Address,
+    external_nullifier: ExternalNullifier,
+    proof: InclusionProof,
+    identity: Identity,
+    calldata: Bytes,
+) -> eyre::Result<()> {
     let puo = partial_user_op_sepolia()
-        .safe(args.safe)
+        .safe(safe)
         .calldata(calldata.clone())
         .call();
 
@@ -401,7 +507,7 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
         )
         .await?;
 
-    info!("Estimated gas: {resp:?}");
+    debug!("Estimated gas: {resp:?}");
 
     let base_fee = provider
         .get_fee_history(1, BlockNumberOrTag::Latest, &[])
@@ -421,53 +527,54 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
         resp.call_gas_limit.into(),
     );
 
-    let pbh_nonce = args
-        .pbh_nonce
-        .map(|n| n as u16)
-        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
-    let pbh_batch_size = args.pbh_batch_size as u16;
+    let uo = user_op_sepolia()
+        .signer(signer)
+        .safe(safe)
+        .module(module)
+        .external_nullifier(external_nullifier)
+        .inclusion_proof(proof)
+        .identity(identity)
+        .pre_verification_gas(U256::from(
+            resp.pre_verification_gas * U128::from(5) / U128::from(4),
+        ))
+        .account_gas_limits(account_gas_limits.into())
+        .gas_fees(fees.into())
+        .calldata(calldata)
+        .call();
 
-    let mut uos = vec![];
-    for (identity, proof) in identities.iter().zip(proofs.iter()) {
-        let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
-        let date = chrono::Utc::now().naive_utc().date();
-        let date_marker = DateMarker::from(date);
+    let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
 
-        for i in pbh_nonce..pbh_batch_size + pbh_nonce {
-            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i);
+    let hash: B256 = provider
+        .raw_request(
+            Cow::Borrowed("eth_sendUserOperation"),
+            (rpc_uo, DEVNET_ENTRYPOINT),
+        )
+        .await
+        .context("Failed to send User Operation")?;
 
-            let uo = user_op_sepolia()
-                .signer(signer.clone())
-                .safe(args.safe)
-                .module(args.module)
-                .external_nullifier(external_nullifier)
-                .inclusion_proof(proof.clone())
-                .identity(identity.clone())
-                .pre_verification_gas(U256::from(
-                    resp.pre_verification_gas * U128::from(5) / U128::from(4),
-                ))
-                .account_gas_limits(account_gas_limits.into())
-                .gas_fees(fees.into())
-                .calldata(calldata.clone())
-                .call();
+    let max_retries = 1000;
+    let mut i = 0;
+    while i < max_retries {
+        let resp: Option<RpcUserOperationByHash> = provider
+            .raw_request(Cow::Borrowed("eth_getUserOperationByHash"), (hash,))
+            .await
+            .context("Failed to get User Operation by hash")?;
 
-            uos.push(uo);
-        }
+        let Some(resp) = resp else {
+            bail!("UO {hash:?} dropped");
+        };
+
+        let Some(transaction_hash) = resp.transaction_hash else {
+            i += 1;
+            sleep(Duration::from_millis(100)).await;
+            continue;
+        };
+
+        debug!("UO {hash:?} included in transaction {transaction_hash:?}");
+        return Ok(());
     }
 
-    for uo in uos {
-        let uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
-        let hash: B256 = provider
-            .raw_request(
-                Cow::Borrowed("eth_sendUserOperation"),
-                (uo, DEVNET_ENTRYPOINT),
-            )
-            .await?;
-
-        info!(?hash, "Sending User Operation");
-    }
-
-    Ok(())
+    bail!("UO {hash:?} not included in any transaction after {max_retries} retries");
 }
 
 fn concat_u128_be(a: U128, b: U128) -> [u8; 32] {
