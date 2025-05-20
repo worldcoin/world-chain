@@ -1,10 +1,10 @@
 use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
+use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
-use alloy_primitives::{B256, U128, U64, U8};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;
@@ -223,6 +223,23 @@ pub fn user_op(
     user_op.signature = Bytes::from(uo_sig);
 
     (user_op, payload)
+}
+
+#[builder]
+pub fn partial_user_op_sepolia(
+    safe: Address,
+    #[builder(into, default = U256::ZERO)] nonce: U256,
+    calldata: Bytes,
+) -> RpcPartialUserOperation {
+    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    RpcPartialUserOperation {
+        sender: safe,
+        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        call_data: calldata,
+        signature: bytes!(""),
+        verification_gas_limit: Some(U128::from(75_000)),
+        aggregator: Some(address!("8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489")),
+    }
 }
 
 #[builder]
@@ -591,6 +608,29 @@ pub struct RpcUserOperationV0_7 {
     eip7702_auth: Option<RpcEip7702Auth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     aggregator: Option<Address>,
+}
+
+/// User operation definition for gas estimation
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcPartialUserOperation {
+    pub sender: Address,
+    pub nonce: U256,
+    pub call_data: Bytes,
+    pub signature: Bytes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_gas_limit: Option<U128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregator: Option<Address>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcGasEstimate {
+    pub pre_verification_gas: U128,
+    pub call_gas_limit: U128,
+    pub verification_gas_limit: U128,
+    pub paymaster_verification_gas_limit: Option<U128>,
 }
 
 #[cfg(test)]

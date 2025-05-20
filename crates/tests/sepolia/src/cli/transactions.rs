@@ -1,15 +1,17 @@
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U128, U256};
 use alloy_primitives::{Bytes, TxKind};
 use alloy_provider::network::{EthereumWallet, TransactionBuilder};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
+use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::SolCall;
-use alloy_sol_types::SolValue;
+use alloy_sol_types::{sol, SolCall};
+use alloy_sol_types::{SolInterface, SolValue};
 use alloy_transport_http::Http;
+use eyre::eyre::Context;
 use futures::{stream, StreamExt, TryStreamExt};
+use rand::Rng;
 use reqwest::header::{HeaderMap, AUTHORIZATION};
 use reqwest::Client;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -28,14 +30,15 @@ use world_chain_builder_pbh::{
 use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
 use world_chain_builder_test_utils::utils::{
-    user_op_sepolia, InclusionProof, RpcUserOperationByHash, RpcUserOperationV0_7,
+    partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
+    RpcUserOperationByHash, RpcUserOperationV0_7,
 };
 use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
 
 use crate::PBH_SIGNATURE_AGGREGATOR;
 
-use super::SendArgs;
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
+use super::{SendAAArgs, SendArgs};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
@@ -328,6 +331,153 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+sol! {
+    contract EntryPoint {
+        function addStake(uint32 unstakeDelaySec) public payable;
+    }
+
+    contract Safe {
+        function executeUserOp(address to, uint256 value, bytes calldata data, uint8 operation) external;
+    }
+}
+
+pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
+    let identities: Vec<SerializableIdentity> =
+        serde_json::from_reader(std::fs::File::open(&args.identities_path)?)?;
+    let identities = identities
+        .into_iter()
+        .map(|identity| Identity {
+            nullifier: identity.nullifier,
+            trapdoor: identity.trapdoor,
+        })
+        .collect::<Vec<_>>();
+
+    let proofs = futures::future::try_join_all(
+        identities
+            .iter()
+            .map(|identity| async { fetch_inclusion_proof(&args.sequencer_url, identity).await }),
+    )
+    .await?;
+
+    let provider = ProviderBuilder::new().connect(&args.rpc_url).await?;
+
+    // calldata for addStake
+    // let inner_calldata: Bytes = EntryPoint::EntryPointCalls::addStake(EntryPoint::addStakeCall {
+    //     unstakeDelaySec: 86400,
+    // })
+    // .abi_encode()
+    // .into();
+
+    // let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+    //     to: DEVNET_ENTRYPOINT,
+    //     value: alloy_primitives::uint!(100000000000000000_U256),
+    //     data: inner_calldata,
+    //     operation: 0,
+    // })
+    // .abi_encode()
+    // .into();
+
+    // empty calldata
+    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+        to: Address::ZERO,
+        value: U256::ZERO,
+        data: Bytes::new(),
+        operation: 0,
+    })
+    .abi_encode()
+    .into();
+
+    let puo = partial_user_op_sepolia()
+        .safe(args.safe)
+        .calldata(calldata.clone())
+        .call();
+
+    let resp: RpcGasEstimate = provider
+        .raw_request(
+            Cow::Borrowed("eth_estimateUserOperationGas"),
+            (puo, DEVNET_ENTRYPOINT),
+        )
+        .await?;
+
+    info!("Estimated gas: {resp:?}");
+
+    // let base_fee = provider
+    //     .get_fee_history(1, BlockNumberOrTag::Latest, &[])
+    //     .await
+    //     .context("Failed to get fee history")?
+    //     .next_block_base_fee()
+    //     .expect("Failed to get base fee");
+
+    let base_fee = 250_u128;
+
+    let priority_fee: U128 = provider
+        .raw_request(Cow::Borrowed("rundler_maxPriorityFeePerGas"), ())
+        .await?;
+    let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
+    let fees = concat_u128_be(priority_fee, max_fee);
+
+    let account_gas_limits = concat_u128_be(
+        resp.verification_gas_limit.into(),
+        resp.call_gas_limit.into(),
+    );
+
+    let mut uos = vec![];
+    for (identity, proof) in identities.iter().zip(proofs.iter()) {
+        let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
+        let date = chrono::Utc::now().naive_utc().date();
+        let date_marker = DateMarker::from(date);
+        let pbh_nonce = rand::thread_rng().gen_range(0..u16::MAX) as u16;
+        let pbh_batch_size = args.pbh_batch_size as u16;
+
+        for i in pbh_nonce..pbh_batch_size + pbh_nonce {
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i);
+
+            let uo = user_op_sepolia()
+                .signer(signer.clone())
+                .safe(args.safe)
+                .module(args.module)
+                .external_nullifier(external_nullifier)
+                .inclusion_proof(proof.clone())
+                .identity(identity.clone())
+                .pre_verification_gas(U256::from(
+                    resp.pre_verification_gas * U128::from(5) / U128::from(4),
+                ))
+                .account_gas_limits(account_gas_limits.into())
+                .gas_fees(fees.into())
+                .calldata(calldata.clone())
+                .call();
+
+            uos.push(uo);
+        }
+    }
+
+    for uo in uos {
+        let uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
+        let hash: B256 = provider
+            .raw_request(
+                Cow::Borrowed("eth_sendUserOperation"),
+                (uo, DEVNET_ENTRYPOINT),
+            )
+            .await?;
+
+        info!(?hash, "Sending User Operation");
+    }
+
+    Ok(())
+}
+
+fn concat_u128_be(a: U128, b: U128) -> [u8; 32] {
+    let a: [u8; 16] = a.to_be_bytes();
+    let b: [u8; 16] = b.to_be_bytes();
+    std::array::from_fn(|i| {
+        if let Some(i) = i.checked_sub(a.len()) {
+            b[i]
+        } else {
+            a[i]
+        }
+    })
 }
 
 async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<InclusionProof> {

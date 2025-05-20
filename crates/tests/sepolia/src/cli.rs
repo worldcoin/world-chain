@@ -28,6 +28,9 @@ pub enum Commands {
     /// Command to send a batch of test transactions, or UserOperations
     /// to the WC Sepolia Testnet.
     Send(SendArgs),
+    /// Command to send a batch of test transactions, or UserOperations
+    /// to the WC Sepolia Testnet.
+    SendAA(SendAAArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -117,6 +120,41 @@ pub struct SendArgs {
     /// JWT Secret authorization in the headers.
     #[clap(long, short)]
     pub auth: Option<JwtSecret>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct SendAAArgs {
+    /// The RPC URL
+    #[clap(long, required = true)]
+    pub rpc_url: String,
+    /// The file path to read the identities from.
+    #[clap(long, default_value = "test_identities.json")]
+    pub identities_path: String,
+    /// The URL to the target signup sequencer.
+    #[clap(
+        long,
+        short,
+        default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
+    )]
+    pub sequencer_url: String,
+    /// The Chain ID of the network.
+    #[clap(long, default_value_t = 4801)]
+    pub chain_id: u64,
+    /// The `PBHEntryPoint` address
+    #[clap(long, default_value = "0x0000000000A21818Ee9F93BB4f2AAad305b5397C")]
+    pub pbh_entry_point: String,
+    /// The number of PBH transactions to generate per identity.
+    #[clap(long, default_value_t = 1)]
+    pub pbh_batch_size: u8,
+    /// The private key signer.
+    #[clap(long, required = true)]
+    pub pbh_private_key: String,
+    // Address of the Safe to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub safe: Address,
+    /// Address of the Module to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub module: Address,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
