@@ -30,12 +30,13 @@ contract DeploySafe is Script {
         );
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        uint256 stakeValue = vm.envUint("STAKE_VALUE");
         vm.startBroadcast(privateKey);
-        deploySafeAndModule(privateKey);
+        deploySafeAndModule(privateKey, stakeValue);
         vm.stopBroadcast();
     }
 
-    function deploySafeAndModule(uint256 privateKey) public {
+    function deploySafeAndModule(uint256 privateKey, uint256 stakeValue) public {
         // Deploy SafeModuleSetup
         moduleSetup = new SafeModuleSetup();
         console.log("SafeModuleSetup Deployed at: ", address(moduleSetup));
@@ -97,6 +98,7 @@ contract DeploySafe is Script {
         Safe safe = Safe(payable(address(proxy)));
         require(safe.isOwner(owner), "Owner not added to Safe");
         console.log("Safe Proxy Deployed at: ", address(safe));
-        IEntryPoint(ENTRY_POINT).depositTo{value: 0.01 ether}(address(safe));
+
+        IEntryPoint(ENTRY_POINT).addStake{value: stakeValue}(86400);
     }
 }
