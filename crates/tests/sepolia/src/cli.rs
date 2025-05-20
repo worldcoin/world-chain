@@ -31,6 +31,8 @@ pub enum Commands {
     /// Command to send a batch of test transactions, or UserOperations
     /// to the WC Sepolia Testnet.
     SendAA(SendAAArgs),
+    /// Command to stake a safe in the Entrypoint.
+    StakeAA(StakeAAArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -161,6 +163,25 @@ pub struct SendAAArgs {
     /// The number of concurrent requests to send.
     #[clap(long, default_value_t = 100)]
     pub concurrency: usize,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct StakeAAArgs {
+    /// The RPC URL
+    #[clap(long, required = true)]
+    pub rpc_url: String,
+    /// The Chain ID of the network.
+    #[clap(long, default_value_t = 4801)]
+    pub chain_id: u64,
+    /// The private key signer.
+    #[clap(long, required = true)]
+    pub pbh_private_key: String,
+    // Address of the Safe to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub safe: Address,
+    /// Address of the Module to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub module: Address,
 }
 
 #[derive(Debug, Clone, ValueEnum)]

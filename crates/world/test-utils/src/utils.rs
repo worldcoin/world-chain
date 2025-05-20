@@ -247,8 +247,8 @@ pub fn user_op_sepolia(
     signer: PrivateKeySigner,
     safe: Address,
     module: Address,
-    identity: Identity,
-    inclusion_proof: InclusionProof,
+    identity: Option<Identity>,
+    inclusion_proof: Option<InclusionProof>,
     #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
     #[builder(into, default = U256::ZERO)] nonce: U256,
     #[builder(default = Bytes::default())] init_code: Bytes,
@@ -263,9 +263,15 @@ pub fn user_op_sepolia(
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> IEntryPoint::PackedUserOperation {
     let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    let nonce_key = if let (Some(_), Some(_)) = (&identity, &inclusion_proof) {
+        U256::from(PBH_NONCE_KEY)
+    } else {
+        U256::ZERO
+    };
+
     let mut user_op = PackedUserOperation {
         sender: safe,
-        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        nonce: ((rand_key | nonce_key) << 64) | nonce,
         initCode: init_code,
         callData: calldata,
         accountGasLimits: account_gas_limits,
@@ -284,24 +290,31 @@ pub fn user_op_sepolia(
 
     let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
 
-    let proof = semaphore_rs::protocol::generate_proof(
-        &identity,
-        &inclusion_proof.proof,
-        encoded_external_nullifier.0,
-        signal,
-    )
-    .expect("Failed to generate semaphore proof");
-    let nullifier_hash =
-        semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
+    let pbh_payload = if let (Some(identity), Some(inclusion_proof)) = (identity, inclusion_proof) {
+        let proof = semaphore_rs::protocol::generate_proof(
+            &identity,
+            &inclusion_proof.proof,
+            encoded_external_nullifier.0,
+            signal,
+        )
+        .expect("Failed to generate semaphore proof");
+        let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(
+            &identity,
+            encoded_external_nullifier.0,
+        );
 
-    let proof = Proof(proof);
+        let proof = Proof(proof);
 
-    let payload = PbhPayload {
-        external_nullifier,
-        nullifier_hash,
-        root: inclusion_proof.root,
-        proof,
+        Some(PbhPayload {
+            external_nullifier,
+            nullifier_hash,
+            root: inclusion_proof.root,
+            proof,
+        })
+    } else {
+        None
     };
+
     let mut uo_sig = Vec::new();
 
     // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
@@ -321,7 +334,9 @@ pub fn user_op_sepolia(
             .abi_encode_packed(),
     );
 
-    uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+    if let Some(payload) = pbh_payload {
+        uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+    }
 
     user_op.signature = Bytes::from(uo_sig);
 
@@ -485,6 +500,38 @@ impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
             aggregator: Some(aggregator),
+            eip7702_auth: None,
+        }
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<RpcUserOperationV0_7> for PackedUserOperation {
+    fn into(self) -> RpcUserOperationV0_7 {
+        RpcUserOperationV0_7 {
+            sender: self.sender,
+            nonce: self.nonce,
+            factory: None,
+            call_data: self.callData,
+            factory_data: None,
+            verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                >> U256::from(128))
+            .to(),
+            call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
+            .to(),
+            pre_verification_gas: self.preVerificationGas,
+            max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
+                .to(),
+            max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
+            .to(),
+            signature: self.signature,
+            paymaster: None,
+            paymaster_data: None,
+            paymaster_post_op_gas_limit: None,
+            paymaster_verification_gas_limit: None,
+            aggregator: None,
             eip7702_auth: None,
         }
     }
