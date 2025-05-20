@@ -158,6 +158,9 @@ pub struct SendAAArgs {
     /// Address of the Module to execute UserOperation's on.
     #[clap(long, required = true)]
     pub module: Address,
+    /// The number of concurrent requests to send.
+    #[clap(long, default_value_t = 100)]
+    pub concurrency: usize,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
