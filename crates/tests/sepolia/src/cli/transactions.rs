@@ -403,14 +403,12 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
 
     info!("Estimated gas: {resp:?}");
 
-    // let base_fee = provider
-    //     .get_fee_history(1, BlockNumberOrTag::Latest, &[])
-    //     .await
-    //     .context("Failed to get fee history")?
-    //     .next_block_base_fee()
-    //     .expect("Failed to get base fee");
-
-    let base_fee = 250_u128;
+    let base_fee = provider
+        .get_fee_history(1, BlockNumberOrTag::Latest, &[])
+        .await
+        .context("Failed to get fee history")?
+        .next_block_base_fee()
+        .expect("Failed to get base fee");
 
     let priority_fee: U128 = provider
         .raw_request(Cow::Borrowed("rundler_maxPriorityFeePerGas"), ())
@@ -423,13 +421,17 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
         resp.call_gas_limit.into(),
     );
 
+    let pbh_nonce = args
+        .pbh_nonce
+        .map(|n| n as u16)
+        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
+    let pbh_batch_size = args.pbh_batch_size as u16;
+
     let mut uos = vec![];
     for (identity, proof) in identities.iter().zip(proofs.iter()) {
         let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
         let date = chrono::Utc::now().naive_utc().date();
         let date_marker = DateMarker::from(date);
-        let pbh_nonce = rand::thread_rng().gen_range(0..u16::MAX) as u16;
-        let pbh_batch_size = args.pbh_batch_size as u16;
 
         for i in pbh_nonce..pbh_batch_size + pbh_nonce {
             let external_nullifier = ExternalNullifier::with_date_marker(date_marker, i);

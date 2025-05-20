@@ -149,6 +149,9 @@ pub struct SendAAArgs {
     /// The private key signer.
     #[clap(long, required = true)]
     pub pbh_private_key: String,
+    /// The nonce for the wallet.
+    #[clap(long)]
+    pub pbh_nonce: Option<u64>,
     // Address of the Safe to execute UserOperation's on.
     #[clap(long, required = true)]
     pub safe: Address,
