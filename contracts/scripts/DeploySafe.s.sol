@@ -97,6 +97,9 @@ contract DeploySafe is Script {
         Safe safe = Safe(payable(address(proxy)));
         require(safe.isOwner(owner), "Owner not added to Safe");
         console.log("Safe Proxy Deployed at: ", address(safe));
-        IEntryPoint(ENTRY_POINT).depositTo{value: 0.01 ether}(address(safe));
+
+        IEntryPoint(ENTRY_POINT).depositTo{value: 1 ether}(
+            address(safe)
+        );
     }
 }

@@ -1,5 +1,5 @@
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Address, B256, U128, U256};
+use alloy_primitives::{Address, FixedBytes, B256, U128, U256};
 use alloy_primitives::{Bytes, TxKind};
 use alloy_provider::network::{EthereumWallet, TransactionBuilder};
 use alloy_provider::{Provider, ProviderBuilder};
@@ -34,14 +34,14 @@ use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
 use world_chain_builder_test_utils::utils::{
     partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
-    RpcUserOperationByHash, RpcUserOperationV0_7,
+    RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
 };
 use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
 
 use crate::PBH_SIGNATURE_AGGREGATOR;
 
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
-use super::{SendAAArgs, SendArgs};
+use super::{SendAAArgs, SendArgs, StakeAAArgs};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
@@ -346,6 +346,82 @@ sol! {
     }
 }
 
+pub async fn stake_aa(args: StakeAAArgs) -> eyre::Result<()> {
+    // calldata for addStake
+    let inner_calldata: Bytes = EntryPoint::EntryPointCalls::addStake(EntryPoint::addStakeCall {
+        unstakeDelaySec: 86400,
+    })
+    .abi_encode()
+    .into();
+
+    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+        to: DEVNET_ENTRYPOINT,
+        value: args.stake_amount,
+        data: inner_calldata,
+        operation: 0,
+    })
+    .abi_encode()
+    .into();
+
+    let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
+
+    let puo = partial_user_op_sepolia()
+        .safe(args.safe)
+        .calldata(calldata.clone())
+        .call();
+
+    let provider = Arc::new(ProviderBuilder::new().connect(&args.rpc_url).await?);
+
+    let (account_gas_limits, fees, pre_verification_gas) =
+        estimate_uo_gas(provider.clone(), &puo).await?;
+
+    let uo = user_op_sepolia()
+        .signer(signer)
+        .safe(args.safe)
+        .module(args.module)
+        .pre_verification_gas(U256::from(
+            pre_verification_gas * U128::from(5) / U128::from(4),
+        ))
+        .account_gas_limits(account_gas_limits)
+        .gas_fees(fees)
+        .calldata(calldata)
+        .call();
+
+    let rpc_uo: RpcUserOperationV0_7 = uo.into();
+
+    let hash: B256 = provider
+        .raw_request(
+            Cow::Borrowed("eth_sendUserOperation"),
+            (rpc_uo, DEVNET_ENTRYPOINT),
+        )
+        .await
+        .context("Failed to send User Operation")?;
+
+    let max_retries = 1000;
+    let mut i = 0;
+    while i < max_retries {
+        let resp: Option<RpcUserOperationByHash> = provider
+            .raw_request(Cow::Borrowed("eth_getUserOperationByHash"), (hash,))
+            .await
+            .context("Failed to get User Operation by hash")?;
+
+        let Some(resp) = resp else {
+            bail!("UO {hash:?} dropped");
+        };
+
+        let Some(transaction_hash) = resp.transaction_hash else {
+            i += 1;
+            sleep(Duration::from_millis(100)).await;
+            continue;
+        };
+
+        debug!("UO {hash:?} included in transaction {transaction_hash:?}");
+        return Ok(());
+    }
+
+    bail!("UO {hash:?} not included in any transaction after {max_retries} retries");
+}
+
 pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
     let identities: Vec<SerializableIdentity> =
         serde_json::from_reader(std::fs::File::open(&args.identities_path)?)?;
@@ -364,23 +440,7 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
     )
     .await?;
 
-    let provider = ProviderBuilder::new().connect(&args.rpc_url).await?;
-
-    // calldata for addStake
-    // let inner_calldata: Bytes = EntryPoint::EntryPointCalls::addStake(EntryPoint::addStakeCall {
-    //     unstakeDelaySec: 86400,
-    // })
-    // .abi_encode()
-    // .into();
-
-    // let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-    //     to: DEVNET_ENTRYPOINT,
-    //     value: alloy_primitives::uint!(100000000000000000_U256),
-    //     data: inner_calldata,
-    //     operation: 0,
-    // })
-    // .abi_encode()
-    // .into();
+    let provider = Arc::new(ProviderBuilder::new().connect(&args.rpc_url).await?);
 
     // empty calldata
     let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
@@ -458,7 +518,7 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
 
 async fn send_uo_task(
     index: usize,
-    provider: impl Provider,
+    provider: Arc<impl Provider>,
     _permit: OwnedSemaphorePermit,
 
     signer: PrivateKeySigner,
@@ -486,7 +546,7 @@ async fn send_uo_task(
 }
 
 async fn send_uo_task_inner(
-    provider: impl Provider,
+    provider: Arc<impl Provider>,
     signer: PrivateKeySigner,
     safe: Address,
     module: Address,
@@ -500,32 +560,8 @@ async fn send_uo_task_inner(
         .calldata(calldata.clone())
         .call();
 
-    let resp: RpcGasEstimate = provider
-        .raw_request(
-            Cow::Borrowed("eth_estimateUserOperationGas"),
-            (puo, DEVNET_ENTRYPOINT),
-        )
-        .await?;
-
-    debug!("Estimated gas: {resp:?}");
-
-    let base_fee = provider
-        .get_fee_history(1, BlockNumberOrTag::Latest, &[])
-        .await
-        .context("Failed to get fee history")?
-        .next_block_base_fee()
-        .expect("Failed to get base fee");
-
-    let priority_fee: U128 = provider
-        .raw_request(Cow::Borrowed("rundler_maxPriorityFeePerGas"), ())
-        .await?;
-    let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
-    let fees = concat_u128_be(priority_fee, max_fee);
-
-    let account_gas_limits = concat_u128_be(
-        resp.verification_gas_limit.into(),
-        resp.call_gas_limit.into(),
-    );
+    let (account_gas_limits, fees, pre_verification_gas) =
+        estimate_uo_gas(provider.clone(), &puo).await?;
 
     let uo = user_op_sepolia()
         .signer(signer)
@@ -535,10 +571,10 @@ async fn send_uo_task_inner(
         .inclusion_proof(proof)
         .identity(identity)
         .pre_verification_gas(U256::from(
-            resp.pre_verification_gas * U128::from(5) / U128::from(4),
+            pre_verification_gas * U128::from(5) / U128::from(4),
         ))
-        .account_gas_limits(account_gas_limits.into())
-        .gas_fees(fees.into())
+        .account_gas_limits(account_gas_limits)
+        .gas_fees(fees)
         .calldata(calldata)
         .call();
 
@@ -575,6 +611,44 @@ async fn send_uo_task_inner(
     }
 
     bail!("UO {hash:?} not included in any transaction after {max_retries} retries");
+}
+
+async fn estimate_uo_gas(
+    provider: impl Provider,
+    puo: &RpcPartialUserOperation,
+) -> eyre::Result<(FixedBytes<32>, FixedBytes<32>, U128)> {
+    let resp: RpcGasEstimate = provider
+        .raw_request(
+            Cow::Borrowed("eth_estimateUserOperationGas"),
+            (puo, DEVNET_ENTRYPOINT),
+        )
+        .await?;
+
+    debug!("Estimated gas: {resp:?}");
+
+    let base_fee = provider
+        .get_fee_history(1, BlockNumberOrTag::Latest, &[])
+        .await
+        .context("Failed to get fee history")?
+        .next_block_base_fee()
+        .expect("Failed to get base fee");
+
+    let priority_fee: U128 = provider
+        .raw_request(Cow::Borrowed("rundler_maxPriorityFeePerGas"), ())
+        .await?;
+    let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
+    let fees = concat_u128_be(priority_fee, max_fee);
+
+    let account_gas_limits = concat_u128_be(
+        resp.verification_gas_limit.into(),
+        resp.call_gas_limit.into(),
+    );
+
+    Ok((
+        account_gas_limits.into(),
+        fees.into(),
+        resp.pre_verification_gas,
+    ))
 }
 
 fn concat_u128_be(a: U128, b: U128) -> [u8; 32] {
