@@ -11,7 +11,7 @@ deployer_addr=$(cast wallet address "$DEPLOYER_PRIVATE_KEY")
 
 mnemonic="test test test test test test test test test test test junk"
 roles=("l2ProxyAdmin" "l1ProxyAdmin" "baseFeeVaultRecipient" "l1FeeVaultRecipient" "sequencerFeeVaultRecipient" "systemConfigOwner")
-funded_roles=("proposer" "batcher" "sequencer" "challenger")
+funded_roles=("proposer" "batcher" "sequencer" "challenger" "bundler0" "bundler1")
 
 IFS=',';read -r -a chain_ids <<< "$1"
 

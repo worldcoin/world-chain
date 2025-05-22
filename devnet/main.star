@@ -75,7 +75,7 @@ def run(plan, args={}):
     rundler.launch(
         plan,
         service_name="rundler",
-        image="alchemyplatform/rundler:v0.6.0-alpha.3",
+        image="alchemyplatform/rundler:v0.8.2",
         rpc_http_url=builder_rpc_url,
         builder_config_file=rundler_builder_config_file,
         mempool_config_file=rundler_mempool_config_file,

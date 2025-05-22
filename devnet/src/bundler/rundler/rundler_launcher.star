@@ -82,10 +82,9 @@ def get_rundler_config(
     cmd = [
         "node",
         "--chain_spec={0}".format(RUNDLER_CHAIN_SPEC_MOUNT_PATH),
-        "--builder.private_keys=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "--signer.private_keys=0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a,0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
         "--node_http={0}".format(rpc_http_url),
         "--rpc.port={0}".format(RUNDLER_HTTP_PORT_ID),
-        "--builder.dropped_status_unsupported",
         "--unsafe",
         "--da_gas_tracking_enabled",
         "--builders_config_path={0}".format(RUNDLER_BUILDER_CONFIG_MOUNT_PATH),
