@@ -6,7 +6,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
-use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
+use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{sol, SolCall};
 use alloy_sol_types::{SolInterface, SolValue};
 use alloy_transport_http::Http;
@@ -36,8 +36,8 @@ use world_chain_builder_test_utils::bindings::IEntryPoint::{
 };
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
 use world_chain_builder_test_utils::utils::{
-    get_operation_hash, hash_user_op, partial_user_op_sepolia, user_op_sepolia, InclusionProof,
-    RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+    get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
+    RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
 };
 use world_chain_builder_test_utils::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
 
@@ -542,7 +542,6 @@ async fn send_uo_task(
         proof,
         identity,
         calldata,
-        false,
     )
     .await
     {
@@ -559,7 +558,6 @@ async fn send_uo_task_inner(
     proof: InclusionProof,
     identity: Identity,
     calldata: Bytes,
-    invalid_proof: bool,
 ) -> eyre::Result<()> {
     let puo: RpcPartialUserOperation = partial_user_op_sepolia()
         .safe(safe)
@@ -582,7 +580,6 @@ async fn send_uo_task_inner(
         .account_gas_limits(account_gas_limits)
         .gas_fees(fees)
         .calldata(calldata)
-        .invalid_proof(invalid_proof)
         .call();
 
     let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
@@ -689,17 +686,6 @@ async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<I
 }
 
 pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()> {
-    let identities: Vec<SerializableIdentity> =
-        serde_json::from_reader(std::fs::File::open(&args.identities_path)?)?;
-
-    let identity: Identity = {
-        Identity {
-            nullifier: identities[0].nullifier,
-            trapdoor: identities[0].trapdoor,
-        }
-    };
-
-    let proof = fetch_inclusion_proof(&args.sequencer_url, &identity).await?;
     let wallet = EthereumWallet::new(args.pbh_private_key.parse::<PrivateKeySigner>()?);
     let provider = Arc::new(
         ProviderBuilder::new()
@@ -737,15 +723,13 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
         let provider = provider.clone();
         let signer = signer.clone();
         let calldata = calldata.clone();
-        let proof = proof.clone();
-        let identity = identity.clone();
 
         let puo: RpcPartialUserOperation = partial_user_op_sepolia()
             .safe(args.safe)
             .calldata(calldata.clone())
             .call();
 
-        let (account_gas_limits, fees, pre_verification_gas) =
+        let (account_gas_limits, _fees, _pre_verification_gas) =
             estimate_uo_gas(provider.clone(), &puo).await?;
 
         let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
@@ -770,14 +754,6 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
         let signature = signer
             .sign_message_sync(&operation_hash.0)
             .expect("Failed to sign operation hash");
-        let signal = hash_user_op(&user_op);
-
-        let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
-
-        let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(
-            &identity,
-            encoded_external_nullifier.0,
-        );
 
         let pbh_payload: PBHPayload = PBHPayload {
             external_nullifier,
@@ -830,8 +806,9 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
             ..Default::default()
         };
 
-        let tx = provider.send_transaction(tx).await?;
-        debug!("Sent UO with pbh_nonce: {current_pbh_nonce}");
+        // This should revert on builder PBH validation error if the builders are up
+        // If all the builders are down/tx-proxy is down, the tx will be mined as the relays simulate the tx without valdiating the proof
+        _ = provider.send_transaction(tx).await?;
 
         i += 1;
     }
