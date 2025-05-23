@@ -808,7 +808,11 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
 
         // This should revert on builder PBH validation error if the builders are up
         // If all the builders are down/tx-proxy is down, the tx will be mined as the relays simulate the tx without valdiating the proof
-        _ = provider.send_transaction(tx).await?;
+        _ = provider.send_transaction(tx).await;
+
+        // println!("Tx hash: {tx_hash:?}");
+
+        // println!("Tx hash: {tx_hash:?}");
 
         i += 1;
     }
