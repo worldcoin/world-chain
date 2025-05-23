@@ -33,6 +33,10 @@ pub enum Commands {
     SendAA(SendAAArgs),
     /// Command to stake a safe in the Entrypoint.
     StakeAA(StakeAAArgs),
+    /// Command to send a batch of PBH bundles with invalid proofs but valid nullifiers so it would successfully execute on-chain
+    /// This is used to stress test peer banning as it would fail proof validation in the builder but succeed on-chain
+    /// It sends 1 UO per bundle from the same safe sequentially
+    SendInvalidProofPBH(SendInvalidProofPBHArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -117,7 +121,12 @@ pub struct SendArgs {
     #[clap(long, default_value = "pbh_bundle.json")]
     pub bundle_path: String,
     /// The RPC URL
-    #[clap(long, required = true)]
+    /// The RPC URL
+    #[clap(
+        long,
+        short,
+        default_value = "https://worldchain-sepolia.g.alchemy.com/public"
+    )]
     pub rpc_url: String,
     /// JWT Secret authorization in the headers.
     #[clap(long, short)]
@@ -127,7 +136,12 @@ pub struct SendArgs {
 #[derive(Debug, Clone, Parser)]
 pub struct SendAAArgs {
     /// The RPC URL
-    #[clap(long, required = true)]
+    /// The RPC URL
+    #[clap(
+        long,
+        short,
+        default_value = "https://worldchain-sepolia.g.alchemy.com/public"
+    )]
     pub rpc_url: String,
     /// The file path to read the identities from.
     #[clap(long, default_value = "test_identities.json")]
@@ -168,7 +182,12 @@ pub struct SendAAArgs {
 #[derive(Debug, Clone, Parser)]
 pub struct StakeAAArgs {
     /// The RPC URL
-    #[clap(long, required = true)]
+    /// The RPC URL
+    #[clap(
+        long,
+        short,
+        default_value = "https://worldchain-sepolia.g.alchemy.com/public"
+    )]
     pub rpc_url: String,
     /// The Chain ID of the network.
     #[clap(long, default_value_t = 4801)]
@@ -185,6 +204,48 @@ pub struct StakeAAArgs {
     /// Address of the Module to execute UserOperation's on.
     #[clap(long, required = true)]
     pub module: Address,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct SendInvalidProofPBHArgs {
+    /// The RPC URL
+    #[clap(
+        long,
+        short,
+        default_value = "https://worldchain-sepolia.g.alchemy.com/public"
+    )]
+    pub rpc_url: String,
+    /// The file path to read the identities from.
+    #[clap(long, default_value = "test_identities.json")]
+    pub identities_path: String,
+    /// The URL to the target signup sequencer.
+    #[clap(
+        long,
+        short,
+        default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
+    )]
+    pub sequencer_url: String,
+    /// The Chain ID of the network.
+    #[clap(long, default_value_t = 4801)]
+    pub chain_id: u64,
+    /// The `PBHEntryPoint` address
+    #[clap(long, default_value = "0x0000000000A21818Ee9F93BB4f2AAad305b5397C")]
+    pub pbh_entry_point: String,
+    /// The starting pbh nonce for the wallet to increment from
+    #[clap(long)]
+    pub pbh_nonce: Option<u64>,
+    /// The private key signer.
+    #[clap(long, required = true)]
+    pub pbh_private_key: String,
+    // Address of the Safe to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub safe: Address,
+    /// Address of the Module to execute UserOperation's on.
+    #[clap(long, required = true)]
+    pub module: Address,
+    /// The number of sequential transactions to send.
+    #[clap(long, default_value_t = 1)]
+    pub transaction_count: usize,
 }
 
 #[derive(Debug, Clone, ValueEnum)]

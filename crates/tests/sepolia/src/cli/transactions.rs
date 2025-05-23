@@ -1,11 +1,12 @@
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Address, FixedBytes, B256, U128, U256};
+use alloy_primitives::{address, bytes, fixed_bytes, Address, FixedBytes, B256, U128, U256};
 use alloy_primitives::{Bytes, TxKind};
 use alloy_provider::network::{EthereumWallet, TransactionBuilder};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
-use alloy_signer_local::PrivateKeySigner;
+use alloy_signer::SignerSync;
+use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::{sol, SolCall};
 use alloy_sol_types::{SolInterface, SolValue};
 use alloy_transport_http::Http;
@@ -30,18 +31,21 @@ use world_chain_builder_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::PBHPayload,
 };
-use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_builder_test_utils::bindings::IEntryPoint::{
+    PackedUserOperation, UserOpsPerAggregator,
+};
 use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
 use world_chain_builder_test_utils::utils::{
-    partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
-    RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+    get_operation_hash, hash_user_op, partial_user_op_sepolia, user_op_sepolia, InclusionProof,
+    RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
 };
-use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
+use world_chain_builder_test_utils::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
 
 use crate::PBH_SIGNATURE_AGGREGATOR;
 
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
-use super::{SendAAArgs, SendArgs, StakeAAArgs};
+use super::{SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs};
+use world_chain_builder_test_utils::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
@@ -538,6 +542,7 @@ async fn send_uo_task(
         proof,
         identity,
         calldata,
+        false,
     )
     .await
     {
@@ -554,8 +559,9 @@ async fn send_uo_task_inner(
     proof: InclusionProof,
     identity: Identity,
     calldata: Bytes,
+    invalid_proof: bool,
 ) -> eyre::Result<()> {
-    let puo = partial_user_op_sepolia()
+    let puo: RpcPartialUserOperation = partial_user_op_sepolia()
         .safe(safe)
         .calldata(calldata.clone())
         .call();
@@ -563,7 +569,7 @@ async fn send_uo_task_inner(
     let (account_gas_limits, fees, pre_verification_gas) =
         estimate_uo_gas(provider.clone(), &puo).await?;
 
-    let uo = user_op_sepolia()
+    let uo: PackedUserOperation = user_op_sepolia()
         .signer(signer)
         .safe(safe)
         .module(module)
@@ -576,6 +582,7 @@ async fn send_uo_task_inner(
         .account_gas_limits(account_gas_limits)
         .gas_fees(fees)
         .calldata(calldata)
+        .invalid_proof(invalid_proof)
         .call();
 
     let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
@@ -679,4 +686,155 @@ async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<I
     let proof: InclusionProof = response.json().await?;
 
     Ok(proof)
+}
+
+pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()> {
+    let identities: Vec<SerializableIdentity> =
+        serde_json::from_reader(std::fs::File::open(&args.identities_path)?)?;
+
+    let identity: Identity = {
+        Identity {
+            nullifier: identities[0].nullifier,
+            trapdoor: identities[0].trapdoor,
+        }
+    };
+
+    let proof = fetch_inclusion_proof(&args.sequencer_url, &identity).await?;
+    let wallet = EthereumWallet::new(args.pbh_private_key.parse::<PrivateKeySigner>()?);
+    let provider = Arc::new(
+        ProviderBuilder::new()
+            .wallet(wallet)
+            .connect(&args.rpc_url)
+            .await?,
+    );
+
+    // empty calldata
+    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+        to: Address::ZERO,
+        value: U256::ZERO,
+        data: Bytes::new(),
+        operation: 0,
+    })
+    .abi_encode()
+    .into();
+
+    let pbh_nonce = args
+        .pbh_nonce
+        .map(|n| n as u16)
+        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
+    let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
+    let date = chrono::Utc::now().naive_utc().date();
+    let date_marker = DateMarker::from(date);
+
+    debug!("Starting pbh_nonce: {pbh_nonce}");
+
+    let mut i = 0;
+    while i < args.transaction_count {
+        let current_pbh_nonce = pbh_nonce + i as u16;
+        let external_nullifier =
+            ExternalNullifier::with_date_marker(date_marker, current_pbh_nonce as u16);
+
+        let provider = provider.clone();
+        let signer = signer.clone();
+        let calldata = calldata.clone();
+        let proof = proof.clone();
+        let identity = identity.clone();
+
+        let puo: RpcPartialUserOperation = partial_user_op_sepolia()
+            .safe(args.safe)
+            .calldata(calldata.clone())
+            .call();
+
+        let (account_gas_limits, fees, pre_verification_gas) =
+            estimate_uo_gas(provider.clone(), &puo).await?;
+
+        let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+        let nonce_key = U256::from(1123123123);
+
+        let mut user_op = PackedUserOperation {
+            sender: args.safe,
+            nonce: ((rand_key | nonce_key) << 64) | U256::from(0),
+            initCode: Bytes::default(),
+            callData: calldata,
+            accountGasLimits: account_gas_limits,
+            preVerificationGas: U256::from(500836),
+            gasFees: fixed_bytes!(
+                "0000000000000000000000003B9ACA0000000000000000000000000073140B60"
+            ),
+            paymasterAndData: Bytes::default(),
+            signature: bytes!("000000000000000000000000"),
+        };
+
+        let operation_hash = get_operation_hash(user_op.clone(), args.module, WC_SEPOLIA_CHAIN_ID);
+
+        let signature = signer
+            .sign_message_sync(&operation_hash.0)
+            .expect("Failed to sign operation hash");
+        let signal = hash_user_op(&user_op);
+
+        let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
+
+        let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(
+            &identity,
+            encoded_external_nullifier.0,
+        );
+
+        let pbh_payload: PBHPayload = PBHPayload {
+            external_nullifier,
+            ..Default::default()
+        };
+
+        let mut uo_sig = Vec::new();
+
+        // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
+        let v: FixedBytes<1> = if signature.v() as u8 == 0 {
+            fixed_bytes!("1F") // 31
+        } else {
+            fixed_bytes!("20") // 32
+        };
+
+        uo_sig.extend_from_slice(
+            &(
+                fixed_bytes!("000000000000000000000000"),
+                signature.r(),
+                signature.s(),
+                v,
+            )
+                .abi_encode_packed(),
+        );
+
+        user_op.signature = Bytes::from(uo_sig);
+
+        let bundle = IPBHEntryPoint::handleAggregatedOpsCall {
+            _0: vec![UserOpsPerAggregator {
+                userOps: vec![user_op],
+                signature: vec![PBHPayloadSolidity::from(pbh_payload)]
+                    .abi_encode()
+                    .into(),
+                aggregator: PBH_SIGNATURE_AGGREGATOR,
+            }],
+            _1: address!("0x6348A4a4dF173F68eB28A452Ca6c13493e447aF1"),
+        };
+
+        let encoded = bundle.abi_encode();
+        let encoded_bytes = Bytes::from(encoded.clone()).to_string();
+
+        println!("Encoded: {encoded_bytes}");
+
+        let tx = TransactionRequest {
+            to: Some(TxKind::Call(args.pbh_entry_point.parse()?)),
+            input: TransactionInput {
+                input: Some(Bytes::from(encoded)),
+                data: None,
+            },
+            ..Default::default()
+        };
+
+        let tx = provider.send_transaction(tx).await?;
+        debug!("Sent UO with pbh_nonce: {current_pbh_nonce}");
+
+        i += 1;
+    }
+
+    Ok(())
 }

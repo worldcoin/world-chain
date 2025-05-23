@@ -3,7 +3,7 @@
 use alloy_primitives::{address, Address};
 use clap::Parser;
 use cli::identities::generate_identities;
-use cli::transactions::{create_bundle, send_aa, send_bundle, stake_aa};
+use cli::transactions::{create_bundle, send_aa, send_bundle, send_invalid_pbh, stake_aa};
 use cli::Cli;
 
 mod cli;
@@ -20,6 +20,7 @@ async fn main() -> eyre::Result<()> {
         cli::Commands::Send(args) => send_bundle(args).await?,
         cli::Commands::SendAA(args) => send_aa(args).await?,
         cli::Commands::StakeAA(args) => stake_aa(args).await?,
+        cli::Commands::SendInvalidProofPBH(args) => send_invalid_pbh(args).await?,
     }
     Ok(())
 }
