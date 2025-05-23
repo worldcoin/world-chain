@@ -1,10 +1,9 @@
 use std::str::FromStr;
 
-use alloy_primitives::{ruint, U256};
+use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use bon::Builder;
 use strum::{Display, EnumString};
-use thiserror::Error;
 
 use crate::date_marker::DateMarker;
 
@@ -99,34 +98,18 @@ impl TryFrom<EncodedExternalNullifier> for ExternalNullifier {
 impl std::fmt::Display for ExternalNullifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let word = EncodedExternalNullifier::from(*self).0;
-        write!(f, "{}", word)
+        write!(f, "{word}")
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum ExternalNullifierError {
-    #[error("invalid format: {0}")]
-    InvalidFormat(#[from] ruint::ParseError),
-
-    #[error("{0} is not a valid month number")]
-    InvalidMonth(u8),
-
-    #[error("error parsing external nullifier version")]
-    InvalidVersion,
-
-    #[error("error parsing external nullifier")]
-    InvalidExternalNullifier,
-
-    #[error(transparent)]
-    RlpError(#[from] alloy_rlp::Error),
-}
-
 impl FromStr for ExternalNullifier {
-    type Err = ExternalNullifierError;
+    type Err = alloy_rlp::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let word: U256 = s.parse()?;
-        Ok(Self::try_from(EncodedExternalNullifier(word))?)
+        let word: U256 = s
+            .parse()
+            .map_err(|_| alloy_rlp::Error::Custom("parse error"))?;
+        Self::try_from(EncodedExternalNullifier(word))
     }
 }
 
