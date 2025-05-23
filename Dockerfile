@@ -38,15 +38,28 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
     cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
-# Deployments depend on sh and wget
+# Deployments depend on sh wget and awscli v2
 FROM debian:bookworm-slim
 WORKDIR /app
 
 # Install wget in the final image
 RUN apt-get update && \
-    apt-get install -y wget netcat-traditional && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        unzip \
+        curl \
+        lz4 \
+        wget \
+        netcat-traditional \
+        tzdata && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
+    unzip /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/aws /tmp/awscliv2.zip
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=builder /app/target/release/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
