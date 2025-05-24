@@ -43,9 +43,6 @@ def launch(
     builder_rpc_0,
     builder_rpc_1,
     builder_rpc_2,
-    l2_rpc_0,
-    l2_rpc_1,
-    l2_rpc_2,
     jwt_file,
 ):
     tx_proxy_service_name = "{0}".format(service_name)
@@ -57,9 +54,6 @@ def launch(
         builder_rpc_0,
         builder_rpc_1,
         builder_rpc_2,
-        l2_rpc_0,
-        l2_rpc_1,
-        l2_rpc_2,
         jwt_file,
     )
 
@@ -79,9 +73,6 @@ def get_tx_proxy_config(
     builder_rpc_0,
     builder_rpc_1,
     builder_rpc_2,
-    l2_rpc_0,
-    l2_rpc_1,
-    l2_rpc_2,
     jwt_file,
 ):
     cmd = [

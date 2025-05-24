@@ -45,6 +45,9 @@ optimism_package:
     supervisor1:
       <<: *x-supervisor
 ethereum_package:
+  participants:
+  - el_type: geth
+    cl_type: teku
   network_params:
     preset: minimal
     genesis_delay: 5
