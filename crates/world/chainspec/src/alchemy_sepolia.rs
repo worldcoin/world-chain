@@ -14,7 +14,7 @@ use reth_optimism_chainspec::{make_op_genesis_header, OpChainSpec};
 
 pub const CHAIN_ID: u64 = 69420;
 
-/// The Base Sepolia spec
+/// The Alchemy Sepolia spec
 pub static ALCHEMY_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/alchemy_sepolia.json"))
         .expect("Can't deserialize Alchemy Sepolia genesis json");
