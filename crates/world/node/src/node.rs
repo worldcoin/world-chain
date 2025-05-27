@@ -197,6 +197,17 @@ impl WorldChainPoolBuilder {
     }
 }
 
+impl WorldChainPoolBuilder {
+    /// Sets the [`PoolBuilderConfigOverrides`] on the pool builder.
+    pub fn with_pool_config_overrides(
+        mut self,
+        pool_config_overrides: PoolBuilderConfigOverrides,
+    ) -> Self {
+        self.pool_config_overrides = pool_config_overrides;
+        self
+    }
+}
+
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
@@ -277,10 +288,17 @@ where
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
-                    pool,
+                    pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
