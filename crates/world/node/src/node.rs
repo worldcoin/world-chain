@@ -192,8 +192,19 @@ impl WorldChainPoolBuilder {
             pbh_entrypoint,
             pbh_signature_aggregator,
             world_id,
-            pool_config_overrides: Default::default(), // TODO: update to not default
+            pool_config_overrides: Default::default(),
         }
+    }
+}
+
+impl WorldChainPoolBuilder {
+    /// Sets the [`PoolBuilderConfigOverrides`] on the pool builder.
+    pub fn with_pool_config_overrides(
+        mut self,
+        pool_config_overrides: PoolBuilderConfigOverrides,
+    ) -> Self {
+        self.pool_config_overrides = pool_config_overrides;
+        self
     }
 }
 
