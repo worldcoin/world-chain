@@ -66,8 +66,10 @@ pub enum PBHValidationError {
     InvalidSignatureAggregator,
     #[error("PBH call tracer error")]
     PBHCallTracerError,
-    #[error("pbh gas limit exceeded")]
+    #[error("PBH gas limit exceeded")]
     PbhGasLimitExceeded,
+    #[error("Duplicate nullifier hash")]
+    DuplicateNullifierHash,
 }
 
 /// The payload of a PBH transaction

@@ -12,13 +12,20 @@ ethereum_constants = import_module(
 TX_PROXY_HTTP_PORT = 8080
 TX_PROXY_HTTP_ADDRESS = "0.0.0.0"
 DISCOVERY_PORT_NUM = 30303
+METRICS_PORT = 9001
 RPC_PORT_ID = "rpc"
+METRICS_PORT_ID = "metrics"
 
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
         RPC_PORT_ID: shared_utils.new_port_spec(
             TX_PROXY_HTTP_PORT,
+            shared_utils.TCP_PROTOCOL,
+            shared_utils.HTTP_APPLICATION_PROTOCOL,
+        ),
+        METRICS_PORT_ID: shared_utils.new_port_spec(
+            METRICS_PORT,
             shared_utils.TCP_PROTOCOL,
             shared_utils.HTTP_APPLICATION_PROTOCOL,
         ),
@@ -69,13 +76,20 @@ def get_tx_proxy_config(
     jwt_file,
 ):
     cmd = [
-        "--builder-url-0={0}".format(builder_rpc_0),
-        "--builder-url-1={0}".format(builder_rpc_1),
-        "--builder-url-2={0}".format(builder_rpc_2),
+        "--builder-urls={0}".format(builder_rpc_0),
+        "--builder-urls={0}".format(builder_rpc_1),
+        "--builder-urls={0}".format(builder_rpc_2),
         "--builder-jwt-path={0}".format(ethereum_constants.JWT_MOUNT_PATH_ON_CONTAINER),
+        "--l2-urls={0}".format(l2_rpc_0),
+        "--l2-urls={0}".format(l2_rpc_1),
+        "--l2-urls={0}".format(l2_rpc_2),
+        "--l2-jwt-path={0}".format(ethereum_constants.JWT_MOUNT_PATH_ON_CONTAINER),
         "--http-port={0}".format(TX_PROXY_HTTP_PORT),
         "--http-addr={0}".format(TX_PROXY_HTTP_ADDRESS),
         "--tracing",
+        "--metrics",
+        "--metrics-port={0}".format(METRICS_PORT),
+        "--metrics-host={0}".format("0.0.0.0"),
         "--log-level={0}".format("debug"),
     ]
 

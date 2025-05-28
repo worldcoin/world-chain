@@ -15,6 +15,7 @@ use eyre::eyre::Result;
 use futures::stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
@@ -93,22 +94,25 @@ where
 }
 
 /// Sends a high volume of transactions to the builder concurrently.
-pub async fn load_test<N, P>(builder_provider: Arc<P>, transactions: &[Bytes]) -> Result<()>
+pub async fn load_test<N, P>(
+    tx_proxy: Arc<P>,
+    builder_provider: Arc<P>,
+    transactions: &[Bytes],
+) -> Result<()>
 where
     N: Network,
     P: Provider<N>,
 {
     let start = Instant::now();
-    let builder_provider_clone = builder_provider.clone();
     stream::iter(transactions.iter().enumerate())
         .map(Ok)
         .try_for_each_concurrent(CONCURRENCY_LIMIT, move |(index, tx)| {
-            let builder_provider = builder_provider_clone.clone();
-
+            let tx_proxy = tx_proxy.clone();
+            let builder_provider = builder_provider.clone();
             async move {
-                let tx = builder_provider.send_raw_transaction(tx).await?;
+                let tx = tx_proxy.send_raw_transaction(tx).await?;
                 let hash = *tx.tx_hash();
-                let receipt = tx.get_receipt().await;
+                let receipt = poll_transaction_receipt(builder_provider, *tx.tx_hash()).await;
                 assert!(receipt.is_ok());
                 debug!(
                     target: "tests::load_test",
@@ -141,7 +145,7 @@ where
             "service",
             "stop",
             "world-chain",
-            "op-el-builder-1-custom-op-node-op-kurtosis",
+            "op-el-builder-2151908-1-custom-op-node-op-kurtosis",
         ],
         env!("CARGO_MANIFEST_DIR"),
     )
@@ -240,4 +244,25 @@ where
         provider.root().clone(),
         tx_hash,
     ))
+}
+
+async fn poll_transaction_receipt<N, P>(
+    provider: Arc<P>,
+    tx_hash: B256,
+) -> Result<<N as Network>::ReceiptResponse>
+where
+    N: Network,
+    P: Provider<N>,
+{
+    let mut interval = interval(provider.client().poll_interval());
+
+    loop {
+        // try to fetch the receipt
+        let receipt = provider.get_transaction_receipt(tx_hash).await?;
+        if let Some(receipt) = receipt {
+            return Ok(receipt);
+        }
+
+        interval.tick().await;
+    }
 }

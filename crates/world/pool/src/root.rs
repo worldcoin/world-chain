@@ -55,21 +55,21 @@ where
             latest_root: Field::ZERO,
         };
 
-        // // If we have a state provider, we can try to load the latest root from the state.
-        // if let Ok(latest) = this.client.last_block_number() {
-        //     let block = this.client.block(latest.into())?;
-        //     if let Some(block) = block {
-        //         let state = this
-        //             .client
-        //             .state_by_block_hash(block.header().hash_slow())?;
-        //         if let Ok(latest_root) = state.storage(this.world_id, LATEST_ROOT_SLOT.into()) {
-        //             if let Some(latest) = latest_root {
-        //                 this.latest_root = latest;
-        //                 this.valid_roots.insert(block.header().timestamp(), latest);
-        //             };
-        //         }
-        //     }
-        // }
+        // If we have a state provider, we can try to load the latest root from the state.
+        if let Ok(latest) = this.client.last_block_number() {
+            let block = this.client.block(latest.into())?;
+            if let Some(block) = block {
+                let state = this
+                    .client
+                    .state_by_block_hash(block.header().hash_slow())?;
+                if let Ok(latest_root) = state.storage(this.world_id, LATEST_ROOT_SLOT.into()) {
+                    if let Some(latest) = latest_root {
+                        this.latest_root = latest;
+                        this.valid_roots.insert(block.header().timestamp(), latest);
+                    };
+                }
+            }
+        }
         Ok(this)
     }
 

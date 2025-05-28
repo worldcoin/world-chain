@@ -1,11 +1,8 @@
 use reth_db::DatabaseError;
 use reth_provider::ProviderError;
-use world_chain_builder_pbh::external_nullifier::ExternalNullifierError;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WorldChainTransactionPoolInvalid {
-    #[error("invalid external nullifier - {0}")]
-    InvalidExternalNullifier(ExternalNullifierError),
     #[error("invalid external nullifier period")]
     InvalidExternalNullifierPeriod,
     #[error("invalid external nullifier nonce")]

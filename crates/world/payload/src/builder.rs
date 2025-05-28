@@ -192,7 +192,7 @@ where
 
     S: BlobStore + Clone,
 {
-    /// Constructs an Optimism payload from the transactions sent via the
+    /// Constructs an Worldchain payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
     /// included in the payload will be those sent through the attributes.
@@ -607,15 +607,6 @@ where
                 }
             }
 
-            // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as
-                // invalid which also removes all dependent transaction from
-                // the iterator before we can continue
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
-            }
-
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
@@ -692,14 +683,17 @@ where
                     PayloadBuilderError::Other(e.into())
                 },
             )?;
-            let gas_used = builder.execute_transaction(tx.clone()).map_err(
-                |e: BlockExecutionError| {
-                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed");
-                    PayloadBuilderError::evm(e)
-                },
-            )?;
 
-            self.commit_changes(info, base_fee, gas_used, tx);
+            // Try to execute the builder tx. In the event that execution fails due to
+            // insufficient funds, continue with the built payload. This ensures that
+            // PBH transactions still receive priority inclusion, even if the PBH nullifier
+            // is not spent rather than sitting in the default execution client's mempool.
+            match builder.execute_transaction(tx.clone()) {
+                Ok(gas_used) => self.commit_changes(info, base_fee, gas_used, tx),
+                Err(e) => {
+                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
+                }
+            }
         }
 
         if !invalid_txs.is_empty() {

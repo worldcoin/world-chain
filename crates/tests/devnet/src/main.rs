@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let (builder_rpc, sequencer_rpc, rundler) = start_devnet(args).await?;
+    let (builder_rpc, sequencer_rpc, rundler, tx_proxy) = start_devnet(args).await?;
 
     let sequencer_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
@@ -52,6 +52,9 @@ async fn main() -> Result<()> {
         Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
     let rundler_provider: Arc<RootProvider<Ethereum>> =
         Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
+    let tx_proxy_provider: Arc<RootProvider<Ethereum>> =
+        Arc::new(ProviderBuilder::default().on_http(tx_proxy.parse().unwrap()));
+
     let timeout = std::time::Duration::from_secs(30);
 
     info!("Waiting for the devnet to be ready");
@@ -72,7 +75,12 @@ async fn main() -> Result<()> {
     )
     .await?;
     info!("Running load test");
-    cases::load_test(builder_provider.clone(), &fixture.eip1559[..198]).await?;
+    cases::load_test(
+        tx_proxy_provider,
+        builder_provider.clone(),
+        &fixture.eip1559[..198],
+    )
+    .await?;
     info!("Running Transact Conditional Test");
     cases::transact_conditional_test(builder_provider.clone(), &fixture.eip1559[198..]).await?;
     info!("Running fallback test");
@@ -80,7 +88,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn start_devnet(args: Args) -> Result<(String, String, String)> {
+async fn start_devnet(args: Args) -> Result<(String, String, String, String)> {
     if !args.no_deploy {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
@@ -101,7 +109,7 @@ async fn start_devnet(args: Args) -> Result<(String, String, String)> {
         }
     }
 
-    let (builder_socket, sequencer_socket, rundler) = get_endpoints().await?;
+    let (builder_socket, sequencer_socket, rundler, tx_proxy) = get_endpoints().await?;
 
     info!(
         builder_rpc = %builder_socket,
@@ -110,17 +118,17 @@ async fn start_devnet(args: Args) -> Result<(String, String, String)> {
         "Devnet is ready"
     );
 
-    Ok((builder_socket, sequencer_socket, rundler))
+    Ok((builder_socket, sequencer_socket, rundler, tx_proxy))
 }
 
-async fn get_endpoints() -> Result<(String, String, String)> {
+async fn get_endpoints() -> Result<(String, String, String, String)> {
     let builder_socket = run_command(
         "kurtosis",
         &[
             "port",
             "print",
             "world-chain",
-            "op-el-builder-1-custom-op-node-op-kurtosis",
+            "op-el-builder-2151908-1-custom-op-node-op-kurtosis",
             "rpc",
         ],
         env!("CARGO_MANIFEST_DIR"),
@@ -138,7 +146,7 @@ async fn get_endpoints() -> Result<(String, String, String)> {
             "port",
             "print",
             "world-chain",
-            "op-el-1-op-geth-op-node-op-kurtosis",
+            "op-el-2151908-1-op-geth-op-node-op-kurtosis",
             "rpc",
         ],
         env!("CARGO_MANIFEST_DIR"),
@@ -157,7 +165,19 @@ async fn get_endpoints() -> Result<(String, String, String)> {
         sequencer_socket.split("http://").collect::<Vec<&str>>()[1]
     );
 
-    Ok((builder_socket, sequencer_socket, rundler_socket))
+    let tx_proxy_socket = run_command(
+        "kurtosis",
+        &["port", "print", "world-chain", "tx-proxy", "rpc"],
+        env!("CARGO_MANIFEST_DIR"),
+    )
+    .await?;
+
+    Ok((
+        builder_socket,
+        sequencer_socket,
+        rundler_socket,
+        tx_proxy_socket,
+    ))
 }
 
 async fn wait<N, P>(provider: P, timeout: time::Duration)
