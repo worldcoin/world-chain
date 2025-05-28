@@ -17,8 +17,9 @@ members = [
     "crates/world/pbh",
     "crates/world/pool",
     "crates/world/test-utils",
+    "crates/world/chainspec", 
     "crates/tests/sepolia",
-    "crates/tests/devnet", 
+    "crates/tests/devnet",
 ]
 
 default-members = ["crates/world/bin"]
@@ -37,11 +38,13 @@ world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
+world-chain-builder-chainspec = { path = "crates/world/chainspec" }
 world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
+reth-cli = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.3.10" }
@@ -90,9 +93,11 @@ op-alloy-consensus = "0.13.0"
 op-alloy-rpc-types = "0.13.0"
 op-alloy-rpc-types-engine = "0.13.0"
 op-alloy-network = "0.13.0"
+alloy-op-hardforks = "0.2.0"
 
 # alloy
 alloy = { version = "0.14.0" }
+alloy-chains = { version = "0.2.0", default-features = false }
 alloy-provider = { version = "0.14.0", default-features = false }
 alloy-rpc-client = { version = "0.14.0", default-features = false }
 alloy-transport-http = { version = "0.14.0", default-features = false }
