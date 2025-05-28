@@ -42,7 +42,7 @@ pub static ALCHEMY_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-/// Base Sepolia list of hardforks.
+/// Alchemy Sepolia list of hardforks.
 pub static ALCHEMY_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
