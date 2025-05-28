@@ -66,6 +66,9 @@ def run(plan, args={}):
         builder_rpc_0=builder_rpc_url,
         builder_rpc_1=reth_rpc_url_0,  # need to be separate client to prevent validation errors
         builder_rpc_2=reth_rpc_url_1,
+        l2_rpc_0=l2_rpc_url,
+        l2_rpc_1=l2_rpc_url,
+        l2_rpc_2=l2_rpc_url,
         jwt_file=jwt_file,
     )
 
