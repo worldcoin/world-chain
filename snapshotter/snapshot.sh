@@ -16,6 +16,8 @@ if [ -z "${EXTERNAL_RPC:-}" ]; then
   exit 1
 fi
 
+AWS_MAX_CONCURRENT_REQUESTS=32
+AWS_MULTIPART_CHUNKSIZE=256MB
 AWS_REGION="${AWS_REGION:=eu-central-2}"
 export AWS_REGION
 
@@ -78,20 +80,15 @@ is_synced() {
 take_snapshot() {
   stop_main_bin
   S3_URL="s3://$BUCKET/mdbx.tar.lz4"
-
-  echo "[INFO] Copying DB file"
-  mkdir -p "$DATA_DIR/snapshots"
-  cp "$DATA_DIR/reth/db/mdbx.dat" "$DATA_DIR/snapshots/mdbx-copy.dat"
-
-  start_main_bin
+  SIZE=$(stat -c%s /data/snapshots/mdbx-copy.dat)
 
   echo "[INFO] Compressing and uploading to S3..."
-  tar --use-compress-program=lz4 -cvf - $DATA_DIR/snapshots/mdbx-copy.dat | \
-    aws s3 cp - "$S3_URL.tmp" --region "$AWS_REGION"
-  aws s3 cp "$S3_URL.tmp" "$S3_URL" --region "$AWS_REGION"
-  aws s3 rm "$S3_URL.tmp" --region "$AWS_REGION"
-
+  tar -C "$DATA_DIR/reth/db" -cf - mdbx.dat | \
+    lz4 -v -1 -c - | \
+      aws s3 cp - "$S3_URL.tmp" --region "$AWS_REGION" --expected-size "$SIZE"
   echo "[INFO] Snapshot completed and uploaded."
+  
+  start_main_bin
 }
 
 # Main loop
