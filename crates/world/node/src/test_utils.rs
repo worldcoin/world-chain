@@ -25,10 +25,9 @@ use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider,
     ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    OmmersProvider, ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_trie::{
@@ -249,12 +248,6 @@ impl BlockReader for WorldChainNoopProvider {
     }
 }
 
-impl OmmersProvider for WorldChainNoopProvider {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        Ok(None)
-    }
-}
-
 impl BlockBodyIndicesProvider for WorldChainNoopProvider {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
@@ -278,10 +271,6 @@ impl BlockReaderIdExt for WorldChainNoopProvider {
     }
 
     fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<Header>> {
-        Ok(None)
-    }
-
-    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
         Ok(None)
     }
 }
@@ -384,6 +373,13 @@ impl ReceiptProvider for WorldChainNoopProvider {
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
+        Ok(vec![])
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         Ok(vec![])
     }
 }
@@ -591,16 +587,6 @@ impl StateProviderFactory for WorldChainNoopProvider {
     }
 }
 
-impl WithdrawalsProvider for WorldChainNoopProvider {
-    fn withdrawals_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-}
-
 impl PruneCheckpointReader for WorldChainNoopProvider {
     fn get_prune_checkpoint(
         &self,
@@ -675,6 +661,8 @@ where
             state_nonce: 0,
             transaction: ValidTransaction::Valid(transaction),
             propagate: false,
+            bytecode_hash: None,
+            authorities: None,
         }
     }
 

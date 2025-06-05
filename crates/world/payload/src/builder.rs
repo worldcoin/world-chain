@@ -17,7 +17,11 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
+use reth_evm::precompiles::PrecompilesMap;
+use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
+use reth_primitives_traits::SignerRecoverable;
+use derive_more::with_trait::Error;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_evm::execute::BlockExecutionError;
 use reth_evm::execute::BlockValidationError;
@@ -37,7 +41,6 @@ use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{Block, Recovered, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
     StateProviderFactory,
@@ -463,7 +466,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                 execution_output: Arc::new(execution_outcome),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: Arc::new(trie_updates),
+            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = op_ctx.attributes().no_tx_pool;
@@ -571,7 +574,7 @@ where
         DB: Database + DatabaseCommit,
         Builder: BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector>>,
+            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector, PrecompilesMap>>,
         >,
         TXS: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
@@ -590,8 +593,10 @@ where
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
+            let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
-            if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
+            
+            if info.is_tx_over_limits(tx_da_size, block_gas_limit, tx_da_limit, block_da_limit, tx.gas_limit()) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -731,8 +736,7 @@ where
     ) -> Result<
         impl BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector>>,
-        >,
+            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>>,
         PayloadBuilderError,
     > {
         // Prepare attributes for next block environment.
@@ -782,13 +786,13 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
 
 pub fn spend_nullifiers_tx<DB, I, Client>(
     ctx: &WorldChainPayloadBuilderCtx<Client>,
-    evm: &mut OpEvm<DB, I>,
+    evm: &mut OpEvm<DB, I, PrecompilesMap>,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
     I: Inspector<OpContext<DB>>,
     DB: revm::Database + revm::DatabaseCommit,
-    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + derive_more::Error + 'static,
+    <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + Error + 'static,
 {
     let nonce = evm
         .db_mut()
@@ -811,5 +815,5 @@ where
 
     let signature = ctx.builder_private_key.sign_transaction_sync(&mut tx)?;
     let signed: OpTransactionSigned = tx.into_signed(signature).into();
-    Ok(signed.into_recovered_unchecked()?)
+    Ok(signed.try_into_recovered_unchecked()?)
 }

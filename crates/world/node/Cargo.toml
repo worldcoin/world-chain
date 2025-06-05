@@ -17,12 +17,15 @@ world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 
 reth.workspace = true
+reth-evm.workspace = true
 reth-chain-state = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true }
 reth-optimism-chainspec.workspace = true
+reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-optimism-rpc.workspace = true
 reth-primitives = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true

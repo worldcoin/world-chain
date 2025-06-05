@@ -19,9 +19,10 @@ use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_node::node::OpAddOns;
-use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_optimism_node::node::{OpAddOns, OpEngineValidatorBuilder};
+use reth_optimism_node::{OpEngineApiBuilder, OpNetworkPrimitives, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_rpc::eth::OpEthApiBuilder;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::{Address, FixedBytes, B256, U256};
@@ -68,12 +69,11 @@ type NodeHelperType = NodeAdapter<
             DiskFileBlobStore,
         >,
         OpEvmConfig,
-        BasicBlockExecutorProvider<OpEvmConfig>,
         Arc<OpBeaconConsensus<OpChainSpec>>,
     >,
 >;
 
-type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType>>;
+type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType, OpEthApiBuilder, OpEngineValidatorBuilder, OpEngineApiBuilder<OpEngineValidatorBuilder>>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
@@ -117,7 +117,7 @@ impl WorldChainBuilderTestContext {
         let world_chain_node = WorldChainNode::new(builder_args.clone());
         let builder = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
+            .with_types::<WorldChainNode>()
             .with_components(world_chain_node.components_builder())
             .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
