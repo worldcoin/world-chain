@@ -24,23 +24,30 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
 
     fn get_blob(
-            &self,
-            _tx_hash: TxHash,
-        ) -> Result<Option<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError> {
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError>
+    {
         Ok(None)
     }
 
     fn get_all_blobs(
-            &self,
-            _tx_hashes: Vec<TxHash>,
-        ) -> Result<Vec<(TxHash, Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>)>, BlobStoreError> {
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<
+        Vec<(
+            TxHash,
+            Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>,
+        )>,
+        BlobStoreError,
+    > {
         Ok(vec![])
     }
 
     fn get_all_blobs_exact(
-            &self,
-            _tx_hashes: Vec<TxHash>,
-        ) -> Result<Vec<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError> {
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError> {
         Ok(vec![])
     }
     fn get_blobs_for_versioned_hashes_v1(

@@ -378,7 +378,7 @@ impl ReceiptProvider for WorldChainNoopProvider {
 
     fn receipts_by_block_range(
         &self,
-        block_range: RangeInclusive<BlockNumber>,
+        _block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         Ok(vec![])
     }

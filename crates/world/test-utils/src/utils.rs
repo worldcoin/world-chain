@@ -13,12 +13,12 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
+use reth_primitives_traits::size::InMemorySize;
 use semaphore_rs::identity::Identity;
 use semaphore_rs::poseidon_tree::LazyPoseidonTree;
 use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
-use reth_primitives_traits::size::InMemorySize;
 
 use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
@@ -290,7 +290,7 @@ pub fn user_op_sepolia(
     let signal = hash_user_op(&user_op);
 
     let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
-    
+
     let pbh_payload = if let (Some(identity), Some(inclusion_proof)) = (identity, inclusion_proof) {
         let proof = semaphore_rs::protocol::generate_proof(
             &identity,

@@ -73,7 +73,15 @@ type NodeHelperType = NodeAdapter<
     >,
 >;
 
-type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType, OpEthApiBuilder, OpEngineValidatorBuilder, OpEngineApiBuilder<OpEngineValidatorBuilder>>>;
+type Adapter = NodeTestContext<
+    NodeHelperType,
+    OpAddOns<
+        NodeHelperType,
+        OpEthApiBuilder,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >,
+>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 

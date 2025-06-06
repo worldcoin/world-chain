@@ -4,6 +4,7 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
+use derive_more::with_trait::Error;
 use eyre::eyre::eyre;
 use op_alloy_rpc_types::OpTransactionRequest;
 use op_revm::OpContext;
@@ -17,18 +18,16 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_evm::precompiles::PrecompilesMap;
-use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
-use reth_primitives_traits::SignerRecoverable;
-use derive_more::with_trait::Error;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_evm::execute::BlockExecutionError;
 use reth_evm::execute::BlockValidationError;
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
+use reth_evm::precompiles::PrecompilesMap;
 use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilder,
     OpPayloadBuilderAttributes,
@@ -41,6 +40,7 @@ use reth_optimism_payload_builder::OpPayloadAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{Block, Recovered, SealedHeader};
+use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
     StateProviderFactory,
@@ -595,8 +595,14 @@ where
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
-            
-            if info.is_tx_over_limits(tx_da_size, block_gas_limit, tx_da_limit, block_da_limit, tx.gas_limit()) {
+
+            if info.is_tx_over_limits(
+                tx_da_size,
+                block_gas_limit,
+                tx_da_limit,
+                block_da_limit,
+                tx.gas_limit(),
+            ) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -736,7 +742,8 @@ where
     ) -> Result<
         impl BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>>,
+            Executor: BlockExecutor<Evm = OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+        >,
         PayloadBuilderError,
     > {
         // Prepare attributes for next block environment.

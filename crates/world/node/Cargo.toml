@@ -21,7 +21,6 @@ reth-evm.workspace = true
 reth-chain-state = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true }
 reth-optimism-chainspec.workspace = true
-reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true

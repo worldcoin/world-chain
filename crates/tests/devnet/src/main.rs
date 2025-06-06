@@ -47,13 +47,13 @@ async fn main() -> Result<()> {
     let (builder_rpc, sequencer_rpc, rundler, tx_proxy) = start_devnet(args).await?;
 
     let sequencer_provider: Arc<RootProvider<Ethereum>> =
-        Arc::new(ProviderBuilder::default().on_http(sequencer_rpc.parse().unwrap()));
+        Arc::new(ProviderBuilder::default().connect_http(sequencer_rpc.parse().unwrap()));
     let builder_provider: Arc<RootProvider<Ethereum>> =
-        Arc::new(ProviderBuilder::default().on_http(builder_rpc.parse().unwrap()));
+        Arc::new(ProviderBuilder::default().connect_http(builder_rpc.parse().unwrap()));
     let rundler_provider: Arc<RootProvider<Ethereum>> =
-        Arc::new(ProviderBuilder::default().on_http(rundler.parse().unwrap()));
+        Arc::new(ProviderBuilder::default().connect_http(rundler.parse().unwrap()));
     let tx_proxy_provider: Arc<RootProvider<Ethereum>> =
-        Arc::new(ProviderBuilder::default().on_http(tx_proxy.parse().unwrap()));
+        Arc::new(ProviderBuilder::default().connect_http(tx_proxy.parse().unwrap()));
 
     let timeout = std::time::Duration::from_secs(30);
 
