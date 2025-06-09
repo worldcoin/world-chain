@@ -43,9 +43,6 @@ fn main() {
                     let sequencer_client = args.rollup_args.sequencer.map(SequencerClient::new);
                     let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                    for method_name in ctx.auth_module.module_mut().method_names() {
-                        println!("Method: {method_name}");
-                    }
                     Ok(())
                 })
                 .launch()
