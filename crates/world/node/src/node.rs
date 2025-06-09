@@ -91,15 +91,10 @@ impl WorldChainNode {
         Node: FullNodeTypes<Types: OpNodeTypes>,
         BasicPayloadServiceBuilder<WorldChainPayloadBuilder>: PayloadServiceBuilder<
             Node,
-            reth_transaction_pool::Pool<
-                TransactionValidationTaskExecutor<
-                    WorldChainTransactionValidator<
-                        <Node as FullNodeTypes>::Provider,
-                        WorldChainPooledTransaction,
-                    >,
-                >,
-                WorldChainOrdering<WorldChainPooledTransaction>,
+            WorldChainTransactionPool<
+                <Node as FullNodeTypes>::Provider,
                 DiskFileBlobStore,
+                WorldChainPooledTransaction,
             >,
             OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
         >,
