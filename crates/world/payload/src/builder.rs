@@ -27,6 +27,7 @@ use reth_evm::precompiles::PrecompilesMap;
 use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvm, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilder,
@@ -62,7 +63,11 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilder<Client, S, Txs = ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone
+        + 'static,
 {
     pub inner: OpPayloadBuilder<WorldChainTransactionPool<Client, S>, Client, OpEvmConfig, Txs>,
     pub verified_blockspace_capacity: u8,
@@ -73,7 +78,11 @@ where
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone
+        + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -129,7 +138,11 @@ where
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone
+        + 'static,
 {
     /// Sets the rollup's compute pending block configuration option.
     pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
@@ -189,10 +202,9 @@ impl<Client, S, T> WorldChainPayloadBuilder<Client, S, T>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone
         + 'static,
-
     S: BlobStore + Clone,
 {
     /// Constructs an Worldchain payload from the transactions sent via the
@@ -401,7 +413,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         >,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + ChainSpecProvider<ChainSpec: OpHardforks>
             + Clone,
     {
         let Self { best } = self;
@@ -504,7 +516,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         >,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + ChainSpecProvider<ChainSpec: OpHardforks>
             + Clone,
     {
         let Self { best } = self;
@@ -544,8 +556,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct WorldChainPayloadBuilderCtx<Client> {
-    pub inner: OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>,
+pub struct WorldChainPayloadBuilderCtx<Client>
+where
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone,
+{
+    pub inner: OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -557,7 +575,7 @@ impl<Client> WorldChainPayloadBuilderCtx<Client>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
 {
     /// Executes the given best transactions and updates the execution info.
@@ -797,6 +815,10 @@ pub fn spend_nullifiers_tx<DB, I, Client>(
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone,
     I: Inspector<OpContext<DB>>,
     DB: revm::Database + revm::DatabaseCommit,
     <DB as revm::Database>::Error: std::fmt::Debug + Send + Sync + Error + 'static,

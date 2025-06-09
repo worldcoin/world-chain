@@ -2,7 +2,7 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
-use alloy_rpc_types::{TransactionInput, TransactionRequest, Withdrawals};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
 use futures::future::join_all;
 use reth::chainspec::{ChainInfo, MAINNET};
