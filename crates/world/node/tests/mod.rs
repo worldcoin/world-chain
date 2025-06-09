@@ -3,35 +3,17 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionRequest, Withdrawals};
-use alloy_signer_local::PrivateKeySigner;
-use op_alloy_consensus::OpTxEnvelope;
-use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter, TreeConfig};
-use reth::builder::components::Components;
+use reth::api::{NodeTypesWithDBAdapter, TreeConfig};
 use reth::builder::Node;
-use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
-use reth::network::types::{BasicNetworkPrimitives, NewBlock};
-use reth::network::NetworkHandle;
+use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
-use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::{Pool, TransactionValidationTaskExecutor};
-use reth_db::test_utils::TempDatabase;
-use reth_db::DatabaseEnv;
 use reth_e2e_test_utils::node::NodeTestContext;
-use reth_e2e_test_utils::wallet::Wallet;
-use reth_e2e_test_utils::{setup_engine, NodeHelperType, TmpDB};
-use reth_evm::execute::BasicBlockExecutor;
-use reth_node_builder::FullNodeTypes;
+use reth_e2e_test_utils::{NodeHelperType, TmpDB};
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_node::node::{OpAddOns, OpEngineValidatorBuilder};
-use reth_optimism_node::txpool::OpPooledTransaction;
-use reth_optimism_node::{OpEngineApiBuilder, OpNetworkPrimitives, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_optimism_rpc::eth::OpEthApiBuilder;
-use reth_primitives::Block;
+use reth_optimism_node::OpPayloadBuilderAttributes;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
@@ -39,12 +21,8 @@ use std::ops::Range;
 use std::sync::Arc;
 use world_chain_builder_node::args::WorldChainArgs;
 use world_chain_builder_node::node::WorldChainNode as OtherWorldChainNode;
-use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::validator::{
-    WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
-};
+use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::{signer, tree_root};
 use world_chain_builder_test_utils::{
@@ -66,11 +44,8 @@ pub struct WorldChainBuilderTestContext {
     pub node: WorldChainNode,
 }
 
-// NodeAdapter<FullNodeTypesAdapter<WorldChainNode, Arc<{type error}, {type error}>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<{type error}, {type error}>>>>, reth::builder::components::Components<FullNodeTypesAdapter<WorldChainNode, Arc<{type error}, {type error}>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<{type error}, {type error}>>>>, BasicNetworkPrimitives<OpPrimitives, op_alloy_consensus::transaction::pooled::OpPooledTransaction, reth::network::reth_eth_wire_types::NewBlock<alloy_consensus::block::Block<op_alloy_consensus::transaction::envelope::OpTxEnvelope>>>, reth::transaction_pool::Pool<TransactionValidationTaskExecutor<WorldChainTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<{type error}, {type error}>>>, WorldChainPooledTransaction>>, WorldChainOrdering<WorldChainPooledTransaction>, DiskFileBlobStore>, OpEvmConfig, Arc<OpBeaconConsensus<OpChainSpec>>>>
-
 impl WorldChainBuilderTestContext {
     pub async fn setup() -> eyre::Result<Self> {
-        let chain_spec = get_chain_spec();
         std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
         let op_chain_spec = Arc::new(get_chain_spec());
 

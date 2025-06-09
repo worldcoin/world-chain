@@ -17,7 +17,6 @@ world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 
 reth.workspace = true
-reth-evm.workspace = true
 reth-chain-state = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true }
 reth-node-builder.workspace = true
