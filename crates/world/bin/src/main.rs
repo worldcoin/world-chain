@@ -1,5 +1,4 @@
 use clap::Parser;
-use reth_node_builder::NodeHandle;
 use reth_optimism_cli::Cli;
 use reth_tracing::tracing::info;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
@@ -32,10 +31,7 @@ fn main() {
         Cli::<WorldChainChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
             let node = WorldChainNode::new(args.clone());
-            let NodeHandle {
-                node: _,
-                node_exit_future,
-            } = builder
+            let handle = builder
                 .node(node)
                 .extend_rpc_modules(move |ctx| {
                     let provider = ctx.provider().clone();
@@ -48,7 +44,7 @@ fn main() {
                 .launch()
                 .await?;
 
-            node_exit_future.await
+            handle.node_exit_future.await
         })
     {
         eprintln!("Error: {err:?}");
