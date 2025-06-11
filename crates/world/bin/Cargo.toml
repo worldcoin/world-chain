@@ -49,7 +49,7 @@ reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # revm 
-revm = { workspace = true }
+revm.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
