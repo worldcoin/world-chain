@@ -20,6 +20,7 @@ optimism_package:
         isthmus_time_offset: 20
       mev_params:
         image: "flashbots/rollup-boost:sha-5286e01"
+        type: custom
       additional_services:
         - rollup-boost
         - blockscout
