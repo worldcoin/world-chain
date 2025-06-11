@@ -1,5 +1,5 @@
 optimism_package = import_module(
-    "github.com/ethpandaops/optimism-package/main.star@86c92926d0fe366c8e0102fc3f9af8d40cf6e8e4"
+    "github.com/ethpandaops/optimism-package/main.star@5ec4fe7972a362ca7408e7fbb47d76805352571b"
 )
 
 world_chain_builder = import_module("./src/el/world_chain_builder_launcher.star")
@@ -8,7 +8,9 @@ rundler = import_module("./src/bundler/rundler/rundler_launcher.star")
 static_files = import_module("./src/static_files/static_files.star")
 
 tx_proxy = import_module("./src/tx-proxy/tx_proxy_launcher.star")
-
+rollup_boost = import_module(
+    "./src/rollup-boost/launcher.star"
+)
 
 # TODO: HA Deployment with op-conductor
 def run(plan, args={}):
@@ -19,6 +21,10 @@ def run(plan, args={}):
             "el_builder_launcher": {
                 "launcher": world_chain_builder.new_op_reth_builder_launcher,
                 "launch_method": world_chain_builder.launch,
+            },
+            "sidecar_launcher": {
+                "launcher": rollup_boost.new_rollup_boost_launcher,
+                "launch_method": rollup_boost.launch,
             },
         },
     )
