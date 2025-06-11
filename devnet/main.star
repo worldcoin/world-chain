@@ -1,5 +1,5 @@
 optimism_package = import_module(
-    "github.com/ethpandaops/optimism-package/main.star@5b46ce33ca331fd595d5b9dc9eea004ab3522f1b"
+    "github.com/ethpandaops/optimism-package/main.star@86c92926d0fe366c8e0102fc3f9af8d40cf6e8e4"
 )
 
 world_chain_builder = import_module("./src/el/world_chain_builder_launcher.star")

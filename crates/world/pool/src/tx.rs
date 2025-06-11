@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError};
-use alloy_eips::{eip7702::SignedAuthorization, Typed2718};
+use alloy_consensus::BlobTransactionValidationError;
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Bytes, TxHash};
 use alloy_rpc_types::{erc4337::TransactionConditional, AccessList};
 use reth::transaction_pool::{
@@ -9,12 +9,14 @@ use reth::transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
 };
 use reth_optimism_node::txpool::{
-    conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction, OpPooledTransaction,
+    conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
+    interop::MaybeInteropTransaction, OpPooledTransaction, OpPooledTx,
 };
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{kzg::KzgSettings, Recovered};
 use reth_primitives_traits::InMemorySize;
 use revm_primitives::{Address, TxKind, B256, U256};
+use std::borrow::Cow;
 use thiserror::Error;
 use world_chain_builder_pbh::payload::{PBHPayload, PBHValidationError};
 
@@ -24,7 +26,9 @@ pub struct WorldChainPooledTransaction {
     pub payload: Option<Vec<PBHPayload>>,
 }
 
-pub trait WorldChainPoolTransaction: EthPoolTransaction + MaybeInteropTransaction {
+pub trait WorldChainPoolTransaction:
+    EthPoolTransaction + MaybeInteropTransaction + OpPooledTx
+{
     fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
     fn conditional_options(&self) -> Option<&TransactionConditional>;
     fn pbh_payload(&self) -> Option<&Vec<PBHPayload>>;
@@ -41,6 +45,18 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
 
     fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
         self.payload.as_ref()
+    }
+}
+
+impl OpPooledTx for WorldChainPooledTransaction {
+    fn encoded_2718(&self) -> std::borrow::Cow<'_, Bytes> {
+        Cow::Borrowed(self.inner.encoded_2718())
+    }
+}
+
+impl DataAvailabilitySized for WorldChainPooledTransaction {
+    fn estimated_da_size(&self) -> u64 {
+        self.inner.estimated_da_size()
     }
 }
 
@@ -144,21 +160,21 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         self.inner.try_into_pooled_eip4844(sidecar)
     }
 
     fn try_from_eip4844(
         _tx: Recovered<Self::Consensus>,
-        _sidecar: BlobTransactionSidecar,
+        _sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         None
     }
 
     fn validate_blob(
         &self,
-        _sidecar: &BlobTransactionSidecar,
+        _sidecar: &BlobTransactionSidecarVariant,
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         Err(BlobTransactionValidationError::NotBlobTransaction(

@@ -13,12 +13,13 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
+use reth_primitives_traits::size::InMemorySize;
 use semaphore_rs::identity::Identity;
 use semaphore_rs::poseidon_tree::LazyPoseidonTree;
 use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use std::{str::FromStr, sync::LazyLock};
+
 use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
 
@@ -128,10 +129,10 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .await
         .expect("Failed to sign transaction");
     let op_tx: OpTypedTransaction = tx.clone().into();
-    let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
+    let tx_signed = OpTransactionSigned::from(op_tx.into_signed(signature));
     let pooled = OpPooledTransaction::new(
         tx_signed.clone().try_into_recovered().unwrap(),
-        tx_signed.eip1559().unwrap().size(),
+        tx_signed.as_eip1559().unwrap().size(),
     );
     pooled
 }
@@ -142,7 +143,7 @@ pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let tx_signed = OpTransactionSigned::new(tx.clone().into(), signature, tx.signature_hash());
+    let tx_signed = OpTransactionSigned::from(tx.into_signed(signature));
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);
     buff.into()

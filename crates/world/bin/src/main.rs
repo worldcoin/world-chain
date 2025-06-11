@@ -36,14 +36,14 @@ fn main() {
                 .extend_rpc_modules(move |ctx| {
                     let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
-                    let sequencer_client =
-                        args.rollup_args.sequencer_http.map(SequencerClient::new);
+                    let sequencer_client = args.rollup_args.sequencer.map(SequencerClient::new);
                     let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                     Ok(())
                 })
                 .launch()
                 .await?;
+
             handle.node_exit_future.await
         })
     {

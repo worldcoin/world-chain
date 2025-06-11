@@ -48,8 +48,8 @@ reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
-# revm with required optimism features
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+# revm 
+revm = { workspace = true }
 
 # ethereum
 alloy-eips.workspace = true

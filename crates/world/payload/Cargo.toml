@@ -29,6 +29,7 @@ reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 reth-payload-util.workspace = true
+reth-optimism-forks.workspace = true
 
 # revm
 revm.workspace = true

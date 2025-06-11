@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::alchemy_sepolia::ALCHEMY_SEPOLIA;
 
-const WORLD_CHAIN_SUPPORTED_CHAINS: &'static [&'static str] = &["alchemy-sepolia"];
+const WORLD_CHAIN_SUPPORTED_CHAINS: &[&str] = &["alchemy-sepolia"];
 
 /// Optimism chain specification parser.
 #[derive(Debug, Clone, Default)]
@@ -15,7 +15,7 @@ pub struct WorldChainChainSpecParser;
 impl ChainSpecParser for WorldChainChainSpecParser {
     type ChainSpec = OpChainSpec;
 
-    const SUPPORTED_CHAINS: &'static [&'static str] = WORLD_CHAIN_SUPPORTED_CHAINS;
+    const SUPPORTED_CHAINS: &[&str] = WORLD_CHAIN_SUPPORTED_CHAINS;
 
     fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
         chain_value_parser(s)
