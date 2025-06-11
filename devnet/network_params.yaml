@@ -19,7 +19,7 @@ optimism_package:
         holocene_time_offset: 0
         isthmus_time_offset: 20
       mev_params:
-        image: "flashbots/rollup-boost:sha-5286e01"
+        image: "flashbots/rollup-boost:sha-e23bcc2"
         type: custom
       additional_services:
         - rollup-boost

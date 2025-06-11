@@ -9,7 +9,8 @@ _net = import_module("/src/util/net.star")
 
 # FIXME This don't seem to be passed to the command
 WS_PORT_NUM = 8546
-
+DEBUG_PORT_NUM = 5555
+MAX_UNSAFE_INTERVAL = 50
 
 def launch(
     plan,
@@ -65,6 +66,9 @@ def get_service_config(
 
     ports = _net.ports_to_port_specs(params.ports)
 
+    env_vars = {}
+    env_vars["MAX_UNSAFE_INTERVAL"] = str(MAX_UNSAFE_INTERVAL)
+
     cmd = [
         "--l2-jwt-path=" + _constants.JWT_MOUNT_PATH_ON_CONTAINER,
         "--l2-url={0}".format(L2_EXECUTION_ENGINE_ENDPOINT),
@@ -73,12 +77,16 @@ def get_service_config(
         "--rpc-host=0.0.0.0",
         "--rpc-port={0}".format(ports[_net.RPC_PORT_NAME].number),
         "--log-level=debug",
+        "--debug-host=0.0.0.0",
+        "--debug-server-port={0}".format(DEBUG_PORT_NUM),
+
     ]
 
     return ServiceConfig(
         image=params.image,
         ports=ports,
         cmd=cmd,
+        env_vars=env_vars,
         files={
             _constants.JWT_MOUNTPOINT_ON_CLIENTS: jwt_file,
         },
