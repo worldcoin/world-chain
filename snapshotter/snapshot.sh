@@ -86,7 +86,10 @@ take_snapshot() {
   tar -C "$DATA_DIR/reth/db" -cf - mdbx.dat | \
     lz4 -v -1 -c - | \
       aws s3 cp - "$S3_URL.tmp" --region "$AWS_REGION" --expected-size "$SIZE"
-  echo "[INFO] Snapshot completed and uploaded."
+  echo "[INFO] Snapshot uploaded"
+  aws s3 cp "$S3_URL.tmp" "$S3_URL" --region "$AWS_REGION"
+  aws s3 rm "$S3_URL.tmp" --region "$AWS_REGION"
+  echo "[INFO] Snapshot completed"
   
   start_main_bin
 }
