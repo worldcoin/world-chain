@@ -31,7 +31,7 @@ MAIN_ARGS=("$@")
 start_main_bin() {
   echo "[INFO] Starting: $MAIN_BIN ${MAIN_ARGS[*]}"
   set -m
-  "$MAIN_BIN" "${MAIN_ARGS[@]}" &                # child in its own PG
+  "$MAIN_BIN" "${MAIN_ARGS[@]}" & # child in its own PG
   MAIN_PID=$!
   PGID=$MAIN_PID
 }
@@ -39,7 +39,7 @@ start_main_bin() {
 stop_main_bin() {
   echo "[INFO] Stopping PID $MAIN_PID"
   kill -- -"$PGID" 2>/dev/null || true
-  wait               # waits for ALL still-running children
+  wait # waits for ALL still-running children
 }
 
 get_block_number() {
