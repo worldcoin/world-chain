@@ -16,10 +16,10 @@ if [ -z "${EXTERNAL_RPC:-}" ]; then
   exit 1
 fi
 
-AWS_MAX_CONCURRENT_REQUESTS=32
-AWS_MULTIPART_CHUNKSIZE=256MB
 AWS_REGION="${AWS_REGION:=eu-central-2}"
+AWS_MAX_CONCURRENT_REQUESTS=32
 export AWS_REGION
+export AWS_MAX_CONCURRENT_REQUESTS
 
 RPC_PORT="${RPC_PORT:=8545}"
 DATA_DIR="${DATA_DIR:=/data}"
@@ -30,14 +30,16 @@ MAIN_ARGS=("$@")
 
 start_main_bin() {
   echo "[INFO] Starting: $MAIN_BIN ${MAIN_ARGS[*]}"
-  "$MAIN_BIN" "${MAIN_ARGS[@]}" &
+  set -m
+  "$MAIN_BIN" "${MAIN_ARGS[@]}" &                # child in its own PG
   MAIN_PID=$!
+  PGID=$MAIN_PID
 }
 
 stop_main_bin() {
   echo "[INFO] Stopping PID $MAIN_PID"
-  kill "$MAIN_PID" 2>/dev/null || true
-  wait "$MAIN_PID" || true
+  kill -- -"$PGID" 2>/dev/null || true
+  wait               # waits for ALL still-running children
 }
 
 get_block_number() {
@@ -94,14 +96,23 @@ take_snapshot() {
   start_main_bin
 }
 
+wait_any() {
+  while :; do
+    kill -0 "$1" 2>/dev/null || return 0   # $1 has exited
+    kill -0 "$2" 2>/dev/null || return 0   # $2 has exited
+    sleep 0.5
+  done
+}
+
 # Main loop
 start_main_bin
-trap 'echo "[INFO] Caught signal, stopping..."; kill "$MAIN_PID" 2>/dev/null || true; exit 0' SIGTERM SIGINT
+trap 'echo "[INFO] Caught signal, stopping..."; stop_main_bin; exit 0' SIGTERM SIGINT
 while true; do
   echo "[INFO] Waiting $SNAPSHOT_INTERVAL seconds before snapshot..."
   sleep "$SNAPSHOT_INTERVAL" & SLEEP_PID=$!
 
-  wait -n "$MAIN_PID" "$SLEEP_PID"
+  # wait -n "$MAIN_PID" "$SLEEP_PID"
+  wait_any "$MAIN_PID" "$SLEEP_PID"
   EXIT_CODE=$?
 
   if ! kill -0 "$MAIN_PID" 2>/dev/null; then
