@@ -17,7 +17,9 @@ if [ -z "${EXTERNAL_RPC:-}" ]; then
 fi
 
 AWS_REGION="${AWS_REGION:=eu-central-2}"
+AWS_MAX_CONCURRENT_REQUESTS=32
 export AWS_REGION
+export AWS_MAX_CONCURRENT_REQUESTS
 
 RPC_PORT="${RPC_PORT:=8545}"
 DATA_DIR="${DATA_DIR:=/data}"
@@ -28,14 +30,16 @@ MAIN_ARGS=("$@")
 
 start_main_bin() {
   echo "[INFO] Starting: $MAIN_BIN ${MAIN_ARGS[*]}"
-  "$MAIN_BIN" "${MAIN_ARGS[@]}" &
+  set -m
+  "$MAIN_BIN" "${MAIN_ARGS[@]}" & # child in its own PG
   MAIN_PID=$!
+  PGID=$MAIN_PID
 }
 
 stop_main_bin() {
   echo "[INFO] Stopping PID $MAIN_PID"
-  kill "$MAIN_PID" 2>/dev/null || true
-  wait "$MAIN_PID" || true
+  kill -- -"$PGID" 2>/dev/null || true
+  wait # waits for ALL still-running children
 }
 
 get_block_number() {
@@ -77,31 +81,42 @@ is_synced() {
 
 take_snapshot() {
   stop_main_bin
-  S3_URL="s3://$BUCKET/mdbx.tar.lz4"
 
-  echo "[INFO] Copying DB file"
-  mkdir -p "$DATA_DIR/snapshots"
-  cp "$DATA_DIR/reth/db/mdbx.dat" "$DATA_DIR/snapshots/mdbx-copy.dat"
+  S3_URL="s3://$BUCKET/reth.tar.lz4"
+  SIZE=$(du -sb "$DATA_DIR/reth" | awk '{print $1}')
+
+  echo "[INFO] Compressing and uploading to S3…"
+  tar -C "$DATA_DIR" -cf - reth | \
+    lz4 -v -1 -c - | \
+    aws s3 cp - "$S3_URL.tmp" \
+      --region "$AWS_REGION" \
+      --expected-size "$SIZE"
+
+  echo "[INFO] Finalising snapshot"
+  aws s3 cp "$S3_URL.tmp" "$S3_URL" --region "$AWS_REGION"
+  aws s3 rm "$S3_URL.tmp"          --region "$AWS_REGION"
+  echo "[INFO] Snapshot completed"
 
   start_main_bin
+}
 
-  echo "[INFO] Compressing and uploading to S3..."
-  tar --use-compress-program=lz4 -cvf - $DATA_DIR/snapshots/mdbx-copy.dat | \
-    aws s3 cp - "$S3_URL.tmp" --region "$AWS_REGION"
-  aws s3 cp "$S3_URL.tmp" "$S3_URL" --region "$AWS_REGION"
-  aws s3 rm "$S3_URL.tmp" --region "$AWS_REGION"
-
-  echo "[INFO] Snapshot completed and uploaded."
+wait_any() {
+  while :; do
+    kill -0 "$1" 2>/dev/null || return 0   # $1 has exited
+    kill -0 "$2" 2>/dev/null || return 0   # $2 has exited
+    sleep 0.5
+  done
 }
 
 # Main loop
 start_main_bin
-trap 'echo "[INFO] Caught signal, stopping..."; kill "$MAIN_PID" 2>/dev/null || true; exit 0' SIGTERM SIGINT
+trap 'echo "[INFO] Caught signal, stopping..."; stop_main_bin; exit 0' SIGTERM SIGINT
 while true; do
   echo "[INFO] Waiting $SNAPSHOT_INTERVAL seconds before snapshot..."
   sleep "$SNAPSHOT_INTERVAL" & SLEEP_PID=$!
 
-  wait -n "$MAIN_PID" "$SLEEP_PID"
+  # wait -n "$MAIN_PID" "$SLEEP_PID"
+  wait_any "$MAIN_PID" "$SLEEP_PID"
   EXIT_CODE=$?
 
   if ! kill -0 "$MAIN_PID" 2>/dev/null; then
