@@ -81,18 +81,22 @@ is_synced() {
 
 take_snapshot() {
   stop_main_bin
-  S3_URL="s3://$BUCKET/mdbx.tar.lz4"
-  SIZE=$(stat -c%s /data/snapshots/mdbx-copy.dat)
 
-  echo "[INFO] Compressing and uploading to S3..."
-  tar -C "$DATA_DIR/reth/db" -cf - mdbx.dat | \
+  S3_URL="s3://$BUCKET/reth.tar.lz4"
+  SIZE=$(du -sb "$DATA_DIR/reth" | awk '{print $1}')
+
+  echo "[INFO] Compressing and uploading to S3…"
+  tar -C "$DATA_DIR" -cf - reth | \
     lz4 -v -1 -c - | \
-      aws s3 cp - "$S3_URL.tmp" --region "$AWS_REGION" --expected-size "$SIZE"
-  echo "[INFO] Snapshot uploaded"
+    aws s3 cp - "$S3_URL.tmp" \
+      --region "$AWS_REGION" \
+      --expected-size "$SIZE"
+
+  echo "[INFO] Finalising snapshot"
   aws s3 cp "$S3_URL.tmp" "$S3_URL" --region "$AWS_REGION"
-  aws s3 rm "$S3_URL.tmp" --region "$AWS_REGION"
+  aws s3 rm "$S3_URL.tmp"          --region "$AWS_REGION"
   echo "[INFO] Snapshot completed"
-  
+
   start_main_bin
 }
 
