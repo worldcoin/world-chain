@@ -50,3 +50,4 @@ serde.workspace = true
 eyre.workspace = true
 futures-util = "0.3"
 clap.workspace = true
+derive_more.workspace = true

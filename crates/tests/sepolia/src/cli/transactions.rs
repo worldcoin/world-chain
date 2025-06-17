@@ -255,7 +255,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
     // Create the HTTP transport.
     let http = Http::with_client(client, args.rpc_url.parse()?);
     let rpc_client = RpcClient::new(http, false);
-    let provider = ProviderBuilder::new().on_client(rpc_client);
+    let provider = ProviderBuilder::new().connect_client(rpc_client);
     match args.tx_type {
         TxType::Transaction => {
             stream::iter(

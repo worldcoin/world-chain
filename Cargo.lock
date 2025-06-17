@@ -3580,6 +3580,7 @@ dependencies = [
  "alloy-serde",
  "clap",
  "color-eyre",
+ "derive_more 2.0.1",
  "futures-util",
  "reth",
  "reth-basic-payload-builder",
