@@ -1,10 +1,10 @@
 use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
+use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_primitives::{
     aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
 };
-use alloy_primitives::{B256, U128, U64, U8};
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
 use alloy_sol_types::SolValue;
@@ -13,12 +13,13 @@ use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
+use reth_primitives_traits::size::InMemorySize;
 use semaphore_rs::identity::Identity;
 use semaphore_rs::poseidon_tree::LazyPoseidonTree;
 use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use std::{str::FromStr, sync::LazyLock};
+
 use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
 
@@ -128,10 +129,10 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .await
         .expect("Failed to sign transaction");
     let op_tx: OpTypedTransaction = tx.clone().into();
-    let tx_signed = OpTransactionSigned::new(op_tx, signature, tx.signature_hash());
+    let tx_signed = OpTransactionSigned::from(op_tx.into_signed(signature));
     let pooled = OpPooledTransaction::new(
         tx_signed.clone().try_into_recovered().unwrap(),
-        tx_signed.eip1559().unwrap().size(),
+        tx_signed.as_eip1559().unwrap().size(),
     );
     pooled
 }
@@ -142,7 +143,7 @@ pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
         .sign_transaction(&mut tx)
         .await
         .expect("Failed to sign transaction");
-    let tx_signed = OpTransactionSigned::new(tx.clone().into(), signature, tx.signature_hash());
+    let tx_signed = OpTransactionSigned::from(tx.into_signed(signature));
     let mut buff = vec![];
     tx_signed.encode_2718(&mut buff);
     buff.into()
@@ -226,12 +227,29 @@ pub fn user_op(
 }
 
 #[builder]
+pub fn partial_user_op_sepolia(
+    safe: Address,
+    #[builder(into, default = U256::ZERO)] nonce: U256,
+    calldata: Bytes,
+) -> RpcPartialUserOperation {
+    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    RpcPartialUserOperation {
+        sender: safe,
+        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        call_data: calldata,
+        signature: bytes!(""),
+        verification_gas_limit: Some(U128::from(75_000)),
+        aggregator: Some(address!("8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489")),
+    }
+}
+
+#[builder]
 pub fn user_op_sepolia(
     signer: PrivateKeySigner,
     safe: Address,
     module: Address,
-    identity: Identity,
-    inclusion_proof: InclusionProof,
+    identity: Option<Identity>,
+    inclusion_proof: Option<InclusionProof>,
     #[builder(default = ExternalNullifier::v1(12, 2024, 0))] external_nullifier: ExternalNullifier,
     #[builder(into, default = U256::ZERO)] nonce: U256,
     #[builder(default = Bytes::default())] init_code: Bytes,
@@ -246,9 +264,15 @@ pub fn user_op_sepolia(
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> IEntryPoint::PackedUserOperation {
     let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
+    let nonce_key = if let (Some(_), Some(_)) = (&identity, &inclusion_proof) {
+        U256::from(PBH_NONCE_KEY)
+    } else {
+        U256::ZERO
+    };
+
     let mut user_op = PackedUserOperation {
         sender: safe,
-        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        nonce: ((rand_key | nonce_key) << 64) | nonce,
         initCode: init_code,
         callData: calldata,
         accountGasLimits: account_gas_limits,
@@ -267,24 +291,31 @@ pub fn user_op_sepolia(
 
     let encoded_external_nullifier = EncodedExternalNullifier::from(external_nullifier);
 
-    let proof = semaphore_rs::protocol::generate_proof(
-        &identity,
-        &inclusion_proof.proof,
-        encoded_external_nullifier.0,
-        signal,
-    )
-    .expect("Failed to generate semaphore proof");
-    let nullifier_hash =
-        semaphore_rs::protocol::generate_nullifier_hash(&identity, encoded_external_nullifier.0);
+    let pbh_payload = if let (Some(identity), Some(inclusion_proof)) = (identity, inclusion_proof) {
+        let proof = semaphore_rs::protocol::generate_proof(
+            &identity,
+            &inclusion_proof.proof,
+            encoded_external_nullifier.0,
+            signal,
+        )
+        .expect("Failed to generate semaphore proof");
+        let nullifier_hash = semaphore_rs::protocol::generate_nullifier_hash(
+            &identity,
+            encoded_external_nullifier.0,
+        );
 
-    let proof = Proof(proof);
+        let proof = Proof(proof);
 
-    let payload = PbhPayload {
-        external_nullifier,
-        nullifier_hash,
-        root: inclusion_proof.root,
-        proof,
+        Some(PbhPayload {
+            external_nullifier,
+            nullifier_hash,
+            root: inclusion_proof.root,
+            proof,
+        })
+    } else {
+        None
     };
+
     let mut uo_sig = Vec::new();
 
     // https://github.com/safe-global/safe-smart-account/blob/21dc82410445637820f600c7399a804ad55841d5/contracts/Safe.sol#L323
@@ -304,7 +335,9 @@ pub fn user_op_sepolia(
             .abi_encode_packed(),
     );
 
-    uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+    if let Some(payload) = pbh_payload {
+        uo_sig.extend_from_slice(PBHPayload::from(payload.clone()).abi_encode().as_ref());
+    }
 
     user_op.signature = Bytes::from(uo_sig);
 
@@ -473,6 +506,38 @@ impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
     }
 }
 
+#[allow(clippy::from_over_into)]
+impl Into<RpcUserOperationV0_7> for PackedUserOperation {
+    fn into(self) -> RpcUserOperationV0_7 {
+        RpcUserOperationV0_7 {
+            sender: self.sender,
+            nonce: self.nonce,
+            factory: None,
+            call_data: self.callData,
+            factory_data: None,
+            verification_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                >> U256::from(128))
+            .to(),
+            call_gas_limit: (U256::from_be_bytes(self.accountGasLimits.into())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
+            .to(),
+            pre_verification_gas: self.preVerificationGas,
+            max_priority_fee_per_gas: (U256::from_be_bytes(self.gasFees.into()) >> U256::from(128))
+                .to(),
+            max_fee_per_gas: (U256::from_be_bytes(self.gasFees.into())
+                & U256::from_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap())
+            .to(),
+            signature: self.signature,
+            paymaster: None,
+            paymaster_data: None,
+            paymaster_post_op_gas_limit: None,
+            paymaster_verification_gas_limit: None,
+            aggregator: None,
+            eip7702_auth: None,
+        }
+    }
+}
+
 pub fn hash_user_op(user_op: &PackedUserOperation) -> Field {
     let hash = SolValue::abi_encode_packed(&(&user_op.sender, &user_op.nonce, &user_op.callData));
 
@@ -591,6 +656,29 @@ pub struct RpcUserOperationV0_7 {
     eip7702_auth: Option<RpcEip7702Auth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     aggregator: Option<Address>,
+}
+
+/// User operation definition for gas estimation
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcPartialUserOperation {
+    pub sender: Address,
+    pub nonce: U256,
+    pub call_data: Bytes,
+    pub signature: Bytes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_gas_limit: Option<U128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregator: Option<Address>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcGasEstimate {
+    pub pre_verification_gas: U128,
+    pub call_gas_limit: U128,
+    pub verification_gas_limit: U128,
+    pub paymaster_verification_gas_limit: Option<U128>,
 }
 
 #[cfg(test)]

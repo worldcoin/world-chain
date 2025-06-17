@@ -16,6 +16,7 @@ world-chain-builder-pbh.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
+alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-sol-types.workspace = true
@@ -29,7 +30,7 @@ reqwest.workspace = true
 semaphore-rs = { workspace = true, features = ["depth_30"]}
 serde_json.workspace = true
 serde = { workspace = true, features = ["derive"]}
-rand = "0.8.5"
+rand.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

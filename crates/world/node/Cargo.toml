@@ -21,10 +21,12 @@ flashblocks.workspace = true
 reth.workspace = true
 reth-chain-state = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true }
+reth-node-builder.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-optimism-rpc.workspace = true
 reth-primitives = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
@@ -34,11 +36,14 @@ reth-trie = { workspace = true, optional = true }
 reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-e2e-test-utils = { workspace = true, optional = true }
+reth-node-api.workspace = true
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true, optional = true }
 revm-primitives = { workspace = true, optional = true }
+op-alloy-consensus.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 tokio = { workspace = true }
 eyre.workspace = true

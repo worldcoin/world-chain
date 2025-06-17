@@ -3,39 +3,26 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionRequest, Withdrawals};
-use reth::api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter, TreeConfig};
-use reth::builder::components::Components;
+use reth::api::{NodeTypesWithDBAdapter, TreeConfig};
 use reth::builder::Node;
-use reth::builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
 use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
-use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::{Pool, TransactionValidationTaskExecutor};
-use reth_db::test_utils::TempDatabase;
-use reth_db::DatabaseEnv;
 use reth_e2e_test_utils::node::NodeTestContext;
-use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_e2e_test_utils::{NodeHelperType, TmpDB};
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_node::node::OpAddOns;
-use reth_optimism_node::{OpNetworkPrimitives, OpPayloadBuilderAttributes};
+use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
 use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::WorldChainNode;
-use world_chain_builder_pool::ordering::WorldChainOrdering;
+use world_chain_builder_node::node::WorldChainNode as OtherWorldChainNode;
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::validator::{
-    WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
-};
+use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::{signer, tree_root};
 use world_chain_builder_test_utils::{
@@ -44,47 +31,22 @@ use world_chain_builder_test_utils::{
 
 use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
 
-type NodeTypesAdapter = FullNodeTypesAdapter<
-    WorldChainNode,
-    Arc<TempDatabase<DatabaseEnv>>,
-    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>>,
+pub(crate) type WorldChainNode = NodeHelperType<
+    OtherWorldChainNode,
+    BlockchainProvider<NodeTypesWithDBAdapter<OtherWorldChainNode, TmpDB>>,
 >;
-
-type NodeHelperType = NodeAdapter<
-    NodeTypesAdapter,
-    Components<
-        NodeTypesAdapter,
-        OpNetworkPrimitives,
-        Pool<
-            TransactionValidationTaskExecutor<
-                WorldChainTransactionValidator<
-                    BlockchainProvider<
-                        NodeTypesWithDBAdapter<WorldChainNode, Arc<TempDatabase<DatabaseEnv>>>,
-                    >,
-                    WorldChainPooledTransaction,
-                >,
-            >,
-            WorldChainOrdering<WorldChainPooledTransaction>,
-            DiskFileBlobStore,
-        >,
-        OpEvmConfig,
-        BasicBlockExecutorProvider<OpEvmConfig>,
-        Arc<OpBeaconConsensus<OpChainSpec>>,
-    >,
->;
-
-type Adapter = NodeTestContext<NodeHelperType, OpAddOns<NodeHelperType>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
 pub struct WorldChainBuilderTestContext {
     pub signers: Range<u32>,
     pub tasks: TaskManager,
-    pub node: Adapter,
+    pub node: WorldChainNode,
 }
 
 impl WorldChainBuilderTestContext {
     pub async fn setup() -> eyre::Result<Self> {
+        std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
         let op_chain_spec = Arc::new(get_chain_spec());
 
         let tasks = TaskManager::current();
@@ -114,10 +76,13 @@ impl WorldChainBuilderTestContext {
             ..Default::default()
         };
 
-        let world_chain_node = WorldChainNode::new(builder_args.clone());
-        let builder = NodeBuilder::new(node_config.clone())
+        let world_chain_node = OtherWorldChainNode::new(builder_args.clone());
+        let NodeHandle {
+            node,
+            node_exit_future: _,
+        } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
+            .with_types_and_provider::<OtherWorldChainNode, BlockchainProvider<_>>()
             .with_components(world_chain_node.components_builder())
             .with_add_ons(world_chain_node.add_ons())
             .extend_rpc_modules(move |ctx| {
@@ -127,12 +92,7 @@ impl WorldChainBuilderTestContext {
 
                 ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                 Ok(())
-            });
-
-        let NodeHandle {
-            node,
-            node_exit_future: _,
-        } = builder
+            })
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),
@@ -144,6 +104,7 @@ impl WorldChainBuilderTestContext {
             .await?;
 
         let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
+
         Ok(Self {
             signers: (0..5),
             tasks,

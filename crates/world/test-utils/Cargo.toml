@@ -13,6 +13,7 @@ world-chain-builder-pbh.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 reth-optimism-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true

@@ -20,7 +20,10 @@ use reth_evm::{
 };
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{txpool::interop::MaybeInteropTransaction, OpNextBlockEnvAttributes};
+use reth_optimism_node::{
+    txpool::{interop::MaybeInteropTransaction, OpPooledTx},
+    OpNextBlockEnvAttributes,
+};
 use reth_optimism_payload_builder::{
     builder::ExecutionInfo, config::OpBuilderConfig, OpPayloadPrimitives,
 };
@@ -28,6 +31,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -96,16 +100,13 @@ where
     }
 }
 
-impl<Pool, Client, Evm, CtxBuilder, Txs>
+impl<Pool, Client, Evm, N, CtxBuilder, Txs>
     FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
-    Pool: TransactionPool<
-        Transaction: MaybeInteropTransaction
-                         + PoolTransaction<Consensus = <Evm::Primitives as NodePrimitives>::SignedTx>,
-    >,
+    N: OpPayloadPrimitives,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
-    Evm: ConfigureEvm<Primitives: OpPayloadPrimitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    Txs: OpPayloadTransactions<Pool::Transaction>,
+    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -116,17 +117,14 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<F, T>(
+    fn build_payload<'a, T>(
         &self,
-        args: BuildArguments<
-            OpPayloadBuilderAttributes<<Evm::Primitives as NodePrimitives>::SignedTx>,
-            OpBuiltPayload<Evm::Primitives>,
-        >,
-        best: F,
-    ) -> Result<BuildOutcome<OpBuiltPayload<Evm::Primitives>>, PayloadBuilderError>
+        args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
+        best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
+    ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        F: Send + Sync + Fn(BestTransactionsAttributes) -> T,
-        T: PayloadTransactions<Transaction = Pool::Transaction>,
+        T:
+            PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
         let BuildArguments {
             mut cached_reads,
@@ -166,14 +164,11 @@ where
 impl<Pool, Client, Evm, N, CtxBuilder, Txs> PayloadBuilder
     for FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
-    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    Pool: TransactionPool<
-        Transaction: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-    >,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks>,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
-
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -200,7 +195,7 @@ where
 
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, N::BlockHeader>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
             config,
@@ -208,11 +203,9 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args, |_| {
-            NoopPayloadTransactions::<Pool::Transaction>::default()
-        })?
-        .into_payload()
-        .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -281,19 +274,19 @@ where
     Txs: PayloadTransactions,
 {
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, ChainSpec, N, Ctx, Tx>(
+    pub fn build<Evm, ChainSpec, N, Ctx, Tx>(
         mut self,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
-        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
+        Tx: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx,
         Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
+        Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        ChainSpec: EthChainSpec + OpHardforks,
+        Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = ChainSpec, Transaction = Tx>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 

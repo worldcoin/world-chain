@@ -60,11 +60,7 @@ impl TryFrom<IPBHPayload> for PBHPayload {
     type Error = alloy_rlp::Error;
 
     fn try_from(val: IPBHPayload) -> Result<Self, Self::Error> {
-        let g1a = (val.proof[0], val.proof[1]);
-        let g2 = ([val.proof[2], val.proof[3]], [val.proof[4], val.proof[5]]);
-        let g1b = (val.proof[6], val.proof[7]);
-
-        let proof = Proof(semaphore_rs::protocol::Proof(g1a, g2, g1b));
+        let proof = Proof(semaphore_rs::protocol::Proof::from_flat(val.proof));
 
         Ok(PBHPayload {
             external_nullifier: ExternalNullifier::try_from(EncodedExternalNullifier(

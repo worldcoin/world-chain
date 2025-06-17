@@ -1,4 +1,4 @@
-FROM rust:1.85.1 AS base
+FROM rust:1.87 AS base
 
 ARG FEATURES
 
@@ -29,19 +29,41 @@ ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --release --recipe-path recipe.json
+    cargo chef cook --release --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
 
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --release --features="$FEATURES" --package=${WORLD_CHAIN_BUILDER_BIN}
+    cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
 
-FROM gcr.io/distroless/cc-debian12
+# Deployments depend on sh wget and awscli v2
+FROM debian:bookworm-slim
 WORKDIR /app
+
+# Install wget in the final image
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        unzip \
+        curl \
+        lz4 \
+        wget \
+        netcat-traditional \
+        tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
+    unzip /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/aws /tmp/awscliv2.zip
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=builder /app/target/release/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
+
+EXPOSE 30303 30303/udp 9001 8545 8546
 
 ENTRYPOINT ["/usr/local/bin/world-chain-builder"]

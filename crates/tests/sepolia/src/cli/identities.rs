@@ -30,7 +30,7 @@ pub struct InsertCommitmentRequest {
 pub async fn generate_identities(args: GenerateArgs) -> eyre::Result<()> {
     let identies: Vec<_> = (0..args.count)
         .map(|_| {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
 
             let mut secret = [0_u8; 64];
             rng.fill_bytes(&mut secret);

@@ -1,5 +1,5 @@
 optimism_package = import_module(
-    "github.com/ethpandaops/optimism-package/main.star@5c6b3267345da8f9409da8ef9bb290cd5608a3ee"
+    "github.com/ethpandaops/optimism-package/main.star@5ec4fe7972a362ca7408e7fbb47d76805352571b"
 )
 
 world_chain_builder = import_module("./src/el/world_chain_builder_launcher.star")
@@ -8,7 +8,9 @@ rundler = import_module("./src/bundler/rundler/rundler_launcher.star")
 static_files = import_module("./src/static_files/static_files.star")
 
 tx_proxy = import_module("./src/tx-proxy/tx_proxy_launcher.star")
-
+rollup_boost = import_module(
+    "./src/rollup-boost/launcher.star"
+)
 
 # TODO: HA Deployment with op-conductor
 def run(plan, args={}):
@@ -19,6 +21,10 @@ def run(plan, args={}):
             "el_builder_launcher": {
                 "launcher": world_chain_builder.new_op_reth_builder_launcher,
                 "launch_method": world_chain_builder.launch,
+            },
+            "sidecar_launcher": {
+                "launcher": rollup_boost.new_rollup_boost_launcher,
+                "launch_method": rollup_boost.launch,
             },
         },
     )
@@ -42,27 +48,27 @@ def run(plan, args={}):
     )
 
     # Extract HTTP RPC url of the builder
-    builder_srv = plan.get_service("op-el-builder-1-custom-op-node-op-kurtosis")
+    builder_srv = plan.get_service("op-el-builder-2151908-1-custom-op-node-op-kurtosis")
     builder_rpc_port = builder_srv.ports["rpc"].number
     builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
     # Extract HTTP RPC url of 2 Reth nodes
-    reth_srv_0 = plan.get_service("op-el-2-op-reth-op-node-op-kurtosis")
+    reth_srv_0 = plan.get_service("op-el-2151908-2-op-reth-op-node-op-kurtosis")
     reth_rpc_port_0 = reth_srv_0.ports["rpc"].number
     reth_rpc_url_0 = "http://{0}:{1}".format(reth_srv_0.ip_address, reth_rpc_port_0)
 
-    reth_srv_1 = plan.get_service("op-el-3-op-reth-op-node-op-kurtosis")
+    reth_srv_1 = plan.get_service("op-el-2151908-3-op-reth-op-node-op-kurtosis")
     reth_rpc_port_1 = reth_srv_1.ports["rpc"].number
     reth_rpc_url_1 = "http://{0}:{1}".format(reth_srv_1.ip_address, reth_rpc_port_1)
 
-    l2_srv = plan.get_service("op-el-1-op-geth-op-node-op-kurtosis")
+    l2_srv = plan.get_service("op-el-2151908-1-op-geth-op-node-op-kurtosis")
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
 
     tx_proxy_http_url = tx_proxy.launch(
         plan,
         service_name="tx-proxy",
-        image="ghcr.io/worldcoin/tx-proxy:latest",
+        image="ghcr.io/worldcoin/tx-proxy:sha-9cdbe54",
         builder_rpc_0=builder_rpc_url,
         builder_rpc_1=reth_rpc_url_0,  # need to be separate client to prevent validation errors
         builder_rpc_2=reth_rpc_url_1,
@@ -75,8 +81,8 @@ def run(plan, args={}):
     rundler.launch(
         plan,
         service_name="rundler",
-        image="alchemyplatform/rundler:v0.6.0-alpha.3",
-        rpc_http_url=tx_proxy_http_url,
+        image="alchemyplatform/rundler:v0.8.2",
+        rpc_http_url=builder_rpc_url,
         builder_config_file=rundler_builder_config_file,
         mempool_config_file=rundler_mempool_config_file,
         chain_spec_file=rundler_chain_spec,

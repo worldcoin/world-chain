@@ -1,9 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::tx::WorldChainPooledTransaction;
-use alloy_consensus::BlobTransactionSidecar;
 use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, B256};
 use reth::transaction_pool::{
     error::PoolError, noop::NoopTransactionPool, AllPoolTransactions, AllTransactionsEvents,
     BestTransactions, BestTransactionsAttributes, BlobStoreError, BlockInfo,
@@ -13,7 +12,6 @@ use reth::transaction_pool::{
 };
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::Recovered;
-use revm_primitives::B256;
 use tokio::sync::mpsc::{self, Receiver};
 
 #[derive(Debug, Clone, Default)]
@@ -24,6 +22,47 @@ pub struct NoopWorldChainTransactionPool {
 
 impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
+
+    fn get_blob(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError>
+    {
+        Ok(None)
+    }
+
+    fn get_all_blobs(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<
+        Vec<(
+            TxHash,
+            Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>,
+        )>,
+        BlobStoreError,
+    > {
+        Ok(vec![])
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<Arc<alloy_eips::eip7594::BlobTransactionSidecarVariant>>, BlobStoreError> {
+        Ok(vec![])
+    }
+    fn get_blobs_for_versioned_hashes_v1(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        Ok(vec![])
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<alloy_eips::eip4844::BlobAndProofV2>>, BlobStoreError> {
+        Ok(Some(vec![]))
+    }
 
     fn get_pending_transactions_with_predicate(
         &self,
@@ -222,34 +261,6 @@ impl TransactionPool for NoopWorldChainTransactionPool {
 
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
-    }
-
-    fn get_blob(
-        &self,
-        _tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
-        Ok(None)
-    }
-
-    fn get_all_blobs(
-        &self,
-        _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
-        Ok(vec![])
-    }
-
-    fn get_all_blobs_exact(
-        &self,
-        _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
-        Ok(vec![])
-    }
-
-    fn get_blobs_for_versioned_hashes(
-        &self,
-        versioned_hashes: &[B256],
-    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        Ok(vec![None; versioned_hashes.len()])
     }
 
     fn get_highest_transaction_by_sender(

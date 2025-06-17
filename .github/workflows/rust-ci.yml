@@ -7,6 +7,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  
 env:
   CARGO_TERM_COLOR: always
 
@@ -54,5 +57,29 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt + lint
-        run: just fmt
+        run: cargo +nightly fmt --all -- --check
+  cargo-clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: clippy
+    steps:
+        - uses: actions/checkout@v4
+        - uses: taiki-e/install-action@just
+        - uses: dtolnay/rust-toolchain@nightly
+          with:
+            components: rustfmt, clippy
+        - name: Cache
+          uses: actions/cache@v3
+          continue-on-error: false
+          with:
+            path: |
+              ~/.cargo/registry/index/
+              ~/.cargo/registry/cache/
+              ~/.cargo/git/db/
+              target/
+            key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+            restore-keys: cargo-test-   
+        - name: clippy
+          run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+        
 

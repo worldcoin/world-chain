@@ -218,7 +218,7 @@ contract TestSetup is Test {
     }
 
     /// @notice Constructs a new pbhEntryPoint without initializing.
-    /// @dev Note that the owner will not be set without initilizing.
+    /// @dev Note that the owner will not be set without initializing.
     function makeUninitPBHEntryPoint() public {
         pbhEntryPointImpl = address(new PBHEntryPointImplV1());
         pbhEntryPoint = IPBHEntryPoint(address(new ERC1967Proxy(pbhEntryPointImpl, new bytes(0x0))));

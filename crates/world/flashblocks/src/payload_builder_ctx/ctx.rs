@@ -12,6 +12,7 @@ use reth_evm::Evm;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
+use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
@@ -23,7 +24,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks + EthChainSpec;
     type Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
-        + MaybeInteropTransaction;
+        + OpPooledTx;
 
     fn spec(&self) -> &Self::ChainSpec;
 

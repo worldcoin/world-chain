@@ -1,4 +1,5 @@
 //! World Chain transaction pool types
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -124,10 +125,12 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         // Ensure that the tx is a valid OP transaction and return early if invalid
         let mut tx_outcome = self.inner.validate_one(origin, tx.clone()).await;
+        if !tx_outcome.is_valid() {
+            return tx_outcome;
+        }
 
         // Decode the calldata and check that all UserOp specify the PBH signature aggregator
-        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input(), true)
-        else {
+        let Ok(calldata) = IPBHEntryPoint::handleAggregatedOpsCall::abi_decode(tx.input()) else {
             return WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
                 .to_outcome(tx);
         };
@@ -145,9 +148,11 @@ where
 
         // Validate all proofs associated with each UserOp
         let mut aggregated_payloads = vec![];
+        let mut seen_nullifier_hashes = HashSet::new();
+
         for aggregated_ops in calldata._0 {
             let buff = aggregated_ops.signature.as_ref();
-            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff, true) {
+            let pbh_payloads = match <Vec<PBHPayload>>::abi_decode(buff) {
                 Ok(pbh_payloads) => pbh_payloads,
                 Err(_) => {
                     return WorldChainPoolTransactionError::from(
@@ -164,7 +169,7 @@ where
 
             let valid_roots = self.root_validator.roots();
 
-            match pbh_payloads
+            let payloads: Vec<PbhPayload> = match pbh_payloads
                 .into_par_iter()
                 .zip(aggregated_ops.userOps)
                 .map(|(payload, op)| {
@@ -177,16 +182,25 @@ where
                         &valid_roots,
                         self.max_pbh_nonce.load(Ordering::Relaxed),
                     )?;
-
                     Ok::<PbhPayload, WorldChainPoolTransactionError>(payload)
                 })
                 .collect::<Result<Vec<PbhPayload>, WorldChainPoolTransactionError>>()
             {
-                Ok(payloads) => {
-                    aggregated_payloads.extend(payloads);
-                }
+                Ok(payloads) => payloads,
                 Err(err) => return err.to_outcome(tx),
+            };
+
+            // Now check for duplicate nullifier_hashes
+            for payload in &payloads {
+                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
+                    return WorldChainPoolTransactionError::from(
+                        PBHValidationError::DuplicateNullifierHash,
+                    )
+                    .to_outcome(tx);
+                }
             }
+
+            aggregated_payloads.extend(payloads);
         }
 
         if let TransactionValidationOutcome::Valid {
@@ -250,29 +264,25 @@ where
     where
         B: reth_primitives_traits::Block,
     {
-        if self.max_pbh_gas_limit.load(Ordering::Relaxed) == 0
-            && self.max_pbh_nonce.load(Ordering::Relaxed) == 0
-        {
-            // Try and fetch the max pbh nonce and gas limit from the state at the latest block
-            if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
-                if let Some(max_pbh_nonce) = state
-                    .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
-                    .ok()
-                    .flatten()
-                {
-                    let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
-                    self.max_pbh_nonce
-                        .store(max_pbh_nonce.to(), Ordering::Relaxed);
-                }
+        // Try and fetch the max pbh nonce and gas limit from the state at the latest block
+        if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
+            if let Some(max_pbh_nonce) = state
+                .storage(self.pbh_entrypoint, PBH_NONCE_LIMIT_SLOT.into())
+                .ok()
+                .flatten()
+            {
+                let max_pbh_nonce = (max_pbh_nonce >> PBH_NONCE_LIMIT_OFFSET) & MAX_U16;
+                self.max_pbh_nonce
+                    .store(max_pbh_nonce.to(), Ordering::Relaxed);
+            }
 
-                if let Some(max_pbh_gas_limit) = state
-                    .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
-                    .ok()
-                    .flatten()
-                {
-                    self.max_pbh_gas_limit
-                        .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
-                }
+            if let Some(max_pbh_gas_limit) = state
+                .storage(self.pbh_entrypoint, PBH_GAS_LIMIT_SLOT.into())
+                .ok()
+                .flatten()
+            {
+                self.max_pbh_gas_limit
+                    .store(max_pbh_gas_limit.to(), Ordering::Relaxed);
             }
         }
         self.inner.on_new_head_block(new_tip_block);
@@ -285,8 +295,6 @@ pub mod tests {
     use alloy_consensus::{Block, Header};
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
-    use ethers_core::rand::rngs::SmallRng;
-    use ethers_core::rand::{Rng, SeedableRng};
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
@@ -414,9 +422,41 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn validate_bundle_no_pbh() {
-        let mut rng = SmallRng::seed_from_u64(42);
+    async fn validate_pbh_bundle_duplicate_nullifier_hash() {
+        const BUNDLER_ACCOUNT: u32 = 9;
+        const USER_ACCOUNT: u32 = 0;
 
+        let pool = setup().await;
+
+        let (user_op, proof) = user_op()
+            .acc(USER_ACCOUNT)
+            .external_nullifier(ExternalNullifier::with_date_marker(
+                DateMarker::from(chrono::Utc::now()),
+                0,
+            ))
+            .call();
+
+        // Lets add two of the same userOp in the bundle so the nullifier hash is the same and we should expect an error
+        let bundle = pbh_bundle(
+            vec![user_op.clone(), user_op],
+            vec![proof.clone().into(), proof.into()],
+        );
+        let calldata = bundle.abi_encode();
+
+        let tx = eip1559().to(PBH_DEV_ENTRYPOINT).input(calldata).call();
+
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
+
+        let res = pool
+            .add_external_transaction(tx.clone().into())
+            .await
+            .expect_err("Failed to add transaction");
+
+        assert!(res.to_string().contains("Duplicate nullifier hash"),);
+    }
+
+    #[tokio::test]
+    async fn validate_bundle_no_pbh() {
         const USER_ACCOUNT: u32 = 0;
 
         let pool = setup().await;
@@ -434,11 +474,7 @@ pub mod tests {
 
         let calldata = bundle.abi_encode();
 
-        let tx = eip1559()
-            // NOTE: Random receiving account
-            .to(rng.gen::<Address>())
-            .input(calldata)
-            .call();
+        let tx = eip1559().to(Address::random()).input(calldata).call();
 
         let tx = eth_tx(USER_ACCOUNT, tx).await;
 

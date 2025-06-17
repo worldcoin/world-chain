@@ -40,7 +40,7 @@ use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTr
 use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     // TODO: Make Evm and ChainSpec generic here?
     pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>>,
@@ -50,24 +50,6 @@ pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
     pub pool: Pool,
-}
-
-impl<Client, Pool> Clone for WorldChainPayloadBuilderCtx<Client, Pool>
-where
-    Client: Clone,
-    Pool: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            verified_blockspace_capacity: self.verified_blockspace_capacity,
-            pbh_entry_point: self.pbh_entry_point,
-            pbh_signature_aggregator: self.pbh_signature_aggregator,
-            client: self.client.clone(),
-            builder_private_key: self.builder_private_key.clone(),
-            pool: self.pool.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
