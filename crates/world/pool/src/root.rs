@@ -59,14 +59,14 @@ where
         if let Ok(latest) = this.client.last_block_number() {
             let block = this.client.block(latest.into())?;
             if let Some(block) = block {
-                let state = this
-                    .client
-                    .state_by_block_hash(block.header().hash_slow())?;
-                if let Ok(Some(latest_root)) = state.storage(this.world_id, LATEST_ROOT_SLOT.into())
-                {
-                    this.latest_root = latest_root;
-                    this.valid_roots
-                        .insert(block.header().timestamp(), latest_root);
+                if let Ok(state) = this.client.state_by_block_hash(block.header().hash_slow()) {
+                    if let Ok(Some(latest_root)) =
+                        state.storage(this.world_id, LATEST_ROOT_SLOT.into())
+                    {
+                        this.latest_root = latest_root;
+                        this.valid_roots
+                            .insert(block.header().timestamp(), latest_root);
+                    }
                 }
             }
         }
