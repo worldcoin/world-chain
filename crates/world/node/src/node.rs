@@ -18,12 +18,12 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpNodeTypes, OpStorage,
+    OpNodeTypes,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{
     OpBuiltPayload, OpEngineApiBuilder, OpEngineTypes, OpEvmConfig, OpPayloadAttributes,
-    OpPayloadBuilderAttributes,
+    OpPayloadBuilderAttributes, OpStorage,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
