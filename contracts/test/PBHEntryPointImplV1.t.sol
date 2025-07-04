@@ -11,6 +11,8 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
 import {IMulticall3} from "../src/interfaces/IMulticall3.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {TestSetup} from "./TestSetup.sol";
 import {TestUtils} from "./TestUtils.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
@@ -24,8 +26,14 @@ import "@lib/PBHExternalNullifier.sol";
 /// @author Worldcoin
 contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
+    using UserOperationLib for PackedUserOperation;
 
-    event PBH(address indexed sender, uint256 indexed signalHash, IPBHEntryPoint.PBHPayload payload);
+    event PBH(
+        address indexed sender,
+        uint256 indexed signalHash,
+        bytes32 indexed userOpHash,
+        IPBHEntryPoint.PBHPayload payload
+    );
     event NumPbhPerMonthSet(uint16 indexed numPbhPerMonth);
     event WorldIdSet(address indexed worldId);
 
@@ -94,12 +102,13 @@ contract PBHEntryPointImplV1Test is TestSetup {
             abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
         uint256 signalHash1 =
             abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
-
+        bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[0].sender, signalHash0, proof0);
+        emit PBH(uoTestFixture[0].sender, signalHash0, userOpHash0, proof0);
 
+        bytes32 userOpHash1 = pbhEntryPoint.getUserOpHash(uoTestFixture[1]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[1].sender, signalHash1, proof1);
+        emit PBH(uoTestFixture[1].sender, signalHash1, userOpHash1, proof1);
 
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
@@ -155,11 +164,13 @@ contract PBHEntryPointImplV1Test is TestSetup {
         uint256 signalHash1 =
             abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
 
+        bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[0].sender, signalHash0, proof0);
+        emit PBH(uoTestFixture[0].sender, signalHash0, userOpHash0, proof0);
 
+        bytes32 userOpHash1 = pbhEntryPoint.getUserOpHash(uoTestFixture[1]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[1].sender, signalHash1, proof1);
+        emit PBH(uoTestFixture[1].sender, signalHash1, userOpHash1, proof1);
 
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
@@ -295,6 +306,12 @@ contract PBHEntryPointImplV1Test is TestSetup {
         assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[0]), 0);
         assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[1]), 0);
         assertEq(pbhEntryPoint.nullifierHashes(nullifierHashes[2]), 0);
+    }
+
+    function test_getUserOpHash(PackedUserOperation memory userOp) public {
+        bytes32 userOpHash = pbhEntryPoint.getUserOpHash(userOp);
+        bytes32 expectedHash = entryPoint.getUserOpHash(userOp);
+        assertEq(userOpHash, expectedHash, "UserOp hash does not match expected hash");
     }
 
     receive() external payable {}

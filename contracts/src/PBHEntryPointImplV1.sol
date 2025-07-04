@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
+import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {ByteHasher} from "./lib/ByteHasher.sol";
 import {PBHExternalNullifier} from "./lib/PBHExternalNullifier.sol";
@@ -19,6 +21,7 @@ import {Base} from "./abstract/Base.sol";
 /// @custom:security-contact security@toolsforhumanity.com
 contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     using ByteHasher for bytes;
+    using UserOperationLib for PackedUserOperation;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
@@ -71,8 +74,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     ///
     /// @param sender The sender of this particular transaction or UserOp.
     /// @param signalHash Signal hash associated with the PBHPayload.
+    /// @param userOpHash The hash of the UserOperation that contains the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
+    event PBH(address indexed sender, uint256 indexed signalHash, bytes32 indexed userOpHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
@@ -280,7 +284,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
                 ).hashToField();
 
                 _verifyPbh(signalHash, pbhPayloads[j]);
-                emit PBH(sender, signalHash, pbhPayloads[j]);
+                bytes32 userOpHash = getUserOpHash(opsPerAggregator[i].userOps[j]);
+                emit PBH(sender, signalHash, userOpHash, pbhPayloads[j]);
             }
         }
 
@@ -354,5 +359,11 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
         }
 
         emit NullifierHashesSpent(msg.sender, _nullifierHashes);
+    }
+
+    /// @notice Returns a hash of the UserOperation.
+    /// @param userOp The UserOperation to hash.
+    function getUserOpHash(PackedUserOperation calldata userOp) public view returns (bytes32 hash) {
+        hash = keccak256(abi.encode(userOp.hash(), address(entryPoint), block.chainid));
     }
 }

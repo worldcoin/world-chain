@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {IMulticall3} from "./IMulticall3.sol";
 
 interface IPBHEntryPoint {
@@ -43,4 +44,5 @@ interface IPBHEntryPoint {
     function spendNullifierHashes(uint256[] calldata _nullifierHashes) external;
     function addBuilder(address builder) external;
     function removeBuilder(address builder) external;
+    function getUserOpHash(PackedUserOperation calldata userOp) external view returns (bytes32);
 }
