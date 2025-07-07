@@ -255,7 +255,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
     // Create the HTTP transport.
     let http = Http::with_client(client, args.rpc_url.parse()?);
     let rpc_client = RpcClient::new(http, false);
-    let provider = ProviderBuilder::new().on_client(rpc_client);
+    let provider = ProviderBuilder::new().connect_client(rpc_client);
     match args.tx_type {
         TxType::Transaction => {
             stream::iter(
@@ -459,7 +459,7 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
     let pbh_nonce = args
         .pbh_nonce
         .map(|n| n as u16)
-        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
+        .unwrap_or_else(|| rand::rng().random_range(0..u16::MAX));
     let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
     let date = chrono::Utc::now().naive_utc().date();
     let date_marker = DateMarker::from(date);
@@ -707,7 +707,7 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
     let pbh_nonce = args
         .pbh_nonce
         .map(|n| n as u16)
-        .unwrap_or_else(|| rand::thread_rng().gen_range(0..u16::MAX));
+        .unwrap_or_else(|| rand::rng().random_range(0..u16::MAX));
     let signer = PrivateKeySigner::from_str(&args.pbh_private_key)?;
     let date = chrono::Utc::now().naive_utc().date();
     let date_marker = DateMarker::from(date);
