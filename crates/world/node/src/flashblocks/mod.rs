@@ -5,15 +5,22 @@ use crate::node::WorldChainPoolBuilder;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::{BasicPayloadServiceBuilder, ComponentsBuilder};
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
+use reth_node_builder::components::PayloadServiceBuilder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpStorage,
+    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    OpNodeTypes,
 };
-use reth_optimism_node::OpEngineTypes;
+use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_rpc::eth::OpEthApiBuilder;
+use reth_optimism_storage::OpStorage;
+use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_trie_db::MerklePatriciaTrie;
+use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_builder_pool::WorldChainTransactionPool;
 mod payload_builder_builder;
 
 /// Type configuration for a regular World Chain node.
@@ -31,6 +38,19 @@ pub struct WorldChainFlashblocksNode {
     pub da_config: OpDAConfig,
 }
 
+/// A [`ComponentsBuilder`] with its generic arguements set to a stack of World Chain Flashblocks specific builders.
+pub type WorldChainFlashblocksNodeComponentBuilder<
+    Node,
+    Payload = FlashblocksPayloadBuilderBuilder,
+> = ComponentsBuilder<
+    Node,
+    WorldChainPoolBuilder,
+    BasicPayloadServiceBuilder<Payload>,
+    OpNetworkBuilder,
+    OpExecutorBuilder,
+    OpConsensusBuilder,
+>;
+
 impl WorldChainFlashblocksNode {
     /// Creates a new instance of the World Chain node type.
     pub fn new(args: WorldChainArgs) -> Self {
@@ -47,23 +67,17 @@ impl WorldChainFlashblocksNode {
     }
 
     /// Returns the components for the given [`RollupArgs`].
-    pub fn components<Node>(
-        &self,
-    ) -> ComponentsBuilder<
-        Node,
-        WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >
+    pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
-        Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
+        Node: FullNodeTypes<Types: OpNodeTypes>,
+        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
+            Node,
+            WorldChainTransactionPool<
+                <Node as FullNodeTypes>::Provider,
+                DiskFileBlobStore,
+                WorldChainPooledTransaction,
             >,
+            OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
         >,
     {
         let WorldChainArgs {
@@ -101,6 +115,7 @@ impl WorldChainFlashblocksNode {
                 signature_aggregator,
                 world_id,
             ))
+            .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     compute_pending_block,
@@ -134,17 +149,14 @@ where
         >,
     >,
 {
-    type ComponentsBuilder = ComponentsBuilder<
-        N,
-        WorldChainPoolBuilder,
-        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >;
+    type ComponentsBuilder = WorldChainFlashblocksNodeComponentBuilder<N>;
 
-    type AddOns =
-        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+    type AddOns = OpAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        OpEthApiBuilder,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components(self)
@@ -152,7 +164,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
-            .with_sequencer(self.args.rollup_args.sequencer_http.clone())
+            .with_sequencer(self.args.rollup_args.sequencer.clone())
             .with_da_config(self.da_config.clone())
             .build()
     }

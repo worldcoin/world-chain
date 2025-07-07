@@ -18,12 +18,12 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpNodeTypes, OpStorage,
+    OpNodeTypes,
 };
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{
     OpBuiltPayload, OpEngineApiBuilder, OpEngineTypes, OpEvmConfig, OpPayloadAttributes,
-    OpPayloadBuilderAttributes,
+    OpPayloadBuilderAttributes, OpStorage,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
@@ -61,7 +61,7 @@ pub struct WorldChainNode {
 }
 
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of World Chain specific builders.
-pub type WorldChainNodeComponentBuilder<Node, Payload = WorldChainPayloadBuilder> =
+pub type WorldChainNodeComponentBuilder<Node, Payload = WorldChainPayloadBuilderBuilder> =
     ComponentsBuilder<
         Node,
         WorldChainPoolBuilder,
@@ -90,7 +90,7 @@ impl WorldChainNode {
     pub fn components<Node>(&self) -> WorldChainNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
-        BasicPayloadServiceBuilder<WorldChainPayloadBuilder>: PayloadServiceBuilder<
+        BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
             Node,
             WorldChainTransactionPool<
                 <Node as FullNodeTypes>::Provider,
@@ -457,7 +457,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
 
 impl<Node, S, Txs>
     PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>, OpEvmConfig>
-    for WorldChainPayloadBuilder<Txs>
+    for WorldChainPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<
         Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,

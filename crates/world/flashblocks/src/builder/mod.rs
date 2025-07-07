@@ -2,6 +2,7 @@ use crate::{
     payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::Encodable2718;
 use alloy_primitives::U256;
 use eyre::eyre::ContextCompat;
@@ -13,12 +14,11 @@ use reth::{
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm,
 };
-use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     txpool::{interop::MaybeInteropTransaction, OpPooledTx},
@@ -31,12 +31,9 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::NodePrimitives;
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
-    StateProviderFactory, StateRootProvider, StorageRootProvider,
+    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::{
@@ -104,6 +101,7 @@ impl<Pool, Client, Evm, N, CtxBuilder, Txs>
     FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
 where
     N: OpPayloadPrimitives,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
@@ -123,8 +121,7 @@ where
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        T:
-            PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
+        T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
     {
         let BuildArguments {
             mut cached_reads,
@@ -203,9 +200,11 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| {
+            NoopPayloadTransactions::<Pool::Transaction>::default()
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -372,7 +371,7 @@ where
         let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
             vec![execution_result.receipts],
-            block.number,
+            block.header().number(),
             Vec::new(),
         );
 
@@ -383,7 +382,7 @@ where
                 execution_output: Arc::new(execution_outcome),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: Arc::new(trie_updates),
+            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
@@ -488,10 +487,10 @@ where
             block_number,
             gas_limit: ctx.attributes().gas_limit.context("Missing gas limit")?,
             timestamp: ctx.attributes().timestamp(),
-            extra_data: block_header.extra_data.clone(),
+            extra_data: block_header.extra_data().clone(),
             base_fee_per_gas: U256::from(
                 block_header
-                    .base_fee_per_gas
+                    .base_fee_per_gas()
                     .context("Missing base fee per gas")?,
             ),
         };
@@ -506,10 +505,10 @@ where
         let withdrawals = ctx.attributes().payload_attributes.withdrawals.clone().0;
 
         let diff = ExecutionPayloadFlashblockDeltaV1 {
-            state_root: block_header.state_root,
-            receipts_root: block_header.receipts_root,
-            logs_bloom: block_header.logs_bloom,
-            gas_used: block_header.gas_used,
+            state_root: block_header.state_root(),
+            receipts_root: block_header.receipts_root(),
+            logs_bloom: block_header.logs_bloom(),
+            gas_used: block_header.gas_used(),
 
             block_hash: outcome.block.sealed_block().hash(),
 

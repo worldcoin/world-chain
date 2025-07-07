@@ -55,6 +55,7 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
 impl FlashblocksPayloadBuilderBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         compute_pending_block: bool,
         verified_blockspace_capacity: u8,
@@ -126,6 +127,7 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
 
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
     /// given EVM config.
+    #[allow(clippy::type_complexity)]
     pub fn build<Node, S>(
         self,
         evm_config: OpEvmConfig,
@@ -177,7 +179,8 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
     }
 }
 
-impl<Node, S, Txs> PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>>
+impl<Node, S, Txs>
+    PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>, OpEvmConfig>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<
@@ -207,11 +210,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
+        evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(
-            OpEvmConfig::new(ctx.chain_spec(), Default::default()),
-            ctx,
-            pool,
-        )
+        self.build(evm_config, ctx, pool)
     }
 }

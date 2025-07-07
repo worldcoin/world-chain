@@ -7,7 +7,6 @@ use eyre::eyre::eyre;
 use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
-use reth::chainspec::EthChainSpec;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
@@ -18,7 +17,8 @@ use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::ConfigureEvm;
 use reth_evm::Evm;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::txpool::conditional::MaybeConditionalTransaction;
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
@@ -26,8 +26,8 @@ use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx}
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
+use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
 use revm_primitives::{Address, U256};
@@ -41,9 +41,14 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtx<Client, Pool> {
-    // TODO: Make Evm and ChainSpec generic here?
-    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>>,
+pub struct WorldChainPayloadBuilderCtx<Client, Pool>
+where
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + Clone,
+{
+    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -65,10 +70,8 @@ pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
 impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
 where
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
-        + Send
-        + Sync
-        + BlockReaderIdExt
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
     Pool: Send + Sync + TransactionPool,
 {
@@ -96,15 +99,13 @@ where
 impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
 where
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
-        + Send
-        + Sync
-        + BlockReaderIdExt
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
     Pool: Send + Sync + TransactionPool,
 {
     type Evm = OpEvmConfig;
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = <Client as ChainSpecProvider>::ChainSpec;
     type Transaction = WorldChainPooledTransaction;
 
     fn spec(&self) -> &Self::ChainSpec {
@@ -197,17 +198,23 @@ where
         self.inner.execute_sequencer_transactions(builder)
     }
 
-    fn execute_best_transactions<Builder, Txs>(
+    /// Executes the given best transactions and updates the execution info.
+    ///
+    /// Returns `Ok(Some(())` if the job was cancelled.
+    fn execute_best_transactions<TXS, Builder>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
-        mut best_txs: Txs,
+        mut best_txs: TXS,
         _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
         <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>,
+        <<<<Builder as BlockBuilder>::Executor as BlockExecutor>::Evm as reth_evm::Evm>::DB as revm::Database>::Error: Send + Sync + 'static,
+        TXS: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
     {
         let mut block_gas_limit = builder.evm_mut().block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
@@ -219,8 +226,16 @@ where
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
+            let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
-            if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
+
+            if info.is_tx_over_limits(
+                tx_da_size,
+                block_gas_limit,
+                tx_da_limit,
+                block_da_limit,
+                tx.gas_limit(),
+            ) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -228,21 +243,12 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.inner.conditional() {
+            if let Some(conditional_options) = pooled_tx.conditional_options() {
                 if validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
-            }
-
-            // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as
-                // invalid which also removes all dependent transaction from
-                // the iterator before we can continue
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
@@ -321,14 +327,17 @@ where
                     PayloadBuilderError::Other(e.into())
                 },
             )?;
-            let gas_used = builder.execute_transaction(tx.clone()).map_err(
-                |e: BlockExecutionError| {
-                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed");
-                    PayloadBuilderError::evm(e)
-                },
-            )?;
 
-            self.commit_changes(info, base_fee, gas_used, tx);
+            // Try to execute the builder tx. In the event that execution fails due to
+            // insufficient funds, continue with the built payload. This ensures that
+            // PBH transactions still receive priority inclusion, even if the PBH nullifier
+            // is not spent rather than sitting in the default execution client's mempool.
+            match builder.execute_transaction(tx.clone()) {
+                Ok(gas_used) => self.commit_changes(info, base_fee, gas_used, tx),
+                Err(e) => {
+                    error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
+                }
+            }
         }
 
         if !invalid_txs.is_empty() {
@@ -346,7 +355,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Send
         + Sync
-        + BlockReaderIdExt
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + Clone,
     Pool: Send + Sync + TransactionPool,
 {
@@ -404,19 +413,19 @@ pub fn spend_nullifiers_tx<DB, EVM, Client, Pool>(
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
 where
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Send
         + Sync
-        + BlockReaderIdExt
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + Clone,
     Pool: Send + Sync + TransactionPool,
     EVM: Evm<DB = DB>,
     DB: revm::Database,
+    <DB as revm::Database>::Error: Send + Sync + 'static,
 {
     let nonce = evm
         .db_mut()
-        .basic(ctx.builder_private_key.address())
-        .expect("idk")
+        .basic(ctx.builder_private_key.address())?
         .unwrap_or_default()
         .nonce;
 
@@ -425,7 +434,7 @@ where
         .gas_limit(dyn_gas_limit(nullifier_hashes.len() as u64))
         .max_priority_fee_per_gas(evm.block().basefee.into())
         .max_fee_per_gas(evm.block().basefee.into())
-        .with_chain_id(ctx.spec().chain_id())
+        .with_chain_id(evm.chain_id())
         .with_call(&spendNullifierHashesCall {
             _nullifierHashes: nullifier_hashes.into_iter().collect(),
         })
@@ -435,5 +444,5 @@ where
 
     let signature = ctx.builder_private_key.sign_transaction_sync(&mut tx)?;
     let signed: OpTransactionSigned = tx.into_signed(signature).into();
-    Ok(signed.into_recovered_unchecked()?)
+    Ok(signed.try_into_recovered_unchecked()?)
 }

@@ -9,7 +9,6 @@ license.workspace = true
 [dependencies]
 # reth
 reth.workspace = true
-reth-execution-types.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
@@ -17,26 +16,18 @@ reth-evm.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
-reth-primitives-traits.workspace = true
 reth-payload-util.workspace = true
-reth-payload-builder-primitives.workspace = true
-reth-payload-primitives.workspace = true
 revm.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-optimism-payload-builder.workspace = true
-reth-optimism-primitives.workspace = true
-reth-optimism-consensus.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types-eth.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-serde.workspace = true
 
 # tokio

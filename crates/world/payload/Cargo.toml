@@ -45,7 +45,6 @@ alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 op-alloy-rpc-types.workspace = true
 alloy-rlp.workspace = true
-op-revm.workspace = true
 
 # misc
 eyre.workspace = true

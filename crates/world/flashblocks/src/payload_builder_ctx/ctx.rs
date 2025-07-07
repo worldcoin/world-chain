@@ -2,7 +2,6 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
 use reth::builder::PayloadBuilderError;
 use reth::{
-    chainspec::EthChainSpec,
     payload::PayloadId,
     revm::{Database, State},
 };
@@ -11,7 +10,6 @@ use reth_evm::block::BlockExecutor;
 use reth_evm::Evm;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::interop::MaybeInteropTransaction;
 use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
@@ -22,7 +20,7 @@ use revm::context::BlockEnv;
 
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
-    type ChainSpec: OpHardforks + EthChainSpec;
+    type ChainSpec: OpHardforks;
     type Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
         + OpPooledTx;
 
@@ -60,7 +58,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
-    fn execute_best_transactions<Builder, Txs>(
+    fn execute_best_transactions<Txs, Builder>(
         &self,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
@@ -70,7 +68,8 @@ pub trait PayloadBuilderCtx: Send + Sync {
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
         Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>;
+        <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>,
+        <<<<Builder as BlockBuilder>::Executor as BlockExecutor>::Evm as Evm>::DB as revm::Database>::Error: Send + Sync + 'static;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

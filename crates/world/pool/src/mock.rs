@@ -33,12 +33,12 @@ use reth_primitives::{
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{
     providers::ConsistentViewError, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider,
-    ChangeSetReader, DatabaseProvider, DatabaseProviderFactory, EthStorage, ExecutionOutcome,
-    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
+    ChainSpecProvider, ChangeSetReader, DatabaseProvider, DatabaseProviderFactory, EthStorage,
+    ExecutionOutcome, HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateCommitmentProvider,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{
@@ -544,17 +544,13 @@ impl BlockReader for MockEthProvider {
         let lock = self.blocks.lock();
         match id {
             BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
-            BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
+            BlockHashOrNumber::Number(num) => {
+                Ok(lock.values().find(|b| b.header.number == num).cloned())
+            }
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Block<OpTransactionSigned>>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -740,19 +736,7 @@ impl HashedPostStateProvider for MockEthProvider {
     }
 }
 
-impl StateProvider for MockEthProvider {
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let lock = self.accounts.lock();
-        Ok(lock
-            .get(&account)
-            .and_then(|account| account.storage.get(&storage_key))
-            .copied())
-    }
-
+impl BytecodeReader for MockEthProvider {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
@@ -766,6 +750,20 @@ impl StateProvider for MockEthProvider {
                 _ => None,
             }
         }))
+    }
+}
+
+impl StateProvider for MockEthProvider {
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let lock = self.accounts.lock();
+        Ok(lock
+            .get(&account)
+            .and_then(|account| account.storage.get(&storage_key))
+            .copied())
     }
 }
 
