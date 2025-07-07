@@ -113,7 +113,7 @@ alloy-rpc-types-eth = { version = "1.0.16", default-features = false }
 alloy-rpc-types = { version = "1.0.16", features = [
   "eth",
 ], default-features = false }
-alloy-rpc-types-engine = { version = "1.0.9" }
+alloy-rpc-types-engine = { version = "1.0.16" }
 alloy-rlp = { version = "0.3.10", default-features = false }
 alloy-eips = { version = "1.0.16", default-features = false }
 alloy-genesis = { version = "1.0.16", default-features = false }
