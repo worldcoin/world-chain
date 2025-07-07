@@ -73,10 +73,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
-    /// @param signalHash Signal hash associated with the PBHPayload.
     /// @param userOpHash The hash of the UserOperation that contains the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 indexed signalHash, bytes32 indexed userOpHash, PBHPayload payload);
+    event PBH(address indexed sender, bytes32 indexed userOpHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
@@ -285,7 +284,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
 
                 _verifyPbh(signalHash, pbhPayloads[j]);
                 bytes32 userOpHash = getUserOpHash(opsPerAggregator[i].userOps[j]);
-                emit PBH(sender, signalHash, userOpHash, pbhPayloads[j]);
+                emit PBH(sender, userOpHash, pbhPayloads[j]);
             }
         }
 

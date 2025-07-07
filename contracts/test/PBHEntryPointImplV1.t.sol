@@ -28,12 +28,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
     using ByteHasher for bytes;
     using UserOperationLib for PackedUserOperation;
 
-    event PBH(
-        address indexed sender,
-        uint256 indexed signalHash,
-        bytes32 indexed userOpHash,
-        IPBHEntryPoint.PBHPayload payload
-    );
+    event PBH(address indexed sender, bytes32 indexed userOpHash, IPBHEntryPoint.PBHPayload payload);
     event NumPbhPerMonthSet(uint16 indexed numPbhPerMonth);
     event WorldIdSet(address indexed worldId);
 
@@ -98,17 +93,13 @@ contract PBHEntryPointImplV1Test is TestSetup {
             signature: aggregatedSignature
         });
 
-        uint256 signalHash0 =
-            abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
-        uint256 signalHash1 =
-            abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
         bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[0].sender, signalHash0, userOpHash0, proof0);
+        emit PBH(uoTestFixture[0].sender, userOpHash0, proof0);
 
         bytes32 userOpHash1 = pbhEntryPoint.getUserOpHash(uoTestFixture[1]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[1].sender, signalHash1, userOpHash1, proof1);
+        emit PBH(uoTestFixture[1].sender, userOpHash1, proof1);
 
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
@@ -159,18 +150,13 @@ contract PBHEntryPointImplV1Test is TestSetup {
             signature: aggregatedSignature
         });
 
-        uint256 signalHash0 =
-            abi.encodePacked(uoTestFixture[0].sender, uoTestFixture[0].nonce, uoTestFixture[0].callData).hashToField();
-        uint256 signalHash1 =
-            abi.encodePacked(uoTestFixture[1].sender, uoTestFixture[1].nonce, uoTestFixture[1].callData).hashToField();
-
         bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[0].sender, signalHash0, userOpHash0, proof0);
+        emit PBH(uoTestFixture[0].sender, userOpHash0, proof0);
 
         bytes32 userOpHash1 = pbhEntryPoint.getUserOpHash(uoTestFixture[1]);
         vm.expectEmit(true, true, true, true);
-        emit PBH(uoTestFixture[1].sender, signalHash1, userOpHash1, proof1);
+        emit PBH(uoTestFixture[1].sender, userOpHash1, proof1);
 
         pbhEntryPoint.handleAggregatedOps(userOpsPerAggregator, payable(address(this)));
     }
