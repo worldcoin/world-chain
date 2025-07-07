@@ -21,6 +21,7 @@ use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
     SealedHeader, TransactionMeta, TransactionSigned,
 };
+use reth_provider::BytecodeReader;
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider,
@@ -161,6 +162,12 @@ impl BlockHashReader for WorldChainNoopProvider {
     }
 }
 
+impl BytecodeReader for WorldChainNoopProvider {
+    fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(None)
+    }
+}
+
 impl BlockNumReader for WorldChainNoopProvider {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(ChainInfo::default())
@@ -193,11 +200,7 @@ impl BlockReader for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -518,10 +521,6 @@ impl StateProvider for WorldChainNoopProvider {
         _account: Address,
         _storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        Ok(None)
-    }
-
-    fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
 }
