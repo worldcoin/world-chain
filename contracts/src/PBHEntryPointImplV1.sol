@@ -362,7 +362,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
 
     /// @notice Returns a hash of the UserOperation.
     /// @param userOp The UserOperation to hash.
-    function getUserOpHash(PackedUserOperation calldata userOp) public view returns (bytes32 hash) {
+    function getUserOpHash(PackedUserOperation calldata userOp) public view virtual returns (bytes32 hash) {
         hash = keccak256(abi.encode(userOp.hash(), address(entryPoint), block.chainid));
     }
 }
