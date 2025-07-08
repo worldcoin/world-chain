@@ -29,14 +29,14 @@ ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --release --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
+    cargo chef cook --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
 
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --release --bin ${WORLD_CHAIN_BUILDER_BIN}
+    cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
 FROM debian:bookworm-slim
@@ -62,7 +62,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
-COPY --from=builder /app/target/release/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
+COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 
