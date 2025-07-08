@@ -300,5 +300,27 @@ contract PBHEntryPointImplV1Test is TestSetup {
         assertEq(userOpHash, expectedHash, "UserOp hash does not match expected hash");
     }
 
+    function test_getUnspentNullifierHash(uint256[] memory nullifierHashes) public {
+        vm.prank(BLOCK_BUILDER);
+
+        // Spend the first 5
+        uint256[] memory nullifierHashesToSpend = new uint256[](5);
+        for (uint256 i = 0; i < 5; i++) {
+            nullifierHashesToSpend[i] = i;
+        }
+        pbhEntryPoint.spendNullifierHashes(nullifierHashesToSpend);
+
+        // Expect the first the returned index to be 5
+        assertEq(pbhEntryPoint.getUnspentNullifierHash(nullifierHashes), 5);
+
+        uint256[] memory firstThreeNullifierHashes = new uint256[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            firstThreeNullifierHashes[i] = i;
+        }
+
+        // Expect the last returned index to be -1
+        assertEq(pbhEntryPoint.getUnspentNullifierHash(firstThreeNullifierHashes), -1);
+    }
+
     receive() external payable {}
 }

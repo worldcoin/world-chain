@@ -45,4 +45,5 @@ interface IPBHEntryPoint {
     function addBuilder(address builder) external;
     function removeBuilder(address builder) external;
     function getUserOpHash(PackedUserOperation calldata userOp) external view returns (bytes32);
+    function getUnspentNullifierHash(uint256[] calldata nullifierHashes) external view returns (int256);
 }
