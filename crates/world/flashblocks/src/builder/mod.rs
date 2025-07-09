@@ -298,6 +298,10 @@ where
         // 1. Setup relevant variables
         let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
         let num_flashblocks = self.block_time / self.flashblock_interval;
+        // TODO: We need a way to not let the gas limit here censor high gas transactions that are under `total_gas_limit`
+        //       at the same time we need to ensure that sum([g_0, g_1, ..., g_n]) < `total_gas_limit`.
+        //       One potential option is to set sup(g_0) = total_gas_limit,
+        //       then sup(g_i) = total_gas_limit - sum([g_0, ..., g_(i-1)]) if sup(g_i) <= 0 then we can stop
         let flashblock_gas_limit = total_gas_limit / num_flashblocks;
 
         self.total_gas_limit = total_gas_limit;
