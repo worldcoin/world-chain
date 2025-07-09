@@ -372,7 +372,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     /// @return The index of the first unspent nullifier hash in the given list.
     /// @dev Returns -1 if no unspent nullifier hash is found.
     function getFirstUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
-        for (uint256 i = 0; i < hashes.length; i++) {
+        for (uint256 i = 0; i < hashes.length; ++i) {
             if (nullifierHashes[i] == 0) {
                 return int256(i);
             }
@@ -388,7 +388,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
         uint256[] memory tempIndexes = new uint256[](hashes.length);
         uint256 unspentCount = 0;
 
-        for (uint256 i = 0; i < hashes.length; i++) {
+        for (uint256 i = 0; i < hashes.length; ++i) {
             if (nullifierHashes[hashes[i]] == 0) {
                 tempIndexes[unspentCount] = i;
                 unspentCount++;
