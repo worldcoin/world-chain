@@ -367,7 +367,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     }
 
     /// @notice Returns the index of the first unspent nullifier hash in the given list.
-    /// @notice This function assumes the array input represents the nullifier hashes for a given sempahore key and monotonically increasing nonces for a given month.
+    /// @notice This function assumes the input array represents nullifier hashes that are
+    /// @notice generated from the same sempahore key and monotonically increasing nonces.
     /// @param hashes The list of nullifier hashes to search through.
     /// @return The index of the first unspent nullifier hash in the given list.
     /// @dev Returns -1 if no unspent nullifier hash is found.
