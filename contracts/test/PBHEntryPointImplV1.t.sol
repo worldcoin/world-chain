@@ -300,7 +300,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
         assertEq(userOpHash, expectedHash, "UserOp hash does not match expected hash");
     }
 
-    function test_getUnspentNullifierHash() public {
+    function test_getFirstUnspentNullifierHash_Returns_CorrectIndex() public {
         vm.prank(BLOCK_BUILDER);
 
         uint256[] memory nullifierHashes = new uint256[](7);
@@ -316,15 +316,49 @@ contract PBHEntryPointImplV1Test is TestSetup {
         pbhEntryPoint.spendNullifierHashes(nullifierHashesToSpend);
 
         // Expect the first the returned index to be 5
-        assertEq(pbhEntryPoint.getUnspentNullifierHash(nullifierHashes), 5);
+        assertEq(pbhEntryPoint.getFirstUnspentNullifierHash(nullifierHashes), 5);
+    }
+
+    function test_getFirstUnspentNullifierHash_Returns_Negative_One() public {
+        vm.prank(BLOCK_BUILDER);
+
+        uint256[] memory nullifierHashes = new uint256[](7);
+        for (uint256 i = 0; i < 7; i++) {
+            nullifierHashes[i] = i;
+        }
+
+        pbhEntryPoint.spendNullifierHashes(nullifierHashes);
 
         uint256[] memory firstThreeNullifierHashes = new uint256[](3);
         for (uint256 i = 0; i < 3; i++) {
             firstThreeNullifierHashes[i] = i;
         }
-
         // Expect the last returned index to be -1
-        assertEq(pbhEntryPoint.getUnspentNullifierHash(firstThreeNullifierHashes), -1);
+        assertEq(pbhEntryPoint.getFirstUnspentNullifierHash(firstThreeNullifierHashes), -1);
+    }
+
+    function test_getUnspentNullifierHashes() public {
+        vm.prank(BLOCK_BUILDER);
+
+        uint256[] memory nullifierHashes = new uint256[](7);
+        for (uint256 i = 0; i < 7; i++) {
+            nullifierHashes[i] = i;
+        }
+
+        uint256[] memory threeHashes = new uint256[](3);
+
+        threeHashes[0] = 1;
+        threeHashes[1] = 2;
+        threeHashes[2] = 4;
+
+        pbhEntryPoint.spendNullifierHashes(threeHashes);
+
+        uint256[] memory unspentHashes = pbhEntryPoint.getUnspentNullifierHashes(nullifierHashes);
+        assertEq(unspentHashes.length, 4);
+        assertEq(unspentHashes[0], 0);
+        assertEq(unspentHashes[1], 3);
+        assertEq(unspentHashes[2], 5);
+        assertEq(unspentHashes[3], 6);
     }
 
     receive() external payable {}

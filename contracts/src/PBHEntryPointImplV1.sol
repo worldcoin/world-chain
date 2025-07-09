@@ -367,15 +367,39 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     }
 
     /// @notice Returns the index of the first unspent nullifier hash in the given list.
+    /// @notice This function assumes the array input represents the nullifier hashes for a given sempahore key and monotonically increasing nonces for a given month.
     /// @param hashes The list of nullifier hashes to search through.
     /// @return The index of the first unspent nullifier hash in the given list.
     /// @dev Returns -1 if no unspent nullifier hash is found.
-    function getUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
-        for (uint256 i = 0; i < hashes.length; ++i) {
+    function getFirstUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
+        for (uint256 i = 0; i < hashes.length; i++) {
             if (nullifierHashes[i] == 0) {
                 return int256(i);
             }
         }
         return -1;
+    }
+
+    /// @notice Returns all indexes of unspent nullifier hashes in the given list.
+    /// @param hashes The list of nullifier hashes to search through.
+    /// @return The indexes of the unspent nullifier hashes in the given list.
+    /// @dev Returns an empty array if no unspent nullifier hashes are found.
+    function getUnspentNullifierHashes(uint256[] calldata hashes) public view virtual returns (uint256[] memory) {
+        uint256[] memory tempIndexes = new uint256[](hashes.length);
+        uint256 unspentCount = 0;
+
+        for (uint256 i = 0; i < hashes.length; i++) {
+            if (nullifierHashes[hashes[i]] == 0) {
+                tempIndexes[unspentCount] = i;
+                unspentCount++;
+            }
+        }
+
+        uint256[] memory unspentIndexes = new uint256[](unspentCount);
+        for (uint256 i = 0; i < unspentCount; ++i) {
+            unspentIndexes[i] = tempIndexes[i];
+        }
+
+        return unspentIndexes;
     }
 }
