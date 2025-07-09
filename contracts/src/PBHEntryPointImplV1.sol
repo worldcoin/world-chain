@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
+import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
 import {ByteHasher} from "./lib/ByteHasher.sol";
 import {PBHExternalNullifier} from "./lib/PBHExternalNullifier.sol";
@@ -19,6 +21,7 @@ import {Base} from "./abstract/Base.sol";
 /// @custom:security-contact security@toolsforhumanity.com
 contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     using ByteHasher for bytes;
+    using UserOperationLib for PackedUserOperation;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
@@ -70,9 +73,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     /// @notice Emitted once for each successful PBH verification.
     ///
     /// @param sender The sender of this particular transaction or UserOp.
-    /// @param signalHash Signal hash associated with the PBHPayload.
+    /// @param userOpHash The hash of the UserOperation that contains the PBHPayload.
     /// @param payload The zero-knowledge proof that demonstrates the claimer is registered with World ID.
-    event PBH(address indexed sender, uint256 indexed signalHash, PBHPayload payload);
+    event PBH(address indexed sender, bytes32 indexed userOpHash, PBHPayload payload);
 
     /// @notice Emitted when the World ID address is set.
     ///
@@ -280,7 +283,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
                 ).hashToField();
 
                 _verifyPbh(signalHash, pbhPayloads[j]);
-                emit PBH(sender, signalHash, pbhPayloads[j]);
+                bytes32 userOpHash = getUserOpHash(opsPerAggregator[i].userOps[j]);
+                emit PBH(sender, userOpHash, pbhPayloads[j]);
             }
         }
 
@@ -354,5 +358,49 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
         }
 
         emit NullifierHashesSpent(msg.sender, _nullifierHashes);
+    }
+
+    /// @notice Returns a hash of the UserOperation.
+    /// @param userOp The UserOperation to hash.
+    function getUserOpHash(PackedUserOperation calldata userOp) public view virtual returns (bytes32 hash) {
+        hash = keccak256(abi.encode(userOp.hash(), address(entryPoint), block.chainid));
+    }
+
+    /// @notice Returns the index of the first unspent nullifier hash in the given list.
+    /// @notice This function assumes the input array represents nullifier hashes that are
+    /// @notice generated from the same sempahore key and monotonically increasing nonces.
+    /// @param hashes The list of nullifier hashes to search through.
+    /// @return The index of the first unspent nullifier hash in the given list.
+    /// @dev Returns -1 if no unspent nullifier hash is found.
+    function getFirstUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
+        for (uint256 i = 0; i < hashes.length; ++i) {
+            if (nullifierHashes[i] == 0) {
+                return int256(i);
+            }
+        }
+        return -1;
+    }
+
+    /// @notice Returns all indexes of unspent nullifier hashes in the given list.
+    /// @param hashes The list of nullifier hashes to search through.
+    /// @return The indexes of the unspent nullifier hashes in the given list.
+    /// @dev Returns an empty array if no unspent nullifier hashes are found.
+    function getUnspentNullifierHashes(uint256[] calldata hashes) public view virtual returns (uint256[] memory) {
+        uint256[] memory tempIndexes = new uint256[](hashes.length);
+        uint256 unspentCount = 0;
+
+        for (uint256 i = 0; i < hashes.length; ++i) {
+            if (nullifierHashes[hashes[i]] == 0) {
+                tempIndexes[unspentCount] = i;
+                unspentCount++;
+            }
+        }
+
+        uint256[] memory unspentIndexes = new uint256[](unspentCount);
+        for (uint256 i = 0; i < unspentCount; ++i) {
+            unspentIndexes[i] = tempIndexes[i];
+        }
+
+        return unspentIndexes;
     }
 }
