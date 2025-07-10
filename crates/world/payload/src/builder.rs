@@ -403,7 +403,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         builder.apply_pre_execution_changes()?;
 
         // 2. execute sequencer transactions
-        let mut info = op_ctx.execute_sequencer_transactions(&mut builder)?;
+        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
         // 3. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
@@ -417,10 +417,10 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             }
 
             // check if the new payload is even more valuable
-            if !ctx.inner.is_better_payload(info.total_fees) {
+            if !ctx.inner.is_better_payload(info.info.total_fees) {
                 // can skip building the block
                 return Ok(BuildOutcomeKind::Aborted {
-                    fees: info.total_fees,
+                    fees: info.info.total_fees,
                 });
             }
         }
@@ -457,7 +457,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let payload = OpBuiltPayload::new(
             op_ctx.payload_id(),
             sealed_block,
-            info.total_fees,
+            info.info.total_fees,
             Some(executed),
         );
 
@@ -494,7 +494,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
-        let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
+        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
         if !ctx.inner.attributes().no_tx_pool {
             let best_txs = best(
                 ctx.inner

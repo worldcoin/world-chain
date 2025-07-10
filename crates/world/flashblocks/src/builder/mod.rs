@@ -1,10 +1,13 @@
 use crate::{
-    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    payload::{
+        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
+        FlashblocksPayloadV1,
+    },
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::Encodable2718;
-use alloy_primitives::U256;
+use alloy_primitives::{map::foldhash::HashMap, Address, U256};
 use eyre::eyre::ContextCompat;
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
@@ -25,23 +28,24 @@ use reth_optimism_node::{
     OpNextBlockEnvAttributes,
 };
 use reth_optimism_payload_builder::{
-    builder::ExecutionInfo, config::OpBuilderConfig, OpPayloadPrimitives,
-};
-use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
+use reth_optimism_payload_builder::{config::OpBuilderConfig, OpPayloadPrimitives};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use revm::database::BundleState;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
+
+use crate::payload_builder_ctx::ExecutionInfo;
 
 mod retaining_payload_txs;
 
@@ -289,7 +293,6 @@ where
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
-        // NOTE: Do we need to init this every time?
         let mut db = State::builder()
             .with_database(db)
             .with_bundle_update()
@@ -314,26 +317,21 @@ where
         let outcome = self
             .build_flashblock(&mut db, &state_provider, ctx, 0)?
             .expect("Missing outcome");
-
-        let payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+        let bundle = db.take_bundle();
+        let payload = Self::create_payload(&outcome, ctx, 0, bundle).unwrap();
         let _ = self.tx.send(payload);
 
         let elapsed = now.elapsed().as_millis() as u64;
         let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
         std::thread::sleep(Duration::from_millis(sleep_time));
 
-        if ctx.attributes().no_tx_pool {
-            // TODO: What do do here? Clearly no reason to produce flashblocks
-            // should we just return early?
-        }
-
         // Produce intermediate flashblocks
         for flashblock_idx in 1..num_flashblocks - 1 {
             let now = Instant::now();
 
             self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
-
-            let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+            let bundle = db.take_bundle();
+            let mut payload = Self::create_payload(&outcome, ctx, flashblock_idx, bundle).unwrap();
             payload.base = None;
             let _ = self.tx.send(payload);
 
@@ -348,17 +346,18 @@ where
         else {
             return Ok(BuildOutcomeKind::Cancelled);
         };
-        let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
+        let bundle = db.take_bundle();
+        let mut payload = Self::create_payload(&outcome, ctx, num_flashblocks, bundle).unwrap();
         payload.base = None;
         let _ = self.tx.send(payload);
 
         let (info, outcome, _diff_txs) = outcome;
 
         // check if the new payload is even more valuable
-        if !ctx.is_better_payload(info.total_fees) {
+        if !ctx.is_better_payload(info.info.total_fees) {
             // can skip building the block
             return Ok(BuildOutcomeKind::Aborted {
-                fees: info.total_fees,
+                fees: info.info.total_fees,
             });
         }
 
@@ -394,7 +393,7 @@ where
         let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
-            info.total_fees,
+            info.info.total_fees,
             Some(executed),
         );
 
@@ -414,7 +413,14 @@ where
         state_provider: impl StateProvider,
         ctx: &Ctx,
         idx: u64,
-    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>)>, PayloadBuilderError>
+    ) -> Result<
+        Option<(
+            ExecutionInfo<<<Ctx as PayloadBuilderCtx>::Evm as ConfigureEvm>::Primitives>,
+            BlockBuilderOutcome<N>,
+            Vec<Tx>,
+        )>,
+        PayloadBuilderError,
+    >
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec,
@@ -464,9 +470,14 @@ where
     }
 
     pub fn create_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
-        (_exec_info, outcome, diff_txs): &(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>),
+        (info, outcome, diff_txs): &(
+            ExecutionInfo<<<Ctx as PayloadBuilderCtx>::Evm as ConfigureEvm>::Primitives>,
+            BlockBuilderOutcome<N>,
+            Vec<Tx>,
+        ),
         ctx: &Ctx,
         idx: u64,
+        bundle_state: BundleState,
     ) -> eyre::Result<FlashblocksPayloadV1>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
@@ -513,11 +524,23 @@ where
             receipts_root: block_header.receipts_root(),
             logs_bloom: block_header.logs_bloom(),
             gas_used: block_header.gas_used(),
-
             block_hash: outcome.block.sealed_block().hash(),
-
             transactions,
             withdrawals,
+        };
+
+        let new_account_balances = bundle_state
+            .state()
+            .iter()
+            .filter_map(|(address, account)| {
+                account.info.as_ref().map(|info| (*address, info.balance))
+            })
+            .collect::<HashMap<Address, U256>>();
+
+        let metadata: FlashblocksMetadata<N> = FlashblocksMetadata {
+            receipts: HashMap::default(),
+            new_account_balances,
+            block_number: ctx.parent().number + 1,
         };
 
         let payload = FlashblocksPayloadV1 {
@@ -525,8 +548,7 @@ where
             index: idx,
             base: Some(base),
             diff,
-            // TODO: Fill out metadata
-            metadata: serde_json::Value::Null,
+            metadata: serde_json::to_value(metadata)?,
         };
 
         Ok(payload)

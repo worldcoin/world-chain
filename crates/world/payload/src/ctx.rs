@@ -4,7 +4,9 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+use flashblocks::payload_builder_ctx::{
+    ExecutionInfo, PayloadBuilderCtx, PayloadBuilderCtxBuilder,
+};
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
@@ -22,9 +24,9 @@ use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
-use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
+use reth_optimism_payload_builder::builder::OpPayloadBuilderCtx;
 use reth_optimism_payload_builder::config::OpDAConfig;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignerRecoverable;
@@ -78,21 +80,21 @@ where
     /// After computing the execution result and state we can commit changes to the database
     fn commit_changes(
         &self,
-        info: &mut ExecutionInfo,
+        info: &mut ExecutionInfo<OpPrimitives>,
         base_fee: u64,
         gas_used: u64,
         tx: Recovered<OpTransactionSigned>,
     ) {
         // add gas used by the transaction to cumulative gas used, before creating the
         // receipt
-        info.cumulative_gas_used += gas_used;
-        info.cumulative_da_bytes_used += tx.length() as u64;
+        info.info.cumulative_gas_used += gas_used;
+        info.info.cumulative_da_bytes_used += tx.length() as u64;
 
         // update add to total fees
         let miner_fee = tx
             .effective_tip_per_gas(base_fee)
             .expect("fee is always valid; execution succeeded");
-        info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        info.info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
     }
 }
 
@@ -194,8 +196,19 @@ where
     fn execute_sequencer_transactions(
         &self,
         builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError> {
-        self.inner.execute_sequencer_transactions(builder)
+    ) -> Result<ExecutionInfo<<Self::Evm as ConfigureEvm>::Primitives>, PayloadBuilderError> {
+        let execution_info = self.inner.execute_sequencer_transactions(builder)?;
+        Ok(ExecutionInfo::<<Self::Evm as ConfigureEvm>::Primitives> {
+            info: reth_optimism_payload_builder::builder::ExecutionInfo {
+                cumulative_da_bytes_used: execution_info.cumulative_da_bytes_used,
+                cumulative_gas_used: execution_info.cumulative_gas_used,
+                total_fees: execution_info.total_fees,
+            },
+            executed_transactions: vec![],
+            receipts: vec![],
+            executed_senders: vec![],
+            extra: Default::default(),
+        })
     }
 
     /// Executes the given best transactions and updates the execution info.
@@ -203,7 +216,7 @@ where
     /// Returns `Ok(Some(())` if the job was cancelled.
     fn execute_best_transactions<TXS, Builder>(
         &self,
-        info: &mut ExecutionInfo,
+        info: &mut ExecutionInfo<<Self::Evm as ConfigureEvm>::Primitives>,
         builder: &mut Builder,
         mut best_txs: TXS,
         _gas_limit: u64,
@@ -229,7 +242,7 @@ where
             let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
 
-            if info.is_tx_over_limits(
+            if info.info.is_tx_over_limits(
                 tx_da_size,
                 block_gas_limit,
                 tx_da_limit,
@@ -264,7 +277,7 @@ where
 
             // If the transaction is verified, check if it can be added within the verified gas limit
             if let Some(payloads) = pooled_tx.pbh_payload() {
-                if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                if info.info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }

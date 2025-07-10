@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 use reth::builder::PayloadBuilderError;
 use reth::{
     payload::PayloadId,
@@ -11,12 +11,26 @@ use reth_evm::Evm;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
-use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{SealedHeader, TxTy};
+use reth_primitives::{NodePrimitives, SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
+use std::fmt::Debug;
+
+#[derive(Default, Debug)]
+pub struct ExecutionInfo<N: NodePrimitives, Extra: Debug + Default = ()> {
+    /// Information related to gas and data availability usage.
+    pub info: reth_optimism_payload_builder::builder::ExecutionInfo,
+    /// All unrecovered executed transactions.
+    pub executed_transactions: Vec<N::SignedTx>,
+    /// The recovered senders of the executed transactions.
+    pub executed_senders: Vec<Address>,
+    /// The transaction receipts for the executed transactions.
+    pub receipts: Vec<N::Receipt>,
+    /// Any extra information attached by the builder.
+    pub extra: Extra,
+}
 
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
@@ -56,14 +70,14 @@ pub trait PayloadBuilderCtx: Send + Sync {
     fn execute_sequencer_transactions(
         &self,
         builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>;
+    ) -> Result<ExecutionInfo<<Self::Evm as ConfigureEvm>::Primitives>, PayloadBuilderError>;
 
     fn execute_best_transactions<Txs, Builder>(
         &self,
-        info: &mut ExecutionInfo,
+        info: &mut ExecutionInfo<<Self::Evm as ConfigureEvm>::Primitives>,
         builder: &mut Builder,
         best_txs: Txs,
-        _gas_limit: u64,
+        gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
