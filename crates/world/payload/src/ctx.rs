@@ -385,7 +385,7 @@ where
             >,
             <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
         >,
-        cancel: CancelOnDrop,
+        cancel: &CancelOnDrop,
         best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
     ) -> Self::PayloadBuilderCtx
     where
@@ -396,7 +396,7 @@ where
             da_config,
             chain_spec,
             config,
-            cancel,
+            cancel: cancel.clone(),
             best_payload,
         };
 

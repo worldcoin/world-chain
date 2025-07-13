@@ -1,19 +1,14 @@
 use crate::{
-    payload::{
-        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
-        FlashblocksPayloadV1,
-    },
+    payload::{ExecutionData, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::Encodable2718;
-use alloy_primitives::{map::foldhash::HashMap, Address, U256};
-use eyre::eyre::ContextCompat;
+use eyre::eyre::eyre;
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    revm::{database::StateProviderDatabase, Database, State},
+    revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, Database, State},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
@@ -37,13 +32,13 @@ use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::database::BundleState;
 use std::{
+    fmt::Debug,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tokio::{runtime::Handle, sync::mpsc};
+use tracing::{debug, error, info, warn, Level, Span};
 
 use crate::payload_builder_ctx::ExecutionInfo;
 
@@ -139,7 +134,7 @@ where
             self.config.da_config.clone(),
             self.client.chain_spec(),
             config,
-            cancel,
+            &cancel,
             best_payload,
         );
 
@@ -153,10 +148,15 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, &ctx)
+            builder.build(state, &state_provider, &ctx, &cancel)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, &ctx)
+            builder.build(
+                cached_reads.as_db_mut(state),
+                &state_provider,
+                &ctx,
+                &cancel,
+            )
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -238,11 +238,6 @@ where
     pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
     pub block_time: u64,
     pub flashblock_interval: u64,
-
-    total_gas_limit: u64,
-    num_flashblocks: u64,
-    flashblock_gas_limit: u64,
-
     executed_txs: Vec<Txs::Transaction>,
 }
 
@@ -262,11 +257,6 @@ where
             tx,
             block_time,
             flashblock_interval,
-
-            total_gas_limit: 0,
-            num_flashblocks: 0,
-            flashblock_gas_limit: 0,
-
             executed_txs: Vec::new(),
         }
     }
@@ -280,8 +270,9 @@ where
     pub fn build<Evm, ChainSpec, N, Ctx, Tx>(
         mut self,
         db: impl Database<Error = ProviderError>,
-        state_provider: impl StateProvider,
+        state_provider: impl StateProvider + Clone,
         ctx: &Ctx,
+        cancel: &CancelOnDrop,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
@@ -299,69 +290,91 @@ where
             .build();
 
         // 1. Setup relevant variables
-        let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
-        let num_flashblocks = self.block_time / self.flashblock_interval;
-        // TODO: We need a way to not let the gas limit here censor high gas transactions that are under `total_gas_limit`
-        //       at the same time we need to ensure that sum([g_0, g_1, ..., g_n]) < `total_gas_limit`.
-        //       One potential option is to set sup(g_0) = total_gas_limit,
-        //       then sup(g_i) = total_gas_limit - sum([g_0, ..., g_(i-1)]) if sup(g_i) <= 0 then we can stop
-        let flashblock_gas_limit = total_gas_limit / num_flashblocks;
-
-        self.total_gas_limit = total_gas_limit;
-        self.num_flashblocks = num_flashblocks;
-        self.flashblock_gas_limit = flashblock_gas_limit;
+        let mut gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+        let mut flashblock_idx = 0;
+        let mut last_flashblock_tx_offset = 0;
 
         // 1. Build initial flashblock
-        let now = Instant::now();
+        let mut interval = tokio::time::interval(Duration::from_millis(self.flashblock_interval));
+        let cancel_at = Instant::now() + Duration::from_millis(self.block_time);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        let outcome = self
-            .build_flashblock(&mut db, &state_provider, ctx, 0)?
-            .expect("Missing outcome");
-        let bundle = db.take_bundle();
-        let payload = Self::create_payload(&outcome, ctx, 0, bundle).unwrap();
-        let _ = self.tx.send(payload);
+        info!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblocks with gas limit {gas_limit} and flashblock interval {flashblock_idx}ms");
+        let last_flashblock_outcome = Handle::current().block_on(async move {
+                let state_provider = state_provider.clone();
+                let mut execution_data = None::<ExecutionData<N, ()>>;
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let now = Instant::now();
+                            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(),  "building flashblock {flashblock_idx}");
+                            if Instant::now() >= cancel_at {
+                                return Ok::<_, PayloadBuilderError>(execution_data)
+                            }
 
-        let elapsed = now.elapsed().as_millis() as u64;
-        let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-        std::thread::sleep(Duration::from_millis(sleep_time));
+                            if cancel.is_cancelled() {
+                                return Ok::<_, PayloadBuilderError>(execution_data);
+                            }
 
-        // Produce intermediate flashblocks
-        for flashblock_idx in 1..num_flashblocks - 1 {
-            let now = Instant::now();
+                            let Some((info, outcome)) = self.build_flashblock(&mut db, &state_provider, ctx, gas_limit)? else {
+                                // If the outcome is None, it means we can skip building the rest of the flashblocks
+                                return Ok(None);
+                            };
 
-            self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
-            let bundle = db.take_bundle();
-            let mut payload = Self::create_payload(&outcome, ctx, flashblock_idx, bundle).unwrap();
-            payload.base = None;
-            let _ = self.tx.send(payload);
+                            let length = outcome.block.body().transactions().collect::<Vec<_>>().len() as u64;
+                            let bundle_state = db.take_bundle();
+                            execution_data = Some(ExecutionData::<N, ()> {
+                                bundle_state,
+                                current_flashblock_offset: last_flashblock_tx_offset + length,
+                                outcome: outcome,
+                                info,
+                                total_flashblocks: flashblock_idx,
+                                attributes: ctx.attributes().clone(),
+                            });
 
-            let elapsed = now.elapsed().as_millis() as u64;
-            let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-            std::thread::sleep(Duration::from_millis(sleep_time));
-        }
+                            let Some(ref execution_data) = execution_data else {
+                                unreachable!()
+                            };
 
-        // Produce the final block
-        let Some(outcome) =
-            self.build_flashblock(&mut db, &state_provider, ctx, num_flashblocks - 1)?
+                            flashblock_idx += 1;
+                            last_flashblock_tx_offset += execution_data.outcome.block.body().transactions().collect::<Vec<_>>().len() as u64;
+                            gas_limit = gas_limit.saturating_sub(execution_data.info.info.cumulative_gas_used);
+
+                            // 2. Create the payload
+                            let execution_payload = FlashblocksPayloadV1::try_from(execution_data)
+                                .map_err(|err| {
+                                    warn!(target: "payload_builder", %err, "failed to create flashblock payload");
+                                    PayloadBuilderError::Other(err.into())
+                            })?;
+
+                            // 3. Publish the payload
+                            if let Err(e) = self.tx.send(execution_payload) {
+                                error!(target: "payload_builder", %e, "failed to send flashblock payload");
+                            }
+
+                            let elapsed = now.elapsed();
+                            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(),gas_used = ?execution_data.info.info.cumulative_gas_used, %gas_limit, flashblock_idx = %execution_data.total_flashblocks, elapsed = ?elapsed, "flashblock built");
+                    }
+                };
+            };
+        }).map_err(|err| {
+                                    warn!(target: "payload_builder", %err, "failed to create flashblock payload");
+                                    PayloadBuilderError::Other(err.into())
+                            })?;
+
+        let Some(ExecutionData {
+            outcome,
+            info,
+            bundle_state,
+            ..
+        }) = last_flashblock_outcome
         else {
-            return Ok(BuildOutcomeKind::Cancelled);
+            return Err(PayloadBuilderError::Other(
+                eyre!("No executed blocks found, this should not happen").into(),
+            ));
         };
-        let bundle = db.take_bundle();
-        let mut payload = Self::create_payload(&outcome, ctx, num_flashblocks, bundle).unwrap();
-        payload.base = None;
-        let _ = self.tx.send(payload);
 
-        let (info, outcome, _diff_txs) = outcome;
-
-        // check if the new payload is even more valuable
-        if !ctx.is_better_payload(info.info.total_fees) {
-            // can skip building the block
-            return Ok(BuildOutcomeKind::Aborted {
-                fees: info.info.total_fees,
-            });
-        }
-
-        let BlockBuilderOutcome {
+        let BlockBuilderOutcome::<N> {
             execution_result,
             hashed_state,
             trie_updates,
@@ -372,7 +385,7 @@ where
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
+            bundle_state,
             vec![execution_result.receipts],
             block.header().number(),
             Vec::new(),
@@ -412,12 +425,11 @@ where
         db: &mut State<DB>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
-        idx: u64,
+        gas_limit: u64,
     ) -> Result<
         Option<(
             ExecutionInfo<<<Ctx as PayloadBuilderCtx>::Evm as ConfigureEvm>::Primitives>,
             BlockBuilderOutcome<N>,
-            Vec<Tx>,
         )>,
         PayloadBuilderError,
     >
@@ -439,10 +451,6 @@ where
 
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
 
-        let gas_limit = (idx + 1) * self.flashblock_gas_limit;
-
-        let mut diff_txs = vec![];
-
         if !ctx.attributes().no_tx_pool {
             // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
             let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
@@ -458,99 +466,12 @@ where
 
             let (prev, observed) = best_txs.take_observed();
 
-            diff_txs.extend_from_slice(&observed);
-
             self.executed_txs.extend_from_slice(&prev);
             self.executed_txs.extend_from_slice(&observed);
         }
 
         let outcome = builder.finish(&state_provider)?;
 
-        Ok(Some((info, outcome, diff_txs)))
-    }
-
-    pub fn create_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
-        (info, outcome, diff_txs): &(
-            ExecutionInfo<<<Ctx as PayloadBuilderCtx>::Evm as ConfigureEvm>::Primitives>,
-            BlockBuilderOutcome<N>,
-            Vec<Tx>,
-        ),
-        ctx: &Ctx,
-        idx: u64,
-        bundle_state: BundleState,
-    ) -> eyre::Result<FlashblocksPayloadV1>
-    where
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
-        N: OpPayloadPrimitives,
-        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
-    {
-        let block_number = ctx.parent().number + 1;
-
-        let block_header = outcome.block.sealed_block().header();
-
-        let base = ExecutionPayloadBaseV1 {
-            parent_beacon_block_root: ctx
-                .parent()
-                .parent_beacon_block_root
-                .context("Missing parent beacon block root")?,
-            parent_hash: ctx.parent().hash(),
-            fee_recipient: ctx.attributes().suggested_fee_recipient(),
-            prev_randao: ctx.attributes().prev_randao(),
-            block_number,
-            gas_limit: ctx.attributes().gas_limit.context("Missing gas limit")?,
-            timestamp: ctx.attributes().timestamp(),
-            extra_data: block_header.extra_data().clone(),
-            base_fee_per_gas: U256::from(
-                block_header
-                    .base_fee_per_gas()
-                    .context("Missing base fee per gas")?,
-            ),
-        };
-
-        let transactions = diff_txs
-            .iter()
-            .cloned()
-            .map(|tx| tx.into_consensus().encoded_2718())
-            .map(|tx_bytes| tx_bytes.into())
-            .collect();
-
-        let withdrawals = ctx.attributes().payload_attributes.withdrawals.clone().0;
-
-        let diff = ExecutionPayloadFlashblockDeltaV1 {
-            state_root: block_header.state_root(),
-            receipts_root: block_header.receipts_root(),
-            logs_bloom: block_header.logs_bloom(),
-            gas_used: block_header.gas_used(),
-            block_hash: outcome.block.sealed_block().hash(),
-            transactions,
-            withdrawals,
-        };
-
-        let new_account_balances = bundle_state
-            .state()
-            .iter()
-            .filter_map(|(address, account)| {
-                account.info.as_ref().map(|info| (*address, info.balance))
-            })
-            .collect::<HashMap<Address, U256>>();
-
-        let metadata: FlashblocksMetadata<N> = FlashblocksMetadata {
-            receipts: HashMap::default(),
-            new_account_balances,
-            block_number: ctx.parent().number + 1,
-        };
-
-        let payload = FlashblocksPayloadV1 {
-            payload_id: ctx.attributes().payload_id(),
-            index: idx,
-            base: Some(base),
-            diff,
-            metadata: serde_json::to_value(metadata)?,
-        };
-
-        Ok(payload)
+        Ok(Some((info, outcome)))
     }
 }

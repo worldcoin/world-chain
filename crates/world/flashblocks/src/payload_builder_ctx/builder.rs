@@ -28,7 +28,7 @@ where
             OpPayloadBuilderAttributes<<Evm::Primitives as NodePrimitives>::SignedTx>,
             <Evm::Primitives as NodePrimitives>::BlockHeader,
         >,
-        cancel: CancelOnDrop,
+        cancel: &CancelOnDrop,
         best_payload: Option<OpBuiltPayload<Evm::Primitives>>,
     ) -> Self::PayloadBuilderCtx
     where
