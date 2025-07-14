@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Debug;
 
-use crate::payload_builder_ctx::ExecutionInfo;
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FlashblocksPayloadV1 {
     /// The payload id of the flashblock
@@ -91,20 +89,18 @@ pub struct FlashblocksMetadata<N: NodePrimitives> {
     pub block_number: u64,
 }
 
-pub struct ExecutionData<N: NodePrimitives, E: Debug + Default> {
+pub struct FlashblockBuildOutcome<N: NodePrimitives> {
     pub bundle_state: BundleState,
     pub outcome: BlockBuilderOutcome<N>,
-    pub info: ExecutionInfo<N, E>,
     pub attributes: OpPayloadBuilderAttributes<N::SignedTx>,
     pub total_flashblocks: u64,
     pub current_flashblock_offset: u64,
 }
 
-impl<N: NodePrimitives, E: Debug + Default> ExecutionData<N, E> {
+impl<N: NodePrimitives> FlashblockBuildOutcome<N> {
     pub fn new(
         bundle_state: BundleState,
         outcome: BlockBuilderOutcome<N>,
-        info: ExecutionInfo<N, E>,
         total_flashblocks: u64,
         current_flashblock_offset: u64,
         attributes: OpPayloadBuilderAttributes<N::SignedTx>,
@@ -112,7 +108,6 @@ impl<N: NodePrimitives, E: Debug + Default> ExecutionData<N, E> {
         Self {
             bundle_state,
             outcome,
-            info,
             total_flashblocks,
             current_flashblock_offset,
             attributes,
@@ -120,9 +115,9 @@ impl<N: NodePrimitives, E: Debug + Default> ExecutionData<N, E> {
     }
 }
 
-impl<N: NodePrimitives, E: Debug + Default> TryFrom<&ExecutionData<N, E>> for FlashblocksPayloadV1 {
+impl<N: NodePrimitives> TryFrom<&FlashblockBuildOutcome<N>> for FlashblocksPayloadV1 {
     type Error = PayloadBuilderError;
-    fn try_from(data: &ExecutionData<N, E>) -> Result<Self, Self::Error> {
+    fn try_from(data: &FlashblockBuildOutcome<N>) -> Result<Self, Self::Error> {
         let base = if data.total_flashblocks == 0 {
             Some(ExecutionPayloadBaseV1 {
                 parent_beacon_block_root: data.outcome.block.header().parent_hash(),
@@ -168,7 +163,8 @@ impl<N: NodePrimitives, E: Debug + Default> TryFrom<&ExecutionData<N, E>> for Fl
             .collect::<Vec<_>>();
 
         let receipts = data
-            .info
+            .outcome
+            .execution_result
             .receipts
             .iter()
             .skip(data.current_flashblock_offset as usize)

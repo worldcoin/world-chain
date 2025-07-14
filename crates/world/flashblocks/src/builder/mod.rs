@@ -1,13 +1,15 @@
 use crate::{
-    payload::{ExecutionData, FlashblocksPayloadV1},
+    payload::{FlashblockBuildOutcome, FlashblocksPayloadV1},
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::BlockHeader;
 use eyre::eyre::eyre;
+use futures_util::select;
 use retaining_payload_txs::RetainingBestTxs;
 use reth::{
-    api::{PayloadBuilderAttributes, PayloadBuilderError},
+    api::{payload, PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
+    core::primitives::block,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, Database, State},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
@@ -23,7 +25,7 @@ use reth_optimism_node::{
     OpNextBlockEnvAttributes,
 };
 use reth_optimism_payload_builder::{
-    builder::OpPayloadTransactions,
+    builder::{ExecutionInfo, OpPayloadTransactions},
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use reth_optimism_payload_builder::{config::OpBuilderConfig, OpPayloadPrimitives};
@@ -39,8 +41,6 @@ use std::{
 };
 use tokio::{runtime::Handle, sync::mpsc};
 use tracing::{debug, error, info, warn, Level, Span};
-
-use crate::payload_builder_ctx::ExecutionInfo;
 
 mod retaining_payload_txs;
 
@@ -148,15 +148,10 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, &ctx, &cancel)
+            builder.build(state, &state_provider, &ctx, cancel)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(
-                cached_reads.as_db_mut(state),
-                &state_provider,
-                &ctx,
-                &cancel,
-            )
+            builder.build(cached_reads.as_db_mut(state), &state_provider, &ctx, cancel)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -272,7 +267,7 @@ where
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider + Clone,
         ctx: &Ctx,
-        cancel: &CancelOnDrop,
+        cancel: CancelOnDrop,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
@@ -283,109 +278,87 @@ where
         Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = ChainSpec, Transaction = Tx>,
     {
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
-
-        let mut db = State::builder()
+        let mut state = State::builder()
             .with_database(db)
             .with_bundle_update()
             .build();
 
         // 1. Setup relevant variables
-        let mut gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
         let mut flashblock_idx = 0;
-        let mut last_flashblock_tx_offset = 0;
+        let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
-        // 1. Build initial flashblock
-        let mut interval = tokio::time::interval(Duration::from_millis(self.flashblock_interval));
-        let cancel_at = Instant::now() + Duration::from_millis(self.block_time);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-        info!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblocks with gas limit {gas_limit} and flashblock interval {flashblock_idx}ms");
-        let last_flashblock_outcome = Handle::current().block_on(async move {
-                let state_provider = state_provider.clone();
-                let mut execution_data = None::<ExecutionData<N, ()>>;
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let now = Instant::now();
-                            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(),  "building flashblock {flashblock_idx}");
-                            if Instant::now() >= cancel_at {
-                                return Ok::<_, PayloadBuilderError>(execution_data)
-                            }
-
-                            if cancel.is_cancelled() {
-                                return Ok::<_, PayloadBuilderError>(execution_data);
-                            }
-
-                            let Some((info, outcome)) = self.build_flashblock(&mut db, &state_provider, ctx, gas_limit)? else {
-                                // If the outcome is None, it means we can skip building the rest of the flashblocks
-                                return Ok(None);
-                            };
-
-                            let length = outcome.block.body().transactions().collect::<Vec<_>>().len() as u64;
-                            let bundle_state = db.take_bundle();
-                            execution_data = Some(ExecutionData::<N, ()> {
-                                bundle_state,
-                                current_flashblock_offset: last_flashblock_tx_offset + length,
-                                outcome: outcome,
-                                info,
-                                total_flashblocks: flashblock_idx,
-                                attributes: ctx.attributes().clone(),
-                            });
-
-                            let Some(ref execution_data) = execution_data else {
-                                unreachable!()
-                            };
-
-                            flashblock_idx += 1;
-                            last_flashblock_tx_offset += execution_data.outcome.block.body().transactions().collect::<Vec<_>>().len() as u64;
-                            gas_limit = gas_limit.saturating_sub(execution_data.info.info.cumulative_gas_used);
-
-                            // 2. Create the payload
-                            let execution_payload = FlashblocksPayloadV1::try_from(execution_data)
-                                .map_err(|err| {
-                                    warn!(target: "payload_builder", %err, "failed to create flashblock payload");
-                                    PayloadBuilderError::Other(err.into())
-                            })?;
-
-                            // 3. Publish the payload
-                            if let Err(e) = self.tx.send(execution_payload) {
-                                error!(target: "payload_builder", %e, "failed to send flashblock payload");
-                            }
-
-                            let elapsed = now.elapsed();
-                            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(),gas_used = ?execution_data.info.info.cumulative_gas_used, %gas_limit, flashblock_idx = %execution_data.total_flashblocks, elapsed = ?elapsed, "flashblock built");
-                    }
-                };
-            };
-        }).map_err(|err| {
-                                    warn!(target: "payload_builder", %err, "failed to create flashblock payload");
-                                    PayloadBuilderError::Other(err.into())
-                            })?;
-
-        let Some(ExecutionData {
-            outcome,
-            info,
-            bundle_state,
-            ..
-        }) = last_flashblock_outcome
+        // 2. Build the block
+        let Some(mut latest_outcome) =
+            self.build_flashblock(&mut state, &state_provider, ctx, gas_limit, flashblock_idx)?
         else {
-            return Err(PayloadBuilderError::Other(
-                eyre!("No executed blocks found, this should not happen").into(),
-            ));
+            return Ok(BuildOutcomeKind::Cancelled);
         };
 
-        let BlockBuilderOutcome::<N> {
-            execution_result,
-            hashed_state,
-            trie_updates,
-            block,
-        } = outcome;
+        // 3.) Constuct the payload
+        let payload = FlashblocksPayloadV1::try_from(&latest_outcome.1)?;
+
+        if let Err(err) = self.tx.send(payload) {
+            error!(target: "payload_builder", %err, "failed to send flashblock payload");
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(
+            self.block_time as usize / self.flashblock_interval as usize,
+        );
+
+        // spawn a task to schedule when the next flashblock job should be started/cancelled
+        self.spawn_flashblock_job_manager(tx, cancel.clone());
+        let notify = tokio::task::block_in_place(|| rx.blocking_recv());
+
+        loop {
+            match notify {
+                Some(()) => {
+                    debug!(target: "payload_builder", id=%ctx.attributes().payload_id(),  "building flashblock {flashblock_idx}");
+
+                    let Some((info, outcome)) = self.build_flashblock(
+                        &mut state,
+                        &state_provider,
+                        ctx,
+                        gas_limit,
+                        flashblock_idx,
+                    )?
+                    else {
+                        break;
+                    };
+
+                    let payload = FlashblocksPayloadV1::try_from(&outcome)?;
+
+                    if let Err(err) = self.tx.send(payload) {
+                        error!(target: "payload_builder", %err, "failed to send flashblock payload");
+                    }
+                    latest_outcome = (info, outcome);
+                }
+                // tx was dropped, resolve the most recent payload
+                None => {
+                    break;
+                }
+            }
+            flashblock_idx += 1;
+        }
+
+        let (
+            info,
+            FlashblockBuildOutcome::<N> {
+                outcome:
+                    BlockBuilderOutcome {
+                        hashed_state,
+                        execution_result,
+                        trie_updates,
+                        block,
+                    },
+                ..
+            },
+        ) = latest_outcome;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         let execution_outcome = ExecutionOutcome::new(
-            bundle_state,
+            state.take_bundle(),
             vec![execution_result.receipts],
             block.header().number(),
             Vec::new(),
@@ -406,7 +379,7 @@ where
         let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
-            info.info.total_fees,
+            info.total_fees,
             Some(executed),
         );
 
@@ -420,19 +393,73 @@ where
         }
     }
 
+    /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
+    ///
+    /// A Flashblock job will be cancelled under the following conditions:
+    /// - If the parent `cancel` is dropped.
+    /// - If the `flashblock_interval` has been exceeded.
+    /// - If the `max_flashblocks` has been exceeded.
+    fn spawn_flashblock_job_manager(
+        &self,
+        tx: tokio::sync::mpsc::Sender<()>,
+        cancel: CancelOnDrop,
+    ) {
+        let block_time = self.block_time;
+        let flashblock_interval = self.flashblock_interval;
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            let cancelled = async || loop {
+                if cancel.is_cancelled() {
+                    break;
+                }
+            };
+            let mut flashblock_interval =
+                tokio::time::interval(Duration::from_millis(flashblock_interval));
+            let mut block_interval = tokio::time::interval(Duration::from_millis(block_time));
+
+            let _ = tx.send(());
+
+            tokio::select! {
+                _ = block_interval.tick() => {
+                    // block interval exceeded, cancel the current job
+                    // and drop the sender to resolve the most recent payload.
+                    drop(tx);
+                },
+                _ = async {
+                    loop {
+                        let tx = tx.clone();
+                        tokio::select! {
+                            _ = flashblock_interval.tick() => {
+                                // queue the next flashblock job, but there's no benefit in cancelling the current job
+                                // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
+                                // because the next job will also exceed `flashblock_interval`.
+                                let _ = tx.send(());
+                            },
+                            _ = cancelled() => {
+                                // parent cancel was dropped by the payload jobs generator
+                                // cancel the child job, and drop the sender
+                                drop(tx);
+                                break;
+                            },
+                        }
+                    }
+                } => {
+                    // either the parent payload job was cancelled, or all flashblocks were built.
+                    // in either case, drop the sender to resolve the most recent payload.
+                    drop(tx);
+                }
+            }
+        });
+    }
+
     fn build_flashblock<EvmConfig, ChainSpec, N, Ctx, DB, Tx>(
         &mut self,
         db: &mut State<DB>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
         gas_limit: u64,
-    ) -> Result<
-        Option<(
-            ExecutionInfo<<<Ctx as PayloadBuilderCtx>::Evm as ConfigureEvm>::Primitives>,
-            BlockBuilderOutcome<N>,
-        )>,
-        PayloadBuilderError,
-    >
+        flashblock_idx: u64,
+    ) -> Result<Option<(ExecutionInfo, FlashblockBuildOutcome<N>)>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec,
@@ -444,6 +471,8 @@ where
     {
         let mut builder = ctx.block_builder(db)?;
 
+        // Execute the sequencer transactions, and pre-execution changes only once on the first block.
+        // `db` will retain the bundle state as a pre-state for all subsequent flashblocks, so we only need to apply the pre-execution changes once.
         builder.apply_pre_execution_changes().map_err(|err| {
             warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
             PayloadBuilderError::Internal(err.into())
@@ -471,6 +500,15 @@ where
         }
 
         let outcome = builder.finish(&state_provider)?;
+
+        let bundle_state = db.take_bundle();
+        let outcome = FlashblockBuildOutcome::<N> {
+            bundle_state,
+            current_flashblock_offset: self.executed_txs.len() as u64,
+            outcome: outcome,
+            total_flashblocks: flashblock_idx,
+            attributes: ctx.attributes().clone(),
+        };
 
         Ok(Some((info, outcome)))
     }

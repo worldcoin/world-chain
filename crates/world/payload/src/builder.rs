@@ -417,10 +417,10 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             }
 
             // check if the new payload is even more valuable
-            if !ctx.inner.is_better_payload(info.info.total_fees) {
+            if !ctx.inner.is_better_payload(info.total_fees) {
                 // can skip building the block
                 return Ok(BuildOutcomeKind::Aborted {
-                    fees: info.info.total_fees,
+                    fees: info.total_fees,
                 });
             }
         }
@@ -457,7 +457,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let payload = OpBuiltPayload::new(
             op_ctx.payload_id(),
             sealed_block,
-            info.info.total_fees,
+            info.total_fees,
             Some(executed),
         );
 
