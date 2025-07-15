@@ -36,6 +36,8 @@ reth-payload-util.workspace = true
 # revm
 revm.workspace = true
 revm-primitives.workspace = true
+alloy-op-evm.workspace = true
+op-alloy-consensus.workspace = true
 
 # alloy
 alloy-network.workspace = true

@@ -2,6 +2,7 @@ use crate::ctx::WorldChainPayloadBuilderCtx;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
 use flashblocks::payload_builder_ctx::PayloadBuilderCtx;
+use op_alloy_consensus::OpTxEnvelope;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -32,7 +33,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
     StateProviderFactory,
 };
-use reth_transaction_pool::BlobStore;
+use reth_transaction_pool::{BlobStore, PoolTransaction};
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
@@ -197,9 +198,12 @@ where
     /// a result indicating success with the payload or an error in case of failure.
     fn build_payload<'a, Txs>(
         &self,
-        args: BuildArguments<OpPayloadBuilderAttributes<OpTransactionSigned>, OpBuiltPayload>,
+        args: BuildArguments<
+            OpPayloadBuilderAttributes<OpTransactionSigned>,
+            OpBuiltPayload<OpPrimitives>,
+        >,
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
     {
@@ -375,14 +379,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     pub fn build<Pool, Client>(
         self,
         db: impl Database<Error = ProviderError>,
-        state_provider: impl StateProvider,
+        state_provider: impl StateProvider + Clone,
         ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
         Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
-            + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
+            + BlockReaderIdExt<Block = alloy_consensus::Block<OpTxEnvelope>>
             + ChainSpecProvider<ChainSpec: OpHardforks>
             + Clone,
     {
@@ -402,15 +406,23 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
 
+        let db = StateProviderDatabase::new(&state_provider);
+
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .build();
+
         // 2. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
+        let info = ctx.execute_sequencer_transactions::<_, ()>(&mut state)?;
 
         // 3. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
-            // TODO: Validate gas limit
+
+            // // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs, 0)?
+                .execute_best_transactions(&mut info, &mut state, best_txs, 0)?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -430,7 +442,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             hashed_state,
             trie_updates,
             block,
-        } = builder.finish(state_provider)?;
+        } = builder.finish(&state_provider)?;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%op_ctx.payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -491,9 +503,11 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build();
+
         let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
+
         let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
         if !ctx.inner.attributes().no_tx_pool {
             let best_txs = best(

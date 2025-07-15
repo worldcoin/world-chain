@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use alloy_primitives::TxHash;
 use reth_payload_util::PayloadTransactions;
@@ -13,18 +13,6 @@ where
 {
     /// The inner payload transactions iterator
     inner: I,
-
-    /// Transactions that were previously observed, they have to be yielded prior to other pool in
-    /// the exact same order. Furthermore we should discard duplicate txs
-    prev: VecDeque<I::Transaction>,
-
-    /// Transactions that were observed in this iteration
-    /// that were also present in `prev`
-    observed_prev: Vec<I::Transaction>,
-
-    /// Transactions observed during the lifetime of this struct
-    /// They should be fed back during the construction of the next flashblock
-    observed: Vec<I::Transaction>,
 
     /// The observed tx hashes. It's a separate container because
     /// the order of transactions in `observed` must remain consistent
@@ -45,20 +33,17 @@ where
     pub fn new(inner: I) -> Self {
         Self {
             inner,
-            prev: VecDeque::new(),
-            observed_prev: Vec::new(),
-            observed: Vec::new(),
             observed_hashes: HashSet::new(),
         }
     }
 
-    pub fn with_prev(mut self, prev: Vec<I::Transaction>) -> Self {
-        self.prev.extend(prev);
+    pub fn with_observed(mut self, observed: Vec<TxHash>) -> Self {
+        self.observed_hashes = observed.into_iter().collect();
         self
     }
 
-    pub fn take_observed(self) -> (Vec<I::Transaction>, Vec<I::Transaction>) {
-        (self.observed_prev, self.observed)
+    pub fn take_observed(self) -> Vec<TxHash> {
+        self.observed_hashes.into_iter().collect()
     }
 
     pub fn guard(&mut self) -> RetainingBestTxsGuard<'_, I> {
@@ -73,13 +58,6 @@ where
     type Transaction = I::Transaction;
 
     fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
-        if let Some(n) = self.inner.prev.pop_front() {
-            self.inner.observed_hashes.insert(*n.hash());
-            self.inner.observed_prev.push(n.clone());
-
-            return Some(n);
-        }
-
         loop {
             let Some(n) = self.inner.inner.next(ctx) else {
                 break;
@@ -87,7 +65,6 @@ where
 
             if !self.inner.observed_hashes.contains(n.hash()) {
                 self.inner.observed_hashes.insert(*n.hash());
-                self.inner.observed.push(n.clone());
 
                 return Some(n);
             }

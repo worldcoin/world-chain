@@ -1,5 +1,3 @@
-use std::net::IpAddr;
-
 use crate::args::WorldChainArgs;
 use crate::node::WorldChainPoolBuilder;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
@@ -99,15 +97,6 @@ impl WorldChainFlashblocksNode {
 
         let flashblock_args = self.args.flashblock_args.as_ref().unwrap();
 
-        let subscribers = flashblocks::ws::new_subscribers();
-
-        // TODO: Connect to a flashblock receiver & WS streaming service
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let addr = (IpAddr::from([0, 0, 0, 0]), flashblock_args.flashblock_port);
-        let _ws_task = flashblocks::ws::start_ws(subscribers.clone(), addr);
-        let _publish_task = flashblocks::ws::publish_task(rx, subscribers);
-
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder::new(
@@ -125,7 +114,10 @@ impl WorldChainFlashblocksNode {
                     builder_private_key.clone(),
                     flashblock_args.flashblock_block_time,
                     flashblock_args.flashblock_interval,
-                    tx,
+                    (
+                        flashblock_args.flashblock_host,
+                        flashblock_args.flashblock_port,
+                    ),
                 )
                 .with_da_config(self.da_config.clone()),
             ))

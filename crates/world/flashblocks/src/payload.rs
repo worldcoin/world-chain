@@ -9,7 +9,6 @@ use reth::{
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_primitives::NodePrimitives;
-use revm::database::BundleState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Debug;
@@ -80,6 +79,8 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
     pub withdrawals: Vec<Withdrawal>,
+    /// The withdrawals root of the block.
+    pub withdrawals_root: B256,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,7 +91,6 @@ pub struct FlashblocksMetadata<N: NodePrimitives> {
 }
 
 pub struct FlashblockBuildOutcome<N: NodePrimitives> {
-    pub bundle_state: BundleState,
     pub outcome: BlockBuilderOutcome<N>,
     pub attributes: OpPayloadBuilderAttributes<N::SignedTx>,
     pub total_flashblocks: u64,
@@ -99,14 +99,12 @@ pub struct FlashblockBuildOutcome<N: NodePrimitives> {
 
 impl<N: NodePrimitives> FlashblockBuildOutcome<N> {
     pub fn new(
-        bundle_state: BundleState,
         outcome: BlockBuilderOutcome<N>,
         total_flashblocks: u64,
         current_flashblock_offset: u64,
         attributes: OpPayloadBuilderAttributes<N::SignedTx>,
     ) -> Self {
         Self {
-            bundle_state,
             outcome,
             total_flashblocks,
             current_flashblock_offset,
@@ -146,11 +144,9 @@ impl<N: NodePrimitives> TryFrom<&FlashblockBuildOutcome<N>> for FlashblocksPaylo
             .accounts
             .iter()
             .filter_map(|(account_hash, account)| {
-                if let Some(acc) = account {
-                    Some((Address::from_word(*account_hash), acc.balance))
-                } else {
-                    None
-                }
+                account
+                    .as_ref()
+                    .map(|acc| (Address::from_word(*account_hash), acc.balance))
             })
             .collect::<HashMap<_, _>>();
 
@@ -199,10 +195,11 @@ impl<N: NodePrimitives> TryFrom<&FlashblockBuildOutcome<N>> for FlashblocksPaylo
                     .body()
                     .withdrawals()
                     .as_ref()
-                    .map_or_else(|| Vec::new(), |w| w.iter().cloned().collect()),
+                    .map_or_else(Vec::new, |w| w.iter().cloned().collect()),
+                ..Default::default()
             },
             metadata: serde_json::to_value(FlashblocksMetadata::<N> {
-                receipts: receipts,
+                receipts,
                 new_account_balances: account_balances,
                 block_number: data.outcome.block.header().number(),
             })

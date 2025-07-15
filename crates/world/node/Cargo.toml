@@ -73,6 +73,8 @@ alloy-network.workspace = true
 alloy-signer-local.workspace = true
 alloy-eips.workspace = true
 
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
 criterion.workspace = true
 semaphore-rs = { workspace = true, features = ["depth_30"] }
 serde_json.workspace = true

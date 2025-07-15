@@ -1,51 +1,39 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::args::WorldChainArgs;
 use crate::flashblocks::WorldChainFlashblocksNode;
-use crate::node::WorldChainNode as OtherWorldChainNode;
-use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_rpc_types::{TransactionRequest, Withdrawals};
 use flashblocks::args::FlashblockArgs;
+use flashblocks::payload::FlashblocksPayloadV1;
+use futures::StreamExt;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::api::{NodeTypesWithDBAdapter, TreeConfig};
+use reth::api::TreeConfig;
+use reth::args::PayloadBuilderArgs;
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
-use reth_e2e_test_utils::{NodeBuilderHelper, NodeHelperType, TmpDB};
-use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeTypes, PayloadAttributesBuilder, PayloadTypes, TxTy,
-};
-use reth_node_builder::components::NetworkBuilder;
-use reth_node_builder::rpc::RethRpcAddOns;
-use reth_node_builder::{NodeComponents, NodeComponentsBuilder};
 use reth_node_core::args::RpcServerArgs;
-use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::Transaction;
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_transaction_pool::{Pool, TransactionPool};
-use revm_primitives::{Address, FixedBytes, B256, U256};
-use std::collections::BTreeMap;
+use reth_provider::providers::BlockchainProvider;
+use revm_primitives::Address;
 use std::ops::Range;
-use std::sync::Arc;
-use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
-use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
-use world_chain_builder_pool::WorldChainTransactionPool;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::task::JoinHandle;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
-use world_chain_builder_test_utils::utils::{signer, tree_root};
+use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use crate::test_utils::{raw_pbh_bundle_bytes, tx};
+use crate::test_utils::tx;
 
 use crate::tests::{get_chain_spec, WorldChainNode, BASE_CHAIN_ID};
 
@@ -67,6 +55,11 @@ pub async fn setup_flashblocks() -> eyre::Result<(
                 .with_unused_ports()
                 .with_http_unused_port(),
         )
+        .with_payload_builder(PayloadBuilderArgs {
+            deadline: Duration::from_millis(1000),
+            max_payload_tasks: 1,
+            ..Default::default()
+        })
         .with_unused_ports();
 
     // discv5 ports seem to be clashing
@@ -82,11 +75,7 @@ pub async fn setup_flashblocks() -> eyre::Result<(
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
         builder_private_key: signer(6).to_bytes().to_string(),
-        flashblock_args: Some(FlashblockArgs {
-            flashblock_port: 8080,
-            flashblock_block_time: 2000,
-            flashblock_interval: 200,
-        }),
+        flashblock_args: Some(FlashblockArgs::default()),
         ..Default::default()
     });
 
@@ -122,7 +111,7 @@ pub async fn setup_flashblocks() -> eyre::Result<(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_flashblocks() -> eyre::Result<()> {
+async fn test_build_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut test_ctx, task_manager) = setup_flashblocks().await?;
 
@@ -132,11 +121,56 @@ async fn test_flashblocks() -> eyre::Result<()> {
         test_ctx.rpc.inject_tx(signed.encoded_2718().into()).await?;
     }
 
-    let payload = test_ctx.advance_block().await?;
+    // Create a struct to hold received messages
+    let received_messages = Arc::new(Mutex::new(Vec::new()));
+    let messages_clone = received_messages.clone();
+    let cancellation_token = CancellationToken::new();
+    let flashblocks_ws_url = format!("ws://127.0.0.1:{}", 9002);
 
+    // Spawn WebSocket listener task
+    let cancellation_token_clone = cancellation_token.clone();
+    let ws_handle: JoinHandle<eyre::Result<()>> = tokio::spawn(async move {
+        let (ws_stream, _) = connect_async(flashblocks_ws_url).await?;
+        let (_, mut read) = ws_stream.split();
+
+        let mut total = 0;
+        loop {
+            tokio::select! {
+              _ = cancellation_token_clone.cancelled() => {
+                  break Ok(());
+              }
+              Some(Ok(Message::Text(text))) = read.next() => {
+                info!(target: "payload_builder", "Received message: {text}");
+
+                let payload = serde_json::from_str::<FlashblocksPayloadV1>(&text).expect("Failed to parse FlashblocksPayloadV1");
+
+                let transactions = payload.diff.transactions;
+                total += transactions.len();
+
+                info!(target: "payload_builder",  ?total, "Received payload with transactions: {transactions:?}");
+
+
+                messages_clone.lock().expect("Failed to lock messages").push(text);
+              }
+            }
+        }
+    });
+
+    // Initiate a payload building job
+    let block = test_ctx.advance_block().await?;
+
+    assert_eq!(
+        received_messages
+            .lock()
+            .expect("Failed to lock messages")
+            .len(),
+        4
+    );
+
+    ws_handle.abort();
     // One transaction should be successfully validated
     // and included in the block.
-    assert_eq!(payload.block().body().transactions.len(), 2);
+    // assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
 }

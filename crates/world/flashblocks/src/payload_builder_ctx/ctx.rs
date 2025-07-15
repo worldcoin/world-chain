@@ -1,28 +1,36 @@
 use alloy_eips::eip4895::Withdrawals;
+use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
 use reth::builder::PayloadBuilderError;
-use reth::{
-    payload::PayloadId,
-    revm::{Database, State},
-};
+use reth::payload::PayloadId;
+use reth::revm::State;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::block::BlockExecutor;
-use reth_evm::Evm;
+use reth_evm::op_revm::OpSpecId;
+use reth_evm::precompiles::PrecompilesMap;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{Evm, EvmEnv};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
-use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
+use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
+use revm::inspector::NoOpInspector;
+use std::fmt::Debug;
 
+use crate::builder::ExecutionInfo;
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
     type ChainSpec: OpHardforks;
     type Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
         + OpPooledTx;
+
+    fn evm_config(&self) -> &Self::Evm;
+
+    fn evm_env(&self) -> EvmEnv<OpSpecId>;
 
     fn spec(&self) -> &Self::ChainSpec;
 
@@ -43,33 +51,33 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            > + 'a,
+            Primitives = OpPrimitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
         PayloadBuilderError,
     >
     where
-        DB: Database,
-        DB::Error: Send + Sync + 'static,
-        DB: reth::revm::Database;
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static;
 
-    fn execute_sequencer_transactions(
+    fn execute_sequencer_transactions<'a, DB>(
         &self,
-        builder: &mut impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>;
+        builder: &mut State<DB>,
+    ) -> Result<ExecutionInfo, PayloadBuilderError>
+    where
+        DB: revm::Database + Debug + 'a,
 
-    fn execute_best_transactions<Txs, Builder>(
+    fn execute_best_transactions<'a, DB, E: Debug + Default, Txs>(
         &self,
-        info: &mut ExecutionInfo,
-        builder: &mut Builder,
+        info: &mut ExecutionInfo<E>,
+        builder: OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
         best_txs: Txs,
         gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
+        DB: revm::Database + Debug + 'a,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
-        Builder: BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives>,
-        <Builder as BlockBuilder>::Executor: BlockExecutor<Evm: Evm<DB: revm::Database>>,
-        <<<<Builder as BlockBuilder>::Executor as BlockExecutor>::Evm as Evm>::DB as revm::Database>::Error: Send + Sync + 'static;
+        DB::Error: Send + Sync + 'static;
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()

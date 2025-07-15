@@ -19,6 +19,7 @@ use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
+use world_chain_builder_test_utils::utils::account;
 
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
@@ -239,7 +240,7 @@ pub fn optimism_payload_attributes(
     OpPayloadBuilderAttributes {
         payload_attributes: attributes,
         transactions: vec![],
-        gas_limit: None,
+        gas_limit: Some(3000000),
         no_tx_pool: false,
         eip_1559_params: None,
     }
@@ -270,6 +271,10 @@ fn get_chain_spec() -> OpChainSpec {
                             (MAX_U16 << U256::from(160)).into(),
                         ),
                     ]))),
+                )])
+                .extend_accounts(vec![(
+                    account(0),
+                    GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
                 )]),
         )
         .ecotone_activated()
