@@ -36,6 +36,7 @@ alloy-op-hardforks.workspace = true
 op-alloy-consensus.workspace = true
 alloy-op-evm.workspace = true
 
+rollup-boost.workspace = true
 revm-state.workspace = true
 # tokio
 tokio.workspace = true

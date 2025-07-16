@@ -1,10 +1,5 @@
-use crate::{
-    payload::{
-        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksMetadata,
-        FlashblocksPayloadV1,
-    },
-    payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
-};
+use crate::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs, BlockBody, BlockHeader, Header, EMPTY_OMMER_ROOT_HASH,
 };
@@ -17,6 +12,9 @@ use reth::{
     chainspec::EthChainSpec,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, Database, State},
     rpc::eth::RpcNodeCore,
+};
+use rollup_boost::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
 
 use alloy_eips::Encodable2718;
@@ -45,6 +43,7 @@ use revm::{
     context::ContextTr,
     database::{states::bundle_state::BundleRetention, BundleState},
 };
+use serde_json::json;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, error, info, span, warn};
@@ -559,11 +558,11 @@ where
             })
             .collect::<HashMap<Address, U256>>();
 
-        let metadata = FlashblocksMetadata::<OpPrimitives> {
-            receipts: receipts_with_hash,
-            new_account_balances,
-            block_number: ctx.parent().number + 1,
-        };
+        let metadata = json! ({
+            "receipts": receipts_with_hash,
+            "new_account_balances": new_account_balances,
+            "block_number": ctx.parent().number + 1,
+        });
 
         // Prepare the flashblocks message
         let fb_payload = FlashblocksPayloadV1 {

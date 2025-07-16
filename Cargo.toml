@@ -48,8 +48,8 @@ reth = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1" }
 reth-cli = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1", features = [
-    "op"
-]}
+    "op",
+] }
 reth-db = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1" }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "v1.5.1", features = [
@@ -141,6 +141,7 @@ jsonrpsee = { version = "0.25.1", features = ["server", "client", "macros"] }
 jsonrpsee-types = "0.25.1"
 
 # 3rd party
+rollup-boost = { git = "https://github.com/flashbots/rollup-boost", branch = "forerunner/p2p-flashblocks" }
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-tungstenite = "0.26.2"
