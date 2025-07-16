@@ -60,12 +60,13 @@ pub trait PayloadBuilderCtx: Send + Sync {
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static;
 
-    fn execute_sequencer_transactions<'a, DB>(
+    fn execute_sequencer_transactions<DB, E: Default + Debug>(
         &self,
-        builder: &mut State<DB>,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>
+        db: &mut State<DB>,
+    ) -> Result<ExecutionInfo<E>, PayloadBuilderError>
     where
-        DB: revm::Database + Debug + 'a,
+        DB: revm::Database + Debug,
+        DB::Error: Send + Sync + 'static;
 
     fn execute_best_transactions<'a, DB, E: Debug + Default, Txs>(
         &self,

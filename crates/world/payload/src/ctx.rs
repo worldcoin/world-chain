@@ -462,8 +462,9 @@ where
                         base_fee,
                         result.gas_used(),
                         tx,
-                        ExecResultAndState { result, state },
-                        &evm.into_env(),
+                        result,
+                        state,
+                        &evm,
                     );
                 }
 

@@ -323,7 +323,7 @@ where
             .apply_pre_execution_changes()?;
 
         let mut info = ctx
-            .execute_sequencer_transactions::<_, FlashblocksExecutionMetadata>(&mut db)
+            .execute_sequencer_transactions(&mut db)
             .map_err(PayloadBuilderError::other)?;
 
         let (payload, flashblock_payload, mut bundle_state) =
