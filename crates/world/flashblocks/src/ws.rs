@@ -1,12 +1,11 @@
 use futures_util::SinkExt;
+use rollup_boost::FlashblocksPayloadV1;
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-
-use crate::payload::FlashblocksPayloadV1;
 
 pub fn new_subscribers() -> Arc<Mutex<Vec<WebSocketStream<TcpStream>>>> {
     Arc::new(Mutex::new(Vec::default()))
