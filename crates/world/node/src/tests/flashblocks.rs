@@ -2,7 +2,7 @@
 use crate::args::WorldChainArgs;
 use crate::flashblocks::WorldChainFlashblocksNode;
 use alloy_network::eip2718::Encodable2718;
-use flashblocks::args::FlashblockArgs;
+use flashblocks::args::FlashblocksArgs;
 use futures::StreamExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::TreeConfig;
@@ -18,7 +18,9 @@ use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::Address;
+use rollup_boost::ed25519_dalek::SigningKey;
 use rollup_boost::FlashblocksPayloadV1;
+use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -69,13 +71,22 @@ pub async fn setup_flashblocks() -> eyre::Result<(
     // is 0.0.0.0 by default
     node_config.network.addr = [127, 0, 0, 1].into();
 
+    let flashblocks_args = FlashblocksArgs {
+        flashblock_block_time: 1000,
+        flashblock_interval: 250,
+        flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        flashblock_port: 9002,
+        flashblocks_authorizor_vk: None,
+        flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
+    };
+
     let node = WorldChainFlashblocksNode::new(WorldChainArgs {
         verified_blockspace_capacity: 70,
         pbh_entrypoint: PBH_DEV_ENTRYPOINT,
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
         builder_private_key: signer(6).to_bytes().to_string(),
-        flashblock_args: Some(FlashblockArgs::default()),
+        flashblocks_args: Some(flashblocks_args),
         ..Default::default()
     });
 

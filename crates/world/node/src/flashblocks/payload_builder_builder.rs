@@ -3,8 +3,6 @@ use std::net::IpAddr;
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
-use flashblocks::ws::{new_subscribers, publish_task, ws_server};
-// use flashblocks::ws::{publish_task, ws_server};
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
@@ -16,6 +14,9 @@ use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
+use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
+use rollup_boost::FlashblocksP2PMsg;
+use tokio::sync::mpsc;
 use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
@@ -48,6 +49,9 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub flashblock_server_addr: (IpAddr, u16),
+    pub publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub authorizer_vk: Option<VerifyingKey>,
+    pub builder_sk: SigningKey,
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -63,6 +67,9 @@ impl FlashblocksPayloadBuilderBuilder {
         block_time: u64,
         flashblock_interval: u64,
         flashblock_server_addr: (IpAddr, u16),
+        publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+        authorizer_vk: Option<VerifyingKey>,
+        builder_sk: SigningKey,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -75,6 +82,9 @@ impl FlashblocksPayloadBuilderBuilder {
             block_time,
             flashblock_interval,
             flashblock_server_addr,
+            publish_tx,
+            authorizer_vk,
+            builder_sk,
         }
     }
 
@@ -102,6 +112,9 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             flashblock_interval,
             flashblock_server_addr,
             best_transactions: _,
+            publish_tx,
+            authorizer_vk,
+            builder_sk,
         } = self;
 
         FlashblocksPayloadBuilderBuilder {
@@ -115,6 +128,9 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             best_transactions: best,
             flashblock_interval,
             flashblock_server_addr,
+            publish_tx,
+            authorizer_vk,
+            builder_sk,
         }
     }
 
@@ -142,8 +158,6 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
             pool: pool.clone(),
@@ -153,7 +167,6 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
                 da_config: self.da_config,
             },
             best_transactions: self.best_transactions.clone(),
-            tx,
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
             ctx_builder: WorldChainPayloadBuilderCtxBuilder {
@@ -167,19 +180,24 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
                     .parse()
                     .context("Failed to parse builder private key")?,
             },
+            publish_tx: self.publish_tx,
+            authorizer_vk: self.authorizer_vk,
+            builder_sk: self.builder_sk,
         };
 
-        let subscribers = new_subscribers();
+        // let subscribers = new_subscribers();
 
-        ctx.task_executor().spawn_critical(
-            "flashblocks ws server",
-            ws_server(subscribers.clone(), self.flashblock_server_addr),
-        );
-
-        ctx.task_executor().spawn_critical(
-            "flashblocks payload builder",
-            publish_task(rx, subscribers.clone()),
-        );
+        // TODO: these tasks should be spawned by
+        // the appropriate component
+        // ctx.task_executor().spawn_critical(
+        //     "flashblocks ws server",
+        //     ws_server(subscribers.clone(), self.flashblock_server_addr),
+        // );
+        //
+        // ctx.task_executor().spawn_critical(
+        //     "flashblocks payload builder",
+        //     publish_task(rx, subscribers.clone()),
+        // );
 
         Ok(payload_builder)
     }

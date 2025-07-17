@@ -32,7 +32,7 @@ fn main() {
         Cli::<WorldChainChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
 
-            if args.flashblock_args.is_some() {
+            if args.flashblocks_args.is_some() {
                 let node = WorldChainFlashblocksNode::new(args.clone());
                 let handle = builder
                     .node(node)

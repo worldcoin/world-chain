@@ -4685,7 +4685,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -7232,7 +7232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -11978,7 +11978,7 @@ dependencies = [
 [[package]]
 name = "rollup-boost"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks#495ab62026ba6a72e89786cc37513ff73035615e"
+source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks#7f8299298ed8cdb38e5bcab2f4f23f5d0138ccf6"
 dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rlp",

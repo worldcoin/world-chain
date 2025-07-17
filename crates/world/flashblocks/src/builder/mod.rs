@@ -1,26 +1,28 @@
 use crate::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
-
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs, BlockBody, BlockHeader, Header, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::{map::foldhash::HashMap, Address, Bytes, B256, U256};
-use futures_util::TryFutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{Block, PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, Database, State},
-    rpc::eth::RpcNodeCore,
 };
 use rollup_boost::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+    ed25519_dalek::{SigningKey, VerifyingKey},
+    Authorization, Authorized,
+};
+use rollup_boost::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksP2PMsg,
+    FlashblocksPayloadV1,
 };
 
 use alloy_eips::Encodable2718;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
-use reth_evm::{block::BlockExecutor, execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
 
 use reth_optimism_chainspec::OpChainSpec;
@@ -31,7 +33,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
@@ -39,10 +41,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{
-    context::ContextTr,
-    database::{states::bundle_state::BundleRetention, BundleState},
-};
+use revm::database::{states::bundle_state::BundleRetention, BundleState};
 use serde_json::json;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
@@ -66,13 +65,15 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
     pub best_transactions: Txs,
-    /// Channel sender for publishing messages
-    pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
     /// Block time in milliseconds
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
     pub ctx_builder: CtxBuilder,
+    /// Channel for publishing messages
+    pub publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub authorizer_vk: Option<VerifyingKey>,
+    pub builder_sk: SigningKey,
 }
 
 // TODO: This manual impl is required because we can't require PayloadBuilderCtx
@@ -93,10 +94,12 @@ where
             client: self.client.clone(),
             config: self.config.clone(),
             best_transactions: self.best_transactions.clone(),
-            tx: self.tx.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
             ctx_builder: self.ctx_builder.clone(),
+            publish_tx: self.publish_tx.clone(),
+            authorizer_vk: self.authorizer_vk,
+            builder_sk: self.builder_sk.clone(),
         }
     }
 }
@@ -142,7 +145,10 @@ where
 
         let builder = FlashblockBuilder::new(
             best,
-            self.tx.clone(),
+            self.publish_tx.clone(),
+            // TODO: figure out how to get the authorization from the FCU
+            None,
+            self.builder_sk.clone(),
             self.block_time,
             self.flashblock_interval,
             cancel.clone(),
@@ -232,7 +238,9 @@ where
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
     /// Channel sender for publishing messages
-    pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
+    pub tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub authorization: Option<Authorization>,
+    pub builder_sk: SigningKey,
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub cancel: CancelOnDrop,
@@ -245,13 +253,17 @@ where
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-        tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
+        tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+        authorization: Option<Authorization>,
+        builder_sk: SigningKey,
         block_time: u64,
         flashblock_interval: u64,
         cancel: CancelOnDrop,
     ) -> Self {
         Self {
             best: Box::new(best),
+            authorization,
+            builder_sk,
             tx,
             block_time,
             flashblock_interval,
@@ -328,7 +340,19 @@ where
         let (payload, flashblock_payload, mut bundle_state) =
             Self::build_block(db, ctx, &mut info)?;
 
-        if let Err(err) = self.tx.send(flashblock_payload) {
+        let authorization = self.authorization.clone().unwrap_or_else(|| {
+            // if no authorization is provided, we create one using the builder's signing key
+            Authorization::new(
+                flashblock_payload.payload_id,
+                self.block_time,
+                &self.builder_sk,
+                self.builder_sk.verifying_key(),
+            )
+        });
+        let authorized =
+            Authorized::new(&self.builder_sk, authorization.clone(), flashblock_payload);
+        let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
+        if let Err(err) = self.tx.send(p2p_msg) {
             error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
 
@@ -376,7 +400,14 @@ where
                         transactions = payload.block().body().transactions.len()
                     );
 
-                    if let Err(err) = self.tx.send(flashblock_payload) {
+                    let authorized = Authorized::new(
+                        &self.builder_sk,
+                        authorization.clone(),
+                        flashblock_payload,
+                    );
+                    let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
+
+                    if let Err(err) = self.tx.send(p2p_msg) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 
