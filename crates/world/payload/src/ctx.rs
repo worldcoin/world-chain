@@ -7,6 +7,7 @@ use alloy_rlp::Encodable;
 use alloy_signer::k256::elliptic_curve::Error;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
+use flashblocks::builder::executor::FlashblocksBlockExecutor;
 use flashblocks::builder::ExecutionInfo;
 use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_consensus::OpTransaction;
@@ -18,6 +19,7 @@ use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::PayloadConfig;
+use reth_evm::block::BlockExecutorFactory;
 use reth_evm::eth::receipt_builder::ReceiptBuilderCtx;
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::op_revm::{OpHaltReason, OpSpecId, OpTransactionError};
@@ -43,6 +45,7 @@ use reth_transaction_pool::PoolTransaction;
 use revm::context::result::{
     EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState,
 };
+use revm::database::BundleState;
 use revm::inspector::NoOpInspector;
 use revm::state::Account;
 use revm::DatabaseCommit;
@@ -60,14 +63,15 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtx<Client, Pool>
+pub struct WorldChainPayloadBuilderCtx<EvmConfig, Client, Pool>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
+    EvmConfig: ConfigureEvm,
 {
-    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
+    pub inner: Arc<OpPayloadBuilderCtx<EvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -77,7 +81,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
+pub struct WorldChainPayloadBuilderCtxBuilder<EvmConfig, Client, Pool> {
     pub client: Client,
     pub pool: Pool,
     pub verified_blockspace_capacity: u8,
@@ -86,13 +90,14 @@ pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
     pub builder_private_key: PrivateKeySigner,
 }
 
-impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
+impl<EvmConfig, Client, Pool> WorldChainPayloadBuilderCtx<EvmConfig, Client, Pool>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
     Pool: Send + Sync + TransactionPool,
+    EvmConfig: ConfigureEvm,
 {
     /// After computing the execution result and state we can commit changes to the database
     fn commit_changes<DB: Database, E: Default + Debug>(
@@ -133,15 +138,17 @@ where
     }
 }
 
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+impl<EvmConfig, Client, Pool> PayloadBuilderCtx
+    for WorldChainPayloadBuilderCtx<EvmConfig, Client, Pool>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
     Pool: Send + Sync + TransactionPool,
+    EvmConfig: ConfigureEvm<BlockExecutorFactory = FlashblocksBlockExecutorFactory>,
 {
-    type Evm = OpEvmConfig;
+    type Evm = EvmConfig;
     type ChainSpec = <Client as ChainSpecProvider>::ChainSpec;
     type Transaction = WorldChainPooledTransaction;
 
@@ -187,10 +194,11 @@ where
     fn block_builder<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
+        bundle_state: Option<BundleState>,
     ) -> Result<
         impl BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor = FlashblocksBlockExecutor<impl Evm, OpRethReceiptBuilder>,
         >,
         PayloadBuilderError,
     >
@@ -220,7 +228,7 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         // Prepare EVM.
-        let evm = self.inner.evm_config.evm_with_env(db, evm_env);
+        let mut evm = self.inner.evm_config.evm_with_env(db, evm_env);
 
         // Prepare block execution context.
         let execution_ctx = self

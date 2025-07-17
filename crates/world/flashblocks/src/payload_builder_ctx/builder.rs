@@ -10,16 +10,16 @@ use reth_primitives::NodePrimitives;
 
 use super::PayloadBuilderCtx;
 
-pub trait PayloadBuilderCtxBuilder<ChainSpec, Transaction>: Clone + Send + Sync {
+pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transaction>: Clone + Send + Sync {
     type PayloadBuilderCtx: PayloadBuilderCtx<
-        Evm = OpEvmConfig,
+        Evm = EvmConfig,
         ChainSpec = ChainSpec,
         Transaction = Transaction,
     >;
 
     fn build<Txs>(
         &self,
-        evm: OpEvmConfig,
+        evm: EvmConfig,
         da_config: OpDAConfig,
         chain_spec: Arc<ChainSpec>,
         config: PayloadConfig<

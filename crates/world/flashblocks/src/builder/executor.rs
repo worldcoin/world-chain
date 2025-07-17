@@ -203,13 +203,18 @@ where
         self.inner.evm_mut().db_mut().bundle_state.extend(pre_state);
         self
     }
+
+    pub fn take_bundle(&self) -> &BundleState {
+        &self.bundle_prestate
+    }
 }
 
 /// Optimism-related EVM configuration.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlashblocksEvmConfig<N: NodePrimitives = OpPrimitives> {
     inner: OpEvmConfig<OpChainSpec, N, OpRethReceiptBuilder>,
     executor_factory: FlashblocksBlockExecutorFactory,
+    block_assembler: FlashblocksBlockAssembler,
 }
 
 impl FlashblocksEvmConfig {
@@ -226,9 +231,10 @@ impl<N: NodePrimitives> FlashblocksEvmConfig<N> {
             inner: OpEvmConfig::new(chain_spec.clone().into(), receipt_builder.clone()),
             executor_factory: FlashblocksBlockExecutorFactory::new(
                 receipt_builder,
-                chain_spec.into(),
+                chain_spec.clone().into(),
                 OpEvmFactory::default(),
             ),
+            block_assembler: FlashblocksBlockAssembler::new(chain_spec.into()),
         }
     }
 
@@ -255,14 +261,14 @@ where
     type Error = EIP1559ParamError;
     type NextBlockEnvCtx = OpNextBlockEnvAttributes;
     type BlockExecutorFactory = FlashblocksBlockExecutorFactory;
-    type BlockAssembler = OpBlockAssembler<OpChainSpec>;
+    type BlockAssembler = FlashblocksBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         &self.executor_factory
     }
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.inner.block_assembler()
+        &self.block_assembler
     }
 
     fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
@@ -291,13 +297,6 @@ where
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data,
         }
-    }
-}
-
-impl<N: NodePrimitives> FlashblocksEvmConfig<N> {
-    /// Returns the receipt builder.
-    pub const fn set_prestate(&mut self) {
-        todo!()
     }
 }
 
@@ -330,6 +329,10 @@ impl FlashblocksBlockExecutorFactory {
     /// Exposes the EVM factory.
     pub const fn evm_factory(&self) -> &OpEvmFactory {
         &self.inner.evm_factory()
+    }
+
+    pub const fn take_bundle(&mut self) -> Option<BundleState> {
+        self.pre_state.take()
     }
 
     /// Sets the pre-state for the block executor factory.

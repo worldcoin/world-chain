@@ -12,17 +12,20 @@ use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_evm::{Database, Evm, EvmEnv};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
+use reth_optimism_node::OpRethReceiptBuilder;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_provider::ProviderError;
+use reth_provider::{bundle_state, ProviderError};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
+use revm::database::BundleState;
 use revm::inspector::NoOpInspector;
 use serde::ser::Error;
 use std::fmt::Debug;
 
+use crate::builder::executor::FlashblocksBlockExecutor;
 use crate::builder::ExecutionInfo;
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
@@ -54,7 +57,10 @@ pub trait PayloadBuilderCtx: Send + Sync {
     ) -> Result<
         impl BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor = FlashblocksBlockExecutor<
+                OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+                OpRethReceiptBuilder,
+            >,
         >,
         PayloadBuilderError,
     >
@@ -62,29 +68,35 @@ pub trait PayloadBuilderCtx: Send + Sync {
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static;
 
-    fn execute_sequencer_transactions<Builder, DB, E: Default + Debug>(
+    fn execute_sequencer_transactions<'a, Builder, DB, E: Default + Debug>(
         &self,
         db: &mut Builder,
-    ) -> Result<ExecutionInfo<E>, PayloadBuilderError>
+    ) -> Result<(ExecutionInfo<E>, BundleState), PayloadBuilderError>
     where
         Builder: BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector, PrecompilesMap>>,
+            Executor = FlashblocksBlockExecutor<
+                OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+                OpRethReceiptBuilder,
+            >,
         >,
-        DB: Database<Error = ProviderError> + 'static;
+        DB: Database<Error = ProviderError> + 'a;
 
-    fn execute_best_transactions<DB, Builder, Txs, E: Debug + Default>(
+    fn execute_best_transactions<'a, DB, Builder, Txs, E: Debug + Default>(
         &self,
         info: &mut ExecutionInfo<E>,
         builder: &mut Builder,
         best_txs: Txs,
         gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>
+    ) -> Result<Option<BundleState>, PayloadBuilderError>
     where
-        DB: Database<Error = ProviderError> + 'static,
+        DB: Database<Error = ProviderError> + 'a,
         Builder: BlockBuilder<
             Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector, PrecompilesMap>>,
+            Executor = FlashblocksBlockExecutor<
+                OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+                OpRethReceiptBuilder,
+            >,
         >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;
 

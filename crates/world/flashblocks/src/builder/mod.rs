@@ -1,4 +1,9 @@
-use crate::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+use crate::{
+    builder::executor::{
+        FlashblocksBlockExecutor, FlashblocksBlockExecutorFactory, FlashblocksEvmConfig,
+    },
+    payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
+};
 
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs, BlockBody, BlockHeader, Header, EMPTY_OMMER_ROOT_HASH,
@@ -13,6 +18,7 @@ use reth::{
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, Database, State},
     rpc::eth::RpcNodeCore,
 };
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use rollup_boost::{
     ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
@@ -20,22 +26,28 @@ use rollup_boost::{
 use alloy_eips::Encodable2718;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
-use reth_evm::{block::BlockExecutor, execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{
+    block::{BlockExecutor, BlockExecutorFactory},
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm,
+};
 use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_optimism_node::{
+    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+};
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider,
-    StateProviderFactory, StateRootProvider, StorageRootProvider,
+    bundle_state, ChainSpecProvider, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StateProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -45,7 +57,7 @@ use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, error, info, span, warn};
 
-mod executor;
+pub mod executor;
 mod retaining_payload_txs;
 
 /// Flashblocks Paylod builder
@@ -54,7 +66,7 @@ mod retaining_payload_txs;
 #[derive(Debug)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The type responsible for creating the evm.
-    pub evm_config: OpEvmConfig,
+    pub evm_config: FlashblocksEvmConfig,
     /// Transaction pool.
     pub pool: Pool,
     /// Node client.
@@ -104,7 +116,7 @@ where
     Txs: OpPayloadTransactions<Pool::Transaction>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    CtxBuilder: PayloadBuilderCtxBuilder<OpChainSpec, Pool::Transaction>,
+    CtxBuilder: PayloadBuilderCtxBuilder<FlashblocksEvmConfig, OpChainSpec, Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -113,7 +125,7 @@ where
     ///
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
-    /// a result indicating success with the payload or an error in case of failure.
+    /// a result indicating success with the payload or an error in case of failure.    
     fn build_payload<'a, T>(
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
@@ -164,7 +176,8 @@ impl<Pool, Client, CtxBuilder, Txs> PayloadBuilder
 where
     Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
-    CtxBuilder: PayloadBuilderCtxBuilder<Client::ChainSpec, Pool::Transaction>,
+    CtxBuilder:
+        PayloadBuilderCtxBuilder<FlashblocksEvmConfig, Client::ChainSpec, Pool::Transaction>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>;
@@ -272,7 +285,11 @@ where
     where
         Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
         Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+        Ctx: PayloadBuilderCtx<
+            Evm: ConfigureEvm<BlockExecutorFactory = FlashblocksBlockExecutorFactory>,
+            Transaction = Tx,
+            ChainSpec = OpChainSpec,
+        >,
     {
         let span = span!(
             tracing::Level::INFO,
@@ -287,6 +304,7 @@ where
         let mut flashblock_idx = 0;
         let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
+        // 2. Setup the parent attributes for all flashblock payloads
         let attributes = OpNextBlockEnvAttributes {
             timestamp: ctx.attributes().timestamp(),
             suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
@@ -309,28 +327,26 @@ where
         };
 
         let state = StateProviderDatabase::new(&state_provider);
+
         let mut db = State::builder()
             .with_database(state)
             .with_bundle_update()
             .build();
 
-        ctx.evm_config()
-            .builder_for_next_block(&mut db, ctx.parent(), attributes.clone())
-            .map_err(PayloadBuilderError::other)?
-            .apply_pre_execution_changes()?;
-
-        let mut info = ctx
-            .execute_sequencer_transactions(&mut db)
+        // Create the block builder
+        let mut builder = ctx.block_builder(&mut db)?;
+        let (mut info, mut bundle_state) = ctx
+            .execute_sequencer_transactions::<_, _, ()>(&mut builder)
             .map_err(PayloadBuilderError::other)?;
 
-        let (payload, flashblock_payload, mut bundle_state) =
-            Self::build_block(db, ctx, &mut info)?;
+        let mut build_outcome = builder.finish(&state_provider)?;
+
+        let flashblock_payload = FlashblocksPayloadV1::default();
 
         if let Err(err) = self.tx.send(flashblock_payload) {
             error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
 
-        // 2. Build the flashblocks
         let total_flashbblocks = self.block_time as usize / self.flashblock_interval as usize;
         let (tx, mut rx) = tokio::sync::mpsc::channel(total_flashbblocks);
 
@@ -339,11 +355,12 @@ where
 
         loop {
             debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblock {flashblock_idx}");
+            let state = StateProviderDatabase::new(&state_provider);
 
-            let mut state = reth::revm::State::builder()
-                .with_database(StateProviderDatabase::new(&state_provider))
+            let mut db = State::builder()
+                .with_database(state)
                 .with_bundle_update()
-                .with_bundle_prestate(bundle_state)
+                .with_bundle_prestate(bundle_state.clone())
                 .build();
 
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
@@ -353,48 +370,76 @@ where
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
-                    let evm = ctx.block_builder(&mut state);
+                    let mut builder = ctx.block_builder(&mut db)?;
 
-                    {
-                        let Some(()) =
-                            ctx.execute_best_transactions(&mut info, evm, best_txns, gas_limit)?
-                        else {
-                            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more transactions to include in flashblock {flashblock_idx}");
-                            break;
-                        };
-                    }
+                    let Some(new_bundle_state) = ctx.execute_best_transactions(
+                        &mut info,
+                        &mut builder,
+                        best_txns,
+                        gas_limit,
+                    )?
+                    else {
+                        break;
+                    };
 
-                    let (payload, flashblock_payload, new_bundle) =
-                        Self::build_block(state, ctx, &mut info)
-                            .map_err(PayloadBuilderError::other)?;
+                    build_outcome = builder.finish(&state_provider)?;
+
+                    let flashblock_payload = FlashblocksPayloadV1::default();
 
                     info!(
                         target: "payload_builder",
                         id=%ctx.attributes().payload_id(),
-                        transactions = payload.block().body().transactions.len()
                     );
 
                     if let Err(err) = self.tx.send(flashblock_payload) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 
-                    bundle_state = new_bundle;
+                    bundle_state = new_bundle_state;
                 }
 
                 // tx was dropped, resolve the most recent payload
                 None => {
                     debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");
-                    if flashblock_idx == 0 {
-                        // if no flashblocks were built, we can return the payload as is
-                        return Ok(BuildOutcomeKind::Freeze(payload));
-                    }
-
                     break;
                 }
             }
 
             flashblock_idx += 1;
         }
+
+        let BlockBuilderOutcome {
+            execution_result,
+            block,
+            hashed_state,
+            trie_updates,
+        } = build_outcome;
+
+        let sealed_block = Arc::new(block.sealed_block().clone());
+
+        let execution_outcome = ExecutionOutcome::new(
+            bundle_state.clone(),
+            vec![execution_result.receipts],
+            block.number,
+            Vec::new(),
+        );
+
+        // create the executed block data
+        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(block),
+                execution_output: Arc::new(Default::default()),
+                hashed_state: Arc::new(hashed_state),
+            },
+            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
+        };
+
+        let payload = OpBuiltPayload::new(
+            ctx.payload_id(),
+            sealed_block,
+            info.total_fees,
+            Some(executed),
+        );
 
         if ctx.attributes().no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
