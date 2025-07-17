@@ -428,7 +428,7 @@ where
         let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
-                execution_output: Arc::new(Default::default()),
+                execution_output: Arc::new(execution_outcome),
                 hashed_state: Arc::new(hashed_state),
             },
             trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
