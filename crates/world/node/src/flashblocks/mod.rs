@@ -1,5 +1,6 @@
 use crate::args::WorldChainArgs;
 use crate::node::WorldChainPoolBuilder;
+use flashblocks_p2p::net::FlashblocksNetworkBuilder;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::{BasicPayloadServiceBuilder, ComponentsBuilder};
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
@@ -45,7 +46,7 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
     Node,
     WorldChainPoolBuilder,
     BasicPayloadServiceBuilder<Payload>,
-    OpNetworkBuilder,
+    FlashblocksNetworkBuilder<OpNetworkBuilder>,
     OpExecutorBuilder,
     OpConsensusBuilder,
 >;
