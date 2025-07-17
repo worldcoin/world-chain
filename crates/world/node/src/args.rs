@@ -1,9 +1,9 @@
 use alloy_primitives::Address;
 use clap::value_parser;
-use flashblocks::args::FlashblockArgs;
+use flashblocks::args::FlashblocksArgs;
 use reth_optimism_node::args::RollupArgs;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, Default, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
 pub struct WorldChainArgs {
     /// op rollup args
@@ -38,5 +38,5 @@ pub struct WorldChainArgs {
 
     /// Flashblock args
     #[command(flatten)]
-    pub flashblock_args: Option<FlashblockArgs>,
+    pub flashblocks_args: Option<FlashblocksArgs>,
 }
