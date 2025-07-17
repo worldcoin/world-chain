@@ -356,7 +356,7 @@ where
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
-                    let evm = ctx.evm_config().evm_for_block(&mut state, ctx.parent());
+                    let evm = ctx.block_builder(&mut state);
 
                     {
                         let Some(()) =
@@ -383,6 +383,7 @@ where
 
                     bundle_state = new_bundle;
                 }
+
                 // tx was dropped, resolve the most recent payload
                 None => {
                     debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");

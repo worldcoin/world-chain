@@ -4,6 +4,7 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::OpEvm;
 use alloy_rlp::Encodable;
+use alloy_signer::k256::elliptic_curve::Error;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use flashblocks::builder::ExecutionInfo;
@@ -236,111 +237,35 @@ where
 
     fn execute_sequencer_transactions<DB, E: Default + Debug>(
         &self,
-        db: &mut State<DB>,
+        db: &mut Builder,
     ) -> Result<ExecutionInfo<E>, PayloadBuilderError>
     where
-        DB: reth_evm::Database + Debug,
+        Builder: BlockBuilder<
+            Primitives = OpPrimitives,
+            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector, PrecompilesMap>>,
+        >,
+        DB: Database<Error = ProviderError> + 'static,
     {
-        let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
-        let mut evm = self
-            .evm_config()
-            .evm_with_env(&mut *db, self.evm_env().clone());
-
-        for sequencer_tx in &self.attributes().transactions {
-            // A sequencer's block should never contain blob transactions.
-            if sequencer_tx.value().is_eip4844() {
-                return Err(PayloadBuilderError::other(
-                    OpPayloadBuilderError::BlobTransactionRejected,
-                ));
-            }
-
-            // Convert the transaction to a [Recovered<TransactionSigned>]. This is
-            // purely for the purposes of utilizing the `evm_config.tx_env`` function.
-            // Deposit transactions do not have signatures, so if the tx is a deposit, this
-            // will just pull in its `from` address.
-            let sequencer_tx = sequencer_tx
-                .value()
-                .try_clone_into_recovered()
-                .map_err(|_| {
-                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
-                })?;
-
-            // Cache the depositor account prior to the state transition for the deposit nonce.
-            //
-            // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
-            // were not introduced in Bedrock. In addition, regular transactions don't have deposit
-            // nonces, so we don't need to touch the DB for those.
-            let depositor_nonce = (self
-                .spec()
-                .is_regolith_active_at_timestamp(self.attributes().timestamp())
-                && sequencer_tx.is_deposit())
-            .then(|| {
-                evm.db_mut()
-                    .load_cache_account(sequencer_tx.signer())
-                    .map(|acc| acc.account_info().unwrap_or_default().nonce)
-            })
-            .transpose()
-            .map_err(|_| {
-                PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
-                    sequencer_tx.signer(),
-                ))
-            })?;
-
-            let ResultAndState { result, state } = match evm.transact(&sequencer_tx) {
-                Ok(res) => res,
-                Err(err) => {
-                    if err.is_invalid_tx_err() {
-                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue;
-                    }
-                    // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
-                }
-            };
-
-            // add gas used by the transaction to cumulative gas used, before creating the receipt
-            let gas_used = result.gas_used();
-            info.cumulative_gas_used += gas_used;
-
-            let ctx = ReceiptBuilderCtx {
-                tx: sequencer_tx.inner(),
-                evm: &evm,
-                result,
-                state: &state,
-                cumulative_gas_used: info.cumulative_gas_used,
-            };
-
-            let receipt = OpRethReceiptBuilder::default()
-                .build_receipt(ctx)
-                .map_err(|_| PayloadBuilderError::Other(eyre!("failed to build receipt").into()))?;
-
-            info.receipts.push(receipt);
-
-            // commit changes
-            evm.db_mut().commit(state);
-
-            // append sender and transaction to the respective lists
-            info.executed_senders.push(sequencer_tx.signer());
-            info.executed_transactions.push(sequencer_tx.into_inner());
-        }
-
-        Ok(info)
+        self.inner.execute_sequencer_transactions(db)
     }
 
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    fn execute_best_transactions<'a, DB, E: Default + Debug, Txs>(
+    fn execute_best_transactions<DB, Builder, Txs, E: Default + Debug>(
         &self,
         info: &mut ExecutionInfo<E>,
-        mut evm: OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+        builder: &mut Builder,
         mut best_txs: Txs,
         _gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
+        Builder: BlockBuilder<
+            Primitives = OpPrimitives,
+            Executor: BlockExecutor<Evm = OpEvm<DB, NoOpInspector, PrecompilesMap>>,
+        >,
+        DB: Database<Error = ProviderError> + 'static,
     {
         let mut block_gas_limit = evm.block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
@@ -457,15 +382,7 @@ where
             // is not spent rather than sitting in the default execution client's mempool.
             match evm.transact(tx.clone()) {
                 Ok(ExecResultAndState { result, state }) => {
-                    self.commit_changes(
-                        info,
-                        base_fee,
-                        result.gas_used(),
-                        tx,
-                        result,
-                        state,
-                        &evm,
-                    );
+                    self.commit_changes(info, base_fee, result.gas_used(), tx, result, state, &evm);
                 }
 
                 Err(e) => {

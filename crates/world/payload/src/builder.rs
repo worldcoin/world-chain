@@ -16,8 +16,8 @@ use reth_basic_payload_builder::{
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
-use reth_evm::{ConfigureEvm, Database};
 use reth_evm::Evm;
+use reth_evm::{ConfigureEvm, Database};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -500,12 +500,11 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     {
         let Self { best } = self;
 
-
         let mut state = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build();
-        
+
         let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut state)?;
 
         let mut db = State::builder()
