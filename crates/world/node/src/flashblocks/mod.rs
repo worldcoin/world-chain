@@ -18,7 +18,7 @@ use reth_optimism_rpc::eth::OpEthApiBuilder;
 use reth_optimism_storage::OpStorage;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_trie_db::MerklePatriciaTrie;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 mod payload_builder_builder;
@@ -82,7 +82,7 @@ impl WorldChainFlashblocksNode {
     {
         let (flashblocks_publish_tx, flashblocks_publish_rx) = mpsc::unbounded_channel();
         // inbound flashblocks, for use with the node overlay
-        // let (flashblocks_tx, flashblocks_rx) = tokio::sync::mpsc::channel(100);
+        let (flashblocks_tx, _flashblocks_rx) = broadcast::channel(100);
 
         let WorldChainArgs {
             rollup_args,
@@ -102,6 +102,20 @@ impl WorldChainFlashblocksNode {
         } = rollup_args;
 
         let flashblocks_args = self.args.flashblocks_args.as_ref().unwrap();
+        let op_network_builder = OpNetworkBuilder {
+            disable_txpool_gossip,
+            disable_discovery_v4: !discovery_v4,
+        };
+        let authorizer_vk = flashblocks_args
+            .flashblocks_authorizor_vk
+            .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
+
+        let fb_network_builder = FlashblocksNetworkBuilder::new(
+            op_network_builder,
+            authorizer_vk,
+            flashblocks_tx,
+            flashblocks_publish_rx,
+        );
 
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -130,10 +144,7 @@ impl WorldChainFlashblocksNode {
                 )
                 .with_da_config(self.da_config.clone()),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
