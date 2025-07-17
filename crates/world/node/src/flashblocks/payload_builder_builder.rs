@@ -3,7 +3,8 @@ use std::net::IpAddr;
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
-use flashblocks::ws::{publish_task, ws_server};
+use flashblocks::ws::{new_subscribers, publish_task, ws_server};
+// use flashblocks::ws::{publish_task, ws_server};
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
@@ -43,7 +44,6 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// Sets the private key of the builder
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
-
     /// flashblocks building params
     pub block_time: u64,
     pub flashblock_interval: u64,
@@ -169,7 +169,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             },
         };
 
-        let subscribers = flashblocks::ws::new_subscribers();
+        let subscribers = new_subscribers();
 
         ctx.task_executor().spawn_critical(
             "flashblocks ws server",

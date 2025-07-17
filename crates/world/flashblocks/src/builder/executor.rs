@@ -1,46 +1,33 @@
 use std::sync::Arc;
 
-use alloy_consensus::{Block, BlockHeader, Header, Transaction, TxReceipt};
+use alloy_consensus::{Block, Header, Transaction, TxReceipt};
 use alloy_eips::eip7685::Requests;
 use alloy_eips::Encodable2718;
-use alloy_op_evm::block::OpAlloyReceiptBuilder;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutor};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_op_hardforks::{OpChainHardforks, OpHardforks};
 use alloy_primitives::{Address, U256};
-use op_alloy_consensus::{EIP1559ParamError, OpTxEnvelope, OpTxReceipt};
+use op_alloy_consensus::EIP1559ParamError;
 use reth::core::primitives::Receipt;
-use reth::network::types::state;
-use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
-use reth_chainspec::EthChainSpec;
-use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor, InternalBlockExecutionError};
+use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_evm::op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
-    eth::receipt_builder::ReceiptBuilderCtx,
-    op_revm::OpHaltReason,
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory, EvmFor};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
     OpBlockAssembler, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
-use reth_primitives::{HeaderTy, NodePrimitives, SealedBlock};
-use reth_provider::{BlockExecutionResult, ProviderError, StateProvider};
-use revm::context::result::ResultAndState;
+use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_provider::BlockExecutionResult;
+use revm::context::result::ExecutionResult;
 use revm::context::TxEnv;
 use revm::database::BundleState;
-use revm::{
-    context::result::{ExecResultAndState, ExecutionResult},
-    primitives::HashMap,
-};
-use revm_state::{Account, EvmState};
-use tracing::warn;
 
 /// This type wraps the [`OpBlockExecutor`] and provides a way to execute flashblocks
 /// with the correct context and state management from prior flashblocks.
