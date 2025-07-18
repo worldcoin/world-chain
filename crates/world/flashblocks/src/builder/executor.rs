@@ -96,16 +96,12 @@ where
                 gas_used,
             },
         ) = self.inner.finish()?;
-        // Extend metadata from the inner executor
+
         self.receipts.extend_from_slice(&receipts);
-        // Add cumulative gas used from prior flashblocks
         self.cumulative_gas_used = gas_used + self.cumulative_gas_used;
-        // Take the bundle prestate from the inner executor.
-        // This holds all transition state changes applied from all flashblocks.
         self.bundle_prestate = evm.db_mut().take_bundle();
         self.total_flashblocks += 1;
 
-        // Return the evm, and the BlockExecutionResult from the outer executor with the aggregated receipts.
         Ok((
             evm,
             BlockExecutionResult {

@@ -45,7 +45,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::inspector::NoOpInspector;
+use revm::{context::inner, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, error, info, span, warn};
@@ -289,7 +289,7 @@ where
         let mut flashblock_idx = 0;
         let mut transactions_offset = 0;
 
-        let mut gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+        let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
         let state = StateProviderDatabase::new(&state_provider);
 
@@ -303,9 +303,6 @@ where
         let (mut info, mut bundle_state) = ctx
             .execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?;
-
-        // Decrement gas limit by the gas used by the sequencer transactions
-        gas_limit -= info.cumulative_gas_used;
 
         let mut build_outcome = builder.finish(&state_provider)?;
 
@@ -357,11 +354,17 @@ where
                         ctx,
                     )?;
 
+                    let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
+                    if inner_gas_limit == 0 {
+                        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no gas left for flashblock {flashblock_idx}, stopping");
+                        break db.take_bundle();
+                    };
+                    
                     let Some(new_bundle_state) = ctx.execute_best_transactions(
                         &mut info,
                         &mut builder,
                         best_txns,
-                        gas_limit,
+                        inner_gas_limit,
                     )?
                     else {
                         break db.take_bundle();
