@@ -2,7 +2,6 @@ use crate::ctx::WorldChainPayloadBuilderCtx;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
 use flashblocks::payload_builder_ctx::PayloadBuilderCtx;
-use op_alloy_consensus::OpTxEnvelope;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -16,7 +15,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::execute::BlockBuilderOutcome;
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
-use reth_evm::{ConfigureEvm, Database};
+use reth_evm::Database;
 use reth_evm::Evm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -33,7 +32,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
     StateProviderFactory,
 };
-use reth_transaction_pool::{BlobStore, PoolTransaction};
+use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
@@ -198,12 +197,9 @@ where
     /// a result indicating success with the payload or an error in case of failure.
     fn build_payload<'a, Txs>(
         &self,
-        args: BuildArguments<
-            OpPayloadBuilderAttributes<OpTransactionSigned>,
-            OpBuiltPayload<OpPrimitives>,
-        >,
+        args: BuildArguments<OpPayloadBuilderAttributes<OpTransactionSigned>, OpBuiltPayload>,
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-    ) -> Result<BuildOutcome<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
     {
@@ -379,14 +375,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     pub fn build<Pool, Client>(
         self,
         db: impl Database<Error = ProviderError>,
-        state_provider: impl StateProvider + Clone,
+        state_provider: impl StateProvider,
         ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
         Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
-            + BlockReaderIdExt<Block = alloy_consensus::Block<OpTxEnvelope>>
+            + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
             + ChainSpecProvider<ChainSpec: OpHardforks>
             + Clone,
     {
@@ -406,24 +402,16 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
 
-        let db = StateProviderDatabase::new(&state_provider);
-
-        let mut state = State::builder()
-            .with_database(db)
-            .with_bundle_update()
-            .build();
-
         // 2. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions::<_, ()>(&mut state)?;
+        let mut info = op_ctx.execute_sequencer_transactions(&mut builder)?;
 
         // 3. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
-            let evm = ctx.evm_config().evm_for_block(&mut state, ctx.parent());
-            // // TODO: Validate gas limit
+            // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, evm, best_txs, 0)?
-                .is_some()
+                .execute_best_transactions(&mut info, &mut builder, best_txs, 0)?
+                .is_none()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
@@ -442,7 +430,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             hashed_state,
             trie_updates,
             block,
-        } = builder.finish(&state_provider)?;
+        } = builder.finish(state_provider)?;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%op_ctx.payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -483,7 +471,6 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         }
     }
 
-    /// TODO: FIXME: This implementation is not correct
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
     pub fn witness<Pool, Client>(
         self,
@@ -500,31 +487,21 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     {
         let Self { best } = self;
 
-
-        let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
-            .with_bundle_update()
-            .build();
-        
-        let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut state)?;
-
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .build();
+        let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
-
-        let mut info = ctx.execute_sequencer_transactions::<_, ()>(&mut db)?;
+        let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
         if !ctx.inner.attributes().no_tx_pool {
             let best_txs = best(
                 ctx.inner
                     .best_transaction_attributes(builder.evm_mut().block()),
             );
-
-            let evm = ctx.evm_config().evm_for_block(&mut db, ctx.parent());
             // TODO: Validate gas limit
-            ctx.execute_best_transactions(&mut info, evm, best_txs, 0)?;
+            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, 0)?;
         }
         builder.into_executor().apply_post_execution_changes()?;
 

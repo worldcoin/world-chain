@@ -44,58 +44,58 @@ world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 flashblocks = { path = "crates/world/flashblocks" }
 
 # reth
-reth = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-evm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1", features = [
+reth = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-cli-util = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-cli = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-evm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", features = [
     "op",
 ] }
-reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-db-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1", features = [
+reth-db = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-db-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-provider = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", features = [
     "test-utils",
 ] }
-reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-rpc-server-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-prune-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-chain-state = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-stages-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-node-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1", features = [
+reth-basic-payload-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-transaction-pool = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-rpc-server-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-prune-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-trie = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-chain-state = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-eth-wire-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-stages-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-trie-db = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-primitives-traits = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-node-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-engine-local = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", features = [
     "op",
 ] }
-reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-payload-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1", default-features = false }
-reth-tasks = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
+reth-node-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-payload-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-payload-util = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-payload-validator = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-revm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", default-features = false }
+reth-tasks = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-chainspec = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 
 # reth-optimism
-reth-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-evm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-node = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-rpc = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-chainspec = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth_payload_util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-forks = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-e2e-test-utils = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-node-core = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-tracing = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
-reth-optimism-storage = { git = "https://github.com/paradigmxyz/reth", tag = "v1.5.1" }
+reth-primitives = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-evm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-node = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-cli = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-rpc = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-consensus = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-chainspec = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth_payload_util = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-payload-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-forks = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-primitives = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-e2e-test-utils = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-consensus = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-node-core = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-tracing = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-rpc-layer = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-node-ethereum = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-optimism-storage = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 
 # alloy op
 op-alloy-consensus = "0.18.9"
@@ -141,8 +141,8 @@ jsonrpsee = { version = "0.25.1", features = ["server", "client", "macros"] }
 jsonrpsee-types = "0.25.1"
 
 # 3rd party
-rollup-boost = { git = "https://github.com/flashbots/rollup-boost", branch = "forerunner/p2p-flashblocks" }
-flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", branch = "forerunner/p2p-flashblocks" }
+rollup-boost = { git = "https://github.com/flashbots/rollup-boost", branch = "forerunner/p2p-flashblocks-reth-fork" }
+flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", branch = "forerunner/p2p-flashblocks-reth-fork" }
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-tungstenite = "0.26.2"
@@ -177,7 +177,7 @@ rayon = "1.10.0"
 auto_impl = "1"
 
 # WIP
-# [patch."https://github.com/paradigmxyz/reth"]
+# [patch."https://github.com/0xOsiris/reth"]
 # reth = { path = "../../paradigmxyz/reth/bin/reth" }
 # reth-cli-util
 # reth-evm

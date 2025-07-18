@@ -14,7 +14,6 @@ use reth_e2e_test_utils::node::NodeTestContext;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::Address;
@@ -168,7 +167,7 @@ async fn test_build_flashblocks() -> eyre::Result<()> {
     });
 
     // Initiate a payload building job
-    let block = test_ctx.advance_block().await?;
+    let _block = test_ctx.advance_block().await?;
 
     assert_eq!(
         received_messages

@@ -1,56 +1,43 @@
 use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
 use alloy_network::{TransactionBuilder, TxSignerSync};
-use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
-use alloy_op_evm::OpEvm;
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::builder::ExecutionInfo;
 use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
-use op_alloy_consensus::OpTransaction;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
-use reth::core::rpc::result;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
 use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_basic_payload_builder::PayloadConfig;
-use reth_evm::eth::receipt_builder::ReceiptBuilderCtx;
+use reth_evm::block::{BlockExecutionError, BlockValidationError};
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
-use reth_evm::op_revm::{OpHaltReason, OpSpecId, OpTransactionError};
-use reth_evm::precompiles::PrecompilesMap;
+use reth_evm::op_revm::OpSpecId;
+use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
-use reth_evm::{Evm, EvmError};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
     OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
-    OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::builder::OpPayloadBuilderCtx;
+use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_payload_builder::error::OpPayloadBuilderError;
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
-use revm::context::result::{
-    EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState,
-};
-use revm::inspector::NoOpInspector;
-use revm::state::Account;
-use revm::DatabaseCommit;
-use revm_primitives::{Address, HashMap, U256};
+use revm::database::BundleState;
+use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tracing::info;
 use tracing::{error, trace};
 
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
@@ -94,41 +81,23 @@ where
     Pool: Send + Sync + TransactionPool,
 {
     /// After computing the execution result and state we can commit changes to the database
-    fn commit_changes<DB: Database, E: Default + Debug>(
+    fn commit_changes(
         &self,
-        info: &mut ExecutionInfo<E>,
+        info: &mut ExecutionInfo,
         base_fee: u64,
         gas_used: u64,
         tx: Recovered<OpTransactionSigned>,
-        result: ExecutionResult<OpHaltReason>,
-        state: HashMap<Address, Account>,
-        evm: &alloy_op_evm::OpEvm<DB, NoOpInspector, PrecompilesMap>,
-    ) -> Result<(), PayloadBuilderError> {
+    ) {
+        // add gas used by the transaction to cumulative gas used, before creating the
+        // receipt
         info.cumulative_gas_used += gas_used;
         info.cumulative_da_bytes_used += tx.length() as u64;
-
-        let receipt = OpRethReceiptBuilder::default()
-            .build_receipt(ReceiptBuilderCtx {
-                tx: &tx,
-                evm: evm,
-                result: result,
-                state: &state,
-                cumulative_gas_used: info.cumulative_gas_used,
-            })
-            .map_err(|_| {
-                error!(target: "payload_builder", "failed to build receipt");
-                PayloadBuilderError::Other(eyre!("failed to build receipt").into())
-            })?;
 
         // update add to total fees
         let miner_fee = tx
             .effective_tip_per_gas(base_fee)
             .expect("fee is always valid; execution succeeded");
         info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-        info.receipts.push(receipt);
-
-        Ok(())
     }
 }
 
@@ -188,14 +157,14 @@ where
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-            Primitives = OpPrimitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
-        >,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
         PayloadBuilderError,
     >
     where
-        DB: revm::Database + std::fmt::Debug + 'a,
-        DB::Error: Send + Sync + std::fmt::Debug + 'static,
+        DB::Error: Send + Sync + 'static,
+        DB: Database + 'a,
     {
         // Prepare attributes for next block environment.
         let attributes = OpNextBlockEnvAttributes {
@@ -234,17 +203,18 @@ where
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
 
-    fn execute_sequencer_transactions<DB, E: Default + Debug>(
+    fn execute_sequencer_transactions<'a, DB>(
         &self,
-        db: &mut State<DB>,
-    ) -> Result<ExecutionInfo<E>, PayloadBuilderError>
+        builder: &mut impl BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+    ) -> Result<(ExecutionInfo, BundleState), PayloadBuilderError>
     where
-        DB: reth_evm::Database + Debug,
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
     {
-        let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
-        let mut evm = self
-            .evm_config()
-            .evm_with_env(&mut *db, self.evm_env().clone());
+        let mut info = ExecutionInfo::new();
 
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
@@ -254,7 +224,7 @@ where
                 ));
             }
 
-            // Convert the transaction to a [Recovered<TransactionSigned>]. This is
+            // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
@@ -265,94 +235,62 @@ where
                     PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
                 })?;
 
-            // Cache the depositor account prior to the state transition for the deposit nonce.
-            //
-            // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
-            // were not introduced in Bedrock. In addition, regular transactions don't have deposit
-            // nonces, so we don't need to touch the DB for those.
-            let depositor_nonce = (self
-                .spec()
-                .is_regolith_active_at_timestamp(self.attributes().timestamp())
-                && sequencer_tx.is_deposit())
-            .then(|| {
-                evm.db_mut()
-                    .load_cache_account(sequencer_tx.signer())
-                    .map(|acc| acc.account_info().unwrap_or_default().nonce)
-            })
-            .transpose()
-            .map_err(|_| {
-                PayloadBuilderError::other(OpPayloadBuilderError::AccountLoadFailed(
-                    sequencer_tx.signer(),
-                ))
-            })?;
-
-            let ResultAndState { result, state } = match evm.transact(&sequencer_tx) {
-                Ok(res) => res,
+            let gas_used = match builder.execute_transaction(sequencer_tx.clone()) {
+                Ok(gas_used) => gas_used,
+                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                    error,
+                    ..
+                })) => {
+                    trace!(target: "payload_builder", %error, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                    continue;
+                }
                 Err(err) => {
-                    if err.is_invalid_tx_err() {
-                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue;
-                    }
                     // this is an error that we should treat as fatal for this attempt
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
-            let gas_used = result.gas_used();
             info.cumulative_gas_used += gas_used;
-
-            let ctx = ReceiptBuilderCtx {
-                tx: sequencer_tx.inner(),
-                evm: &evm,
-                result,
-                state: &state,
-                cumulative_gas_used: info.cumulative_gas_used,
-            };
-
-            let receipt = OpRethReceiptBuilder::default()
-                .build_receipt(ctx)
-                .map_err(|_| PayloadBuilderError::Other(eyre!("failed to build receipt").into()))?;
-
-            info.receipts.push(receipt);
-
-            // commit changes
-            evm.db_mut().commit(state);
-
-            // append sender and transaction to the respective lists
-            info.executed_senders.push(sequencer_tx.signer());
-            info.executed_transactions.push(sequencer_tx.into_inner());
         }
 
-        Ok(info)
+        Ok((
+            info,
+            builder.executor_mut().evm_mut().db_mut().take_bundle(),
+        ))
     }
 
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    fn execute_best_transactions<'a, DB, E: Default + Debug, Txs>(
+    fn execute_best_transactions<'a, Txs, DB, Builder>(
         &self,
-        info: &mut ExecutionInfo<E>,
-        mut evm: OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+        info: &mut ExecutionInfo,
+        builder: &mut Builder,
         mut best_txs: Txs,
         _gas_limit: u64,
-    ) -> Result<Option<()>, PayloadBuilderError>
+    ) -> Result<Option<BundleState>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<Transaction = Self::Transaction>,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+        Txs: PayloadTransactions<
+            Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+        >,
     {
-        let mut block_gas_limit = evm.block().gas_limit;
+        let mut block_gas_limit = builder.evm_mut().block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
-        let base_fee = evm.block().basefee;
+        let base_fee = builder.evm_mut().block().basefee;
 
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
-            info!(target: "payload_builder", "Processing transaction: {}", pooled_tx.hash());
             let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
 
@@ -386,7 +324,7 @@ where
 
             // check if the job was cancelled, if so we can exit early
             if self.inner.cancel.is_cancelled() {
-                return Ok(Some(()));
+                return Ok(None);
             }
 
             // If the transaction is verified, check if it can be added within the verified gas limit
@@ -406,9 +344,8 @@ where
                 }
             }
 
-            let gas_used = match evm.transact(tx.clone()) {
+            let gas_used = match builder.execute_transaction(tx.clone()) {
                 Ok(res) => {
-                    let gas_used = res.result.gas_used();
                     if let Some(payloads) = pooled_tx.pbh_payload() {
                         if spent_nullifier_hashes.len() == payloads.len() {
                             block_gas_limit -= FIXED_GAS
@@ -416,20 +353,23 @@ where
 
                         block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                     }
-
-                    let ExecResultAndState { result, state } = res;
-
-                    self.commit_changes(info, base_fee, gas_used, tx, result, state, &evm);
-
-                    gas_used
+                    res
                 }
                 Err(err) => {
                     match err {
-                        EVMError::Transaction(OpTransactionError::Base(ref _error)) => {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            // trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            // best_txs.mark_invalid(tx.signer(), tx.nonce());
+                        BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                            error,
+                            ..
+                        }) => {
+                            if error.is_nonce_too_low() {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
+                                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                            }
 
                             continue;
                         }
@@ -441,10 +381,12 @@ where
                     }
                 }
             };
+
+            self.commit_changes(info, base_fee, gas_used, tx);
         }
 
         if !spent_nullifier_hashes.is_empty() {
-            let tx = spend_nullifiers_tx(self, &mut evm, spent_nullifier_hashes).map_err(
+            let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(
                 |e| {
                     error!(target: "payload_builder", %e, "failed to build spend nullifiers transaction");
                     PayloadBuilderError::Other(e.into())
@@ -455,19 +397,8 @@ where
             // insufficient funds, continue with the built payload. This ensures that
             // PBH transactions still receive priority inclusion, even if the PBH nullifier
             // is not spent rather than sitting in the default execution client's mempool.
-            match evm.transact(tx.clone()) {
-                Ok(ExecResultAndState { result, state }) => {
-                    self.commit_changes(
-                        info,
-                        base_fee,
-                        result.gas_used(),
-                        tx,
-                        result,
-                        state,
-                        &evm,
-                    );
-                }
-
+            match builder.execute_transaction(tx.clone()) {
+                Ok(gas_used) => self.commit_changes(info, base_fee, gas_used, tx),
                 Err(e) => {
                     error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
                 }
@@ -478,11 +409,13 @@ where
             self.pool.remove_transactions(invalid_txs);
         }
 
-        Ok(None)
+        Ok(Some(
+            builder.executor_mut().evm_mut().db_mut().take_bundle(),
+        ))
     }
 }
 
-impl<Client, Pool> PayloadBuilderCtxBuilder<OpChainSpec, WorldChainPooledTransaction>
+impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, WorldChainPooledTransaction>
     for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
 where
     Client: StateProviderFactory
