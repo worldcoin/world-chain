@@ -308,7 +308,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
                         let mut tries = 0;
                         loop {
                             if tries >= max_retries {
-                                panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                                panic!("User Operation not included in a Transaction after {max_retries} retries");
                             }
                             // Check if the User Operation has been included in a Transaction
                             let resp: RpcUserOperationByHash = provider
@@ -643,10 +643,7 @@ async fn estimate_uo_gas(
     let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
     let fees = concat_u128_be(priority_fee, max_fee);
 
-    let account_gas_limits = concat_u128_be(
-        resp.verification_gas_limit.into(),
-        resp.call_gas_limit.into(),
-    );
+    let account_gas_limits = concat_u128_be(resp.verification_gas_limit, resp.call_gas_limit);
 
     Ok((
         account_gas_limits.into(),
@@ -672,7 +669,7 @@ async fn fetch_inclusion_proof(url: &str, identity: &Identity) -> eyre::Result<I
 
     let commitment = identity.commitment();
     let response = client
-        .post(format!("{}/inclusionProof", url))
+        .post(format!("{url}/inclusionProof"))
         .json(&serde_json::json! {{
             "identityCommitment": commitment,
         }})
@@ -718,7 +715,7 @@ pub async fn send_invalid_pbh(args: SendInvalidProofPBHArgs) -> eyre::Result<()>
     while i < args.transaction_count {
         let current_pbh_nonce = pbh_nonce + i as u16;
         let external_nullifier =
-            ExternalNullifier::with_date_marker(date_marker, current_pbh_nonce as u16);
+            ExternalNullifier::with_date_marker(date_marker, current_pbh_nonce);
 
         let provider = provider.clone();
         let signer = signer.clone();

@@ -1,7 +1,10 @@
+use std::net::IpAddr;
+
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
-use flashblocks::payload::FlashblocksPayloadV1;
+use flashblocks::ws::{new_subscribers, publish_task, ws_server};
+// use flashblocks::ws::{publish_task, ws_server};
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
@@ -13,7 +16,6 @@ use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
-use tokio::sync::mpsc::UnboundedSender;
 use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
@@ -42,14 +44,10 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// Sets the private key of the builder
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
-
     /// flashblocks building params
     pub block_time: u64,
     pub flashblock_interval: u64,
-
-    /// the channel to send flashblocks
-    // TODO: Change to typed
-    pub flashblock_sender: UnboundedSender<FlashblocksPayloadV1>,
+    pub flashblock_server_addr: (IpAddr, u16),
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -64,7 +62,7 @@ impl FlashblocksPayloadBuilderBuilder {
         builder_private_key: String,
         block_time: u64,
         flashblock_interval: u64,
-        flashblock_sender: UnboundedSender<FlashblocksPayloadV1>,
+        flashblock_server_addr: (IpAddr, u16),
     ) -> Self {
         Self {
             compute_pending_block,
@@ -74,11 +72,9 @@ impl FlashblocksPayloadBuilderBuilder {
             best_transactions: (),
             builder_private_key,
             da_config: OpDAConfig::default(),
-
             block_time,
             flashblock_interval,
-
-            flashblock_sender,
+            flashblock_server_addr,
         }
     }
 
@@ -89,10 +85,12 @@ impl FlashblocksPayloadBuilderBuilder {
     }
 }
 
-impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
+impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
+    FlashblocksPayloadBuilderBuilder<Txs>
+{
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T>(self, best_transactions: T) -> FlashblocksPayloadBuilderBuilder<T> {
+    pub fn with_transactions<T>(self, best: T) -> FlashblocksPayloadBuilderBuilder<T> {
         let Self {
             compute_pending_block,
             da_config,
@@ -100,12 +98,9 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
-
             block_time,
             flashblock_interval,
-
-            flashblock_sender,
-
+            flashblock_server_addr,
             best_transactions: _,
         } = self;
 
@@ -115,13 +110,11 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
-            best_transactions,
             builder_private_key,
-
             block_time,
+            best_transactions: best,
             flashblock_interval,
-
-            flashblock_sender,
+            flashblock_server_addr,
         }
     }
 
@@ -137,7 +130,6 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         FlashblocksPayloadBuilder<
             WorldChainTransactionPool<Node::Provider, S>,
             Node::Provider,
-            OpEvmConfig,
             WorldChainPayloadBuilderCtxBuilder<
                 Node::Provider,
                 WorldChainTransactionPool<Node::Provider, S>,
@@ -150,6 +142,8 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
             pool: pool.clone(),
@@ -159,7 +153,7 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
                 da_config: self.da_config,
             },
             best_transactions: self.best_transactions.clone(),
-            tx: self.flashblock_sender,
+            tx,
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
             ctx_builder: WorldChainPayloadBuilderCtxBuilder {
@@ -174,6 +168,18 @@ impl<Txs> FlashblocksPayloadBuilderBuilder<Txs> {
                     .context("Failed to parse builder private key")?,
             },
         };
+
+        let subscribers = new_subscribers();
+
+        ctx.task_executor().spawn_critical(
+            "flashblocks ws server",
+            ws_server(subscribers.clone(), self.flashblock_server_addr),
+        );
+
+        ctx.task_executor().spawn_critical(
+            "flashblocks payload builder",
+            publish_task(rx, subscribers.clone()),
+        );
 
         Ok(payload_builder)
     }
@@ -198,7 +204,6 @@ where
     type PayloadBuilder = FlashblocksPayloadBuilder<
         WorldChainTransactionPool<Node::Provider, S>,
         Node::Provider,
-        OpEvmConfig,
         WorldChainPayloadBuilderCtxBuilder<
             Node::Provider,
             WorldChainTransactionPool<Node::Provider, S>,

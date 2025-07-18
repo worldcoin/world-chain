@@ -19,8 +19,8 @@ use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::WorldChainNode as OtherWorldChainNode;
+use world_chain_builder_test_utils::utils::account;
+
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
@@ -29,19 +29,21 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
+use crate::args::WorldChainArgs;
+use crate::node::WorldChainNode as OtherWorldChainNode;
+use crate::test_utils::{raw_pbh_bundle_bytes, tx};
 
-pub(crate) type WorldChainNode = NodeHelperType<
-    OtherWorldChainNode,
-    BlockchainProvider<NodeTypesWithDBAdapter<OtherWorldChainNode, TmpDB>>,
->;
+mod flashblocks;
+
+pub(crate) type WorldChainNode<N> =
+    NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
 pub struct WorldChainBuilderTestContext {
     pub signers: Range<u32>,
-    pub tasks: TaskManager,
-    pub node: WorldChainNode,
+    pub _tasks: TaskManager,
+    pub node: WorldChainNode<OtherWorldChainNode>,
 }
 
 impl WorldChainBuilderTestContext {
@@ -107,7 +109,7 @@ impl WorldChainBuilderTestContext {
 
         Ok(Self {
             signers: (0..5),
-            tasks,
+            _tasks: tasks,
             node: test_ctx,
         })
     }
@@ -238,7 +240,7 @@ pub fn optimism_payload_attributes(
     OpPayloadBuilderAttributes {
         payload_attributes: attributes,
         transactions: vec![],
-        gas_limit: None,
+        gas_limit: Some(3000000),
         no_tx_pool: false,
         eip_1559_params: None,
     }
@@ -269,6 +271,10 @@ fn get_chain_spec() -> OpChainSpec {
                             (MAX_U16 << U256::from(160)).into(),
                         ),
                     ]))),
+                )])
+                .extend_accounts(vec![(
+                    account(0),
+                    GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
                 )]),
         )
         .ecotone_activated()

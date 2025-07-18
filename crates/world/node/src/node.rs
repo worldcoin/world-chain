@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use alloy_primitives::Address;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::{
@@ -11,6 +13,8 @@ use reth::builder::{
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_node_api::PayloadAttributesBuilder;
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_node_builder::{DebugNode, FullNodeComponents, PayloadTypes, PrimitivesTy, TxTy};
 use reth_optimism_chainspec::OpChainSpec;
@@ -184,6 +188,12 @@ where
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
         rpc_block.into_consensus()
+    }
+
+    fn local_payload_attributes_builder(
+        chain_spec: &Self::ChainSpec,
+    ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes> {
+        LocalPayloadAttributesBuilder::new(Arc::new(chain_spec.clone()))
     }
 }
 

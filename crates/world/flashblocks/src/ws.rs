@@ -1,35 +1,24 @@
-use eyre::eyre::Context;
 use futures_util::SinkExt;
+use rollup_boost::FlashblocksPayloadV1;
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{mpsc, Mutex},
-    task::JoinHandle,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-
-use crate::payload::FlashblocksPayloadV1;
 
 pub fn new_subscribers() -> Arc<Mutex<Vec<WebSocketStream<TcpStream>>>> {
     Arc::new(Mutex::new(Vec::default()))
 }
 
-/// Starts the websocket server that listens for incoming subscriber connections
-pub fn start_ws(
+pub async fn ws_server(
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
     addr: impl ToSocketAddrs + Send + 'static,
-) -> JoinHandle<eyre::Result<()>> {
-    tokio::spawn(ws_server(subscribers, addr))
-}
-
-async fn ws_server(
-    subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
-    addr: impl ToSocketAddrs + Send + 'static,
-) -> eyre::Result<()> {
+) {
     let listener = TcpListener::bind(addr)
         .await
-        .context("Failed to bind to addr")?;
-    let addr = listener.local_addr().context("Failed to bind")?;
+        .expect("Failed to bind WebSocket server");
+    let addr = listener.local_addr().expect("Failed to get local address");
     let subscribers = subscribers.clone();
 
     tracing::info!("Starting WebSocket server on {}", addr);
@@ -50,25 +39,17 @@ async fn ws_server(
     }
 }
 
-/// Background task that handles publishing messages to WebSocket subscribers
-pub fn publish_task(
-    rx: mpsc::UnboundedReceiver<FlashblocksPayloadV1>,
-    subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
-) -> JoinHandle<eyre::Result<()>> {
-    tokio::spawn(publish_task_inner(rx, subscribers))
-}
-
-async fn publish_task_inner(
+pub async fn publish_task(
     mut rx: mpsc::UnboundedReceiver<FlashblocksPayloadV1>,
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
-) -> eyre::Result<()> {
+) {
     while let Some(message) = rx.recv().await {
         let mut subscribers = subscribers.lock().await;
 
         // Remove disconnected subscribers and send message to connected ones
         let mut retained_subscribers = Vec::with_capacity(subscribers.len());
         for mut ws_stream in subscribers.drain(..) {
-            let msg = serde_json::to_string(&message).context("Serializing payload")?;
+            let msg = serde_json::to_string(&message).expect("Failed to serialize payload");
 
             match ws_stream.send(Message::Text(msg.into())).await {
                 Ok(()) => {
@@ -81,6 +62,4 @@ async fn publish_task_inner(
         }
         *subscribers = retained_subscribers;
     }
-
-    Ok(())
 }
