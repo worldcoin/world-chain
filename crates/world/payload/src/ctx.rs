@@ -256,7 +256,12 @@ where
 
         Ok((
             info,
-            builder.executor_mut().evm_mut().db_mut().take_bundle(),
+            builder
+                .executor_mut()
+                .evm_mut()
+                .db_mut()
+                .bundle_state
+                .clone(),
         ))
     }
 
@@ -410,7 +415,12 @@ where
         }
 
         Ok(Some(
-            builder.executor_mut().evm_mut().db_mut().take_bundle(),
+            builder
+                .executor_mut()
+                .evm_mut()
+                .db_mut()
+                .bundle_state
+                .clone(),
         ))
     }
 }
