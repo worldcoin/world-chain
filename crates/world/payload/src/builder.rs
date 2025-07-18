@@ -411,7 +411,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             // TODO: Validate gas limit
             if ctx
                 .execute_best_transactions(&mut info, &mut builder, best_txs, 0)?
-                .is_some()
+                .is_none()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
