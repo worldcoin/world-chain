@@ -367,7 +367,6 @@ where
                         break db.take_bundle();
                     };
 
-                    // This does not have correct receipts root, or block body
                     build_outcome = builder.finish(&state_provider)?;
 
                     let flashblock_payload = flashblock_payload_from_outcome(
