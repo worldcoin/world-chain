@@ -1,32 +1,31 @@
 use std::sync::Arc;
 
-use alloy_consensus::{Block, Header, Transaction, TxReceipt};
+use alloy_consensus::{Block, Transaction, TxReceipt};
 use alloy_eips::eip7685::Requests;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutor};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{Address, U256};
-use op_alloy_consensus::EIP1559ParamError;
 use reth::core::primitives::Receipt;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
-use reth_evm::op_revm::{OpSpecId, OpTransaction};
+use reth_evm::execute::{
+    BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
+    ExecutorTx,
+};
+use reth_evm::op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
+use reth_evm::{Evm, EvmFactory};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpBlockAssembler, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
-};
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
+use reth_optimism_primitives::{DepositReceipt, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
-use reth_primitives::{NodePrimitives, SealedBlock};
-use reth_provider::BlockExecutionResult;
+use reth_primitives::{NodePrimitives, Recovered};
+use reth_provider::{BlockExecutionResult, StateProvider};
 use revm::context::result::ExecutionResult;
-use revm::context::TxEnv;
 use revm::database::BundleState;
 
 /// This type wraps the [`OpBlockExecutor`] and provides a way to execute flashblocks
@@ -204,99 +203,15 @@ where
         self
     }
 
-    pub fn take_bundle(&self) -> &BundleState {
-        &self.bundle_prestate
-    }
-}
-
-/// Optimism-related EVM configuration.
-#[derive(Debug, Clone)]
-pub struct FlashblocksEvmConfig<N: NodePrimitives = OpPrimitives> {
-    inner: OpEvmConfig<OpChainSpec, N, OpRethReceiptBuilder>,
-    executor_factory: FlashblocksBlockExecutorFactory,
-    block_assembler: FlashblocksBlockAssembler,
-}
-
-impl FlashblocksEvmConfig {
-    /// Creates a new [`OpEvmConfig`] with the given chain spec for OP chains.
-    pub fn optimism(chain_spec: OpChainSpec) -> Self {
-        Self::new(chain_spec, OpRethReceiptBuilder::default())
-    }
-}
-
-impl<N: NodePrimitives> FlashblocksEvmConfig<N> {
-    /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub fn new(chain_spec: OpChainSpec, receipt_builder: OpRethReceiptBuilder) -> Self {
-        Self {
-            inner: OpEvmConfig::new(chain_spec.clone().into(), receipt_builder.clone()),
-            executor_factory: FlashblocksBlockExecutorFactory::new(
-                receipt_builder,
-                chain_spec.clone().into(),
-                OpEvmFactory::default(),
-            ),
-            block_assembler: FlashblocksBlockAssembler::new(chain_spec.into()),
-        }
-    }
-
-    /// Returns the chain spec associated with this configuration.
-    pub const fn chain_spec(&self) -> &OpChainSpec {
-        self.executor_factory.spec()
-    }
-}
-
-impl<N: NodePrimitives> ConfigureEvm for FlashblocksEvmConfig<N>
-where
-    N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        BlockHeader = Header,
-        BlockBody = alloy_consensus::BlockBody<OpTransactionSigned>,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-    >,
-    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
-    Self: Send + Sync + Unpin + Clone + 'static,
-    OpEvmConfig<OpChainSpec, N, OpRethReceiptBuilder>: Send + Sync + Unpin + Clone + 'static,
-{
-    type Primitives = N;
-    type Error = EIP1559ParamError;
-    type NextBlockEnvCtx = OpNextBlockEnvAttributes;
-    type BlockExecutorFactory = FlashblocksBlockExecutorFactory;
-    type BlockAssembler = FlashblocksBlockAssembler;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        &self.executor_factory
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.block_assembler
-    }
-
-    fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
-        self.inner.evm_env(header)
-    }
-
-    fn next_evm_env(
-        &self,
-        parent: &Header,
-        attributes: &Self::NextBlockEnvCtx,
-    ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
-    }
-
-    fn context_for_block(&self, block: &'_ SealedBlock<N::Block>) -> OpBlockExecutionCtx {
-        self.inner.context_for_block(block)
-    }
-
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<N::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx,
-    ) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
-            parent_hash: parent.hash(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            extra_data: attributes.extra_data,
-        }
+    /// Extends the receipts and gas used to reflect the aggregated execution result
+    /// of prior flashblocks as a pre state to the current.
+    pub fn with_execution_result(
+        mut self,
+        execution_result: BlockExecutionResult<R::Receipt>,
+    ) -> Self {
+        self.receipts.extend(execution_result.receipts);
+        self.cumulative_gas_used += execution_result.gas_used;
+        self
     }
 }
 
@@ -434,5 +349,89 @@ where
         input: BlockAssemblerInput<'_, '_, F>,
     ) -> Result<Self::Block, BlockExecutionError> {
         self.assemble_block(input)
+    }
+}
+
+/// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
+pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {
+    pub inner: BasicBlockBuilder<
+        'a,
+        FlashblocksBlockExecutorFactory,
+        FlashblocksBlockExecutor<Evm, OpRethReceiptBuilder>,
+        OpBlockAssembler<OpChainSpec>,
+        N,
+    >,
+}
+
+impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
+    /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
+    pub fn new(
+        ctx: OpBlockExecutionCtx,
+        parent: &'a SealedHeader<N::BlockHeader>,
+        executor: FlashblocksBlockExecutor<Evm, OpRethReceiptBuilder>,
+        transactions: Vec<Recovered<N::SignedTx>>,
+        chain_spec: Arc<OpChainSpec>,
+    ) -> Self {
+        Self {
+            inner: BasicBlockBuilder {
+                executor,
+                assembler: OpBlockAssembler::new(chain_spec),
+                ctx,
+                parent,
+                transactions,
+            },
+        }
+    }
+}
+
+impl<'a, DB, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, N, E>
+where
+    DB: Database + 'a,
+    N: NodePrimitives<
+        Receipt = OpReceipt,
+        SignedTx = OpTransactionSigned,
+        Block = alloy_consensus::Block<OpTransactionSigned>,
+    >,
+    E: Evm<
+        DB = &'a mut State<DB>,
+        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Spec = OpSpecId,
+        HaltReason = OpHaltReason,
+    >,
+{
+    type Primitives = N;
+    type Executor = FlashblocksBlockExecutor<E, OpRethReceiptBuilder>;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.inner.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+        ) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        self.inner.execute_transaction_with_commit_condition(tx, f)
+    }
+
+    fn finish(
+        self,
+        state: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        self.inner.finish(state)
+    }
+
+    fn executor_mut(&mut self) -> &mut Self::Executor {
+        self.inner.executor_mut()
+    }
+
+    fn executor(&self) -> &Self::Executor {
+        self.inner.executor()
+    }
+
+    fn into_executor(self) -> Self::Executor {
+        self.inner.into_executor()
     }
 }

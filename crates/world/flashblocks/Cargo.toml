@@ -18,7 +18,6 @@ reth-transaction-pool.workspace = true
 reth-payload-util.workspace = true
 revm.workspace = true
 reth-evm.workspace = true
-reth-optimism-consensus.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -31,13 +30,11 @@ reth-optimism-chainspec.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-serde.workspace = true
-alloy-op-hardforks.workspace = true
 op-alloy-consensus.workspace = true
 alloy-op-evm.workspace = true
 
 rollup-boost.workspace = true
-revm-state.workspace = true
+
 # tokio
 tokio.workspace = true
 tokio-tungstenite.workspace = true
@@ -46,6 +43,5 @@ tokio-tungstenite.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-eyre.workspace = true
 futures-util = "0.3"
 clap.workspace = true

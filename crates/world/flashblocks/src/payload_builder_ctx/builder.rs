@@ -10,7 +10,9 @@ use reth_primitives::NodePrimitives;
 
 use super::PayloadBuilderCtx;
 
-pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transaction>: Clone + Send + Sync {
+pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transaction>:
+    Clone + Send + Sync
+{
     type PayloadBuilderCtx: PayloadBuilderCtx<
         Evm = EvmConfig,
         ChainSpec = ChainSpec,
