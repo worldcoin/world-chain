@@ -45,7 +45,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::inner, inspector::NoOpInspector};
+use revm::inspector::NoOpInspector;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
     Authorization, Authorized,

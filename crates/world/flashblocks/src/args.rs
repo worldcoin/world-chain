@@ -2,7 +2,7 @@
 
 //! clap [Args](clap::Args) for Flashblocks configuration
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
@@ -73,7 +73,7 @@ mod tests {
             "--flashblock.interval",
             "200",
             "--flashblock.builder_sk",
-            "0x0000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .args;
 

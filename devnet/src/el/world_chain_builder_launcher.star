@@ -218,6 +218,7 @@ def get_config(
         "--builder.world_id={0}".format(WORLD_ID),
         "--flashblock.block_time={0}".format(2000),
         "--flashblock.interval={0}".format(250),
+        "--flashblock.builder_sk=0000000000000000000000000000000000000000000000000000000000000000"
     ]
 
     observability.expose_metrics_port(ports)
