@@ -25,11 +25,10 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::config::OpDAConfig;
-use reth_optimism_payload_builder::error::OpPayloadBuilderError;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
-use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
+use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
 use revm::database::BundleState;
@@ -214,45 +213,7 @@ where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
     {
-        let mut info = ExecutionInfo::new();
-
-        for sequencer_tx in &self.attributes().transactions {
-            // A sequencer's block should never contain blob transactions.
-            if sequencer_tx.value().is_eip4844() {
-                return Err(PayloadBuilderError::other(
-                    OpPayloadBuilderError::BlobTransactionRejected,
-                ));
-            }
-
-            // Convert the transaction to a [RecoveredTx]. This is
-            // purely for the purposes of utilizing the `evm_config.tx_env`` function.
-            // Deposit transactions do not have signatures, so if the tx is a deposit, this
-            // will just pull in its `from` address.
-            let sequencer_tx = sequencer_tx
-                .value()
-                .try_clone_into_recovered()
-                .map_err(|_| {
-                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
-                })?;
-
-            let gas_used = match builder.execute_transaction(sequencer_tx.clone()) {
-                Ok(gas_used) => gas_used,
-                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                    error,
-                    ..
-                })) => {
-                    trace!(target: "payload_builder", %error, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                    continue;
-                }
-                Err(err) => {
-                    // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
-                }
-            };
-
-            // add gas used by the transaction to cumulative gas used, before creating the receipt
-            info.cumulative_gas_used += gas_used;
-        }
+        let info = self.inner.execute_sequencer_transactions(builder)?;
 
         Ok((
             info,
@@ -273,7 +234,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        _gas_limit: u64,
+        mut gas_limit: u64,
     ) -> Result<Option<BundleState>, PayloadBuilderError>
     where
         DB: reth_evm::Database + 'a,
@@ -286,13 +247,12 @@ where
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        let mut block_gas_limit = builder.evm_mut().block().gas_limit;
         let block_da_limit = self.inner.da_config.max_da_block_size();
         let tx_da_limit = self.inner.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee;
 
         let mut invalid_txs = vec![];
-        let verified_gas_limit = (self.verified_blockspace_capacity as u64 * block_gas_limit) / 100;
+        let verified_gas_limit = (self.verified_blockspace_capacity as u64 * gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
@@ -301,7 +261,7 @@ where
 
             if info.is_tx_over_limits(
                 tx_da_size,
-                block_gas_limit,
+                gas_limit,
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
@@ -353,10 +313,10 @@ where
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
                         if spent_nullifier_hashes.len() == payloads.len() {
-                            block_gas_limit -= FIXED_GAS
+                            gas_limit -= FIXED_GAS
                         }
 
-                        block_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
+                        gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                     }
                     res
                 }

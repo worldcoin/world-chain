@@ -288,7 +288,8 @@ where
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
         let mut transactions_offset = 0;
-        let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+
+        let mut gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
         let state = StateProviderDatabase::new(&state_provider);
 
@@ -302,6 +303,9 @@ where
         let (mut info, mut bundle_state) = ctx
             .execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?;
+
+        // Decrement gas limit by the gas used by the sequencer transactions
+        gas_limit -= info.cumulative_gas_used;
 
         let mut build_outcome = builder.finish(&state_provider)?;
 
@@ -324,14 +328,14 @@ where
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
 
-        loop {
+        let bundle_state = loop {
             debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblock {flashblock_idx}");
             let state = StateProviderDatabase::new(&state_provider);
 
             let mut db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
-                .with_bundle_prestate(bundle_state.clone())
+                .with_bundle_prestate(bundle_state)
                 .build();
 
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
@@ -360,7 +364,7 @@ where
                         gas_limit,
                     )?
                     else {
-                        break;
+                        break db.take_bundle();
                     };
 
                     // This does not have correct receipts root, or block body
@@ -389,12 +393,12 @@ where
                 // tx was dropped, resolve the most recent payload
                 None => {
                     debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");
-                    break;
+                    break db.take_bundle();
                 }
             }
 
             flashblock_idx += 1;
-        }
+        };
 
         let BlockBuilderOutcome {
             execution_result,
@@ -406,9 +410,9 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            bundle_state.clone(),
+            bundle_state,
             vec![execution_result.receipts],
-            block.number,
+            block.number(),
             Vec::new(),
         );
 
