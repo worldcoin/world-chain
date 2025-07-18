@@ -257,7 +257,7 @@ def get_config(
     env_vars = participant.el_builder_extra_env_vars
     env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
-    env_vars["RUST_LOG"] = "info,payload_builder=trace"
+    env_vars["RUST_LOG"] = "info,payload_builder=trace,flashblocks=trace"
     config_args = {
         "image": participant.el_builder_image,
         "ports": used_ports,
