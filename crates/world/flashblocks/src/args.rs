@@ -29,7 +29,7 @@ impl Default for FlashblockArgs {
     fn default() -> Self {
         Self {
             flashblock_block_time: 1000,
-            flashblock_interval: 250,
+            flashblock_interval: 200,
             flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             flashblock_port: 9002,
         }

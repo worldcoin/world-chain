@@ -1,5 +1,8 @@
 use crate::{
-    builder::executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+    builder::{
+        executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+        payload_txns::BestPayloadTxns,
+    },
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
 
@@ -45,12 +48,13 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::inner, inspector::NoOpInspector};
+use revm::inspector::NoOpInspector;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, error, info, span, warn};
 
 pub mod executor;
+pub mod payload_txns;
 
 /// Flashblocks Paylod builder
 ///
@@ -322,6 +326,9 @@ where
         let total_flashbblocks = self.block_time as usize / self.flashblock_interval as usize;
         let (tx, mut rx) = tokio::sync::mpsc::channel(total_flashbblocks);
 
+        // Tracks all executed transactions across all flashblocks.
+        let mut executed_txns = vec![];
+
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
 
@@ -342,6 +349,9 @@ where
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
+                    let mut best_txns = BestPayloadTxns::new(best_txns)
+                        .with_prev(executed_txns.drain(..).collect());
+
                     let transactions = build_outcome
                         .block
                         .clone_transactions_recovered()
@@ -359,11 +369,11 @@ where
                         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no gas left for flashblock {flashblock_idx}, stopping");
                         break db.take_bundle();
                     };
-                    
+
                     let Some(new_bundle_state) = ctx.execute_best_transactions(
                         &mut info,
                         &mut builder,
-                        best_txns,
+                        best_txns.guard(),
                         inner_gas_limit,
                     )?
                     else {
@@ -387,6 +397,12 @@ where
                     if let Err(err) = self.tx.send(flashblock_payload) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
+
+                    // update executed transactions
+                    let (prev, observed) = best_txns.take_observed();
+
+                    executed_txns.extend_from_slice(&prev);
+                    executed_txns.extend_from_slice(&observed);
 
                     transactions_offset += build_outcome.block.body().transactions_iter().count();
                     bundle_state = new_bundle_state;
