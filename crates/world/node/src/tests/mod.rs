@@ -75,7 +75,7 @@ impl WorldChainBuilderTestContext {
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
             builder_private_key: signer(6).to_bytes().to_string(),
-            flashblock_args: None,
+            flashblocks_args: None,
             ..Default::default()
         };
 

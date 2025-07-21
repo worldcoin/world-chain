@@ -18,7 +18,7 @@ use reth_optimism_rpc::eth::OpEthApiBuilder;
 use reth_optimism_storage::OpStorage;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_trie_db::MerklePatriciaTrie;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 mod payload_builder_builder;
@@ -80,7 +80,7 @@ impl WorldChainFlashblocksNode {
             OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
         >,
     {
-        let (flashblocks_publish_tx, flashblocks_publish_rx) = mpsc::unbounded_channel();
+        let (flashblocks_publish_tx, flashblocks_publish_rx) = broadcast::channel(100);
         // inbound flashblocks, for use with the node overlay
         let (flashblocks_tx, _flashblocks_rx) = broadcast::channel(100);
 

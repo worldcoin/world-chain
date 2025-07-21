@@ -218,6 +218,8 @@ def get_config(
         "--builder.world_id={0}".format(WORLD_ID),
         "--flashblock.block_time={0}".format(2000),
         "--flashblock.interval={0}".format(200),
+        "--flashblock.host={0}".format("0.0.0.0"),
+        "--flashblock.port={0}".format(FLASHBLOCKS_WS_PORT_NUM),
         "--flashblock.builder_sk=0000000000000000000000000000000000000000000000000000000000000000",
         "--builder.interval={0}".format("1500ms"),
     ]

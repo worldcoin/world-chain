@@ -17,7 +17,7 @@ use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
 use rollup_boost::FlashblocksP2PMsg;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
@@ -50,7 +50,7 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub flashblock_server_addr: (IpAddr, u16),
-    pub publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
     pub authorizer_vk: Option<VerifyingKey>,
     pub builder_sk: SigningKey,
 }
@@ -68,7 +68,7 @@ impl FlashblocksPayloadBuilderBuilder {
         block_time: u64,
         flashblock_interval: u64,
         flashblock_server_addr: (IpAddr, u16),
-        publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+        publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
         authorizer_vk: Option<VerifyingKey>,
         builder_sk: SigningKey,
     ) -> Self {
@@ -181,24 +181,22 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
                     .parse()
                     .context("Failed to parse builder private key")?,
             },
-            publish_tx: self.publish_tx,
+            publish_tx: self.publish_tx.clone(),
             authorizer_vk: self.authorizer_vk,
             builder_sk: self.builder_sk,
         };
 
-        // let subscribers = new_subscribers();
+        let subscribers = new_subscribers();
 
-        // TODO: these tasks should be spawned by
-        // the appropriate component
-        // ctx.task_executor().spawn_critical(
-        //     "flashblocks ws server",
-        //     ws_server(subscribers.clone(), self.flashblock_server_addr),
-        // );
-        //
-        // ctx.task_executor().spawn_critical(
-        //     "flashblocks payload builder",
-        //     publish_task(rx, subscribers.clone()),
-        // );
+        ctx.task_executor().spawn_critical(
+            "flashblocks ws server",
+            ws_server(subscribers.clone(), self.flashblock_server_addr),
+        );
+
+        ctx.task_executor().spawn_critical(
+            "flashblocks payload builder",
+            publish_task(self.publish_tx.subscribe(), subscribers.clone()),
+        );
 
         Ok(payload_builder)
     }

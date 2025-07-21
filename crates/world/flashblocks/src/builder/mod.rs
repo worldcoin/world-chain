@@ -54,7 +54,7 @@ use rollup_boost::{
     Authorization, Authorized,
 };
 use std::{fmt::Debug, sync::Arc};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{sync::broadcast, time::Instant};
 use tracing::{debug, error, info, span, warn};
 
 pub mod executor;
@@ -82,7 +82,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub flashblock_interval: u64,
     pub ctx_builder: CtxBuilder,
     /// Channel for publishing messages
-    pub publish_tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
     pub authorizer_vk: Option<VerifyingKey>,
     pub builder_sk: SigningKey,
 }
@@ -248,7 +248,7 @@ where
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
     /// Channel sender for publishing messages
-    pub tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
     pub authorization: Option<Authorization>,
     pub builder_sk: SigningKey,
     pub block_time: u64,
@@ -263,7 +263,7 @@ where
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-        tx: mpsc::UnboundedSender<FlashblocksP2PMsg>,
+        publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
         authorization: Option<Authorization>,
         builder_sk: SigningKey,
         block_time: u64,
@@ -274,7 +274,7 @@ where
             best: Box::new(best),
             authorization,
             builder_sk,
-            tx,
+            publish_tx,
             block_time,
             flashblock_interval,
             cancel,
@@ -351,7 +351,7 @@ where
             Authorized::new(&self.builder_sk, authorization.clone(), flashblock_payload);
         let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
 
-        if let Err(err) = self.tx.send(p2p_msg) {
+        if let Err(err) = self.publish_tx.send(p2p_msg) {
             error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
 
@@ -433,7 +433,7 @@ where
                     );
                     let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
 
-                    if let Err(err) = self.tx.send(p2p_msg) {
+                    if let Err(err) = self.publish_tx.send(p2p_msg) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 

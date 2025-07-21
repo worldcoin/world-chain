@@ -3827,7 +3827,7 @@ dependencies = [
 [[package]]
 name = "flashblocks-p2p"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks-reth-fork#00eb0a20a09f27334850089e96296b871b400d68"
+source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks-reth-fork#813e1976193c133e0b414d4e4066c101c88cf531"
 dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rlp",
@@ -11096,7 +11096,7 @@ dependencies = [
 [[package]]
 name = "rollup-boost"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks-reth-fork#00eb0a20a09f27334850089e96296b871b400d68"
+source = "git+https://github.com/flashbots/rollup-boost?branch=forerunner/p2p-flashblocks-reth-fork#813e1976193c133e0b414d4e4066c101c88cf531"
 dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rlp",
