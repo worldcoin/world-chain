@@ -51,7 +51,7 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::inspector::NoOpInspector;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
-use tracing::{debug, error, info, span, warn};
+use tracing::{debug, error, span, warn};
 
 pub mod executor;
 pub mod payload_txns;
@@ -287,9 +287,8 @@ where
         );
 
         let _enter = span.enter();
-        debug!(target: "payload_builder", id=%ctx.payload_id(), "building new payload");
 
-        debug!(target: "flashblocks_payload_builder", id=%ctx.payload_id(), "building flashblocks payload");
+        debug!(target: "payload_builder", "building new payload");
 
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
@@ -335,7 +334,7 @@ where
         self.spawn_flashblock_job_manager(tx);
 
         let bundle_state = loop {
-            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblock {flashblock_idx}");
+            debug!(target: "payload_builder", "building flashblock {flashblock_idx}");
             let state = StateProviderDatabase::new(&state_provider);
 
             let mut db = State::builder()
@@ -391,11 +390,6 @@ where
                         transactions_offset,
                     );
 
-                    info!(
-                        target: "payload_builder",
-                        id=%ctx.attributes().payload_id(),
-                    );
-
                     if let Err(err) = self.tx.send(flashblock_payload) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
@@ -412,7 +406,7 @@ where
 
                 // tx was dropped, resolve the most recent payload
                 None => {
-                    debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");
+                    debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
                     break db.take_bundle();
                 }
             }
@@ -453,7 +447,7 @@ where
             Some(executed),
         );
 
-        info!(target: "payload_builder", id=%ctx.attributes().payload_id(), payload=?payload, "built payload");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "built payload");
 
         if ctx.attributes().no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
@@ -461,8 +455,6 @@ where
             // freeze it once we've successfully built it.
             Ok(BuildOutcomeKind::Freeze(payload))
         } else {
-            info!(target: "payload_builder", id=%ctx.attributes().payload_id(), payload=?payload);
-
             Ok(BuildOutcomeKind::Better { payload })
         }
     }
