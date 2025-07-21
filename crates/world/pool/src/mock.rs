@@ -27,8 +27,7 @@ use reth_node_ethereum::EthEngineTypes;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{
-    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
-    SealedHeader,
+    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedHeader,
 };
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{
@@ -556,7 +555,7 @@ impl BlockReader for MockEthProvider {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Block<OpTransactionSigned>>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 

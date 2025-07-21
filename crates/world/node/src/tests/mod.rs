@@ -19,8 +19,8 @@ use revm_primitives::{Address, FixedBytes, B256, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::WorldChainNode as OtherWorldChainNode;
+use world_chain_builder_test_utils::utils::account;
+
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
@@ -29,19 +29,21 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
+use crate::args::WorldChainArgs;
+use crate::node::WorldChainNode as OtherWorldChainNode;
+use crate::test_utils::{raw_pbh_bundle_bytes, tx};
 
-pub(crate) type WorldChainNode = NodeHelperType<
-    OtherWorldChainNode,
-    BlockchainProvider<NodeTypesWithDBAdapter<OtherWorldChainNode, TmpDB>>,
->;
+mod flashblocks;
+
+pub(crate) type WorldChainNode<N> =
+    NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
 pub struct WorldChainBuilderTestContext {
     pub signers: Range<u32>,
-    pub tasks: TaskManager,
-    pub node: WorldChainNode,
+    pub _tasks: TaskManager,
+    pub node: WorldChainNode<OtherWorldChainNode>,
 }
 
 impl WorldChainBuilderTestContext {
@@ -73,6 +75,7 @@ impl WorldChainBuilderTestContext {
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
             builder_private_key: signer(6).to_bytes().to_string(),
+            flashblock_args: None,
             ..Default::default()
         };
 
@@ -107,7 +110,7 @@ impl WorldChainBuilderTestContext {
 
         Ok(Self {
             signers: (0..5),
-            tasks,
+            _tasks: tasks,
             node: test_ctx,
         })
     }
@@ -143,12 +146,15 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let non_pbh_tx = tx(
         ctx.node.inner.chain_spec().chain.id(),
         None,
         0,
         Address::default(),
+        210_000,
     );
     let wallet = signer(0);
     let signer = EthereumWallet::from(wallet);
@@ -200,6 +206,8 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
@@ -269,6 +277,10 @@ fn get_chain_spec() -> OpChainSpec {
                             (MAX_U16 << U256::from(160)).into(),
                         ),
                     ]))),
+                )])
+                .extend_accounts(vec![(
+                    account(0),
+                    GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
                 )]),
         )
         .ecotone_activated()

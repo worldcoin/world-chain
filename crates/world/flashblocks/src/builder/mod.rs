@@ -1,57 +1,68 @@
 use crate::{
-    payload::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    builder::{
+        executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+        payload_txns::BestPayloadTxns,
+    },
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+
 use alloy_consensus::BlockHeader;
 use alloy_eips::Encodable2718;
+use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
-use eyre::eyre::ContextCompat;
-use retaining_payload_txs::RetainingBestTxs;
+use op_alloy_consensus::OpTxEnvelope;
+use reth::api::BlockBody;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    revm::{database::StateProviderDatabase, Database, State},
+    revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, State},
 };
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+use reth_primitives::{NodePrimitives, Recovered};
+use rollup_boost::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+};
+
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm, Evm,
+    precompiles::PrecompilesMap,
+    ConfigureEvm,
 };
+
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::{interop::MaybeInteropTransaction, OpPooledTx},
-    OpNextBlockEnvAttributes,
+    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::{
-    builder::ExecutionInfo, config::OpBuilderConfig, OpPayloadPrimitives,
-};
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    BlockExecutionResult, ChainSpecProvider, ExecutionOutcome, StateProvider, StateProviderFactory,
 };
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::sync::mpsc;
-use tracing::{debug, warn};
 
-mod retaining_payload_txs;
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use revm::inspector::NoOpInspector;
+use std::{fmt::Debug, sync::Arc};
+use tokio::{sync::mpsc, time::Instant};
+use tracing::{debug, error, span, warn};
+
+pub mod executor;
+pub mod payload_txns;
 
 /// Flashblocks Paylod builder
 ///
 /// A payload builder
 #[derive(Debug)]
-pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs = ()> {
+pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The type responsible for creating the evm.
-    pub evm_config: Evm,
+    pub evm_config: OpEvmConfig,
     /// Transaction pool.
     pub pool: Pool,
     /// Node client.
@@ -73,12 +84,11 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs = ()> {
 // TODO: This manual impl is required because we can't require PayloadBuilderCtx
 //       to be Clone, because OpPayloadBuilderCtx is not Clone.
 //       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
-impl<Pool, Client, Evm, CtxBuilder, Txs> Clone
-    for FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
+impl<Pool, Client, CtxBuilder, Txs> Clone
+    for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
     Pool: Clone,
     Client: Clone,
-    Evm: Clone,
     Txs: Clone,
     CtxBuilder: Clone,
 {
@@ -97,15 +107,12 @@ where
     }
 }
 
-impl<Pool, Client, Evm, N, CtxBuilder, Txs>
-    FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
+impl<Pool, Client, CtxBuilder, Txs> FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
-    N: OpPayloadPrimitives,
     Txs: OpPayloadTransactions<Pool::Transaction>,
-    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
-    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    CtxBuilder: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Pool::Transaction>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -114,17 +121,17 @@ where
     ///
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
-    /// a result indicating success with the payload or an error in case of failure.
+    /// a result indicating success with the payload or an error in case of failure.    
     fn build_payload<'a, T>(
         &self,
-        args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
+        args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
-    ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
     {
         let BuildArguments {
-            mut cached_reads,
+            cached_reads,
             config,
             cancel,
             best_payload,
@@ -135,7 +142,7 @@ where
             self.config.da_config.clone(),
             self.client.chain_spec(),
             config,
-            cancel,
+            &cancel,
             best_payload,
         );
 
@@ -144,32 +151,31 @@ where
             self.tx.clone(),
             self.block_time,
             self.flashblock_interval,
+            cancel.clone(),
         );
+
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
-        let state = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, &ctx)
+            builder.build(&state_provider, &ctx)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, &ctx)
+            builder.build(&state_provider, &ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
 }
 
-impl<Pool, Client, Evm, N, CtxBuilder, Txs> PayloadBuilder
-    for FlashblocksPayloadBuilder<Pool, Client, Evm, CtxBuilder, Txs>
+impl<Pool, Client, CtxBuilder, Txs> PayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
-    N: OpPayloadPrimitives,
-    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks>,
-    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    CtxBuilder: PayloadBuilderCtxBuilder<Evm, Client::ChainSpec, Pool::Transaction>,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
+    CtxBuilder: PayloadBuilderCtxBuilder<OpEvmConfig, Client::ChainSpec, Pool::Transaction>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
-    type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
-    type BuiltPayload = OpBuiltPayload<N>;
+    type Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>;
+    type BuiltPayload = OpBuiltPayload;
 
     fn try_build(
         &self,
@@ -192,7 +198,7 @@ where
 
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes, N::BlockHeader>,
+        config: PayloadConfig<Self::Attributes, alloy_consensus::Header>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
             config,
@@ -234,12 +240,7 @@ where
     pub tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
     pub block_time: u64,
     pub flashblock_interval: u64,
-
-    total_gas_limit: u64,
-    num_flashblocks: u64,
-    flashblock_gas_limit: u64,
-
-    executed_txs: Vec<Txs::Transaction>,
+    pub cancel: CancelOnDrop,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs>
@@ -252,135 +253,194 @@ where
         tx: mpsc::UnboundedSender<FlashblocksPayloadV1>,
         block_time: u64,
         flashblock_interval: u64,
+        cancel: CancelOnDrop,
     ) -> Self {
         Self {
             best: Box::new(best),
             tx,
             block_time,
             flashblock_interval,
-
-            total_gas_limit: 0,
-            num_flashblocks: 0,
-            flashblock_gas_limit: 0,
-
-            executed_txs: Vec::new(),
+            cancel,
         }
     }
 }
 
-impl<Txs> FlashblockBuilder<'_, Txs>
+impl<'a, Txs> FlashblockBuilder<'_, Txs>
 where
     Txs: PayloadTransactions,
 {
     /// Builds the payload on top of the state.
-    pub fn build<Evm, ChainSpec, N, Ctx, Tx>(
-        mut self,
-        db: impl Database<Error = ProviderError>,
-        state_provider: impl StateProvider,
+    pub fn build<Ctx, Tx>(
+        self,
+        state_provider: impl StateProvider + Clone,
         ctx: &Ctx,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
+    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        N: OpPayloadPrimitives,
-        Tx: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx,
+        Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
         Txs: PayloadTransactions<Transaction = Tx>,
-        Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
-        Ctx: PayloadBuilderCtx<Evm = Evm, ChainSpec = ChainSpec, Transaction = Tx>,
+        Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
     {
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        let span = span!(
+            tracing::Level::INFO,
+            "flashblock_builder",
+            id = %ctx.payload_id(),
+        );
 
-        // NOTE: Do we need to init this every time?
+        let _enter = span.enter();
+
+        debug!(target: "payload_builder", "building new payload");
+
+        // 1. Setup relevant variables
+        let mut flashblock_idx = 0;
+        let mut transactions_offset = 0;
+
+        let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+
+        let state = StateProviderDatabase::new(&state_provider);
+
         let mut db = State::builder()
-            .with_database(db)
+            .with_database(state)
             .with_bundle_update()
             .build();
 
-        // 1. Setup relevant variables
-        let total_gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
-        let num_flashblocks = self.block_time / self.flashblock_interval;
-        // TODO: We need a way to not let the gas limit here censor high gas transactions that are under `total_gas_limit`
-        //       at the same time we need to ensure that sum([g_0, g_1, ..., g_n]) < `total_gas_limit`.
-        //       One potential option is to set sup(g_0) = total_gas_limit,
-        //       then sup(g_i) = total_gas_limit - sum([g_0, ..., g_(i-1)]) if sup(g_i) <= 0 then we can stop
-        let flashblock_gas_limit = total_gas_limit / num_flashblocks;
+        let mut builder = self.block_builder(&mut db, vec![], None, ctx)?;
 
-        self.total_gas_limit = total_gas_limit;
-        self.num_flashblocks = num_flashblocks;
-        self.flashblock_gas_limit = flashblock_gas_limit;
+        let (mut info, mut bundle_state) = ctx
+            .execute_sequencer_transactions(&mut builder)
+            .map_err(PayloadBuilderError::other)?;
 
-        // 1. Build initial flashblock
-        let now = Instant::now();
+        let mut build_outcome = builder.finish(&state_provider)?;
 
-        let outcome = self
-            .build_flashblock(&mut db, &state_provider, ctx, 0)?
-            .expect("Missing outcome");
+        let flashblock_payload = flashblock_payload_from_outcome(
+            &build_outcome,
+            ctx,
+            flashblock_idx,
+            transactions_offset,
+        );
 
-        let payload = Self::create_payload(&outcome, ctx, 0).unwrap();
-        let _ = self.tx.send(payload);
+        transactions_offset += build_outcome.block.body().transactions_iter().count();
 
-        let elapsed = now.elapsed().as_millis() as u64;
-        let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-        std::thread::sleep(Duration::from_millis(sleep_time));
-
-        if ctx.attributes().no_tx_pool {
-            // TODO: What do do here? Clearly no reason to produce flashblocks
-            // should we just return early?
-        }
-
-        // Produce intermediate flashblocks
-        for flashblock_idx in 1..num_flashblocks - 1 {
-            let now = Instant::now();
-
-            self.build_flashblock(&mut db, &state_provider, ctx, flashblock_idx)?;
-
-            let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
-            payload.base = None;
-            let _ = self.tx.send(payload);
-
-            let elapsed = now.elapsed().as_millis() as u64;
-            let sleep_time = self.flashblock_interval.saturating_sub(elapsed);
-            std::thread::sleep(Duration::from_millis(sleep_time));
-        }
-
-        // Produce the final block
-        let Some(outcome) =
-            self.build_flashblock(&mut db, &state_provider, ctx, num_flashblocks - 1)?
-        else {
-            return Ok(BuildOutcomeKind::Cancelled);
+        if let Err(err) = self.tx.send(flashblock_payload) {
+            error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
-        let mut payload = Self::create_payload(&outcome, ctx, 0).unwrap();
-        payload.base = None;
-        let _ = self.tx.send(payload);
 
-        let (info, outcome, _diff_txs) = outcome;
+        let total_flashbblocks = self.block_time as usize / self.flashblock_interval as usize;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(total_flashbblocks);
 
-        // check if the new payload is even more valuable
-        if !ctx.is_better_payload(info.total_fees) {
-            // can skip building the block
-            return Ok(BuildOutcomeKind::Aborted {
-                fees: info.total_fees,
-            });
-        }
+        // Tracks all executed transactions across all flashblocks.
+        let mut executed_txns = vec![];
+
+        // spawn a task to schedule when the next flashblock job should be started/cancelled
+        self.spawn_flashblock_job_manager(tx);
+
+        let bundle_state = loop {
+            debug!(target: "payload_builder", "building flashblock {flashblock_idx}");
+            let state = StateProviderDatabase::new(&state_provider);
+
+            let mut db = State::builder()
+                .with_database(state)
+                .with_bundle_update()
+                .with_bundle_prestate(bundle_state)
+                .build();
+
+            let notify = tokio::task::block_in_place(|| rx.blocking_recv());
+
+            let span = span!(
+                tracing::Level::DEBUG,
+                "flashblock_builder",
+                id = %ctx.attributes().payload_id(),
+                flashblock_idx,
+            );
+
+            match notify {
+                Some(()) => {
+                    let _enter = span.enter();
+
+                    let best_txns =
+                        (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
+
+                    let mut best_txns = BestPayloadTxns::new(best_txns)
+                        .with_prev(std::mem::take(&mut executed_txns));
+
+                    let transactions = build_outcome
+                        .block
+                        .clone_transactions_recovered()
+                        .collect::<Vec<_>>();
+
+                    let mut builder = self.block_builder(
+                        &mut db,
+                        transactions,
+                        Some(build_outcome.execution_result.clone()),
+                        ctx,
+                    )?;
+
+                    let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
+                    if inner_gas_limit == 0 {
+                        debug!(target: "payload_builder",  "no gas left for flashblock - stopping");
+                        break db.take_bundle();
+                    };
+
+                    let Some(new_bundle_state) = ctx.execute_best_transactions(
+                        &mut info,
+                        &mut builder,
+                        best_txns.guard(),
+                        inner_gas_limit,
+                    )?
+                    else {
+                        break db.take_bundle();
+                    };
+
+                    build_outcome = builder.finish(&state_provider)?;
+
+                    let flashblock_payload = flashblock_payload_from_outcome(
+                        &build_outcome,
+                        ctx,
+                        flashblock_idx,
+                        transactions_offset,
+                    );
+
+                    if let Err(err) = self.tx.send(flashblock_payload) {
+                        error!(target: "payload_builder", %err, "failed to send flashblock payload");
+                    }
+
+                    // update executed transactions
+                    let (prev, observed) = best_txns.take_observed();
+
+                    executed_txns.extend_from_slice(&prev.collect::<Vec<_>>());
+                    executed_txns.extend_from_slice(&observed.collect::<Vec<_>>());
+
+                    transactions_offset += build_outcome.block.body().transactions_iter().count();
+                    bundle_state = new_bundle_state;
+                }
+
+                // tx was dropped, resolve the most recent payload
+                None => {
+                    debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
+                    break db.take_bundle();
+                }
+            }
+
+            flashblock_idx += 1;
+        };
 
         let BlockBuilderOutcome {
             execution_result,
+            block,
             hashed_state,
             trie_updates,
-            block,
-        } = outcome;
+        } = build_outcome;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
+            bundle_state,
             vec![execution_result.receipts],
-            block.header().number(),
+            block.number(),
             Vec::new(),
         );
 
         // create the executed block data
-        let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
+        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
                 execution_output: Arc::new(execution_outcome),
@@ -389,8 +449,6 @@ where
             trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
         };
 
-        let no_tx_pool = ctx.attributes().no_tx_pool;
-
         let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
@@ -398,7 +456,9 @@ where
             Some(executed),
         );
 
-        if no_tx_pool {
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "built payload");
+
+        if ctx.attributes().no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
             // in the payload. In other words, the payload is deterministic and we can
             // freeze it once we've successfully built it.
@@ -408,127 +468,209 @@ where
         }
     }
 
-    fn build_flashblock<EvmConfig, ChainSpec, N, Ctx, DB, Tx>(
-        &mut self,
-        db: &mut State<DB>,
-        state_provider: impl StateProvider,
-        ctx: &Ctx,
-        idx: u64,
-    ) -> Result<Option<(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>)>, PayloadBuilderError>
+    pub fn block_builder<Ctx, DB, N, Tx>(
+        &self,
+        db: &'a mut State<DB>,
+        transactions: Vec<Recovered<N::SignedTx>>,
+        execution_result: Option<BlockExecutionResult<OpReceipt>>,
+        ctx: &'a Ctx,
+    ) -> Result<
+        FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+        PayloadBuilderError,
+    >
     where
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec,
-        DB: Database<Error = ProviderError>,
-        N: OpPayloadPrimitives,
-        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
+        Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
+        N: NodePrimitives<
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
+        Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
     {
-        let mut builder = ctx.block_builder(db)?;
-
-        builder.apply_pre_execution_changes().map_err(|err| {
-            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
-            PayloadBuilderError::Internal(err.into())
-        })?;
-
-        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
-
-        let gas_limit = (idx + 1) * self.flashblock_gas_limit;
-
-        let mut diff_txs = vec![];
-
-        if !ctx.attributes().no_tx_pool {
-            // TODO: builder doesn't have to be &mut here, we could use `.env()` if such method existed
-            let best_txs = (self.best)(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            let mut best_txs =
-                RetainingBestTxs::new(best_txs).with_prev(self.executed_txs.drain(..).collect());
-
-            if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs.guard(), gas_limit)?
-                .is_some()
+        let attributes = OpNextBlockEnvAttributes {
+            timestamp: ctx.attributes().timestamp(),
+            suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
+            prev_randao: ctx.attributes().prev_randao(),
+            gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
+            parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
+            extra_data: if ctx
+                .spec()
+                .is_holocene_active_at_timestamp(ctx.attributes().timestamp())
             {
-                return Ok(None);
-            }
+                ctx.attributes()
+                    .get_holocene_extra_data(
+                        ctx.spec()
+                            .base_fee_params_at_timestamp(ctx.attributes().timestamp()),
+                    )
+                    .map_err(PayloadBuilderError::other)?
+            } else {
+                Default::default()
+            },
+        };
 
-            let (prev, observed) = best_txs.take_observed();
+        // Prepare EVM environment.
+        let evm_env = ctx
+            .evm_config()
+            .next_evm_env(ctx.parent(), &attributes)
+            .map_err(PayloadBuilderError::other)?;
 
-            diff_txs.extend_from_slice(&observed);
+        // Prepare EVM.
+        let evm = ctx.evm_config().evm_with_env(db, evm_env);
 
-            self.executed_txs.extend_from_slice(&prev);
-            self.executed_txs.extend_from_slice(&observed);
+        // Prepare block execution context.
+        let execution_ctx = ctx
+            .evm_config()
+            .context_for_next_block(ctx.parent(), attributes);
+
+        let mut executor = FlashblocksBlockExecutor::new(
+            evm,
+            ctx.spec().clone(),
+            OpRethReceiptBuilder::default(),
+            execution_ctx.clone(),
+        );
+
+        if let Some(execution_result) = execution_result {
+            executor = executor.with_execution_result(execution_result)
         }
 
-        let outcome = builder.finish(&state_provider)?;
-
-        Ok(Some((info, outcome, diff_txs)))
+        Ok(FlashblocksBlockBuilder::new(
+            execution_ctx,
+            ctx.parent(),
+            executor,
+            transactions,
+            Arc::new(ctx.spec().clone()),
+        ))
     }
 
-    pub fn create_payload<EvmConfig, ChainSpec, N, Ctx, Tx>(
-        (_exec_info, outcome, diff_txs): &(ExecutionInfo, BlockBuilderOutcome<N>, Vec<Tx>),
-        ctx: &Ctx,
-        idx: u64,
-    ) -> eyre::Result<FlashblocksPayloadV1>
-    where
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        ChainSpec: EthChainSpec + OpHardforks,
-        N: OpPayloadPrimitives,
-        Tx: MaybeInteropTransaction + PoolTransaction<Consensus = N::SignedTx>,
-        Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec, Transaction = Tx>,
-    {
-        let block_number = ctx.parent().number + 1;
+    /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
+    ///
+    /// A Flashblock job will be cancelled under the following conditions:
+    /// - If the parent `cancel` is dropped.
+    /// - If the `flashblock_interval` has been exceeded.
+    /// - If the `max_flashblocks` has been exceeded.
+    fn spawn_flashblock_job_manager(&self, tx: tokio::sync::mpsc::Sender<()>) {
+        let block_time = self.block_time;
+        let flashblock_interval = self.flashblock_interval;
+        let cancel = self.cancel.clone();
+        let span = span!(tracing::Level::DEBUG, "flashblock_job_manager");
+        tokio::spawn(async move {
+            let _enter = span.enter();
+            debug!(target: "payload_builder", "flashblock job manager started");
 
-        let block_header = outcome.block.sealed_block().header();
+            let mut flashblock_interval =
+                tokio::time::interval(tokio::time::Duration::from_millis(flashblock_interval));
+            let mut block_interval =
+                tokio::time::interval(tokio::time::Duration::from_millis(block_time));
 
-        let base = ExecutionPayloadBaseV1 {
-            parent_beacon_block_root: ctx
-                .parent()
-                .parent_beacon_block_root
-                .context("Missing parent beacon block root")?,
-            parent_hash: ctx.parent().hash(),
-            fee_recipient: ctx.attributes().suggested_fee_recipient(),
-            prev_randao: ctx.attributes().prev_randao(),
-            block_number,
-            gas_limit: ctx.attributes().gas_limit.context("Missing gas limit")?,
-            timestamp: ctx.attributes().timestamp(),
-            extra_data: block_header.extra_data().clone(),
-            base_fee_per_gas: U256::from(
-                block_header
-                    .base_fee_per_gas()
-                    .context("Missing base fee per gas")?,
-            ),
+            block_interval.tick().await;
+            flashblock_interval.tick().await;
+
+            tokio::select! {
+                _ = block_interval.tick() => {
+                    debug!(target: "payload_builder", "block interval exceeded, cancelling current job");
+                    // block interval exceeded, cancel the current job
+                    // and drop the sender to resolve the most recent payload.
+                    drop(tx);
+                },
+
+                _ = async {
+                    loop {
+                        let instant = Instant::now();
+                        let _tx = tx.clone();
+                        if cancel.is_cancelled() {
+                            debug!(target: "payload_builder", "parent cancel was dropped, cancelling flashblock job");
+                            // parent cancel was dropped by the payload jobs generator
+                            // cancel the child job, and drop the sender
+                            break;
+                        }
+
+                        tokio::select! {
+                            _ = flashblock_interval.tick() => {
+                                let elapsed = instant.elapsed();
+                                warn!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
+                                // queue the next flashblock job, but there's no benefit in cancelling the current job
+                                // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
+                                // because the next job will also exceed `flashblock_interval`.
+                                if let Err(err) = tx.send(()).await {
+                                    warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
+                                }
+                            },
+                       }
+                    }
+                } => {
+                    // either the parent payload job was cancelled, or all flashblocks were built.
+                    // in either case, drop the sender to resolve the most recent payload.
+                }
+            }
+        });
+    }
+}
+
+fn flashblock_payload_from_outcome<N: NodePrimitives, Ctx>(
+    outcome: &BlockBuilderOutcome<N>,
+    ctx: &Ctx,
+    flashblock_idx: u64,
+    transactions_offset: usize,
+) -> FlashblocksPayloadV1
+where
+    Ctx:
+        PayloadBuilderCtx<Evm = OpEvmConfig, ChainSpec = OpChainSpec, Transaction: PoolTransaction>,
+{
+    let payload_base =
+        if flashblock_idx == 0 {
+            Some(ExecutionPayloadBaseV1 {
+                parent_beacon_block_root: ctx
+                    .attributes()
+                    .payload_attributes
+                    .parent_beacon_block_root
+                    .unwrap(),
+                parent_hash: ctx.parent().hash(),
+                fee_recipient: ctx.attributes().suggested_fee_recipient(),
+                prev_randao: ctx.attributes().payload_attributes.prev_randao,
+                block_number: ctx.parent().number + 1,
+                gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
+                timestamp: ctx.attributes().payload_attributes.timestamp,
+                extra_data: ctx
+                    .attributes()
+                    .get_holocene_extra_data(ctx.spec().base_fee_params_at_timestamp(
+                        ctx.attributes().payload_attributes.timestamp,
+                    ))
+                    .unwrap_or_default(),
+                base_fee_per_gas: U256::from(ctx.evm_env().block_env().basefee),
+            })
+        } else {
+            None
         };
 
-        let transactions = diff_txs
-            .iter()
-            .cloned()
-            .map(|tx| tx.into_consensus().encoded_2718())
-            .map(|tx_bytes| tx_bytes.into())
-            .collect();
+    let transactions = outcome
+        .block
+        .body()
+        .transactions_iter()
+        .skip(transactions_offset)
+        .map(|tx| tx.encoded_2718().into())
+        .collect::<Vec<_>>();
 
-        let withdrawals = ctx.attributes().payload_attributes.withdrawals.clone().0;
-
-        let diff = ExecutionPayloadFlashblockDeltaV1 {
-            state_root: block_header.state_root(),
-            receipts_root: block_header.receipts_root(),
-            logs_bloom: block_header.logs_bloom(),
-            gas_used: block_header.gas_used(),
-
-            block_hash: outcome.block.sealed_block().hash(),
-
+    FlashblocksPayloadV1 {
+        payload_id: ctx.payload_id(),
+        index: flashblock_idx,
+        base: payload_base,
+        diff: ExecutionPayloadFlashblockDeltaV1 {
+            state_root: outcome.block.state_root(),
+            receipts_root: outcome.block.receipts_root(),
+            logs_bloom: outcome.block.logs_bloom(),
+            gas_used: outcome.block.gas_used(),
+            block_hash: outcome.block.hash(),
             transactions,
-            withdrawals,
-        };
-
-        let payload = FlashblocksPayloadV1 {
-            payload_id: ctx.attributes().payload_id(),
-            index: idx,
-            base: Some(base),
-            diff,
-            // TODO: Fill out metadata
-            metadata: serde_json::Value::Null,
-        };
-
-        Ok(payload)
+            withdrawals: outcome
+                .block
+                .body()
+                .withdrawals()
+                .cloned()
+                .unwrap_or_default()
+                .to_vec(),
+            withdrawals_root: outcome.block.withdrawals_root().unwrap_or_default(),
+        },
+        metadata: Default::default(),
     }
 }
