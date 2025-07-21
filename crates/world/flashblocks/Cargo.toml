@@ -42,6 +42,5 @@ tokio-tungstenite.workspace = true
 # misc
 tracing.workspace = true
 serde_json.workspace = true
-serde.workspace = true
 futures-util = "0.3"
 clap.workspace = true

@@ -47,7 +47,6 @@ alloy-sol-types = { workspace = true, optional = true }
 revm-primitives = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 alloy-rpc-types-eth.workspace = true
-rollup-boost.workspace = true
 
 tokio = { workspace = true }
 eyre.workspace = true
@@ -74,6 +73,7 @@ alloy-network.workspace = true
 alloy-signer-local.workspace = true
 alloy-eips.workspace = true
 
+rollup-boost.workspace = true
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 criterion.workspace = true

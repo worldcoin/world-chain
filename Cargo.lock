@@ -3820,7 +3820,6 @@ dependencies = [
  "reth-transaction-pool 1.5.1",
  "revm 27.0.3",
  "rollup-boost",
- "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",

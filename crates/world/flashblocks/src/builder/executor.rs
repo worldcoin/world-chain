@@ -98,7 +98,7 @@ where
         ) = self.inner.finish()?;
 
         self.receipts.extend_from_slice(&receipts);
-        self.cumulative_gas_used = gas_used + self.cumulative_gas_used;
+        self.cumulative_gas_used += gas_used;
         self.bundle_prestate = evm.db_mut().take_bundle();
         self.total_flashblocks += 1;
 
@@ -234,12 +234,12 @@ impl FlashblocksBlockExecutorFactory {
 
     /// Exposes the chain specification.
     pub const fn spec(&self) -> &OpChainSpec {
-        &self.inner.spec()
+        self.inner.spec()
     }
 
     /// Exposes the EVM factory.
     pub const fn evm_factory(&self) -> &OpEvmFactory {
-        &self.inner.evm_factory()
+        self.inner.evm_factory()
     }
 
     pub const fn take_bundle(&mut self) -> Option<BundleState> {
@@ -259,7 +259,7 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
     type Receipt = OpReceipt;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.inner.evm_factory()
+        self.inner.evm_factory()
     }
 
     fn create_executor<'a, DB, I>(

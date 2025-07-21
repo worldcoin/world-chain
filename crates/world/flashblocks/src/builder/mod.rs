@@ -352,7 +352,7 @@ where
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
                     let mut best_txns = BestPayloadTxns::new(best_txns)
-                        .with_prev(executed_txns.drain(..).collect());
+                        .with_prev(std::mem::take(&mut executed_txns));
 
                     let transactions = build_outcome
                         .block
@@ -467,7 +467,7 @@ where
         }
     }
 
-    pub fn block_builder<Ctx, DB, N: NodePrimitives, Tx>(
+    pub fn block_builder<Ctx, DB, N, Tx>(
         &self,
         db: &'a mut State<DB>,
         transactions: Vec<Recovered<N::SignedTx>>,
