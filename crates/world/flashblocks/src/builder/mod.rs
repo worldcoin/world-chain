@@ -429,11 +429,6 @@ where
                         transactions_offset,
                     );
 
-                    info!(
-                        target: "payload_builder",
-                        id=%ctx.attributes().payload_id(),
-                    );
-
                     let authorized = Authorized::new(
                         &self.builder_sk,
                         authorization.clone(),
