@@ -1,5 +1,4 @@
 #!/bin/bash
-set -ex
 
 # NOTE: This script should be run through `just devnet-up` rather than directly.
 kurtosis_port=$(kurtosis port print world-chain op-el-builder-2151908-1-custom-op-node-op-kurtosis rpc)
