@@ -31,13 +31,15 @@ pub struct FlashblocksArgs {
 
     #[arg(
         long = "flashblock.authorizor_sk",
-        env = "FLASHBLOCKS_AUTHORIZOR_VK", value_parser = parse_vk,
+        env = "FLASHBLOCKS_AUTHORIZOR_VK", 
+        value_parser = parse_vk,
         required = false,
     )]
     pub flashblocks_authorizor_vk: Option<VerifyingKey>,
 
     #[arg(long = "flashblock.builder_sk", 
-        env = "FLASHBLOCKS_BUILDER_SK", value_parser = parse_sk,
+        env = "FLASHBLOCKS_BUILDER_SK", 
+        value_parser = parse_sk,
         required = false,
     )]
     pub flashblocks_builder_sk: SigningKey,

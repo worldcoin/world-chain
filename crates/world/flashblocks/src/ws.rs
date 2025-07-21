@@ -3,7 +3,7 @@ use rollup_boost::FlashblocksP2PMsg;
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{broadcast, mpsc, Mutex},
+    sync::{broadcast, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
