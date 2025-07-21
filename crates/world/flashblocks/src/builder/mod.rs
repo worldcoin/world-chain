@@ -304,9 +304,8 @@ where
         );
 
         let _enter = span.enter();
-        debug!(target: "payload_builder", id=%ctx.payload_id(), "building new payload");
 
-        debug!(target: "flashblocks_payload_builder", id=%ctx.payload_id(), "building flashblocks payload");
+        debug!(target: "payload_builder", "building new payload");
 
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
@@ -365,7 +364,7 @@ where
         self.spawn_flashblock_job_manager(tx);
 
         let bundle_state = loop {
-            debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblock {flashblock_idx}");
+            debug!(target: "payload_builder", "building flashblock {flashblock_idx}");
             let state = StateProviderDatabase::new(&state_provider);
 
             let mut db = State::builder()
@@ -376,8 +375,17 @@ where
 
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
 
+            let span = span!(
+                tracing::Level::DEBUG,
+                "flashblock_builder",
+                id = %ctx.attributes().payload_id(),
+                flashblock_idx,
+            );
+
             match notify {
                 Some(()) => {
+                    let _enter = span.enter();
+
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
@@ -398,7 +406,7 @@ where
 
                     let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
                     if inner_gas_limit == 0 {
-                        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no gas left for flashblock {flashblock_idx}, stopping");
+                        debug!(target: "payload_builder",  "no gas left for flashblock - stopping");
                         break db.take_bundle();
                     };
 
@@ -440,8 +448,8 @@ where
                     // update executed transactions
                     let (prev, observed) = best_txns.take_observed();
 
-                    executed_txns.extend_from_slice(&prev);
-                    executed_txns.extend_from_slice(&observed);
+                    executed_txns.extend_from_slice(&prev.collect::<Vec<_>>());
+                    executed_txns.extend_from_slice(&observed.collect::<Vec<_>>());
 
                     transactions_offset += build_outcome.block.body().transactions_iter().count();
                     bundle_state = new_bundle_state;
@@ -449,7 +457,7 @@ where
 
                 // tx was dropped, resolve the most recent payload
                 None => {
-                    debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");
+                    debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
                     break db.take_bundle();
                 }
             }
@@ -490,7 +498,7 @@ where
             Some(executed),
         );
 
-        info!(target: "payload_builder", id=%ctx.attributes().payload_id(), payload=?payload, "built payload");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "built payload");
 
         if ctx.attributes().no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
@@ -498,8 +506,6 @@ where
             // freeze it once we've successfully built it.
             Ok(BuildOutcomeKind::Freeze(payload))
         } else {
-            info!(target: "payload_builder", id=%ctx.attributes().payload_id(), payload=?payload);
-
             Ok(BuildOutcomeKind::Better { payload })
         }
     }
@@ -624,7 +630,7 @@ where
                         tokio::select! {
                             _ = flashblock_interval.tick() => {
                                 let elapsed = instant.elapsed();
-                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, cancelling current job");
+                                warn!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
                                 // queue the next flashblock job, but there's no benefit in cancelling the current job
                                 // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
                                 // because the next job will also exceed `flashblock_interval`.

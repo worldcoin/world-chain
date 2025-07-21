@@ -44,8 +44,8 @@ where
         self
     }
 
-    pub fn take_observed(self) -> (Vec<TxHash>, Vec<TxHash>) {
-        (self.prev.into_iter().collect(), self.observed)
+    pub fn take_observed(self) -> (impl Iterator<Item = TxHash>, impl Iterator<Item = TxHash>) {
+        (self.prev.into_iter(), self.observed.into_iter())
     }
 
     pub fn guard(&mut self) -> BestPayloadTxnsGuard<'_, I> {
@@ -60,11 +60,7 @@ where
     type Transaction = I::Transaction;
 
     fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
-        loop {
-            let Some(n) = self.inner.inner.next(ctx) else {
-                break;
-            };
-
+        while let Some(n) = self.inner.inner.next(ctx) {
             // If the transaction is not in the previous set, we can yield it.
             if !self.inner.prev.contains(n.hash()) {
                 self.inner.observed.push(*n.hash());
