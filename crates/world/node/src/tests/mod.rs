@@ -206,8 +206,6 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
