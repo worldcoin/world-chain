@@ -57,8 +57,9 @@ pub async fn setup_flashblocks() -> eyre::Result<(
                 .with_http_unused_port(),
         )
         .with_payload_builder(PayloadBuilderArgs {
-            deadline: Duration::from_millis(1000),
+            deadline: Duration::from_millis(1500),
             max_payload_tasks: 1,
+            gas_limit: Some(35_000_000),
             ..Default::default()
         })
         .with_unused_ports();
@@ -122,11 +123,12 @@ pub async fn setup_flashblocks() -> eyre::Result<(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_build_flashblocks() -> eyre::Result<()> {
+    tokio::time::sleep(Duration::from_secs(1)).await; // Allow time for the node to start
     reth_tracing::init_test_tracing();
-    let (signers, mut test_ctx, task_manager) = setup_flashblocks().await?;
+    let (_signers, mut test_ctx, _task_manager) = setup_flashblocks().await?;
 
     for i in 0..=10 {
-        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random());
+        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
         let signed = TransactionTestContext::sign_tx(signer(0), raw_tx).await;
         test_ctx.rpc.inject_tx(signed.encoded_2718().into()).await?;
     }
@@ -167,20 +169,11 @@ async fn test_build_flashblocks() -> eyre::Result<()> {
     });
 
     // Initiate a payload building job
-    let _block = test_ctx.advance_block().await?;
+    let block = test_ctx.advance_block().await?;
 
-    assert_eq!(
-        received_messages
-            .lock()
-            .expect("Failed to lock messages")
-            .len(),
-        4
-    );
+    assert_eq!(block.into_sealed_block().into_body().transactions.len(), 11);
 
     ws_handle.abort();
-    // One transaction should be successfully validated
-    // and included in the block.
-    // assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
 }

@@ -399,6 +399,8 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         // Prepare block builder.
         let mut builder = PayloadBuilderCtx::block_builder(&ctx, &mut state)?;
 
+        let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
+
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
 
@@ -410,7 +412,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
             // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs, 0)?
+                .execute_best_transactions(&mut info, &mut builder, best_txs, gas_limit)?
                 .is_none()
             {
                 return Ok(BuildOutcomeKind::Cancelled);

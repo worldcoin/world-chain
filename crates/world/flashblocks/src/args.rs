@@ -18,7 +18,7 @@ pub struct FlashblocksArgs {
     pub flashblock_block_time: u64,
 
     /// Interval in milliseconds to wait before computing the next pending block.
-    #[arg(long = "flashblock.interval", env, default_value = "250")]
+    #[arg(long = "flashblock.interval", env, default_value = "200")]
     pub flashblock_interval: u64,
 
     /// The host to bind the Flashblocks WebSocket server to.

@@ -217,8 +217,9 @@ def get_config(
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
         "--flashblock.block_time={0}".format(2000),
-        "--flashblock.interval={0}".format(250),
+        "--flashblock.interval={0}".format(200),
         "--flashblock.builder_sk=0000000000000000000000000000000000000000000000000000000000000000"
+        "--builder.interval={0}".format("1500ms"),
     ]
 
     observability.expose_metrics_port(ports)

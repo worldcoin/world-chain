@@ -1,5 +1,8 @@
 use crate::{
-    builder::executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+    builder::{
+        executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+        payload_txns::BestPayloadTxns,
+    },
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::BlockHeader;
@@ -55,6 +58,7 @@ use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, error, info, span, warn};
 
 pub mod executor;
+pub mod payload_txns;
 
 /// Flashblocks Paylod builder
 ///
@@ -302,9 +306,12 @@ where
         let _enter = span.enter();
         debug!(target: "payload_builder", id=%ctx.payload_id(), "building new payload");
 
+        debug!(target: "flashblocks_payload_builder", id=%ctx.payload_id(), "building flashblocks payload");
+
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
         let mut transactions_offset = 0;
+
         let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
         let state = StateProviderDatabase::new(&state_provider);
@@ -351,17 +358,20 @@ where
         let total_flashbblocks = self.block_time as usize / self.flashblock_interval as usize;
         let (tx, mut rx) = tokio::sync::mpsc::channel(total_flashbblocks);
 
+        // Tracks all executed transactions across all flashblocks.
+        let mut executed_txns = vec![];
+
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
 
-        loop {
+        let bundle_state = loop {
             debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "building flashblock {flashblock_idx}");
             let state = StateProviderDatabase::new(&state_provider);
 
             let mut db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
-                .with_bundle_prestate(bundle_state.clone())
+                .with_bundle_prestate(bundle_state)
                 .build();
 
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
@@ -370,6 +380,9 @@ where
                 Some(()) => {
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
+
+                    let mut best_txns = BestPayloadTxns::new(best_txns)
+                        .with_prev(std::mem::take(&mut executed_txns));
 
                     let transactions = build_outcome
                         .block
@@ -383,17 +396,22 @@ where
                         ctx,
                     )?;
 
+                    let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
+                    if inner_gas_limit == 0 {
+                        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no gas left for flashblock {flashblock_idx}, stopping");
+                        break db.take_bundle();
+                    };
+
                     let Some(new_bundle_state) = ctx.execute_best_transactions(
                         &mut info,
                         &mut builder,
-                        best_txns,
-                        gas_limit,
+                        best_txns.guard(),
+                        inner_gas_limit,
                     )?
                     else {
-                        break;
+                        break db.take_bundle();
                     };
 
-                    // This does not have correct receipts root, or block body
                     build_outcome = builder.finish(&state_provider)?;
 
                     let flashblock_payload = flashblock_payload_from_outcome(
@@ -419,6 +437,12 @@ where
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 
+                    // update executed transactions
+                    let (prev, observed) = best_txns.take_observed();
+
+                    executed_txns.extend_from_slice(&prev);
+                    executed_txns.extend_from_slice(&observed);
+
                     transactions_offset += build_outcome.block.body().transactions_iter().count();
                     bundle_state = new_bundle_state;
                 }
@@ -426,12 +450,12 @@ where
                 // tx was dropped, resolve the most recent payload
                 None => {
                     debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no more flashblocks to build, resolving payload");
-                    break;
+                    break db.take_bundle();
                 }
             }
 
             flashblock_idx += 1;
-        }
+        };
 
         let BlockBuilderOutcome {
             execution_result,
@@ -443,9 +467,9 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            bundle_state.clone(),
+            bundle_state,
             vec![execution_result.receipts],
-            block.number,
+            block.number(),
             Vec::new(),
         );
 
@@ -480,7 +504,7 @@ where
         }
     }
 
-    pub fn block_builder<Ctx, DB, N: NodePrimitives, Tx>(
+    pub fn block_builder<Ctx, DB, N, Tx>(
         &self,
         db: &'a mut State<DB>,
         transactions: Vec<Recovered<N::SignedTx>>,
