@@ -345,8 +345,17 @@ where
 
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
 
+            let span = span!(
+                tracing::Level::DEBUG,
+                "flashblock_builder",
+                id = %ctx.attributes().payload_id(),
+                flashblock_idx,
+            );
+
             match notify {
                 Some(()) => {
+                    let _enter = span.enter();
+
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
@@ -367,7 +376,7 @@ where
 
                     let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
                     if inner_gas_limit == 0 {
-                        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), "no gas left for flashblock {flashblock_idx}, stopping");
+                        debug!(target: "payload_builder",  "no gas left for flashblock - stopping");
                         break db.take_bundle();
                     };
 
@@ -397,8 +406,8 @@ where
                     // update executed transactions
                     let (prev, observed) = best_txns.take_observed();
 
-                    executed_txns.extend_from_slice(&prev);
-                    executed_txns.extend_from_slice(&observed);
+                    executed_txns.extend_from_slice(&prev.collect::<Vec<_>>());
+                    executed_txns.extend_from_slice(&observed.collect::<Vec<_>>());
 
                     transactions_offset += build_outcome.block.body().transactions_iter().count();
                     bundle_state = new_bundle_state;
@@ -579,7 +588,7 @@ where
                         tokio::select! {
                             _ = flashblock_interval.tick() => {
                                 let elapsed = instant.elapsed();
-                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, cancelling current job");
+                                warn!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
                                 // queue the next flashblock job, but there's no benefit in cancelling the current job
                                 // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
                                 // because the next job will also exceed `flashblock_interval`.
