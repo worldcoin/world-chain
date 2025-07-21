@@ -216,8 +216,11 @@ def get_config(
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
-        "--flashblock.block_time={0}".format(2000),
-        "--flashblock.interval={0}".format(250),
+        "--flashblock.block_time={0}".format(1000),
+        "--flashblock.interval={0}".format(200),
+        "--flashblock.host={0}".format("0.0.0.0"),
+        "--flashblock.port={0}".format(FLASHBLOCKS_WS_PORT_NUM),
+        "--builder.interval={0}".format("1500ms"),
     ]
 
     observability.expose_metrics_port(ports)
