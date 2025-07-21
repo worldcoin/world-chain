@@ -84,6 +84,7 @@ pub async fn raw_pbh_bundle_bytes(
         Some(Bytes::from(encoded)),
         tx_nonce,
         PBH_DEV_ENTRYPOINT,
+        210_000,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();
@@ -113,18 +114,25 @@ pub async fn raw_pbh_multicall_bytes(
         Some(Bytes::from(encoded)),
         tx_nonce,
         PBH_DEV_ENTRYPOINT,
+        210_000,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();
     raw_tx.into()
 }
 
-pub fn tx(chain_id: u64, data: Option<Bytes>, nonce: u64, to: Address) -> TransactionRequest {
+pub fn tx(
+    chain_id: u64,
+    data: Option<Bytes>,
+    nonce: u64,
+    to: Address,
+    gas: u64,
+) -> TransactionRequest {
     TransactionRequest {
         nonce: Some(nonce),
         value: Some(U256::from(100)),
         to: Some(TxKind::Call(to)),
-        gas: Some(21_000),
+        gas: Some(gas),
         max_fee_per_gas: Some(20e10 as u128),
         max_priority_fee_per_gas: Some(20e10 as u128),
         chain_id: Some(chain_id),

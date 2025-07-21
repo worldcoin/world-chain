@@ -75,6 +75,7 @@ impl WorldChainBuilderTestContext {
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
             builder_private_key: signer(6).to_bytes().to_string(),
+            flashblock_args: None,
             ..Default::default()
         };
 
@@ -145,12 +146,15 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let non_pbh_tx = tx(
         ctx.node.inner.chain_spec().chain.id(),
         None,
         0,
         Address::default(),
+        210_000,
     );
     let wallet = signer(0);
     let signer = EthereumWallet::from(wallet);
@@ -202,6 +206,8 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
@@ -240,7 +246,7 @@ pub fn optimism_payload_attributes(
     OpPayloadBuilderAttributes {
         payload_attributes: attributes,
         transactions: vec![],
-        gas_limit: Some(3000000),
+        gas_limit: None,
         no_tx_pool: false,
         eip_1559_params: None,
     }

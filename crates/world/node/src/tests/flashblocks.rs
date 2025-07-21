@@ -57,6 +57,7 @@ pub async fn setup_flashblocks() -> eyre::Result<(
         .with_payload_builder(PayloadBuilderArgs {
             deadline: Duration::from_millis(1500),
             max_payload_tasks: 1,
+            gas_limit: Some(35_000_000),
             ..Default::default()
         })
         .with_unused_ports();
@@ -115,10 +116,8 @@ async fn test_build_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut test_ctx, _task_manager) = setup_flashblocks().await?;
 
-    tokio::time::sleep(Duration::from_secs(2)).await; // Allow time for the node to start
-
     for i in 0..=10 {
-        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random());
+        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
         let signed = TransactionTestContext::sign_tx(signer(0), raw_tx).await;
         test_ctx.rpc.inject_tx(signed.encoded_2718().into()).await?;
     }

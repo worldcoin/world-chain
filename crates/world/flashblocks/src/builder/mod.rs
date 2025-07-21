@@ -289,6 +289,8 @@ where
         let _enter = span.enter();
         debug!(target: "payload_builder", id=%ctx.payload_id(), "building new payload");
 
+        debug!(target: "flashblocks_payload_builder", id=%ctx.payload_id(), "building flashblocks payload");
+
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
         let mut transactions_offset = 0;
