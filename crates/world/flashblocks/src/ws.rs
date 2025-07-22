@@ -52,7 +52,7 @@ pub async fn publish_task(
         let mut retained_subscribers = Vec::with_capacity(subscribers.len());
         let FlashblocksP2PMsg::FlashblocksPayloadV1(inner) = message;
         for mut ws_stream in subscribers.drain(..) {
-            let msg = serde_json::to_string(&inner).expect("Failed to serialize message");
+            let msg = serde_json::to_string(&inner.payload).expect("Failed to serialize message");
 
             match ws_stream.send(Message::Text(msg.into())).await {
                 Ok(()) => {

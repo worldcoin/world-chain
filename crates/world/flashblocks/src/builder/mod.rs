@@ -311,11 +311,10 @@ where
         // 1. Setup relevant variables
         let mut flashblock_idx = 0;
         let mut transactions_offset = 0;
-
         let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
+        // 2. Create the block builder
         let state = StateProviderDatabase::new(&state_provider);
-
         let mut db = State::builder()
             .with_database(state)
             .with_bundle_update()
@@ -323,12 +322,13 @@ where
 
         let mut builder = self.block_builder(&mut db, vec![], None, ctx)?;
 
+        // 3. Execute Deposit transactions
         let (mut info, mut bundle_state) = ctx
             .execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?;
 
+        // 4. Build the block
         let mut build_outcome = builder.finish(&state_provider)?;
-
         let flashblock_payload = flashblock_payload_from_outcome(
             &build_outcome,
             ctx,
@@ -336,6 +336,7 @@ where
             transactions_offset,
         );
 
+        // Adjust transaction offset to account for deposit transactions
         transactions_offset += build_outcome.block.body().transactions_iter().count();
 
         let authorization = self.authorization.clone().unwrap_or_else(|| {
@@ -347,11 +348,13 @@ where
                 self.builder_sk.verifying_key(),
             )
         });
-        let authorized =
-            Authorized::new(&self.builder_sk, authorization.clone(), flashblock_payload);
-        let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
 
-        if let Err(err) = self.publish_tx.send(p2p_msg) {
+        let authorized = |payload| {
+            let authorized = Authorized::new(&self.builder_sk, authorization.clone(), payload);
+            FlashblocksP2PMsg::FlashblocksPayloadV1(authorized)
+        };
+
+        if let Err(err) = self.publish_tx.send(authorized(flashblock_payload)) {
             error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
 
@@ -364,10 +367,10 @@ where
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
 
-        let bundle_state = loop {
-            debug!(target: "payload_builder", "building flashblock {flashblock_idx}");
+        // 5. Repeat executing transactions from the pool every `flashblock_interval` milliseconds
+        let bundle = loop {
+            // Init database with pre state bundle from the previous block
             let state = StateProviderDatabase::new(&state_provider);
-
             let mut db = State::builder()
                 .with_database(state)
                 .with_bundle_update()
@@ -387,6 +390,7 @@ where
                 Some(()) => {
                     let _enter = span.enter();
 
+                    // fetch the best transactions from the tx pool discarding previously executed transactions
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
 
@@ -430,14 +434,7 @@ where
                         transactions_offset,
                     );
 
-                    let authorized = Authorized::new(
-                        &self.builder_sk,
-                        authorization.clone(),
-                        flashblock_payload,
-                    );
-                    let p2p_msg = FlashblocksP2PMsg::FlashblocksPayloadV1(authorized);
-
-                    if let Err(err) = self.publish_tx.send(p2p_msg) {
+                    if let Err(err) = self.publish_tx.send(authorized(flashblock_payload)) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 
@@ -471,7 +468,7 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            bundle_state,
+            bundle,
             vec![execution_result.receipts],
             block.number(),
             Vec::new(),
