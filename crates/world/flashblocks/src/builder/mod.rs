@@ -46,11 +46,11 @@ use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
     BlockExecutionResult, ChainSpecProvider, ExecutionOutcome, StateProvider, StateProviderFactory,
 };
-
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::inspector::NoOpInspector;
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::mpsc, time::Instant};
+use tracing::info;
 use tracing::{debug, error, span, warn};
 
 pub mod executor;
@@ -366,6 +366,8 @@ where
                         .block
                         .clone_transactions_recovered()
                         .collect::<Vec<_>>();
+
+                    info!(target: "payload_builder", "building flashblock {flashblock_idx} with {} transactions", transactions.len());
 
                     let mut builder = self.block_builder(
                         &mut db,
