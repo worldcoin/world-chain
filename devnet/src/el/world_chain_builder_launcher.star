@@ -220,6 +220,7 @@ def get_config(
         "--flashblock.interval={0}".format(200),
         "--flashblock.host={0}".format("0.0.0.0"),
         "--flashblock.port={0}".format(FLASHBLOCKS_WS_PORT_NUM),
+        "--flashblock.builder_sk=0000000000000000000000000000000000000000000000000000000000000000",
         "--builder.interval={0}".format("1500ms"),
     ]
 
@@ -259,7 +260,7 @@ def get_config(
     env_vars = participant.el_builder_extra_env_vars
     env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
-    env_vars["RUST_LOG"] = "info,payload_builder=trace"
+    env_vars["RUST_LOG"] = "info,payload_builder=trace,flashblocks=trace"
     config_args = {
         "image": participant.el_builder_image,
         "ports": used_ports,

@@ -75,7 +75,7 @@ impl WorldChainBuilderTestContext {
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
             builder_private_key: signer(6).to_bytes().to_string(),
-            flashblock_args: None,
+            flashblocks_args: None,
             ..Default::default()
         };
 
@@ -206,6 +206,8 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 

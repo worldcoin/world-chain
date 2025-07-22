@@ -1,9 +1,8 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::args::WorldChainArgs;
 use crate::flashblocks::WorldChainFlashblocksNode;
-use crate::test_utils::tx;
 use alloy_network::eip2718::Encodable2718;
-use flashblocks::args::FlashblockArgs;
+use flashblocks::args::FlashblocksArgs;
 use futures::StreamExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::TreeConfig;
@@ -18,7 +17,9 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::Address;
+use rollup_boost::ed25519_dalek::SigningKey;
 use rollup_boost::FlashblocksPayloadV1;
+use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,27 +27,27 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, span};
+use tracing::info;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
+use crate::test_utils::tx;
+
 use crate::tests::{get_chain_spec, WorldChainNode, BASE_CHAIN_ID};
 
-pub async fn setup_swarm(
-    num_nodes: u8,
-) -> eyre::Result<(
+pub async fn setup_flashblocks() -> eyre::Result<(
     Range<u8>,
-    Vec<WorldChainNode<WorldChainFlashblocksNode>>,
+    WorldChainNode<WorldChainFlashblocksNode>,
     TaskManager,
 )> {
     std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     let op_chain_spec = Arc::new(get_chain_spec());
 
-    let task_manager = TaskManager::current();
-    let exec = task_manager.executor();
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
 
     let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(op_chain_spec.clone())
         .with_chain(op_chain_spec.clone())
@@ -70,81 +71,61 @@ pub async fn setup_swarm(
     // is 0.0.0.0 by default
     node_config.network.addr = [127, 0, 0, 1].into();
 
-    let mut nodes: Vec<_> =
-        Vec::<WorldChainNode<WorldChainFlashblocksNode>>::with_capacity(num_nodes as usize);
+    let flashblocks_args = FlashblocksArgs {
+        flashblock_block_time: 1000,
+        flashblock_interval: 250,
+        flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        flashblock_port: 9002,
+        flashblocks_authorizor_vk: None,
+        flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
+    };
 
-    for idx in 0..num_nodes {
-        let span = span!(tracing::Level::INFO, "test_node", idx);
+    let node = WorldChainFlashblocksNode::new(WorldChainArgs {
+        verified_blockspace_capacity: 70,
+        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+        signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+        world_id: DEV_WORLD_ID,
+        builder_private_key: signer(6).to_bytes().to_string(),
+        flashblocks_args: Some(flashblocks_args),
+        ..Default::default()
+    });
 
-        let _enter = span.enter();
+    let NodeHandle {
+        node,
+        node_exit_future: _,
+    } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
+        .with_types_and_provider::<WorldChainFlashblocksNode, BlockchainProvider<_>>()
+        .with_components(node.components_builder())
+        .with_add_ons(node.add_ons())
+        .extend_rpc_modules(move |ctx| {
+            let provider = ctx.provider().clone();
+            let pool = ctx.pool().clone();
+            let eth_api_ext = WorldChainEthApiExt::new(pool, provider, None);
 
-        let node = WorldChainFlashblocksNode::new(WorldChainArgs {
-            verified_blockspace_capacity: 70,
-            pbh_entrypoint: PBH_DEV_ENTRYPOINT,
-            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-            world_id: DEV_WORLD_ID,
-            builder_private_key: signer(6).to_bytes().to_string(),
-            flashblock_args: Some(FlashblockArgs {
-                flashblock_port: 9002 + idx as u16,
-                ..Default::default()
-            }),
-            ..Default::default()
-        });
+            ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+            Ok(())
+        })
+        .launch_with_fn(|builder| {
+            let launcher = EngineNodeLauncher::new(
+                builder.task_executor().clone(),
+                builder.config().datadir(),
+                TreeConfig::default(),
+            );
+            builder.launch_with(launcher)
+        })
+        .await?;
 
-        let NodeHandle {
-            node,
-            node_exit_future: _,
-        } = NodeBuilder::new(node_config.clone())
-            .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainFlashblocksNode, BlockchainProvider<_>>()
-            .with_components(node.components_builder())
-            .with_add_ons(node.add_ons())
-            .extend_rpc_modules(move |ctx| {
-                let provider = ctx.provider().clone();
-                let pool = ctx.pool().clone();
-                let eth_api_ext = WorldChainEthApiExt::new(pool, provider, None);
+    let test_ctx = NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
 
-                ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                Ok(())
-            })
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    builder.task_executor().clone(),
-                    builder.config().datadir(),
-                    TreeConfig::default(),
-                );
-                builder.launch_with(launcher)
-            })
-            .await?;
-
-        let mut node =
-            NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
-
-        // Connect each node in a chain.
-        if let Some(previous_node) = nodes.last_mut() {
-            previous_node.connect(&mut node).await;
-        }
-
-        // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2 {
-            if let Some(first_node) = nodes.first_mut() {
-                node.connect(first_node).await;
-            }
-        }
-
-        nodes.push(node);
-    }
-
-    Ok((0..6, nodes, task_manager))
+    Ok((0..6, test_ctx, tasks))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_build_flashblocks() -> eyre::Result<()> {
     tokio::time::sleep(Duration::from_secs(1)).await; // Allow time for the node to start
     reth_tracing::init_test_tracing();
-    let (_signers, mut nodes, _task_manager) = setup_swarm(3).await?;
-
-    let test_ctx = nodes.first_mut().expect("Expected at least one node");
+    let (_signers, mut test_ctx, _task_manager) = setup_flashblocks().await?;
 
     for i in 0..=10 {
         let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);

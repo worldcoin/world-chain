@@ -1,9 +1,10 @@
 use futures_util::SinkExt;
-use rollup_boost::FlashblocksPayloadV1;
+use rollup_boost::FlashblocksP2PMsg;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{mpsc, Mutex},
+    sync::Mutex,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
@@ -39,17 +40,19 @@ pub async fn ws_server(
     }
 }
 
+/// Background task that handles publishing messages to WebSocket subscribers
 pub async fn publish_task(
-    mut rx: mpsc::UnboundedReceiver<FlashblocksPayloadV1>,
+    mut rx: broadcast::Receiver<FlashblocksP2PMsg>,
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
 ) {
-    while let Some(message) = rx.recv().await {
+    while let Ok(message) = rx.recv().await {
         let mut subscribers = subscribers.lock().await;
 
         // Remove disconnected subscribers and send message to connected ones
         let mut retained_subscribers = Vec::with_capacity(subscribers.len());
+        let FlashblocksP2PMsg::FlashblocksPayloadV1(inner) = message;
         for mut ws_stream in subscribers.drain(..) {
-            let msg = serde_json::to_string(&message).expect("Failed to serialize payload");
+            let msg = serde_json::to_string(&inner).expect("Failed to serialize message");
 
             match ws_stream.send(Message::Text(msg.into())).await {
                 Ok(()) => {

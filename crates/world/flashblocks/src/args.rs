@@ -2,12 +2,17 @@
 
 //! clap [Args](clap::Args) for Flashblocks configuration
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
+
+use rollup_boost::{
+    ed25519_dalek::{SigningKey, VerifyingKey},
+    parse_sk, parse_vk,
+};
 
 /// Parameters for Flashblocks configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Flashblocks")]
-pub struct FlashblockArgs {
+pub struct FlashblocksArgs {
     /// The payload building interval in milliseconds.
     #[arg(long = "flashblock.block_time", env, default_value = "1000")]
     pub flashblock_block_time: u64,
@@ -23,17 +28,21 @@ pub struct FlashblockArgs {
     /// The port to bind the Flashblocks WebSocket server to.
     #[arg(long = "flashblock.port", env, default_value = "9002")]
     pub flashblock_port: u16,
-}
 
-impl Default for FlashblockArgs {
-    fn default() -> Self {
-        Self {
-            flashblock_block_time: 1000,
-            flashblock_interval: 200,
-            flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            flashblock_port: 9002,
-        }
-    }
+    #[arg(
+        long = "flashblock.authorizor_sk",
+        env = "FLASHBLOCKS_AUTHORIZOR_VK", 
+        value_parser = parse_vk,
+        required = false,
+    )]
+    pub flashblocks_authorizor_vk: Option<VerifyingKey>,
+
+    #[arg(long = "flashblock.builder_sk", 
+        env = "FLASHBLOCKS_BUILDER_SK", 
+        value_parser = parse_sk,
+        required = false,
+    )]
+    pub flashblocks_builder_sk: SigningKey,
 }
 
 #[cfg(test)]
@@ -50,19 +59,23 @@ mod tests {
 
     #[test]
     fn parse_args() {
-        let expected_args = FlashblockArgs {
+        let expected_args = FlashblocksArgs {
             flashblock_block_time: 1,
             flashblock_interval: 200,
             flashblock_port: 9002,
             flashblock_host: "127.0.0.1".parse().unwrap(),
+            flashblocks_authorizor_vk: None,
+            flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
         };
 
-        let args = CommandParser::<FlashblockArgs>::parse_from([
+        let args = CommandParser::<FlashblocksArgs>::parse_from([
             "bin",
             "--flashblock.block_time",
             "1",
             "--flashblock.interval",
             "200",
+            "--flashblock.builder_sk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .args;
 

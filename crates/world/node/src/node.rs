@@ -111,7 +111,7 @@ impl WorldChainNode {
             signature_aggregator,
             world_id,
             builder_private_key,
-            flashblock_args: _,
+            flashblocks_args: _,
         } = self.args.clone();
 
         let RollupArgs {
