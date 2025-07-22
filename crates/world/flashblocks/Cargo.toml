@@ -44,3 +44,4 @@ tracing.workspace = true
 serde_json.workspace = true
 futures-util = "0.3"
 clap.workspace = true
+eyre.workspace = true

@@ -5,6 +5,7 @@ use crate::{
     },
     payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
 };
+
 use alloy_consensus::BlockHeader;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::OpEvm;
@@ -55,7 +56,7 @@ use rollup_boost::{
 };
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::broadcast, time::Instant};
-use tracing::{debug, error, info, span, warn};
+use tracing::{debug, error, span, warn};
 
 pub mod executor;
 pub mod payload_txns;
