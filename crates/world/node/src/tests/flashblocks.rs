@@ -1,7 +1,9 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::args::WorldChainArgs;
 use crate::flashblocks::WorldChainFlashblocksNode;
+use alloy_eips::Decodable2718;
 use alloy_network::eip2718::Encodable2718;
+use alloy_primitives::{Bytes, TxHash};
 use flashblocks::args::FlashblocksArgs;
 use futures::StreamExt;
 use op_alloy_consensus::OpTxEnvelope;
@@ -18,7 +20,8 @@ use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::Address;
 use rollup_boost::ed25519_dalek::SigningKey;
-use rollup_boost::FlashblocksPayloadV1;
+use rollup_boost::{FlashblocksP2PMsg, FlashblocksPayloadV1};
+use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
@@ -27,7 +30,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
-use tracing::span;
+use tracing::{info, span};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{
@@ -35,8 +38,9 @@ use world_chain_builder_test_utils::{
 };
 
 use crate::test_utils::tx;
-
 use crate::tests::{get_chain_spec, WorldChainNode, BASE_CHAIN_ID};
+
+use reth_node_api::{BlockBody, PayloadBuilderAttributes};
 
 pub async fn setup_flashblocks(
     num_nodes: u8,
@@ -62,6 +66,7 @@ pub async fn setup_flashblocks(
             deadline: Duration::from_millis(1500),
             max_payload_tasks: 1,
             gas_limit: Some(35_000_000),
+            interval: Duration::from_millis(2000),
             ..Default::default()
         })
         .with_unused_ports();
@@ -82,7 +87,7 @@ pub async fn setup_flashblocks(
 
         let flashblocks_args = FlashblocksArgs {
             flashblock_block_time: 1000,
-            flashblock_interval: 250,
+            flashblock_interval: 200,
             flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             flashblock_port: 9002 + idx as u16,
             flashblocks_authorizor_vk: None,
@@ -145,20 +150,9 @@ pub async fn setup_flashblocks(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_build_flashblocks() -> eyre::Result<()> {
-    tokio::time::sleep(Duration::from_secs(1)).await; // Allow time for the node to start
+async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _task_manager) = setup_flashblocks(3).await?;
-
-    let node = nodes
-        .first_mut()
-        .expect("At least one node should be present");
-
-    for i in 0..=10 {
-        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
-        let signed = TransactionTestContext::sign_tx(signer(0), raw_tx).await;
-        node.rpc.inject_tx(signed.encoded_2718().into()).await?;
-    }
 
     // Create a struct to hold received messages
     let received_messages = Arc::new(Mutex::new(Vec::new()));
@@ -176,18 +170,91 @@ async fn test_build_flashblocks() -> eyre::Result<()> {
               _ = cancellation_token_clone.cancelled() => {
                   break Ok(());
               }
-              Some(Ok(Message::Text(text))) = read.next() => {
-                let payload = serde_json::from_str::<FlashblocksPayloadV1>(&text).expect("Failed to parse FlashblocksPayloadV1");
-                messages_clone.lock().expect("Failed to lock messages").push(payload);
-              }
+                Some(Ok(Message::Text(text))) = read.next() => {
+                    let payload = serde_json::from_str::<FlashblocksP2PMsg>(&text).expect("Failed to parse FlashblocksPayloadV1");
+                    let FlashblocksP2PMsg::FlashblocksPayloadV1(inner) = payload;
+                    messages_clone.lock().expect("Failed to lock messages").push(inner.payload);
+                }
             }
         }
     });
 
-    // Initiate a payload building job
-    let block = node.advance_block().await?;
+    // fetch the first node
+    let node: &mut WorldChainNode<WorldChainFlashblocksNode> = nodes
+        .first_mut()
+        .expect("At least one node should be present");
 
-    assert_eq!(block.into_sealed_block().into_body().transactions.len(), 11);
+    let mut txns: Vec<Bytes> = vec![];
+
+    for i in 0..=11 {
+        let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
+        let signed = TransactionTestContext::sign_tx(signer(i as u32), raw_tx).await;
+        txns.push(signed.encoded_2718().into());
+    }
+
+    let mut flashblocks_interval = tokio::time::interval(Duration::from_millis(200));
+    flashblocks_interval.tick().await;
+
+    // trigger new payload building draining the pool
+    let eth_attr = node.payload.new_payload().await.unwrap();
+    // first event is the payload attributes
+    node.payload.expect_attr_event(eth_attr.clone()).await?;
+
+    for tx in &txns[..4] {
+        node.rpc.inject_tx(tx.clone()).await?;
+    }
+
+    flashblocks_interval.tick().await;
+    for tx in &txns[4..8] {
+        node.rpc.inject_tx(tx.clone()).await?;
+    }
+
+    flashblocks_interval.tick().await;
+    for tx in &txns[8..] {
+        node.rpc.inject_tx(tx.clone()).await?;
+    }
+
+    // wait for the payload builder to have finished building
+    node.payload
+        .wait_for_built_payload(eth_attr.payload_id())
+        .await;
+
+    // ensure we're also receiving the built payload as event
+    let payload = node.payload.expect_built_payload().await?;
+
+    let flashblock_payloads = received_messages.lock().expect("Failed to lock messages");
+    let block = payload.into_sealed_block();
+
+    let payload_transactions = block
+        .body()
+        .transactions()
+        .map(|tx| tx.hash())
+        .collect::<HashSet<_>>();
+
+    let mut flashblock_payload_txns: HashSet<TxHash> = HashSet::new();
+
+    for fb_payload in flashblock_payloads.iter() {
+        assert_eq!(fb_payload.payload_id, eth_attr.payload_id());
+        flashblock_payload_txns.extend(fb_payload.diff.transactions.iter().map(|tx| {
+            let decoded =
+                OpTxEnvelope::decode_2718(&mut tx.as_ref()).expect("Failed to decode transaction");
+            decoded.hash().clone()
+        }));
+    }
+
+    assert_eq!(
+        flashblock_payload_txns.len(),
+        payload_transactions.len(),
+        "Flashblocks payloads should contain all transactions from the built payload"
+    );
+
+    for tx in payload_transactions {
+        assert!(
+            flashblock_payload_txns.contains(tx),
+            "Flashblocks payloads should contain transaction: {:?}",
+            tx
+        );
+    }
 
     ws_handle.abort();
 
