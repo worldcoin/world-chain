@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::span;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{
@@ -38,9 +38,11 @@ use crate::test_utils::tx;
 
 use crate::tests::{get_chain_spec, WorldChainNode, BASE_CHAIN_ID};
 
-pub async fn setup_flashblocks() -> eyre::Result<(
+pub async fn setup_flashblocks(
+    num_nodes: u8,
+) -> eyre::Result<(
     Range<u8>,
-    WorldChainNode<WorldChainFlashblocksNode>,
+    Vec<WorldChainNode<WorldChainFlashblocksNode>>,
     TaskManager,
 )> {
     std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
@@ -71,66 +73,91 @@ pub async fn setup_flashblocks() -> eyre::Result<(
     // is 0.0.0.0 by default
     node_config.network.addr = [127, 0, 0, 1].into();
 
-    let flashblocks_args = FlashblocksArgs {
-        flashblock_block_time: 1000,
-        flashblock_interval: 250,
-        flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        flashblock_port: 9002,
-        flashblocks_authorizor_vk: None,
-        flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
-    };
+    let mut nodes =
+        Vec::<WorldChainNode<WorldChainFlashblocksNode>>::with_capacity(num_nodes as usize);
 
-    let node = WorldChainFlashblocksNode::new(WorldChainArgs {
-        verified_blockspace_capacity: 70,
-        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
-        signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-        world_id: DEV_WORLD_ID,
-        builder_private_key: signer(6).to_bytes().to_string(),
-        flashblocks_args: Some(flashblocks_args),
-        ..Default::default()
-    });
+    for idx in 0..num_nodes {
+        let span = span!(tracing::Level::INFO, "test_node", idx);
+        let _enter = span.enter();
 
-    let NodeHandle {
-        node,
-        node_exit_future: _,
-    } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
-        .with_types_and_provider::<WorldChainFlashblocksNode, BlockchainProvider<_>>()
-        .with_components(node.components_builder())
-        .with_add_ons(node.add_ons())
-        .extend_rpc_modules(move |ctx| {
-            let provider = ctx.provider().clone();
-            let pool = ctx.pool().clone();
-            let eth_api_ext = WorldChainEthApiExt::new(pool, provider, None);
+        let flashblocks_args = FlashblocksArgs {
+            flashblock_block_time: 1000,
+            flashblock_interval: 250,
+            flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            flashblock_port: 9002 + idx as u16,
+            flashblocks_authorizor_vk: None,
+            flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
+        };
 
-            ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-            Ok(())
-        })
-        .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
-                builder.task_executor().clone(),
-                builder.config().datadir(),
-                TreeConfig::default(),
-            );
-            builder.launch_with(launcher)
-        })
-        .await?;
+        let node = WorldChainFlashblocksNode::new(WorldChainArgs {
+            verified_blockspace_capacity: 70,
+            pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+            world_id: DEV_WORLD_ID,
+            builder_private_key: signer(6).to_bytes().to_string(),
+            flashblocks_args: Some(flashblocks_args),
+            ..Default::default()
+        });
 
-    let test_ctx = NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
+        let NodeHandle {
+            node,
+            node_exit_future: _,
+        } = NodeBuilder::new(node_config.clone())
+            .testing_node(exec.clone())
+            .with_types_and_provider::<WorldChainFlashblocksNode, BlockchainProvider<_>>()
+            .with_components(node.components_builder())
+            .with_add_ons(node.add_ons())
+            .extend_rpc_modules(move |ctx| {
+                let provider = ctx.provider().clone();
+                let pool = ctx.pool().clone();
+                let eth_api_ext = WorldChainEthApiExt::new(pool, provider, None);
 
-    Ok((0..6, test_ctx, tasks))
+                ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                Ok(())
+            })
+            .launch_with_fn(|builder| {
+                let launcher = EngineNodeLauncher::new(
+                    builder.task_executor().clone(),
+                    builder.config().datadir(),
+                    TreeConfig::default(),
+                );
+                builder.launch_with(launcher)
+            })
+            .await?;
+
+        let mut node =
+            NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
+
+        // Connect each node in a chain.
+        if let Some(previous_node) = nodes.last_mut() {
+            previous_node.connect(&mut node).await;
+        }
+        // Connect last node with the first if there are more than two
+        if idx + 1 == num_nodes && num_nodes > 2 {
+            if let Some(first_node) = nodes.first_mut() {
+                node.connect(first_node).await;
+            }
+        }
+
+        nodes.push(node);
+    }
+    Ok((0..6, nodes, tasks))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_build_flashblocks() -> eyre::Result<()> {
     tokio::time::sleep(Duration::from_secs(1)).await; // Allow time for the node to start
     reth_tracing::init_test_tracing();
-    let (_signers, mut test_ctx, _task_manager) = setup_flashblocks().await?;
+    let (_signers, mut nodes, _task_manager) = setup_flashblocks(3).await?;
+
+    let node = nodes
+        .first_mut()
+        .expect("At least one node should be present");
 
     for i in 0..=10 {
         let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
         let signed = TransactionTestContext::sign_tx(signer(0), raw_tx).await;
-        test_ctx.rpc.inject_tx(signed.encoded_2718().into()).await?;
+        node.rpc.inject_tx(signed.encoded_2718().into()).await?;
     }
 
     // Create a struct to hold received messages
@@ -144,32 +171,21 @@ async fn test_build_flashblocks() -> eyre::Result<()> {
     let ws_handle: JoinHandle<eyre::Result<()>> = tokio::spawn(async move {
         let (ws_stream, _) = connect_async(flashblocks_ws_url).await?;
         let (_, mut read) = ws_stream.split();
-
-        let mut total = 0;
         loop {
             tokio::select! {
               _ = cancellation_token_clone.cancelled() => {
                   break Ok(());
               }
               Some(Ok(Message::Text(text))) = read.next() => {
-                info!(target: "payload_builder", "Received message: {text}");
-
                 let payload = serde_json::from_str::<FlashblocksPayloadV1>(&text).expect("Failed to parse FlashblocksPayloadV1");
-
-                let transactions = payload.diff.transactions;
-                total += transactions.len();
-
-                info!(target: "payload_builder",  ?total, "Received payload with transactions: {transactions:?}");
-
-
-                messages_clone.lock().expect("Failed to lock messages").push(text);
+                messages_clone.lock().expect("Failed to lock messages").push(payload);
               }
             }
         }
     });
 
     // Initiate a payload building job
-    let block = test_ctx.advance_block().await?;
+    let block = node.advance_block().await?;
 
     assert_eq!(block.into_sealed_block().into_body().transactions.len(), 11);
 
