@@ -56,6 +56,7 @@ use tokio::{sync::broadcast, time::Instant};
 use tracing::{debug, error, span, warn};
 
 pub mod executor;
+pub mod job;
 pub mod payload_txns;
 
 /// Flashblocks Paylod builder
