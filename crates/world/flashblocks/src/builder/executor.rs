@@ -5,7 +5,6 @@ use alloy_eips::eip7685::Requests;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutor};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{Address, U256};
 use reth::core::primitives::Receipt;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
@@ -34,24 +33,10 @@ pub struct FlashblocksBlockExecutor<Evm, R>
 where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
 {
-    /// The total flashblocks that have been executed.
-    pub total_flashblocks: u64,
-    /// The index of the current flashblock in the transactions, and receipts.
-    pub current_flashblock_offset: u64,
     /// Aggregated receipts.
     pub receipts: Vec<R::Receipt>,
-    /// Latest flashblocks bundle state.
-    pub bundle_prestate: BundleState,
-    /// All executed transactions (unrecovered).
-    pub executed_transactions: Vec<R::Transaction>,
-    /// The recovered senders for the executed transactions.
-    pub executed_senders: Vec<Address>,
     /// All gas used so far
     pub cumulative_gas_used: u64,
-    /// Estimated DA size
-    pub cumulative_da_bytes_used: u64,
-    /// Tracks fees from executed mempool transactions
-    pub total_fees: U256,
     /// The inner block executor.
     /// This is used to execute the block and commit changes.
     inner: OpBlockExecutor<Evm, R, OpChainSpec>,
@@ -89,7 +74,7 @@ where
         mut self,
     ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
         let (
-            mut evm,
+            evm,
             BlockExecutionResult {
                 receipts,
                 requests: _,
@@ -99,8 +84,6 @@ where
 
         self.receipts.extend_from_slice(&receipts);
         self.cumulative_gas_used += gas_used;
-        self.bundle_prestate = evm.db_mut().take_bundle();
-        self.total_flashblocks += 1;
 
         Ok((
             evm,
@@ -178,14 +161,7 @@ where
         let inner = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
 
         Self {
-            total_flashblocks: 0,
-            executed_transactions: Vec::new(),
-            executed_senders: Vec::new(),
-            current_flashblock_offset: 0,
-            bundle_prestate: BundleState::default(),
             cumulative_gas_used: 0,
-            cumulative_da_bytes_used: 0,
-            total_fees: U256::ZERO,
             receipts: Vec::new(),
             inner,
         }
@@ -199,14 +175,15 @@ where
         self
     }
 
-    /// Extends the receipts and gas used to reflect the aggregated execution result
-    /// of prior flashblocks as a pre state to the current.
-    pub fn with_execution_result(
-        mut self,
-        execution_result: BlockExecutionResult<R::Receipt>,
-    ) -> Self {
-        self.receipts.extend(execution_result.receipts);
-        self.cumulative_gas_used += execution_result.gas_used;
+    /// Extends the receipts to reflect the aggregated execution result
+    pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
+        self.receipts.extend_from_slice(&receipts);
+        self
+    }
+
+    /// Extends the gas used to reflect the aggregated execution result
+    pub fn with_gas_used(mut self, gas_used: u64) -> Self {
+        self.cumulative_gas_used += gas_used;
         self
     }
 }
@@ -387,6 +364,7 @@ where
         Receipt = OpReceipt,
         SignedTx = OpTransactionSigned,
         Block = alloy_consensus::Block<OpTransactionSigned>,
+        BlockHeader = alloy_consensus::Header,
     >,
     E: Evm<
         DB = &'a mut State<DB>,

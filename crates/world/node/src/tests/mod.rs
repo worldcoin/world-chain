@@ -2,20 +2,19 @@
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_rpc_types::{TransactionRequest, Withdrawals};
+use alloy_rpc_types::TransactionRequest;
+use op_alloy_consensus::OpTxEnvelope;
 use reth::api::{NodeTypesWithDBAdapter, TreeConfig};
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_e2e_test_utils::{NodeHelperType, TmpDB};
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
-use revm_primitives::{Address, FixedBytes, B256, U256};
+use revm_primitives::{Address, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -106,7 +105,8 @@ impl WorldChainBuilderTestContext {
             })
             .await?;
 
-        let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
+        let test_ctx =
+            NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
 
         Ok(Self {
             signers: (0..5),
@@ -227,29 +227,6 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
-}
-
-/// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(
-    timestamp: u64,
-) -> OpPayloadBuilderAttributes<OpTransactionSigned> {
-    let attributes = EthPayloadBuilderAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Withdrawals::default(),
-        parent_beacon_block_root: Some(B256::ZERO),
-        id: PayloadId(FixedBytes::<8>::random()),
-        parent: FixedBytes::default(),
-    };
-
-    OpPayloadBuilderAttributes {
-        payload_attributes: attributes,
-        transactions: vec![],
-        gas_limit: None,
-        no_tx_pool: false,
-        eip_1559_params: None,
-    }
 }
 
 /// Builds an OP Mainnet chain spec with the given merkle root

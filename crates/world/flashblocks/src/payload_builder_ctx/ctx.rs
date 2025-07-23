@@ -16,7 +16,6 @@ use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
-use revm::database::BundleState;
 
 pub trait PayloadBuilderCtx: Send + Sync {
     type Evm: ConfigureEvm;
@@ -62,7 +61,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
         >,
-    ) -> Result<(ExecutionInfo, BundleState), PayloadBuilderError>
+    ) -> Result<ExecutionInfo, PayloadBuilderError>
     where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static;
@@ -73,7 +72,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         builder: &mut Builder,
         best_txs: Txs,
         gas_limit: u64,
-    ) -> Result<Option<BundleState>, PayloadBuilderError>
+    ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,

@@ -31,7 +31,6 @@ use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
-use revm::database::BundleState;
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::collections::HashSet;
@@ -208,22 +207,12 @@ where
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
         >,
-    ) -> Result<(ExecutionInfo, BundleState), PayloadBuilderError>
+    ) -> Result<ExecutionInfo, PayloadBuilderError>
     where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
     {
-        let info = self.inner.execute_sequencer_transactions(builder)?;
-
-        Ok((
-            info,
-            builder
-                .executor_mut()
-                .evm_mut()
-                .db_mut()
-                .bundle_state
-                .clone(),
-        ))
+        self.inner.execute_sequencer_transactions(builder)
     }
 
     /// Executes the given best transactions and updates the execution info.
@@ -235,7 +224,7 @@ where
         builder: &mut Builder,
         mut best_txs: Txs,
         mut gas_limit: u64,
-    ) -> Result<Option<BundleState>, PayloadBuilderError>
+    ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
@@ -374,14 +363,7 @@ where
             self.pool.remove_transactions(invalid_txs);
         }
 
-        Ok(Some(
-            builder
-                .executor_mut()
-                .evm_mut()
-                .db_mut()
-                .bundle_state
-                .clone(),
-        ))
+        Ok(Some(()))
     }
 }
 

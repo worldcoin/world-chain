@@ -17,19 +17,18 @@ use reth::{
     chainspec::EthChainSpec,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, State},
 };
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_primitives::{NodePrimitives, Recovered};
-use rollup_boost::FlashblocksP2PMsg;
-use rollup_boost::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
-};
-
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
     ConfigureEvm,
+};
+use reth_primitives::{NodePrimitives, Recovered};
+use rollup_boost::FlashblocksP2PMsg;
+use rollup_boost::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
 
 use reth_optimism_chainspec::OpChainSpec;
@@ -44,9 +43,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_provider::{
-    BlockExecutionResult, ChainSpecProvider, ExecutionOutcome, StateProvider, StateProviderFactory,
-};
+use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProvider, StateProviderFactory};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::inspector::NoOpInspector;
@@ -88,9 +85,6 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub builder_sk: SigningKey,
 }
 
-// TODO: This manual impl is required because we can't require PayloadBuilderCtx
-//       to be Clone, because OpPayloadBuilderCtx is not Clone.
-//       The workaround is to put ctx in `Arc` and not have to depend on it being Clone
 impl<Pool, Client, CtxBuilder, Txs> Clone
     for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
@@ -315,20 +309,21 @@ where
 
         // 2. Create the block builder
         let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder()
+        let mut state = State::builder()
             .with_database(state)
             .with_bundle_update()
             .build();
 
-        let mut builder = self.block_builder(&mut db, vec![], None, ctx)?;
+        let mut builder = self.block_builder(&mut state, vec![], vec![], None, ctx)?;
 
         // 3. Execute Deposit transactions
-        let (mut info, mut bundle_state) = ctx
+        let mut info = ctx
             .execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?;
 
         // 4. Build the block
         let mut build_outcome = builder.finish(&state_provider)?;
+
         let flashblock_payload = flashblock_payload_from_outcome(
             &build_outcome,
             ctx,
@@ -363,20 +358,18 @@ where
 
         // Tracks all executed transactions across all flashblocks.
         let mut executed_txns = vec![];
+        let mut executed_receipts = build_outcome
+            .execution_result
+            .receipts
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
 
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
 
-        // 5. Repeat executing transactions from the pool every `flashblock_interval` milliseconds
-        let bundle = loop {
-            // Init database with pre state bundle from the previous block
-            let state = StateProviderDatabase::new(&state_provider);
-            let mut db = State::builder()
-                .with_database(state)
-                .with_bundle_update()
-                .with_bundle_prestate(bundle_state)
-                .build();
-
+        // 5. Repeat executing transactions from the pool every `flashblock_interval` milliseconds\
+        loop {
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
 
             let span = span!(
@@ -403,26 +396,27 @@ where
                         .collect::<Vec<_>>();
 
                     let mut builder = self.block_builder(
-                        &mut db,
+                        &mut state,
                         transactions,
-                        Some(build_outcome.execution_result.clone()),
+                        std::mem::take(&mut executed_receipts),
+                        Some(build_outcome.execution_result.gas_used),
                         ctx,
                     )?;
 
                     let inner_gas_limit = gas_limit.saturating_sub(build_outcome.block.gas_used());
                     if inner_gas_limit == 0 {
                         debug!(target: "payload_builder",  "no gas left for flashblock - stopping");
-                        break db.take_bundle();
+                        break;
                     };
 
-                    let Some(new_bundle_state) = ctx.execute_best_transactions(
+                    let Some(()) = ctx.execute_best_transactions(
                         &mut info,
                         &mut builder,
                         best_txns.guard(),
                         inner_gas_limit,
                     )?
                     else {
-                        break db.take_bundle();
+                        break;
                     };
 
                     build_outcome = builder.finish(&state_provider)?;
@@ -443,20 +437,20 @@ where
 
                     executed_txns.extend_from_slice(&prev.collect::<Vec<_>>());
                     executed_txns.extend_from_slice(&observed.collect::<Vec<_>>());
+                    executed_receipts.extend_from_slice(&build_outcome.execution_result.receipts);
 
                     transactions_offset += build_outcome.block.body().transactions_iter().count();
-                    bundle_state = new_bundle_state;
                 }
 
                 // tx was dropped, resolve the most recent payload
                 None => {
                     debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
-                    break db.take_bundle();
+                    break;
                 }
             }
 
             flashblock_idx += 1;
-        };
+        }
 
         let BlockBuilderOutcome {
             execution_result,
@@ -468,7 +462,7 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            bundle,
+            state.take_bundle(),
             vec![execution_result.receipts],
             block.number(),
             Vec::new(),
@@ -507,7 +501,8 @@ where
         &self,
         db: &'a mut State<DB>,
         transactions: Vec<Recovered<N::SignedTx>>,
-        execution_result: Option<BlockExecutionResult<OpReceipt>>,
+        receipts: Vec<N::Receipt>,
+        cumulative_gas_used: Option<u64>,
         ctx: &'a Ctx,
     ) -> Result<
         FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
@@ -518,6 +513,7 @@ where
         N: NodePrimitives<
             Block = alloy_consensus::Block<OpTransactionSigned>,
             BlockHeader = alloy_consensus::Header,
+            Receipt = OpReceipt,
         >,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
@@ -563,10 +559,11 @@ where
             ctx.spec().clone(),
             OpRethReceiptBuilder::default(),
             execution_ctx.clone(),
-        );
+        )
+        .with_receipts(receipts);
 
-        if let Some(execution_result) = execution_result {
-            executor = executor.with_execution_result(execution_result)
+        if let Some(cumulative_gas_used) = cumulative_gas_used {
+            executor = executor.with_gas_used(cumulative_gas_used)
         }
 
         Ok(FlashblocksBlockBuilder::new(
@@ -623,7 +620,7 @@ where
                         tokio::select! {
                             _ = flashblock_interval.tick() => {
                                 let elapsed = instant.elapsed();
-                                warn!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
+                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
                                 // queue the next flashblock job, but there's no benefit in cancelling the current job
                                 // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
                                 // because the next job will also exceed `flashblock_interval`.

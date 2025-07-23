@@ -17,6 +17,7 @@ use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::utils::optimism_payload_attributes;
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use revm_primitives::Address;
 use rollup_boost::ed25519_dalek::SigningKey;
@@ -279,8 +280,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     // Assert the blocks match
     assert_eq!(
-        payload.into_sealed_block().header().state_root, // Our state roots mismatch FML
-        block.header().state_root,
+        payload.into_sealed_block().header().state_root(),
+        block.header().state_root(),
         "World Chain Node should have built the same block as the Flashblocks Node"
     );
 
