@@ -358,12 +358,7 @@ where
 
         // Tracks all executed transactions across all flashblocks.
         let mut executed_txns = vec![];
-        let mut executed_receipts = build_outcome
-            .execution_result
-            .receipts
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut executed_receipts = build_outcome.execution_result.receipts.to_vec();
 
         // spawn a task to schedule when the next flashblock job should be started/cancelled
         self.spawn_flashblock_job_manager(tx);
@@ -556,9 +551,9 @@ where
 
         let mut executor = FlashblocksBlockExecutor::new(
             evm,
+            execution_ctx.clone(),
             ctx.spec().clone(),
             OpRethReceiptBuilder::default(),
-            execution_ctx.clone(),
         )
         .with_receipts(receipts);
 
