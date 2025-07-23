@@ -1,6 +1,6 @@
 use flashblocks::builder::job::FlashblockJobGenerator;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},

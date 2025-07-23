@@ -3,7 +3,7 @@ use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
-use reth::builder::components::{BasicPayloadServiceBuilder, ComponentsBuilder};
+use reth::builder::components::ComponentsBuilder;
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_optimism_chainspec::OpChainSpec;

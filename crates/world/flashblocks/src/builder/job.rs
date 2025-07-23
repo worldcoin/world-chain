@@ -1,17 +1,10 @@
-use op_alloy_consensus::OpTxEnvelope;
 use reth::{payload::PayloadJobGenerator, tasks::TaskSpawner};
 use reth_basic_payload_builder::{
     BasicPayloadJob, BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, HeaderForPayload,
     PayloadBuilder,
 };
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{txpool::OpPooledTx, OpBuiltPayload};
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use reth_transaction_pool::TransactionPool;
-use rollup_boost::FlashblocksP2PMsg;
-use tokio::sync::broadcast;
 
-use crate::{builder::FlashblocksPayloadBuilder, context::PayloadBuilderCtxBuilder};
+use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 
 /// A type that initiates payload building jobs on the [`FlashblocksPayloadBuilder`].
 pub struct FlashblockJobGenerator<Client, Tasks, Builder> {
