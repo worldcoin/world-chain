@@ -1,0 +1,159 @@
+use alloy_eips::eip4895::Withdrawals;
+use alloy_primitives::U256;
+use reth::builder::PayloadBuilderError;
+use reth::payload::PayloadId;
+use reth::revm::State;
+use reth_chainspec::EthereumHardforks;
+use reth_evm::block::BlockExecutor;
+use reth_evm::op_revm::OpSpecId;
+use reth_evm::{execute::BlockBuilder, ConfigureEvm};
+use reth_evm::{Evm, EvmEnv};
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_node::txpool::OpPooledTx;
+use reth_optimism_payload_builder::builder::ExecutionInfo;
+use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
+use reth_payload_util::PayloadTransactions;
+use reth_primitives::{SealedHeader, TxTy};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
+use revm::context::BlockEnv;
+
+mod builder;
+
+pub use builder::PayloadBuilderCtxBuilder;
+
+/// Context trait for building payloads with flashblock support.
+///
+/// This trait abstracts execution into a context that you have control over.
+/// e.g. custom ordering, or execution policies may be implemented while retaining
+/// the core flashblocks functionality in the [`FlashblocksPayloadBuilder`].
+///
+/// # Type Parameters
+///
+/// * `Evm` - EVM configuration implementing [`ConfigureEvm`]
+/// * `ChainSpec` - Chain specification supporting Optimism hardforks
+/// * `Transaction` - Pool transaction type with Optimism support
+pub trait PayloadBuilderCtx: Send + Sync {
+    /// EVM configuration type that handles EVM setup and execution.
+    type Evm: ConfigureEvm;
+
+    /// Chain specification type that supports Optimism hardforks.
+    type ChainSpec: OpHardforks;
+
+    /// The Pooled transaction type for this node.
+    type Transaction: PoolTransaction<Consensus = TxTy<<Self::Evm as ConfigureEvm>::Primitives>>
+        + OpPooledTx;
+
+    /// Provides access to the EVM configuration used throughout payload building.
+    ///
+    /// This configuration determines how transactions are executed, what opcodes
+    /// are available, and which hardfork rules apply during block construction.
+    fn evm_config(&self) -> &Self::Evm;
+
+    /// Constructs the execution environment that will be used for all transaction processing.
+    ///
+    /// Sets up block-level context (timestamp, difficulty, gas limit) and applies
+    /// Optimism-specific configuration like fee parameters and L1 data availability costs.
+    fn evm_env(&self) -> EvmEnv<OpSpecId>;
+
+    /// Exposes the chain specification to determine active hardforks and network rules.
+    ///
+    /// Used to validate transactions against current network rules and enable/disable
+    /// features based on block height or timestamp.
+    fn spec(&self) -> &Self::ChainSpec;
+
+    /// Provides the parent block header that this payload builds upon.
+    ///
+    /// The new block inherits context from this parent, including state root,
+    /// block number (parent + 1), and chain continuity validation.
+    fn parent(&self) -> &SealedHeader;
+
+    /// Exposes the consensus layer's instructions for building this specific payload.
+    ///
+    /// Contains the target timestamp, fee recipient, gas limit, and other parameters
+    /// that the consensus client has determined for this block slot.
+    fn attributes(
+        &self,
+    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>>;
+
+    /// Calculates transaction selection criteria based on current network conditions.
+    ///
+    /// Determines the minimum gas price, priority fee requirements, and other filters
+    /// that transactions must meet to be considered for inclusion in this block.
+    fn best_transaction_attributes(&self, block_env: &BlockEnv) -> BestTransactionsAttributes;
+
+    /// Returns the unique identifier that tracks this specific payload building job.
+    ///
+    /// Used for logging, metrics, and coordinating between different components
+    /// that may be working on the same payload concurrently.
+    fn payload_id(&self) -> PayloadId;
+
+    /// Evaluates whether a newly built payload should replace the current best candidate.
+    ///
+    /// Typically compares total fee revenue, but may include other factors like
+    /// transaction count, MEV opportunities, or builder preferences.
+    fn is_better_payload(&self, total_fees: U256) -> bool;
+
+    /// Creates a block builder that will execute transactions and maintain block state.
+    ///
+    /// The builder handles transaction execution, state updates, receipt generation,
+    /// and maintains all the data structures needed to finalize the block.
+    fn block_builder<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+    ) -> Result<
+        impl BlockBuilder<
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
+        PayloadBuilderError,
+    >
+    where
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static;
+
+    /// Processes mandatory system transactions that must be included before user transactions.
+    ///
+    /// For Optimism, this typically includes L1 deposit transactions that represent
+    /// funds being bridged from L1 to L2. These transactions cannot fail and must
+    /// be processed in the exact order specified by the L1 chain.
+    fn execute_sequencer_transactions<'a, DB>(
+        &self,
+        builder: &mut impl BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+    ) -> Result<ExecutionInfo, PayloadBuilderError>
+    where
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static;
+
+    /// Processes user transactions from the mempool until `gas_limit` is reached.
+    ///
+    /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
+    fn execute_best_transactions<'a, Txs, DB, Builder>(
+        &self,
+        info: &mut ExecutionInfo,
+        builder: &mut Builder,
+        best_txs: Txs,
+        gas_limit: u64,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+        Txs: PayloadTransactions<Transaction = Self::Transaction>;
+
+    /// Determines if validator withdrawals should be processed in this block.
+    ///
+    /// Checks if the Shanghai hardfork is active at the current timestamp, and
+    /// if so, returns the withdrawals specified by the consensus layer. These
+    /// represent validator stake withdrawals that must be processed automatically.
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.spec()
+            .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
+            .then(|| &self.attributes().payload_attributes.withdrawals)
+    }
+}

@@ -4,7 +4,7 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::payload_builder_ctx::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+use flashblocks::context::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
@@ -44,13 +44,7 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtx<Client, Pool>
-where
-    Client: StateProviderFactory
-        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-        + ChainSpecProvider<ChainSpec: OpHardforks>
-        + Clone,
-{
+pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider, Pool> {
     pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
