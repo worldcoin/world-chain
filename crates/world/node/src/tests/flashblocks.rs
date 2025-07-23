@@ -65,8 +65,8 @@ pub async fn setup_flashblocks(
         .with_payload_builder(PayloadBuilderArgs {
             deadline: Duration::from_millis(4000),
             max_payload_tasks: 1,
-            gas_limit: Some(35_000_000),
-            interval: Duration::from_millis(2000),
+            gas_limit: Some(25_000_000),
+            interval: Duration::from_millis(1000),
             ..Default::default()
         })
         .with_unused_ports();
@@ -86,7 +86,7 @@ pub async fn setup_flashblocks(
         let _enter = span.enter();
 
         let flashblocks_args = FlashblocksArgs {
-            flashblock_block_time: 2000,
+            flashblock_block_time: 1000,
             flashblock_interval: 200,
             flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             flashblock_port: 9002 + idx as u16,
@@ -283,6 +283,67 @@ async fn test_flashblocks() -> eyre::Result<()> {
         block.header(),
         "World Chain Node should have built the same block as the Flashblocks Node"
     );
+
+    ws_handle.abort();
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_flashblocks_gas_limit_exceeded() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Fill up the entire gas limit with transactions in the first flashblock.
+    // This should cancel all subsequent flashblocks when the gas limit has been consumed.
+    let (_signers, mut nodes, _task_manager) = setup_flashblocks(3).await?;
+
+    // Create a struct to hold received messages
+    let received_messages = Arc::new(Mutex::new(Vec::new()));
+    let messages_clone = received_messages.clone();
+    let cancellation_token = CancellationToken::new();
+    let flashblocks_ws_url = format!("ws://127.0.0.1:{}", 9002);
+
+    // Spawn WebSocket listener task
+    let cancellation_token_clone = cancellation_token.clone();
+    let ws_handle: JoinHandle<eyre::Result<()>> = tokio::spawn(async move {
+        let (ws_stream, _) = connect_async(flashblocks_ws_url).await?;
+        let (_, mut read) = ws_stream.split();
+        loop {
+            tokio::select! {
+              _ = cancellation_token_clone.cancelled() => {
+                  break Ok(());
+              }
+                Some(Ok(Message::Text(text))) = read.next() => {
+                    let payload = serde_json::from_str::<FlashblocksPayloadV1>(&text).expect("Failed to parse FlashblocksPayloadV1");
+
+                    messages_clone.lock().expect("Failed to lock messages").push(payload);
+                }
+            }
+        }
+    });
+
+    let node: &mut WorldChainNode<WorldChainFlashblocksNode> = nodes
+        .first_mut()
+        .expect("At least one node should be present");
+
+    for i in 0..10 {
+        for j in 0..200 {
+            let raw_tx = tx(BASE_CHAIN_ID, None, j, Address::random(), 21_000);
+            let signed = TransactionTestContext::sign_tx(signer(i), raw_tx).await;
+            node.rpc.inject_tx(signed.encoded_2718().into()).await?;
+        }
+    }
+
+    // Let everything settle
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    // trigger payload building draining the pool
+    let payload = node.advance_block().await?;
+
+    let block = payload.into_sealed_block();
+    dbg!(block.body().transactions.len());
+    dbg!(block.header().gas_used);
+    dbg!(received_messages.lock().expect("failed to lock").len());
 
     ws_handle.abort();
 
