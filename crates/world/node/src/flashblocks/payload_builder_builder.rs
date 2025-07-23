@@ -18,7 +18,7 @@ use reth_transaction_pool::BlobStore;
 use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
 use rollup_boost::FlashblocksP2PMsg;
 use tokio::sync::broadcast;
-use world_chain_builder_payload::ctx::WorldChainPayloadBuilderCtxBuilder;
+use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
