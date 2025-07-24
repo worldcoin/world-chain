@@ -56,6 +56,7 @@ use tokio::{sync::broadcast, time::Instant};
 use tracing::{debug, error, span, warn};
 
 pub mod executor;
+pub mod job;
 pub mod payload_txns;
 
 /// Flashblocks Paylod builder
@@ -378,6 +379,8 @@ where
                 Some(()) => {
                     let _enter = span.enter();
 
+                    debug!(target: "payload_builder", "building flashblock");
+
                     // fetch the best transactions from the tx pool discarding previously executed transactions
                     let best_txns =
                         (*self.best)(ctx.best_transaction_attributes(ctx.evm_env().block_env()));
@@ -488,7 +491,9 @@ where
             // freeze it once we've successfully built it.
             Ok(BuildOutcomeKind::Freeze(payload))
         } else {
-            Ok(BuildOutcomeKind::Better { payload })
+            // Always freeze the payload with flashblocks, as we have recomitted to the tx-pool 4 times over a 1 second timeframe.
+            // There is not enough time left to build a new payload.
+            Ok(BuildOutcomeKind::Freeze(payload))
         }
     }
 

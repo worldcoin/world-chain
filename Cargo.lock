@@ -14421,6 +14421,7 @@ dependencies = [
  "futures",
  "op-alloy-consensus",
  "reth",
+ "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-db",
  "reth-e2e-test-utils",
