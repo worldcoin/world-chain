@@ -1,8 +1,9 @@
 use crate::args::WorldChainArgs;
+use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
-use reth::builder::components::{BasicPayloadServiceBuilder, ComponentsBuilder};
+use reth::builder::components::ComponentsBuilder;
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
 use reth_node_builder::components::PayloadServiceBuilder;
 use reth_optimism_chainspec::OpChainSpec;
@@ -21,7 +22,9 @@ use reth_trie_db::MerklePatriciaTrie;
 use tokio::sync::broadcast;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
+
 mod payload_builder_builder;
+pub mod service_builder;
 
 /// Type configuration for a regular World Chain node.
 #[derive(Debug, Default, Clone)]
@@ -45,7 +48,7 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
 > = ComponentsBuilder<
     Node,
     WorldChainPoolBuilder,
-    BasicPayloadServiceBuilder<Payload>,
+    FlashblocksPayloadServiceBuilder<Payload>,
     FlashblocksNetworkBuilder<OpNetworkBuilder>,
     OpExecutorBuilder,
     OpConsensusBuilder,
@@ -70,7 +73,7 @@ impl WorldChainFlashblocksNode {
     pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
-        BasicPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
+        FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
             Node,
             WorldChainTransactionPool<
                 <Node as FullNodeTypes>::Provider,
@@ -125,7 +128,7 @@ impl WorldChainFlashblocksNode {
                 world_id,
             ))
             .executor(OpExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::new(
+            .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     compute_pending_block,
                     verified_blockspace_capacity,
