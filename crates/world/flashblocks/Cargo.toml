@@ -34,6 +34,7 @@ op-alloy-consensus.workspace = true
 alloy-op-evm.workspace = true
 
 rollup-boost.workspace = true
+flashblocks-p2p.workspace = true
 
 # tokio
 tokio.workspace = true

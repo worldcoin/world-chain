@@ -3800,6 +3800,7 @@ dependencies = [
  "alloy-op-evm",
  "alloy-primitives 1.2.1",
  "clap",
+ "flashblocks-p2p",
  "futures-util",
  "op-alloy-consensus",
  "reth",

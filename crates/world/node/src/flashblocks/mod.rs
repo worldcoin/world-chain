@@ -48,7 +48,7 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
 > = ComponentsBuilder<
     Node,
     WorldChainPoolBuilder,
-    FlashblocksPayloadServiceBuilder<Payload>,
+    FlashblocksPayloadServiceBuilder<Node, Payload>,
     FlashblocksNetworkBuilder<OpNetworkBuilder>,
     OpExecutorBuilder,
     OpConsensusBuilder,
@@ -73,7 +73,7 @@ impl WorldChainFlashblocksNode {
     pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
-        FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
+        FlashblocksPayloadServiceBuilder<Node, FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
             Node,
             WorldChainTransactionPool<
                 <Node as FullNodeTypes>::Provider,
@@ -146,6 +146,8 @@ impl WorldChainFlashblocksNode {
                     flashblocks_args.flashblocks_builder_sk.clone(),
                 )
                 .with_da_config(self.da_config.clone()),
+                authorizer_vk.clone(),
+                flashblocks_args.flashblocks_builder_sk.clone(),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())

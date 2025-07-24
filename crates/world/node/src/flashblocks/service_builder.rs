@@ -1,28 +1,46 @@
 use flashblocks::builder::job::FlashblockJobGenerator;
+use flashblocks_p2p::protocol::handler::FlashblocksHandler;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_node_api::{FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
     BuilderContext,
 };
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
+use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
-#[derive(Debug, Default, Clone)]
-pub struct FlashblocksPayloadServiceBuilder<PB>(PB);
+#[derive(Debug, Clone)]
+pub struct FlashblocksPayloadServiceBuilder<N, PB> {
+    pb: PB,
+    builder_vk: VerifyingKey,
+    authorizer_sk: SigningKey,
+    p2p_handler: FlashblocksHandler<N>,
+}
 
-impl<PB> FlashblocksPayloadServiceBuilder<PB> {
+impl<N, PB> FlashblocksPayloadServiceBuilder<N, PB> {
     /// Create a new [`FlashblocksPayloadServiceBuilder`].
-    pub const fn new(payload_builder_builder: PB) -> Self {
-        Self(payload_builder_builder)
+    pub const fn new(
+        pb: PB,
+        builder_vk: VerifyingKey,
+        authorizer_sk: SigningKey,
+        p2p_handler: FlashblocksHandler<N>,
+    ) -> Self {
+        Self {
+            pb,
+            builder_vk,
+            authorizer_sk,
+            p2p_handler,
+        }
     }
 }
 
-impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
-    for FlashblocksPayloadServiceBuilder<PB>
+impl<N, Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
+    for FlashblocksPayloadServiceBuilder<N, PB>
 where
+    N: NodePrimitives,
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EvmConfig: Send,
@@ -34,7 +52,7 @@ where
         pool: Pool,
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool, evm_config).await?;
+        let payload_builder = self.pb.build_payload_builder(ctx, pool, evm_config).await?;
 
         let conf = ctx.config().builder.clone();
 
@@ -48,6 +66,9 @@ where
             ctx.task_executor().clone(),
             payload_job_config,
             payload_builder,
+            self.p2p_handler,
+            self.authorizer_sk.clone(),
+            self.builder_vk.clone(),
         );
 
         let (payload_service, payload_service_handle) =
