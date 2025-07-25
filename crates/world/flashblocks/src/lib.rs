@@ -4,4 +4,3 @@ pub mod args;
 pub mod builder;
 pub mod context;
 pub mod ws;
-pub mod service;

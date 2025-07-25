@@ -2,11 +2,11 @@ use crate::args::WorldChainArgs;
 use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
-use flashblocks_p2p::protocol::handler::FlashblocksHandler;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::ComponentsBuilder;
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
-use reth_node_builder::components::{NetworkBuilder, PayloadServiceBuilder};
+use reth_node_builder::components::PayloadServiceBuilder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
@@ -49,7 +49,7 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
 > = ComponentsBuilder<
     Node,
     WorldChainPoolBuilder,
-    FlashblocksPayloadServiceBuilder<Node, Payload>,
+    FlashblocksPayloadServiceBuilder<Payload>,
     FlashblocksNetworkBuilder<OpNetworkBuilder>,
     OpExecutorBuilder,
     OpConsensusBuilder,
@@ -74,18 +74,16 @@ impl WorldChainFlashblocksNode {
     pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
-        FlashblocksPayloadServiceBuilder<Node, FlashblocksPayloadBuilderBuilder>:
-            PayloadServiceBuilder<
-                Node,
-                WorldChainTransactionPool<
-                    <Node as FullNodeTypes>::Provider,
-                    DiskFileBlobStore,
-                    WorldChainPooledTransaction,
-                >,
-                OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
+            Node,
+            WorldChainTransactionPool<
+                <Node as FullNodeTypes>::Provider,
+                DiskFileBlobStore,
+                WorldChainPooledTransaction,
             >,
+            OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
     {
-        let (flashblocks_publish_tx, flashblocks_publish_rx) = broadcast::channel(100);
         // inbound flashblocks, for use with the node overlay
         let (flashblocks_tx, _flashblocks_rx) = broadcast::channel(100);
 
@@ -115,10 +113,14 @@ impl WorldChainFlashblocksNode {
             .flashblocks_authorizor_vk
             .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
 
-        let flashblocks_handle = FlashblocksHandle::new(todo!());
+        let flashblocks_handle = FlashblocksHandle::new(
+            authorizer_vk,
+            flashblocks_args.flashblocks_builder_sk.clone(),
+            flashblocks_tx.clone(),
+        );
 
         let fb_network_builder =
-            FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle);
+            FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle.clone());
 
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -141,13 +143,14 @@ impl WorldChainFlashblocksNode {
                         flashblocks_args.flashblock_host,
                         flashblocks_args.flashblock_port,
                     ),
-                    flashblocks_publish_tx,
+                    flashblocks_tx,
                     flashblocks_args.flashblocks_authorizor_vk,
                     flashblocks_args.flashblocks_builder_sk.clone(),
                 )
                 .with_da_config(self.da_config.clone()),
                 authorizer_vk.clone(),
                 flashblocks_args.flashblocks_builder_sk.clone(),
+                flashblocks_handle,
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())

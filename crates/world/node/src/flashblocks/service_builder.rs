@@ -1,8 +1,8 @@
 use flashblocks::builder::job::FlashblockJobGenerator;
-use flashblocks_p2p::protocol::handler::FlashblocksHandler;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
     BuilderContext,
@@ -13,20 +13,20 @@ use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
 #[derive(Debug, Clone)]
-pub struct FlashblocksPayloadServiceBuilder<N, PB> {
+pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     builder_vk: VerifyingKey,
     authorizer_sk: SigningKey,
-    p2p_handler: FlashblocksHandler<N>,
+    p2p_handler: FlashblocksHandle,
 }
 
-impl<N, PB> FlashblocksPayloadServiceBuilder<N, PB> {
+impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     /// Create a new [`FlashblocksPayloadServiceBuilder`].
     pub const fn new(
         pb: PB,
         builder_vk: VerifyingKey,
         authorizer_sk: SigningKey,
-        p2p_handler: FlashblocksHandler<N>,
+        p2p_handler: FlashblocksHandle,
     ) -> Self {
         Self {
             pb,
@@ -37,10 +37,9 @@ impl<N, PB> FlashblocksPayloadServiceBuilder<N, PB> {
     }
 }
 
-impl<N, Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
-    for FlashblocksPayloadServiceBuilder<N, PB>
+impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
+    for FlashblocksPayloadServiceBuilder<PB>
 where
-    N: NodePrimitives,
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EvmConfig: Send,
