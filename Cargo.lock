@@ -3801,7 +3801,6 @@ dependencies = [
  "alloy-primitives 1.2.1",
  "clap",
  "flashblocks-p2p",
- "futures-util",
  "op-alloy-consensus",
  "reth",
  "reth-basic-payload-builder",
@@ -3819,9 +3818,7 @@ dependencies = [
  "reth-transaction-pool",
  "revm",
  "rollup-boost",
- "serde_json",
  "tokio",
- "tokio-tungstenite",
  "tracing",
 ]
 

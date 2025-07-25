@@ -143,6 +143,7 @@ jsonrpsee-types = "0.25.1"
 # 3rd party
 rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "5173953" }
 flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "5173953" }
+
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-tungstenite = "0.26.2"

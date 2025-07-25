@@ -17,10 +17,6 @@ use reth_primitives::{SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::BlockEnv;
 
-mod builder;
-
-pub use builder::PayloadBuilderCtxBuilder;
-
 /// Context trait for building payloads with flashblock support.
 ///
 /// This trait abstracts execution into a context that you have control over.

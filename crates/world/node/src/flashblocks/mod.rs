@@ -144,8 +144,9 @@ impl WorldChainFlashblocksNode {
                         flashblocks_args.flashblock_port,
                     ),
                     flashblocks_tx,
-                    flashblocks_args.flashblocks_authorizor_vk,
+                    authorizer_vk,
                     flashblocks_args.flashblocks_builder_sk.clone(),
+                    flashblocks_handle.clone(),
                 )
                 .with_da_config(self.da_config.clone()),
                 authorizer_vk,

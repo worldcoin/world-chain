@@ -1,7 +1,7 @@
 use crate::context::WorldChainPayloadBuilderCtx;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
-use flashblocks::context::PayloadBuilderCtx;
+use flashblocks::PayloadBuilderCtx;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;

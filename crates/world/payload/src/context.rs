@@ -4,7 +4,7 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::context::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
+use flashblocks::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};

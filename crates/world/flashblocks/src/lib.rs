@@ -2,6 +2,9 @@
 #![allow(clippy::type_complexity)]
 pub mod args;
 pub mod builder;
-pub mod context;
-pub mod ws;
-pub mod service;
+pub mod rpc;
+
+pub use builder::{
+    traits::context::PayloadBuilderCtx, traits::context_builder::PayloadBuilderCtxBuilder,
+    FlashblockBuilder, FlashblocksPayloadBuilder,
+};

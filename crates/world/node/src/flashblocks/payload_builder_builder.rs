@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
-use flashblocks::ws::{new_subscribers, publish_task, ws_server};
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
@@ -50,8 +50,9 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub flashblock_server_addr: (IpAddr, u16),
+    pub p2p_handler: FlashblocksHandle,
     pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
-    pub authorizer_vk: Option<VerifyingKey>,
+    pub authorizer_vk: VerifyingKey,
     pub builder_sk: SigningKey,
 }
 
@@ -69,8 +70,9 @@ impl FlashblocksPayloadBuilderBuilder {
         flashblock_interval: u64,
         flashblock_server_addr: (IpAddr, u16),
         publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
-        authorizer_vk: Option<VerifyingKey>,
+        authorizer_vk: VerifyingKey,
         builder_sk: SigningKey,
+        p2p_handler: FlashblocksHandle,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -86,6 +88,7 @@ impl FlashblocksPayloadBuilderBuilder {
             publish_tx,
             authorizer_vk,
             builder_sk,
+            p2p_handler,
         }
     }
 
@@ -116,6 +119,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             publish_tx,
             authorizer_vk,
             builder_sk,
+            p2p_handler,
         } = self;
 
         FlashblocksPayloadBuilderBuilder {
@@ -132,6 +136,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             publish_tx,
             authorizer_vk,
             builder_sk,
+            p2p_handler,
         }
     }
 
@@ -181,22 +186,10 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
                     .parse()
                     .context("Failed to parse builder private key")?,
             },
-            publish_tx: self.publish_tx.clone(),
             authorizer_vk: self.authorizer_vk,
             builder_sk: self.builder_sk,
+            p2p_handler: self.p2p_handler.clone(),
         };
-
-        let subscribers = new_subscribers();
-
-        ctx.task_executor().spawn_critical(
-            "flashblocks ws server",
-            ws_server(subscribers.clone(), self.flashblock_server_addr),
-        );
-
-        ctx.task_executor().spawn_critical(
-            "flashblocks payload builder",
-            publish_task(self.publish_tx.subscribe(), subscribers.clone()),
-        );
 
         Ok(payload_builder)
     }

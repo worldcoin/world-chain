@@ -3,13 +3,14 @@ use crate::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
-    context::{PayloadBuilderCtx, PayloadBuilderCtxBuilder},
+    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::BlockBody;
 use reth::{
@@ -27,7 +28,8 @@ use reth_evm::{
 };
 use reth_primitives::{NodePrimitives, Recovered};
 use rollup_boost::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+    AuthorizedPayload, ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
+    FlashblocksPayloadV1,
 };
 
 use reth_optimism_chainspec::OpChainSpec;
@@ -51,12 +53,13 @@ use rollup_boost::{
     Authorization,
 };
 use std::{fmt::Debug, sync::Arc};
-use tokio::{sync::broadcast, time::Instant};
-use tracing::{debug, error, span, warn};
+use tokio::time::Instant;
+use tracing::{debug, span, warn};
 
 pub mod executor;
 pub mod job;
 pub mod payload_txns;
+pub mod traits;
 
 /// Flashblocks Paylod builder
 ///
@@ -78,10 +81,10 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub block_time: u64,
     /// Flashblock interval in milliseconds
     pub flashblock_interval: u64,
+    /// The p2p flashblocks handler.
+    pub p2p_handler: FlashblocksHandle,
     pub ctx_builder: CtxBuilder,
-    /// Channel for publishing messages
-    pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
-    pub authorizer_vk: Option<VerifyingKey>,
+    pub authorizer_vk: VerifyingKey,
     pub builder_sk: SigningKey,
 }
 
@@ -102,8 +105,8 @@ where
             best_transactions: self.best_transactions.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
+            p2p_handler: self.p2p_handler.clone(),
             ctx_builder: self.ctx_builder.clone(),
-            publish_tx: self.publish_tx.clone(),
             authorizer_vk: self.authorizer_vk,
             builder_sk: self.builder_sk.clone(),
         }
@@ -151,10 +154,11 @@ where
 
         let builder = FlashblockBuilder::new(
             best,
-            self.publish_tx.clone(),
             // TODO: figure out how to get the authorization from the FCU
             None,
+            self.p2p_handler.clone(),
             self.builder_sk.clone(),
+            self.authorizer_vk,
             self.block_time,
             self.flashblock_interval,
             cancel.clone(),
@@ -243,9 +247,10 @@ where
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
     /// Channel sender for publishing messages
-    pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
     pub authorization: Option<Authorization>,
+    pub p2p_handler: FlashblocksHandle,
     pub builder_sk: SigningKey,
+    pub authorizer_vk: VerifyingKey,
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub cancel: CancelOnDrop,
@@ -255,12 +260,14 @@ impl<'a, Txs> FlashblockBuilder<'a, Txs>
 where
     Txs: PayloadTransactions,
 {
-    /// Creates a new [`OpBuilder`].
+    #[allow(clippy::too_many_arguments)]
+    /// Creates a new [`FlashblockBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-        publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
         authorization: Option<Authorization>,
+        p2p_handler: FlashblocksHandle,
         builder_sk: SigningKey,
+        authorizer_vk: VerifyingKey,
         block_time: u64,
         flashblock_interval: u64,
         cancel: CancelOnDrop,
@@ -269,10 +276,11 @@ where
             best: Box::new(best),
             authorization,
             builder_sk,
-            publish_tx,
+            authorizer_vk,
             block_time,
             flashblock_interval,
             cancel,
+            p2p_handler,
         }
     }
 }
@@ -331,12 +339,25 @@ where
             transactions_offset,
         );
 
+        // Constructs an authorized flashblock payload to be broadcasted to the network.
+        let authorized = |payload: FlashblocksPayloadV1| {
+            let authorization = Authorization::new(
+                payload.payload_id,
+                ctx.attributes().timestamp(),
+                &self.builder_sk,
+                self.authorizer_vk,
+            );
+
+            AuthorizedPayload::new(&self.builder_sk, authorization, payload)
+        };
+
         // Adjust transaction offset to account for deposit transactions
         transactions_offset += build_outcome.block.body().transactions_iter().count();
 
-        if let Err(err) = self.publish_tx.send(flashblock_payload) {
-            error!(target: "payload_builder", %err, "failed to send flashblock payload");
-        };
+        // Start publishing the flashblock payload
+        if let Err(e) = self.p2p_handler.publish_new(authorized(flashblock_payload)) {
+            warn!(target: "payload_builder", %e, "failed to publish initial flashblock payload");
+        }
 
         let total_flashbblocks = self.block_time as usize / self.flashblock_interval as usize;
         let (tx, mut rx) = tokio::sync::mpsc::channel(total_flashbblocks);
@@ -410,8 +431,8 @@ where
                         transactions_offset,
                     );
 
-                    if let Err(err) = self.publish_tx.send(flashblock_payload) {
-                        error!(target: "payload_builder", %err, "failed to send flashblock payload");
+                    if let Err(e) = self.p2p_handler.publish_new(authorized(flashblock_payload)) {
+                        warn!(target: "payload_builder", %e, "failed to publish flashblock payload");
                     }
 
                     // update executed transactions
