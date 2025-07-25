@@ -2,25 +2,24 @@
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_rpc_types::{TransactionRequest, Withdrawals};
+use alloy_rpc_types::TransactionRequest;
+use op_alloy_consensus::OpTxEnvelope;
 use reth::api::{NodeTypesWithDBAdapter, TreeConfig};
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_e2e_test_utils::{NodeHelperType, TmpDB};
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_provider::providers::BlockchainProvider;
-use revm_primitives::{Address, FixedBytes, B256, U256};
+use revm_primitives::{Address, U256};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
-use world_chain_builder_node::args::WorldChainArgs;
-use world_chain_builder_node::node::WorldChainNode as OtherWorldChainNode;
+use world_chain_builder_test_utils::utils::account;
+
 use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
 use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
@@ -29,19 +28,21 @@ use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
-use world_chain_builder_node::test_utils::{raw_pbh_bundle_bytes, tx};
+use crate::args::WorldChainArgs;
+use crate::node::WorldChainNode as OtherWorldChainNode;
+use crate::test_utils::{raw_pbh_bundle_bytes, tx};
 
-pub(crate) type WorldChainNode = NodeHelperType<
-    OtherWorldChainNode,
-    BlockchainProvider<NodeTypesWithDBAdapter<OtherWorldChainNode, TmpDB>>,
->;
+mod flashblocks;
+
+pub(crate) type WorldChainNode<N> =
+    NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>;
 
 pub const BASE_CHAIN_ID: u64 = 8453;
 
 pub struct WorldChainBuilderTestContext {
     pub signers: Range<u32>,
-    pub tasks: TaskManager,
-    pub node: WorldChainNode,
+    pub _tasks: TaskManager,
+    pub node: WorldChainNode<OtherWorldChainNode>,
 }
 
 impl WorldChainBuilderTestContext {
@@ -73,6 +74,7 @@ impl WorldChainBuilderTestContext {
             signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
             world_id: DEV_WORLD_ID,
             builder_private_key: signer(6).to_bytes().to_string(),
+            flashblocks_args: None,
             ..Default::default()
         };
 
@@ -103,11 +105,12 @@ impl WorldChainBuilderTestContext {
             })
             .await?;
 
-        let test_ctx = NodeTestContext::new(node, optimism_payload_attributes).await?;
+        let test_ctx =
+            NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
 
         Ok(Self {
             signers: (0..5),
-            tasks,
+            _tasks: tasks,
             node: test_ctx,
         })
     }
@@ -143,12 +146,15 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let non_pbh_tx = tx(
         ctx.node.inner.chain_spec().chain.id(),
         None,
         0,
         Address::default(),
+        210_000,
     );
     let wallet = signer(0);
     let signer = EthereumWallet::from(wallet);
@@ -200,6 +206,8 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
     let mut ctx = WorldChainBuilderTestContext::setup().await?;
     let signer = 0;
 
@@ -219,29 +227,6 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     assert_eq!(payload.block().body().transactions.len(), 2);
 
     Ok(())
-}
-
-/// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(
-    timestamp: u64,
-) -> OpPayloadBuilderAttributes<OpTransactionSigned> {
-    let attributes = EthPayloadBuilderAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Withdrawals::default(),
-        parent_beacon_block_root: Some(B256::ZERO),
-        id: PayloadId(FixedBytes::<8>::random()),
-        parent: FixedBytes::default(),
-    };
-
-    OpPayloadBuilderAttributes {
-        payload_attributes: attributes,
-        transactions: vec![],
-        gas_limit: None,
-        no_tx_pool: false,
-        eip_1559_params: None,
-    }
 }
 
 /// Builds an OP Mainnet chain spec with the given merkle root
@@ -269,6 +254,10 @@ fn get_chain_spec() -> OpChainSpec {
                             (MAX_U16 << U256::from(160)).into(),
                         ),
                     ]))),
+                )])
+                .extend_accounts(vec![(
+                    account(0),
+                    GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
                 )]),
         )
         .ecotone_activated()
