@@ -26,7 +26,6 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives::{NodePrimitives, Recovered};
-use rollup_boost::FlashblocksP2PMsg;
 use rollup_boost::{
     ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
@@ -49,7 +48,7 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::inspector::NoOpInspector;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization, Authorized,
+    Authorization,
 };
 use std::{fmt::Debug, sync::Arc};
 use tokio::{sync::broadcast, time::Instant};
@@ -81,7 +80,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub flashblock_interval: u64,
     pub ctx_builder: CtxBuilder,
     /// Channel for publishing messages
-    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
     pub authorizer_vk: Option<VerifyingKey>,
     pub builder_sk: SigningKey,
 }
@@ -244,7 +243,7 @@ where
     best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
 
     /// Channel sender for publishing messages
-    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
     pub authorization: Option<Authorization>,
     pub builder_sk: SigningKey,
     pub block_time: u64,
@@ -259,7 +258,7 @@ where
     /// Creates a new [`OpBuilder`].
     pub fn new(
         best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-        publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
+        publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
         authorization: Option<Authorization>,
         builder_sk: SigningKey,
         block_time: u64,
@@ -335,22 +334,7 @@ where
         // Adjust transaction offset to account for deposit transactions
         transactions_offset += build_outcome.block.body().transactions_iter().count();
 
-        let authorization = self.authorization.clone().unwrap_or_else(|| {
-            // if no authorization is provided, we create one using the builder's signing key
-            Authorization::new(
-                flashblock_payload.payload_id,
-                self.block_time,
-                &self.builder_sk,
-                self.builder_sk.verifying_key(),
-            )
-        });
-
-        let authorized = |payload| {
-            let authorized = Authorized::new(&self.builder_sk, authorization.clone(), payload);
-            FlashblocksP2PMsg::FlashblocksPayloadV1(authorized)
-        };
-
-        if let Err(err) = self.publish_tx.send(authorized(flashblock_payload)) {
+        if let Err(err) = self.publish_tx.send(flashblock_payload) {
             error!(target: "payload_builder", %err, "failed to send flashblock payload");
         };
 
@@ -426,7 +410,7 @@ where
                         transactions_offset,
                     );
 
-                    if let Err(err) = self.publish_tx.send(authorized(flashblock_payload)) {
+                    if let Err(err) = self.publish_tx.send(flashblock_payload) {
                         error!(target: "payload_builder", %err, "failed to send flashblock payload");
                     }
 

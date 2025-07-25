@@ -16,7 +16,9 @@ world-chain-builder-pool.workspace = true
 world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 flashblocks.workspace = true
+
 rollup-boost.workspace = true
+flashblocks-p2p.workspace = true
 
 reth.workspace = true
 reth-chain-state = { workspace = true, optional = true }
@@ -48,7 +50,6 @@ alloy-sol-types = { workspace = true, optional = true }
 revm-primitives = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 alloy-rpc-types-eth.workspace = true
-flashblocks-p2p.workspace = true
 tokio = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true, optional = true }
@@ -84,20 +85,20 @@ chrono.workspace = true
 [features]
 default = []
 test = [
-  "world-chain-builder-test-utils",
-  "world-chain-builder-pbh",
-  "dep:reth-e2e-test-utils",
-  "dep:reth-chain-state",
-  "dep:reth-tracing",
-  "dep:reth-primitives",
-  "dep:reth-primitives-traits",
-  "dep:reth-prune-types",
-  "dep:reth-trie",
-  "dep:reth-db",
-  "dep:alloy-rpc-types",
-  "dep:alloy-sol-types",
-  "dep:alloy-eips",
-  "dep:revm-primitives",
-  "dep:futures",
-  "dep:chrono",
+    "world-chain-builder-test-utils",
+    "world-chain-builder-pbh",
+    "dep:reth-e2e-test-utils",
+    "dep:reth-chain-state",
+    "dep:reth-tracing",
+    "dep:reth-primitives",
+    "dep:reth-primitives-traits",
+    "dep:reth-prune-types",
+    "dep:reth-trie",
+    "dep:reth-db",
+    "dep:alloy-rpc-types",
+    "dep:alloy-sol-types",
+    "dep:alloy-eips",
+    "dep:revm-primitives",
+    "dep:futures",
+    "dep:chrono",
 ]

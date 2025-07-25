@@ -16,7 +16,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
-use rollup_boost::FlashblocksP2PMsg;
+use rollup_boost::FlashblocksPayloadV1;
 use tokio::sync::broadcast;
 use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
@@ -50,7 +50,7 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub flashblock_server_addr: (IpAddr, u16),
-    pub publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
+    pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
     pub authorizer_vk: Option<VerifyingKey>,
     pub builder_sk: SigningKey,
 }
@@ -68,7 +68,7 @@ impl FlashblocksPayloadBuilderBuilder {
         block_time: u64,
         flashblock_interval: u64,
         flashblock_server_addr: (IpAddr, u16),
-        publish_tx: broadcast::Sender<FlashblocksP2PMsg>,
+        publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
         authorizer_vk: Option<VerifyingKey>,
         builder_sk: SigningKey,
     ) -> Self {
