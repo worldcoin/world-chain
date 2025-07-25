@@ -67,7 +67,7 @@ where
             payload_builder,
             self.p2p_handler,
             self.authorizer_sk.clone(),
-            self.builder_vk.clone(),
+            self.builder_vk,
         );
 
         let (payload_service, payload_service_handle) =

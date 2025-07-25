@@ -69,7 +69,7 @@ where
             payload_id,
             timestamp,
             &self.authorizer_sk.clone(),
-            self.builder_vk.clone(),
+            self.builder_vk,
         );
 
         self.p2p_handler.start_publishing(authorization);
