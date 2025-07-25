@@ -2,10 +2,11 @@ use crate::args::WorldChainArgs;
 use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
+use flashblocks_p2p::protocol::handler::FlashblocksHandler;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::ComponentsBuilder;
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
-use reth_node_builder::components::PayloadServiceBuilder;
+use reth_node_builder::components::{NetworkBuilder, PayloadServiceBuilder};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
@@ -73,15 +74,16 @@ impl WorldChainFlashblocksNode {
     pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
-        FlashblocksPayloadServiceBuilder<Node, FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
-            Node,
-            WorldChainTransactionPool<
-                <Node as FullNodeTypes>::Provider,
-                DiskFileBlobStore,
-                WorldChainPooledTransaction,
+        FlashblocksPayloadServiceBuilder<Node, FlashblocksPayloadBuilderBuilder>:
+            PayloadServiceBuilder<
+                Node,
+                WorldChainTransactionPool<
+                    <Node as FullNodeTypes>::Provider,
+                    DiskFileBlobStore,
+                    WorldChainPooledTransaction,
+                >,
+                OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
             >,
-            OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-        >,
     {
         let (flashblocks_publish_tx, flashblocks_publish_rx) = broadcast::channel(100);
         // inbound flashblocks, for use with the node overlay
@@ -113,12 +115,10 @@ impl WorldChainFlashblocksNode {
             .flashblocks_authorizor_vk
             .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
 
-        let fb_network_builder = FlashblocksNetworkBuilder::new(
-            op_network_builder,
-            authorizer_vk,
-            flashblocks_tx,
-            flashblocks_publish_rx,
-        );
+        let flashblocks_handle = FlashblocksHandle::new(todo!());
+
+        let fb_network_builder =
+            FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle);
 
         ComponentsBuilder::default()
             .node_types::<Node>()
