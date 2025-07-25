@@ -1,16 +1,27 @@
-use reth::{payload::PayloadJobGenerator, tasks::TaskSpawner};
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use reth::{api::PayloadBuilderAttributes, payload::PayloadJobGenerator, tasks::TaskSpawner};
 use reth_basic_payload_builder::{
     BasicPayloadJob, BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, HeaderForPayload,
     PayloadBuilder,
 };
 
+use reth_primitives::NodePrimitives;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use rollup_boost::{
+    ed25519_dalek::{SigningKey, VerifyingKey},
+    Authorization,
+};
 
 /// A type that initiates payload building jobs on the [`FlashblocksPayloadBuilder`].
 pub struct FlashblockJobGenerator<Client, Tasks, Builder> {
+    /// The inner payload job generator.
     inner: BasicPayloadJobGenerator<Client, Tasks, Builder>,
-    // TODO: Add broadcast::Receiver<FlashblocksP2PMsg> or maybe this should hold a type that handles all that.
-    // We can trigger P2PHandler::start_publish() on `new_payload_job` as the entrypoint
+    /// The P2P handler for flashblocks.
+    p2p_handler: FlashblocksHandle,
+    /// The authorization signing key for the builder.
+    authorizer_sk: SigningKey,
+    /// The verifying key for the builder.
+    builder_vk: VerifyingKey,
 }
 
 impl<Client, Tasks, Builder> FlashblockJobGenerator<Client, Tasks, Builder> {
@@ -20,9 +31,15 @@ impl<Client, Tasks, Builder> FlashblockJobGenerator<Client, Tasks, Builder> {
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         builder: Builder,
+        p2p_handler: FlashblocksHandle,
+        authorizer_sk: SigningKey,
+        builder_vk: VerifyingKey,
     ) -> Self {
         Self {
             inner: BasicPayloadJobGenerator::with_builder(client, executor, config, builder),
+            p2p_handler,
+            authorizer_sk,
+            builder_vk,
         }
     }
 }
@@ -45,12 +62,22 @@ where
         &self,
         attr: <Self::Job as reth::payload::PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, reth::api::PayloadBuilderError> {
-        // TODO(@forerunner)
-        // P2PHandler::start_publish()
+        let payload_id = attr.payload_id();
+        let timestamp = attr.timestamp();
+
+        let authorization = Authorization::new(
+            payload_id,
+            timestamp,
+            &self.authorizer_sk.clone(),
+            self.builder_vk,
+        );
+
+        self.p2p_handler.start_publishing(authorization);
+
         self.inner.new_payload_job(attr)
     }
 
-    fn on_new_state<N: reth_primitives::NodePrimitives>(
+    fn on_new_state<N: NodePrimitives>(
         &mut self,
         new_state: reth_provider::CanonStateNotification<N>,
     ) {

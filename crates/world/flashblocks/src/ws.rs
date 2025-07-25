@@ -1,5 +1,6 @@
+// TODO: Remove this after P2P Handle is used as sink of messages in the tests
 use futures_util::SinkExt;
-use rollup_boost::FlashblocksP2PMsg;
+use rollup_boost::FlashblocksPayloadV1;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::{
@@ -42,7 +43,7 @@ pub async fn ws_server(
 
 /// Background task that handles publishing messages to WebSocket subscribers
 pub async fn publish_task(
-    mut rx: broadcast::Receiver<FlashblocksP2PMsg>,
+    mut rx: broadcast::Receiver<FlashblocksPayloadV1>,
     subscribers: Arc<Mutex<Vec<WebSocketStream<TcpStream>>>>,
 ) {
     while let Ok(message) = rx.recv().await {
@@ -50,9 +51,8 @@ pub async fn publish_task(
 
         // Remove disconnected subscribers and send message to connected ones
         let mut retained_subscribers = Vec::with_capacity(subscribers.len());
-        let FlashblocksP2PMsg::FlashblocksPayloadV1(inner) = message;
         for mut ws_stream in subscribers.drain(..) {
-            let msg = serde_json::to_string(&inner.payload).expect("Failed to serialize message");
+            let msg = serde_json::to_string(&message).expect("Failed to serialize message");
 
             match ws_stream.send(Message::Text(msg.into())).await {
                 Ok(()) => {
