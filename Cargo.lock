@@ -3799,9 +3799,13 @@ dependencies = [
  "alloy-eips",
  "alloy-op-evm",
  "alloy-primitives 1.2.1",
+ "alloy-rpc-types-engine",
  "clap",
  "flashblocks-p2p",
+ "futures",
+ "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -3812,6 +3816,7 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
+ "reth-optimism-rpc",
  "reth-payload-util",
  "reth-primitives",
  "reth-provider",
@@ -3825,7 +3830,7 @@ dependencies = [
 [[package]]
 name = "flashblocks-p2p"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rollup-boost?rev=5173953#51739539f36861a6dc27a60c42cc63fb66d9ef63"
+source = "git+https://github.com/flashbots/rollup-boost?rev=24acb80#24acb8097e0ecb2a5758b348d618a672d3f69d26"
 dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rlp",
@@ -11094,7 +11099,7 @@ dependencies = [
 [[package]]
 name = "rollup-boost"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rollup-boost?rev=5173953#51739539f36861a6dc27a60c42cc63fb66d9ef63"
+source = "git+https://github.com/flashbots/rollup-boost?rev=24acb80#24acb8097e0ecb2a5758b348d618a672d3f69d26"
 dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rlp",

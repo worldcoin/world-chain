@@ -381,7 +381,7 @@ where
             );
 
             match notify {
-                Some(()) => {
+                Some(None) => {
                     let _enter = span.enter();
 
                     debug!(target: "payload_builder", "building flashblock");
@@ -446,7 +446,8 @@ where
                 }
 
                 // tx was dropped, resolve the most recent payload
-                None => {
+                // TODO: Update this
+                _ => {
                     debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
                     break;
                 }
@@ -582,13 +583,18 @@ where
 
     /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
     ///
-    /// A Flashblock job will be cancelled under the following conditions:
-    /// - If the parent `cancel` is dropped.
-    /// - If the `flashblock_interval` has been exceeded.
-    /// - If the `max_flashblocks` has been exceeded.
-    fn spawn_flashblock_job_manager(&self, tx: tokio::sync::mpsc::Sender<()>) {
+    /// A job will be initiated every `flashblock_interval` as long as clearance has been given from the p2p handler.
+    /// There are two possible outcomes:
+    /// 1. Clearance is yielded by the p2p handler - b
+    fn spawn_flashblock_job_manager(
+        &self,
+        tx: tokio::sync::mpsc::Sender<Option<FlashblocksPayloadV1>>,
+    ) {
         let block_time = self.block_time;
         let flashblock_interval = self.flashblock_interval;
+
+        let _p2p_handler = self.p2p_handler.clone();
+
         let cancel = self.cancel.clone();
         let span = span!(tracing::Level::DEBUG, "flashblock_job_manager");
         tokio::spawn(async move {
@@ -610,6 +616,8 @@ where
                     // and drop the sender to resolve the most recent payload.
                     drop(tx);
                 },
+                // Wait for clearance from the p2p handler.
+                // This checks whether another builder is already building flashblocks. If so, we want to build on top of the latest flashblock published over p2p.
 
                 _ = async {
                     loop {
@@ -624,14 +632,32 @@ where
 
                         tokio::select! {
                             _ = flashblock_interval.tick() => {
-                                let elapsed = instant.elapsed();
-                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
-                                // queue the next flashblock job, but there's no benefit in cancelling the current job
-                                // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
-                                // because the next job will also exceed `flashblock_interval`.
-                                if let Err(err) = tx.send(()).await {
+                                // Flashblock interval has elapsed, wait for clearance from the p2p handler.
+                                // TODO:
+                                // tokio::select! {
+                                //     _ = p2p_handler.wait_for_clearance() => {
+                                //         debug!(target: "payload_builder", "flashblock clearance granted, building flashblock");
+                                //         // clearance granted, we can build the next flashblock on top of the parent
+                                //         // queue the next flashblock job, but there's no benefit in cancelling the current job
+                                //         // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
+                                //         // because the next job will also exceed `flashblock_interval`.
+                                //         if let Err(err) = tx.send(None).await {
+                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
+                                //         }
+                                //     },
+                                //     flashblock = flashblocks_rx.recv() => {
+                                //         // flashblock was received over p2p, we can build on top of it
+                                //         if let Err(err) = tx.send(flashblock).await {
+                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
+                                //         }
+                                //     },
+                                // }
+
+                                if let Err(err) = tx.send(None).await {
                                     warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
                                 }
+                                let elapsed = instant.elapsed();
+                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
                             },
                        }
                     }
