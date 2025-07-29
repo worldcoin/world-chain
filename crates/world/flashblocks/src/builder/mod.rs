@@ -14,7 +14,7 @@ use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{api::BlockBody, core::primitives::transaction::recover};
+use reth::api::BlockBody;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
@@ -57,7 +57,7 @@ use rollup_boost::{
     Authorization,
 };
 use std::{fmt::Debug, sync::Arc};
-use tokio::{join, runtime::Handle, time::Instant};
+use tokio::runtime::Handle;
 use tracing::{debug, span, trace, warn};
 
 pub mod executor;
@@ -360,11 +360,11 @@ where
 
             for tx in aggregated_state.diff.transactions {
                 let envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
-                    .map_err(|_| PayloadBuilderError::MissingPayload)?;
+                    .expect("pre-confirmed transactions are always decodable");
 
                 let recovered = envelope
                     .try_clone_into_recovered_unchecked()
-                    .expect("Failed to recover transaction");
+                    .expect("pre-confirmed transactions are always valid");
 
                 let gas_used = match builder.execute_transaction(recovered.clone()) {
                     Ok(gas_used) => gas_used,
@@ -432,7 +432,7 @@ where
                 "Block hash mismatch"
             );
 
-            // Freeze the payload 
+            // Freeze the payload
             return Ok(BuildOutcomeKind::Freeze(payload));
         }
 
@@ -502,7 +502,7 @@ where
             );
 
             match notify {
-                Some(None) => {
+                Some(()) => {
                     let _enter = span.enter();
 
                     debug!(target: "payload_builder", "building flashblock");
@@ -704,10 +704,7 @@ where
     /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
     ///
     /// A job will be initiated every `flashblock_interval` as long as clearance has been given from the p2p handler.
-    fn spawn_flashblock_job_manager(
-        &self,
-        tx: tokio::sync::mpsc::Sender<Option<FlashblocksPayloadV1>>,
-    ) {
+    fn spawn_flashblock_job_manager(&self, tx: tokio::sync::mpsc::Sender<()>) {
         let block_time = self.block_time;
         let flashblock_interval = self.flashblock_interval;
 
@@ -754,7 +751,7 @@ where
 
                         // if we reach here, we have clearance to build a new flashblock
                         debug!(target: "payload_builder", "flashblock interval exceeded, and clearance granted building new flashblock");
-                        if let Err(e) = tx.send(None).await {
+                        if let Err(e) = tx.send(()).await {
                             warn!(target: "payload_builder", %e, "failed to send flashblock job");
                             break;
                         }
