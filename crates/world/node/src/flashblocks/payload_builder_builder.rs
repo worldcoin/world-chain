@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use flashblocks::builder::FlashblocksPayloadBuilder;
+use flashblocks::rpc::engine::FlashblocksState;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
@@ -54,6 +55,7 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     pub publish_tx: broadcast::Sender<FlashblocksPayloadV1>,
     pub authorizer_vk: VerifyingKey,
     pub builder_sk: SigningKey,
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -73,6 +75,7 @@ impl FlashblocksPayloadBuilderBuilder {
         authorizer_vk: VerifyingKey,
         builder_sk: SigningKey,
         p2p_handler: FlashblocksHandle,
+        flashblocks_state: FlashblocksState,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -89,6 +92,7 @@ impl FlashblocksPayloadBuilderBuilder {
             authorizer_vk,
             builder_sk,
             p2p_handler,
+            flashblocks_state,
         }
     }
 
@@ -120,6 +124,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             authorizer_vk,
             builder_sk,
             p2p_handler,
+            flashblocks_state,
         } = self;
 
         FlashblocksPayloadBuilderBuilder {
@@ -137,6 +142,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             authorizer_vk,
             builder_sk,
             p2p_handler,
+            flashblocks_state,
         }
     }
 
@@ -189,6 +195,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             authorizer_vk: self.authorizer_vk,
             builder_sk: self.builder_sk,
             p2p_handler: self.p2p_handler.clone(),
+            flashblocks_state: self.flashblocks_state,
         };
 
         Ok(payload_builder)

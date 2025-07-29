@@ -3,6 +3,7 @@ use crate::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
+    rpc::engine::FlashblocksState,
     PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
@@ -53,7 +54,7 @@ use rollup_boost::{
     Authorization,
 };
 use std::{fmt::Debug, sync::Arc};
-use tokio::time::Instant;
+use tokio::{join, runtime::Handle, time::Instant};
 use tracing::{debug, span, warn};
 
 pub mod executor;
@@ -86,6 +87,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub ctx_builder: CtxBuilder,
     pub authorizer_vk: VerifyingKey,
     pub builder_sk: SigningKey,
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl<Pool, Client, CtxBuilder, Txs> Clone
@@ -103,6 +105,7 @@ where
             client: self.client.clone(),
             config: self.config.clone(),
             best_transactions: self.best_transactions.clone(),
+            flashblocks_state: self.flashblocks_state.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
             p2p_handler: self.p2p_handler.clone(),
@@ -254,6 +257,7 @@ where
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub cancel: CancelOnDrop,
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs>
@@ -271,6 +275,7 @@ where
         block_time: u64,
         flashblock_interval: u64,
         cancel: CancelOnDrop,
+        flashblocks_state: FlashblocksState,
     ) -> Self {
         Self {
             best: Box::new(best),
@@ -281,6 +286,7 @@ where
             flashblock_interval,
             cancel,
             p2p_handler,
+            flashblocks_state,
         }
     }
 }
@@ -315,6 +321,46 @@ where
         let mut transactions_offset = 0;
         let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
+        // 2. Wait for clearance from the p2p handler
+        let p2p_handler = self.p2p_handler.clone();
+        let res = tokio::task::block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(async {
+                p2p_handler.await_clearance().await;
+                self.flashblocks_state.0.read().await
+            })
+        });
+
+        let mut updated = false;
+
+        // If we have pending state we want to force include any deposits not yet included in the latest flashblock
+        // and immediately seal the block, and freeze the payload. This ensures a high degree of integrity on pre confirmations
+        // even in times of a failover.
+        let transactions_prestate = if let Some(payload) = res.last() {
+            let payload_id = payload.payload_id;
+            debug_assert!(
+                res.iter().all(|p| p.payload_id == payload_id),
+                "all flashblocks should have the same payload id"
+            );
+
+            // aggregate all transactions for an absolute pre-state
+            let mut transactions = res
+                .iter()
+                .flat_map(|p| p.diff.transactions.to_vec())
+                .collect::<Vec<_>>();
+
+            // grab all deposit transactions from the attributes
+            for tx in &ctx.attributes().transactions {
+                if transactions.iter().any(|t| *t == *tx.encoded_bytes()) {
+                    transactions.push(tx.encoded_bytes().clone());
+                    updated = true;
+                }
+            }
+
+            transactions
+        } else {
+            vec![]
+        };
         // 2. Create the block builder
         let state = StateProviderDatabase::new(&state_provider);
         let mut state = State::builder()
@@ -446,7 +492,6 @@ where
                 }
 
                 // tx was dropped, resolve the most recent payload
-                // TODO: Update this
                 _ => {
                     debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
                     break;
@@ -584,8 +629,6 @@ where
     /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
     ///
     /// A job will be initiated every `flashblock_interval` as long as clearance has been given from the p2p handler.
-    /// There are two possible outcomes:
-    /// 1. Clearance is yielded by the p2p handler - b
     fn spawn_flashblock_job_manager(
         &self,
         tx: tokio::sync::mpsc::Sender<Option<FlashblocksPayloadV1>>,
@@ -593,7 +636,7 @@ where
         let block_time = self.block_time;
         let flashblock_interval = self.flashblock_interval;
 
-        let _p2p_handler = self.p2p_handler.clone();
+        let p2p_handler = self.p2p_handler.clone();
 
         let cancel = self.cancel.clone();
         let span = span!(tracing::Level::DEBUG, "flashblock_job_manager");
@@ -616,12 +659,11 @@ where
                     // and drop the sender to resolve the most recent payload.
                     drop(tx);
                 },
+
                 // Wait for clearance from the p2p handler.
                 // This checks whether another builder is already building flashblocks. If so, we want to build on top of the latest flashblock published over p2p.
-
                 _ = async {
                     loop {
-                        let instant = Instant::now();
                         let _tx = tx.clone();
                         if cancel.is_cancelled() {
                             debug!(target: "payload_builder", "parent cancel was dropped, cancelling flashblock job");
@@ -630,36 +672,17 @@ where
                             break;
                         }
 
-                        tokio::select! {
-                            _ = flashblock_interval.tick() => {
-                                // Flashblock interval has elapsed, wait for clearance from the p2p handler.
-                                // TODO:
-                                // tokio::select! {
-                                //     _ = p2p_handler.wait_for_clearance() => {
-                                //         debug!(target: "payload_builder", "flashblock clearance granted, building flashblock");
-                                //         // clearance granted, we can build the next flashblock on top of the parent
-                                //         // queue the next flashblock job, but there's no benefit in cancelling the current job
-                                //         // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
-                                //         // because the next job will also exceed `flashblock_interval`.
-                                //         if let Err(err) = tx.send(None).await {
-                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                //         }
-                                //     },
-                                //     flashblock = flashblocks_rx.recv() => {
-                                //         // flashblock was received over p2p, we can build on top of it
-                                //         if let Err(err) = tx.send(flashblock).await {
-                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                //         }
-                                //     },
-                                // }
+                       let (_, _) = tokio::join!(
+                            flashblock_interval.tick(),
+                            p2p_handler.await_clearance()
+                        );
 
-                                if let Err(err) = tx.send(None).await {
-                                    warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                }
-                                let elapsed = instant.elapsed();
-                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
-                            },
-                       }
+                        // if we reach here, we have clearance to build a new flashblock
+                        debug!(target: "payload_builder", "flashblock interval exceeded, and clearance granted building new flashblock");
+                        if let Err(e) = tx.send(None).await {
+                            warn!(target: "payload_builder", %e, "failed to send flashblock job");
+                            break;
+                        }
                     }
                 } => {
                     // either the parent payload job was cancelled, or all flashblocks were built.

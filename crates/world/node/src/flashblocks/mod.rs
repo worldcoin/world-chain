@@ -1,6 +1,7 @@
 use crate::args::WorldChainArgs;
 use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
+use flashblocks::rpc::engine::FlashblocksState;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
@@ -122,6 +123,8 @@ impl WorldChainFlashblocksNode {
         let fb_network_builder =
             FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle.clone());
 
+        let flashblocks_state = FlashblocksState::default();
+
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder::new(
@@ -147,6 +150,7 @@ impl WorldChainFlashblocksNode {
                     authorizer_vk,
                     flashblocks_args.flashblocks_builder_sk.clone(),
                     flashblocks_handle.clone(),
+                    flashblocks_state,
                 )
                 .with_da_config(self.da_config.clone()),
                 authorizer_vk,
@@ -154,7 +158,6 @@ impl WorldChainFlashblocksNode {
                 flashblocks_handle,
             ))
             .network(fb_network_builder)
-            .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 }
