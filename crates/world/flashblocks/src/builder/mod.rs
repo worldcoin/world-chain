@@ -328,11 +328,12 @@ where
         // 2. Wait for clearance from the p2p handler
         let p2p_handler = self.p2p_handler.clone();
 
-        let handle = Handle::current();
-        // Fetch the current state from the p2p handler
-        let state = handle.block_on(async {
-            p2p_handler.await_clearance().await;
-            self.flashblocks_state.0.read().await
+        let state = tokio::task::block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(async {
+                p2p_handler.await_clearance().await;
+                self.flashblocks_state.0.read().await
+            })
         });
 
         // TODO: We shouldn't re-execute the transitions here, but we have to because of a lack of context
