@@ -3,17 +3,18 @@ use crate::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
-    rpc::engine::FlashblocksState,
+    rpc::engine::{reduce_all, FlashblocksState},
     PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::api::BlockBody;
+use reth::{api::BlockBody, core::primitives::transaction::recover};
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
@@ -23,10 +24,12 @@ use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind}
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
+    block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
     ConfigureEvm,
 };
+use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
 use rollup_boost::{
     AuthorizedPayload, ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
@@ -38,7 +41,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_optimism_payload_builder::{builder::ExecutionInfo, config::OpBuilderConfig};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
@@ -55,7 +58,7 @@ use rollup_boost::{
 };
 use std::{fmt::Debug, sync::Arc};
 use tokio::{join, runtime::Handle, time::Instant};
-use tracing::{debug, span, warn};
+use tracing::{debug, span, trace, warn};
 
 pub mod executor;
 pub mod job;
@@ -165,6 +168,7 @@ where
             self.block_time,
             self.flashblock_interval,
             cancel.clone(),
+            self.flashblocks_state.clone(),
         );
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -323,44 +327,115 @@ where
 
         // 2. Wait for clearance from the p2p handler
         let p2p_handler = self.p2p_handler.clone();
-        let res = tokio::task::block_in_place(|| {
-            let handle = Handle::current();
-            handle.block_on(async {
-                p2p_handler.await_clearance().await;
-                self.flashblocks_state.0.read().await
-            })
+
+        let handle = Handle::current();
+        // Fetch the current state from the p2p handler
+        let state = handle.block_on(async {
+            p2p_handler.await_clearance().await;
+            self.flashblocks_state.0.read().await
         });
 
-        let mut updated = false;
+        // TODO: We shouldn't re-execute the transitions here, but we have to because of a lack of context
+        // on the [`FlashblocksPayloadV1`]. We need to know `total_fees` which can't be determined without
+        // re-executing the transactions. This information exists on the Receipt, but we currently aren't including any metadata.
+        if !state.is_empty() {
+            // Re-execute the transactions to aggregate the trie updates, and receipts.
+            let db = StateProviderDatabase::new(&state_provider);
+            let mut db = State::builder()
+                .with_database(db)
+                .with_bundle_update()
+                .build();
+            // construct the block builder
+            let mut builder = ctx.block_builder(&mut db)?;
 
-        // If we have pending state we want to force include any deposits not yet included in the latest flashblock
-        // and immediately seal the block, and freeze the payload. This ensures a high degree of integrity on pre confirmations
-        // even in times of a failover.
-        let transactions_prestate = if let Some(payload) = res.last() {
-            let payload_id = payload.payload_id;
-            debug_assert!(
-                res.iter().all(|p| p.payload_id == payload_id),
-                "all flashblocks should have the same payload id"
-            );
+            let aggregated_state =
+                reduce_all(state.clone()).ok_or(PayloadBuilderError::MissingPayload)?;
 
-            // aggregate all transactions for an absolute pre-state
-            let mut transactions = res
-                .iter()
-                .flat_map(|p| p.diff.transactions.to_vec())
-                .collect::<Vec<_>>();
+            let base = aggregated_state
+                .base
+                .as_ref()
+                .ok_or(PayloadBuilderError::MissingPayload)?;
 
-            // grab all deposit transactions from the attributes
-            for tx in &ctx.attributes().transactions {
-                if transactions.iter().any(|t| *t == *tx.encoded_bytes()) {
-                    transactions.push(tx.encoded_bytes().clone());
-                    updated = true;
-                }
+            let mut info = ExecutionInfo::default();
+
+            for tx in aggregated_state.diff.transactions {
+                let envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
+                    .map_err(|_| PayloadBuilderError::MissingPayload)?;
+
+                let recovered = envelope
+                    .try_clone_into_recovered_unchecked()
+                    .expect("Failed to recover transaction");
+
+                let gas_used = match builder.execute_transaction(recovered.clone()) {
+                    Ok(gas_used) => gas_used,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        trace!(target: "payload_builder", %error, ?tx, "Error in transaction, skipping.");
+                        continue;
+                    }
+                    Err(err) => {
+                        // this is an error that we should treat as fatal for this attempt
+                        return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
+                    }
+                };
+
+                info.total_fees += if envelope.is_deposit() {
+                    U256::ZERO
+                } else {
+                    let miner_fee = recovered
+                        .effective_tip_per_gas(base.base_fee_per_gas.to())
+                        .expect("fee is always valid; execution succeeded");
+
+                    U256::from(miner_fee) * U256::from(gas_used)
+                };
             }
 
-            transactions
-        } else {
-            vec![]
-        };
+            let BlockBuilderOutcome {
+                execution_result,
+                hashed_state,
+                trie_updates,
+                block,
+            } = builder.finish(&state_provider)?;
+
+            let sealed_block = Arc::new(block.sealed_block().clone());
+
+            let execution_outcome = ExecutionOutcome::new(
+                db.take_bundle(),
+                vec![execution_result.receipts],
+                block.number(),
+                Vec::new(),
+            );
+
+            // create the executed block data
+            let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> =
+                ExecutedBlockWithTrieUpdates {
+                    block: ExecutedBlock {
+                        recovered_block: Arc::new(block),
+                        execution_output: Arc::new(execution_outcome),
+                        hashed_state: Arc::new(hashed_state),
+                    },
+                    trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
+                };
+
+            let payload = OpBuiltPayload::new(
+                ctx.payload_id(),
+                sealed_block.clone(),
+                info.total_fees,
+                Some(executed),
+            );
+
+            debug_assert_eq!(
+                sealed_block.hash(),
+                aggregated_state.diff.block_hash,
+                "Block hash mismatch"
+            );
+
+            // Freeze the payload 
+            return Ok(BuildOutcomeKind::Freeze(payload));
+        }
+
         // 2. Create the block builder
         let state = StateProviderDatabase::new(&state_provider);
         let mut state = State::builder()

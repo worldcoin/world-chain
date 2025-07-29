@@ -3801,6 +3801,7 @@ dependencies = [
  "alloy-primitives 1.2.1",
  "alloy-rpc-types-engine",
  "clap",
+ "color-eyre",
  "flashblocks-p2p",
  "futures",
  "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",

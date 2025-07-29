@@ -47,3 +47,4 @@ tracing.workspace = true
 clap.workspace = true
 jsonrpsee-core.workspace = true
 futures.workspace = true
+eyre.workspace = true
