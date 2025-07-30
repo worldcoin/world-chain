@@ -28,7 +28,7 @@ pub struct InsertCommitmentRequest {
 
 /// Generate Test identities, and inserts them into the signup sequencer.
 pub async fn generate_identities(args: GenerateArgs) -> eyre::Result<()> {
-    let identies: Vec<_> = (0..args.count)
+    let identities: Vec<_> = (0..args.count)
         .map(|_| {
             let mut rng = rand::rng();
 
@@ -46,14 +46,14 @@ pub async fn generate_identities(args: GenerateArgs) -> eyre::Result<()> {
 
     serde_json::to_writer(
         std::fs::File::create(args.path)?,
-        &identies
+        &identities
             .iter()
             .map(SerializableIdentity::from)
             .collect::<Vec<_>>(),
     )?;
 
     let client = reqwest::Client::new();
-    futures::future::try_join_all(identies.iter().map(|identity| {
+    futures::future::try_join_all(identities.iter().map(|identity| {
         insert_identity(
             &client,
             &args.sequencer_url,
