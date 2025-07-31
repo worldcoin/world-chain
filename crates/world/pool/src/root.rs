@@ -26,7 +26,7 @@ where
 {
     /// Address of the WorldID contract
     world_id: Address,
-    /// The client used to aquire account state from the database.
+    /// The client used to acquire account state from the database.
     client: Client,
     /// A map of valid roots indexed by block timestamp.
     valid_roots: BTreeMap<u64, Field>,
@@ -45,7 +45,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `client` - The client used to aquire account state from the database.
+    /// * `client` - The client used to acquire account state from the database.
     pub fn new(client: Client, world_id: Address) -> Result<Self, WorldChainTransactionPoolError> {
         let mut this = Self {
             client,
