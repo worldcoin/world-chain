@@ -25,6 +25,36 @@ use tokio::sync::RwLock;
 
 pub type Flashblocks = Vec<FlashblocksPayloadV1>;
 
+// Reduces a Vector of FlashblocksPayloadV1 into a single FlashblocksPayloadV1
+pub fn reduce_all(payloads: Flashblocks) -> Option<FlashblocksPayloadV1> {
+    let mut iter = payloads.into_iter();
+    let mut acc = iter.next()?;
+
+    for next in iter {
+        debug_assert_eq!(
+            acc.payload_id, next.payload_id,
+            "all flashblocks should have the same payload_id"
+        );
+
+        if acc.base.is_none() && next.base.is_some() {
+            acc.base = next.base;
+        }
+
+        acc.diff.gas_used += next.diff.gas_used;
+
+        acc.diff.transactions.extend(next.diff.transactions);
+        acc.diff.withdrawals.extend(next.diff.withdrawals);
+
+        acc.diff.state_root = next.diff.state_root;
+        acc.diff.receipts_root = next.diff.receipts_root;
+        acc.diff.logs_bloom = next.diff.logs_bloom;
+        acc.diff.block_hash = next.diff.block_hash;
+        acc.diff.withdrawals_root = next.diff.withdrawals_root;
+    }
+
+    Some(acc)
+}
+
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
