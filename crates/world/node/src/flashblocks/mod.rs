@@ -1,4 +1,5 @@
 use crate::args::WorldChainArgs;
+use crate::flashblocks::rpc::WorldChainEngineApiBuilder;
 use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
 use crate::node::WorldChainPoolBuilder;
 use flashblocks::rpc::engine::FlashblocksState;
@@ -7,14 +8,17 @@ use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use payload_builder_builder::FlashblocksPayloadBuilderBuilder;
 use reth::builder::components::ComponentsBuilder;
 use reth::builder::{FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes};
+use reth::rpc::compat::RpcTypes;
+use reth_node_api::FullNodeComponents;
 use reth_node_builder::components::PayloadServiceBuilder;
+use reth_node_builder::rpc::{EthApiBuilder, Identity};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_node::node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
     OpNodeTypes,
 };
-use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, OpEvmConfig};
+use reth_optimism_node::{OpAddOnsBuilder, OpEngineApiBuilder, OpEngineTypes, OpEvmConfig};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::eth::OpEthApiBuilder;
@@ -26,6 +30,7 @@ use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
 mod payload_builder_builder;
+mod rpc;
 pub mod service_builder;
 
 /// Type configuration for a regular World Chain node.
@@ -160,6 +165,17 @@ impl WorldChainFlashblocksNode {
             .network(fb_network_builder)
             .consensus(OpConsensusBuilder::default())
     }
+
+    /// Returns [``] with configured arguments.
+    pub fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
+        OpAddOnsBuilder::default()
+            .with_sequencer(self.args.rollup_args.sequencer.clone())
+            .with_sequencer_headers(self.args.rollup_args.sequencer_headers.clone())
+            .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.rollup_args.enable_tx_conditional)
+            .with_min_suggested_priority_fee(self.args.rollup_args.min_suggested_priority_fee)
+            .with_historical_rpc(self.args.rollup_args.historical_rpc.clone())
+    }
 }
 
 impl<N> Node<N> for WorldChainFlashblocksNode
@@ -187,10 +203,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        Self::AddOns::builder()
-            .with_sequencer(self.args.rollup_args.sequencer.clone())
-            .with_da_config(self.da_config.clone())
-            .build()
+        self.add_ons_builder().build()
     }
 }
 
@@ -200,4 +213,32 @@ impl NodeTypes for WorldChainFlashblocksNode {
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
+}
+
+/// Add-ons w.r.t World Chain
+#[derive(Debug)]
+pub struct WorldChainAddOns<
+    N: FullNodeComponents,
+    EthB: EthApiBuilder<N>,
+    EV,
+    EB,
+    RpcMiddleware = Identity,
+> {
+    inner: OpAddOns<N, EthB, EV, EB, RpcMiddleware>,
+}
+
+impl<N: FullNodeComponents<Types: NodeTypes>> Default
+    for WorldChainAddOns<
+        N,
+        OpEthApiBuilder,
+        OpEngineValidatorBuilder,
+        WorldChainEngineApiBuilder<OpEngineValidatorBuilder>,
+        Identity,
+    >
+where
+    OpEthApiBuilder: EthApiBuilder<N>,
+{
+    fn default() -> Self {
+        todo!()
+    }
 }

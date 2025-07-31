@@ -43,20 +43,23 @@ reth-basic-payload-builder.workspace = true
 reth-transaction-pool.workspace = true
 reth-e2e-test-utils = { workspace = true, optional = true }
 reth-node-api.workspace = true
+reth-rpc-engine-api.workspace = true
+
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true, optional = true }
-revm-primitives = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
+revm-primitives = { workspace = true, optional = true }
+
 tokio = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true, optional = true }
 clap.workspace = true
 chrono = { workspace = true, optional = true }
 tracing.workspace = true
-
 
 [dev-dependencies]
 world-chain-builder-pbh.workspace = true

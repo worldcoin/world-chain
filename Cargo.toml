@@ -55,6 +55,7 @@ reth-db-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-provider = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", features = [
     "test-utils",
 ] }
+reth-rpc-engine-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-basic-payload-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-transaction-pool = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-rpc-server-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
@@ -179,7 +180,7 @@ bon = "3.3.0"
 rayon = "1.10.0"
 auto_impl = "1"
 async-trait = "0.1.88"
-
+tower = "0.5"
 # WIP
 # [patch."https://github.com/0xOsiris/reth"]
 # reth = { path = "../../paradigmxyz/reth/bin/reth" }

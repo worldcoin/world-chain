@@ -41,14 +41,7 @@ use world_chain_builder_pool::WorldChainTransactionPool;
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilder<Client, S, Txs = ()>
-where
-    Client: StateProviderFactory
-        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
-        + ChainSpecProvider<ChainSpec: OpHardforks>
-        + Clone
-        + 'static,
-{
+pub struct WorldChainPayloadBuilder<Client: StateProviderFactory + BlockReaderIdExt, S, Txs = ()> {
     pub inner: OpPayloadBuilder<WorldChainTransactionPool<Client, S>, Client, OpEvmConfig, Txs>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
