@@ -2,7 +2,7 @@
 
 Upon receiving new transactions, the World Chain Builder will first ensure that the payload is [a valid OP Stack transaction](https://github.com/paradigmxyz/reth/blob/1e965caf5fa176f244a31c0d2662ba1b590938db/crates/optimism/txpool/src/validator.rs#L136-L203). In addition to the default checks, the builder will also [evaluate transactions for PBH conditions](https://github.com/worldcoin/world-chain/blob/kit/docs/world-chain-builder/crates/world/pool/src/validator.rs#L180-L204).
 
-Any transaction that calls the `pbhMulticall()` or `handleAggregatedOps()` function on the `PBHEntyrPoint` will be considered a PBH transaction and must clear PBH Validation. PBH transactions must contain a valid `PBHPayload` or `PBHPayload[]` in the case of PBH 4337 bundles.
+Any transaction that calls the `pbhMulticall()` or `handleAggregatedOps()` function on the `PBHEntryPoint` will be considered a PBH transaction and must clear PBH Validation. PBH transactions must contain a valid `PBHPayload` or `PBHPayload[]` in the case of PBH 4337 bundles.
 
 ```solidity
     struct PBHPayload {
