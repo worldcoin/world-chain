@@ -74,7 +74,7 @@ async fn insert_identity(
     identity: Identity,
 ) -> eyre::Result<()> {
     let response = client
-        .post(format!("{}/insertIdentity", sequencer_url))
+        .post(format!("{sequencer_url}/insertIdentity"))
         .basic_auth(username, Some(password))
         .json(&InsertCommitmentRequest {
             identity_commitment: identity.commitment().into(),

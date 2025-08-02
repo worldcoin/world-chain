@@ -31,7 +31,13 @@ impl TransactionFixtures {
 
         let mut eip1559 = Vec::new();
         for i in 0..200 {
-            let tx = tx(DEV_CHAIN_ID, None, i as u64, Address::with_last_byte(0x01));
+            let tx = tx(
+                DEV_CHAIN_ID,
+                None,
+                i as u64,
+                Address::with_last_byte(0x01),
+                210_000,
+            );
             let envelope = TransactionTestContext::sign_tx(signer(7), tx).await;
             let raw_tx = envelope.encoded_2718();
             eip1559.push(raw_tx.into());

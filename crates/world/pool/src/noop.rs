@@ -23,6 +23,10 @@ pub struct NoopWorldChainTransactionPool {
 impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
 
+    fn pending_and_queued_txn_count(&self) -> (usize, usize) {
+        (0, 0)
+    }
+
     fn get_blob(
         &self,
         _tx_hash: TxHash,
