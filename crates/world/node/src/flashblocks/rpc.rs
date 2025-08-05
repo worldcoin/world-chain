@@ -1,5 +1,6 @@
-use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
+use alloy_rpc_types::engine::ClientVersionV1;
 use flashblocks::rpc::engine::{FlashblocksState, OpEngineApiExt};
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::{
     payload::PayloadStore,
@@ -15,7 +16,9 @@ use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 /// Builder for basic [`OpEngineApiExt`] implementation.
 pub struct WorldChainEngineApiBuilder<EV> {
     /// The engine validator builder.
-    engine_validator_builder: EV,
+    pub engine_validator_builder: EV,
+    /// The flashblocks handler.
+    pub flashblocks_handle: FlashblocksHandle,
 }
 
 impl<N, EV> EngineApiBuilder<N> for WorldChainEngineApiBuilder<EV>
@@ -27,7 +30,7 @@ where
         >,
         // TODO: Bound Network = OurCustomNetwork to get access to the FlashblocksHandler
         // This will give us the ability to grab the stream here.
-        // Additionally we'll want to store `FlashblocksState` on our `Network` type, so we can use it 
+        // Additionally we'll want to store `FlashblocksState` on our `Network` type, so we can use it
         // from `NodeContext`, and `AddOnsContext` this will allow us to initialize the Any other RPC module overrides with the `FlashblocksState`
         // After initializing the NodeComponents
     >,
@@ -47,6 +50,7 @@ where
     ) -> eyre::eyre::Result<Self::EngineApi> {
         let Self {
             engine_validator_builder,
+            flashblocks_handle,
         } = self;
 
         let engine_validator = engine_validator_builder.build(ctx).await?;
@@ -77,7 +81,9 @@ where
             op_engine_api,
             FlashblocksState::default(),
             ctx.node.task_executor(),
-            todo!(),
+            flashblocks_handle.flashblock_stream(),
         );
+
+        Ok(op_engine_api_ext)
     }
 }

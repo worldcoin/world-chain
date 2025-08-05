@@ -4,6 +4,7 @@ use crate::flashblocks::WorldChainFlashblocksNode;
 use alloy_network::eip2718::Encodable2718;
 use alloy_primitives::{Bytes, TxHash};
 use flashblocks::args::FlashblocksArgs;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
@@ -41,6 +42,7 @@ pub async fn setup_flashblocks(
     Range<u8>,
     Vec<WorldChainNode<WorldChainFlashblocksNode>>,
     TaskManager,
+    Vec<FlashblocksHandle>,
 )> {
     std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     let op_chain_spec = Arc::new(get_chain_spec());
@@ -74,6 +76,8 @@ pub async fn setup_flashblocks(
     let mut nodes =
         Vec::<WorldChainNode<WorldChainFlashblocksNode>>::with_capacity(num_nodes as usize);
 
+    let mut flashblocks_handles = Vec::with_capacity(num_nodes as usize);
+
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
         let _enter = span.enter();
@@ -87,15 +91,26 @@ pub async fn setup_flashblocks(
             flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
         };
 
-        let node = WorldChainFlashblocksNode::new(WorldChainArgs {
-            verified_blockspace_capacity: 70,
-            pbh_entrypoint: PBH_DEV_ENTRYPOINT,
-            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-            world_id: DEV_WORLD_ID,
-            builder_private_key: signer(6).to_bytes().to_string(),
-            flashblocks_args: Some(flashblocks_args),
-            ..Default::default()
-        });
+        let (flashblocks_tx, _) = tokio::sync::broadcast::channel(100);
+
+        let flashblocks_handle = FlashblocksHandle::new(
+            flashblocks_args.flashblocks_builder_sk.verifying_key(),
+            flashblocks_args.flashblocks_builder_sk.clone(),
+            flashblocks_tx,
+        );
+
+        let node = WorldChainFlashblocksNode::new(
+            WorldChainArgs {
+                verified_blockspace_capacity: 70,
+                pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+                signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+                world_id: DEV_WORLD_ID,
+                builder_private_key: signer(6).to_bytes().to_string(),
+                flashblocks_args: Some(flashblocks_args),
+                ..Default::default()
+            },
+            flashblocks_handle.clone(),
+        );
 
         let NodeHandle {
             node,
@@ -138,14 +153,16 @@ pub async fn setup_flashblocks(
         }
 
         nodes.push(node);
+        flashblocks_handles.push(flashblocks_handle);
     }
-    Ok((0..6, nodes, tasks))
+    Ok((0..6, nodes, tasks, flashblocks_handles))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (_signers, mut nodes, _task_manager) = setup_flashblocks(3).await?;
+    // TODO:
+    let (_signers, mut nodes, _task_manager, _) = setup_flashblocks(3).await?;
 
     // fetch the first node
     let node: &mut WorldChainNode<WorldChainFlashblocksNode> = nodes

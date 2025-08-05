@@ -25,7 +25,7 @@ use reth_optimism_rpc::eth::OpEthApiBuilder;
 use reth_optimism_storage::OpStorage;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_trie_db::MerklePatriciaTrie;
-use tokio::sync::broadcast;
+
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
@@ -34,7 +34,7 @@ mod rpc;
 pub mod service_builder;
 
 /// Type configuration for a regular World Chain node.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WorldChainFlashblocksNode {
     /// Additional World Chain args
@@ -46,6 +46,8 @@ pub struct WorldChainFlashblocksNode {
     ///
     /// By default no throttling is applied.
     pub da_config: OpDAConfig,
+    /// The flashblocks handler.
+    pub flashblocks_handle: FlashblocksHandle,
 }
 
 /// A [`ComponentsBuilder`] with its generic arguements set to a stack of World Chain Flashblocks specific builders.
@@ -63,10 +65,11 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
 
 impl WorldChainFlashblocksNode {
     /// Creates a new instance of the World Chain node type.
-    pub fn new(args: WorldChainArgs) -> Self {
+    pub fn new(args: WorldChainArgs, flashblocks_handle: FlashblocksHandle) -> Self {
         Self {
             args,
             da_config: OpDAConfig::default(),
+            flashblocks_handle,
         }
     }
 
@@ -90,18 +93,20 @@ impl WorldChainFlashblocksNode {
             OpEvmConfig<<<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
         >,
     {
-        // inbound flashblocks, for use with the node overlay
-        let (flashblocks_tx, _flashblocks_rx) = broadcast::channel(100);
-
-        let WorldChainArgs {
-            rollup_args,
-            verified_blockspace_capacity,
-            pbh_entrypoint,
-            signature_aggregator,
-            world_id,
-            builder_private_key,
-            flashblocks_args: _,
-        } = self.args.clone();
+        let Self {
+            args:
+                WorldChainArgs {
+                    rollup_args,
+                    verified_blockspace_capacity,
+                    pbh_entrypoint,
+                    signature_aggregator,
+                    world_id,
+                    builder_private_key,
+                    flashblocks_args: _,
+                },
+            flashblocks_handle,
+            ..
+        } = self;
 
         let RollupArgs {
             disable_txpool_gossip,
@@ -112,18 +117,13 @@ impl WorldChainFlashblocksNode {
 
         let flashblocks_args = self.args.flashblocks_args.as_ref().unwrap();
         let op_network_builder = OpNetworkBuilder {
-            disable_txpool_gossip,
+            disable_txpool_gossip: *disable_txpool_gossip,
             disable_discovery_v4: !discovery_v4,
         };
+
         let authorizer_vk = flashblocks_args
             .flashblocks_authorizor_vk
             .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
-
-        let flashblocks_handle = FlashblocksHandle::new(
-            authorizer_vk,
-            flashblocks_args.flashblocks_builder_sk.clone(),
-            flashblocks_tx.clone(),
-        );
 
         let fb_network_builder =
             FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle.clone());
@@ -133,17 +133,17 @@ impl WorldChainFlashblocksNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(WorldChainPoolBuilder::new(
-                pbh_entrypoint,
-                signature_aggregator,
-                world_id,
+                *pbh_entrypoint,
+                *signature_aggregator,
+                *world_id,
             ))
             .executor(OpExecutorBuilder::default())
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
-                    compute_pending_block,
-                    verified_blockspace_capacity,
-                    pbh_entrypoint,
-                    signature_aggregator,
+                    *compute_pending_block,
+                    *verified_blockspace_capacity,
+                    *pbh_entrypoint,
+                    *signature_aggregator,
                     builder_private_key.clone(),
                     flashblocks_args.flashblock_block_time,
                     flashblocks_args.flashblock_interval,
@@ -151,7 +151,7 @@ impl WorldChainFlashblocksNode {
                         flashblocks_args.flashblock_host,
                         flashblocks_args.flashblock_port,
                     ),
-                    flashblocks_tx,
+                    flashblocks_handle.flashblocks_tx(),
                     authorizer_vk,
                     flashblocks_args.flashblocks_builder_sk.clone(),
                     flashblocks_handle.clone(),
@@ -160,7 +160,7 @@ impl WorldChainFlashblocksNode {
                 .with_da_config(self.da_config.clone()),
                 authorizer_vk,
                 flashblocks_args.flashblocks_builder_sk.clone(),
-                flashblocks_handle,
+                flashblocks_handle.clone(),
             ))
             .network(fb_network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -168,6 +168,7 @@ impl WorldChainFlashblocksNode {
 
     /// Returns [``] with configured arguments.
     pub fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
+        // TODO: Update this.
         OpAddOnsBuilder::default()
             .with_sequencer(self.args.rollup_args.sequencer.clone())
             .with_sequencer_headers(self.args.rollup_args.sequencer_headers.clone())

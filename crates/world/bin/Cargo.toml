@@ -16,6 +16,9 @@ world-chain-builder-node.workspace = true
 world-chain-builder-rpc.workspace = true
 world-chain-builder-chainspec.workspace = true
 
+# rollup-boost
+flashblocks-p2p.workspace = true
+
 # reth
 reth-db.workspace = true
 
@@ -71,7 +74,7 @@ serde_json.workspace = true
 # test-utils dependencies
 reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio.workspace = true
 tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]
