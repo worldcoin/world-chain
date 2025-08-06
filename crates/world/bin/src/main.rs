@@ -1,8 +1,12 @@
 use clap::Parser;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use reth_node_builder::node::Node;
 use reth_optimism_cli::Cli;
 use reth_tracing::tracing::info;
+use tokio::sync::broadcast;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
-use world_chain_builder_node::flashblocks::WorldChainFlashblocksNode;
+use world_chain_builder_node::flashblocks_node::WorldChainFlashblocksNode;
+use world_chain_builder_node::FlashblocksState;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -32,10 +36,28 @@ fn main() {
         Cli::<WorldChainChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
 
-            if args.flashblocks_args.is_some() {
-                let node = WorldChainFlashblocksNode::new(args.clone());
+            if let Some(flashblocks_args) = args.flashblocks_args.clone() {
+                let authorizer_vk = flashblocks_args
+                    .flashblocks_authorizor_vk
+                    .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
+
+                let (flashblocks_tx, _) = broadcast::channel(100);
+
+                let state = FlashblocksState::default();
+
+                let flashblocks_handle = FlashblocksHandle::new(
+                    authorizer_vk,
+                    flashblocks_args.flashblocks_builder_sk.clone(),
+                    flashblocks_tx.clone(),
+                );
+
+                let node =
+                    WorldChainFlashblocksNode::new(args.clone(), flashblocks_handle, state.clone());
+
                 let handle = builder
-                    .node(node)
+                    .with_types::<WorldChainFlashblocksNode>()
+                    .with_components(node.components())
+                    .with_add_ons(node.add_ons())
                     .extend_rpc_modules(move |ctx| {
                         let provider = ctx.provider().clone();
                         let pool = ctx.pool().clone();
@@ -47,6 +69,7 @@ fn main() {
                     })
                     .launch()
                     .await?;
+
                 handle.node_exit_future.await
             } else {
                 let node = WorldChainNode::new(args.clone());

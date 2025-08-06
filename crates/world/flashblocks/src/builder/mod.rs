@@ -3,10 +3,12 @@ use crate::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
+    rpc::engine::{reduce_all, FlashblocksState},
     PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
@@ -22,10 +24,12 @@ use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind}
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
+    block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
     ConfigureEvm,
 };
+use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
 use rollup_boost::{
     AuthorizedPayload, ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
@@ -37,7 +41,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_optimism_payload_builder::{builder::ExecutionInfo, config::OpBuilderConfig};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
@@ -48,13 +52,10 @@ use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProvider, StatePro
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::inspector::NoOpInspector;
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
-};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::{fmt::Debug, sync::Arc};
-use tokio::time::Instant;
-use tracing::{debug, span, warn};
+use tokio::runtime::Handle;
+use tracing::{debug, info, span, trace, warn};
 
 pub mod executor;
 pub mod job;
@@ -84,8 +85,9 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The p2p flashblocks handler.
     pub p2p_handler: FlashblocksHandle,
     pub ctx_builder: CtxBuilder,
-    pub authorizer_vk: VerifyingKey,
+    pub authorizer_sk: SigningKey,
     pub builder_sk: SigningKey,
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl<Pool, Client, CtxBuilder, Txs> Clone
@@ -103,11 +105,12 @@ where
             client: self.client.clone(),
             config: self.config.clone(),
             best_transactions: self.best_transactions.clone(),
+            flashblocks_state: self.flashblocks_state.clone(),
             block_time: self.block_time,
             flashblock_interval: self.flashblock_interval,
             p2p_handler: self.p2p_handler.clone(),
             ctx_builder: self.ctx_builder.clone(),
-            authorizer_vk: self.authorizer_vk,
+            authorizer_sk: self.authorizer_sk.clone(),
             builder_sk: self.builder_sk.clone(),
         }
     }
@@ -158,10 +161,11 @@ where
             None,
             self.p2p_handler.clone(),
             self.builder_sk.clone(),
-            self.authorizer_vk,
+            self.authorizer_sk.clone(),
             self.block_time,
             self.flashblock_interval,
             cancel.clone(),
+            self.flashblocks_state.clone(),
         );
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -250,10 +254,11 @@ where
     pub authorization: Option<Authorization>,
     pub p2p_handler: FlashblocksHandle,
     pub builder_sk: SigningKey,
-    pub authorizer_vk: VerifyingKey,
+    pub authorizer_sk: SigningKey,
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub cancel: CancelOnDrop,
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl<'a, Txs> FlashblockBuilder<'a, Txs>
@@ -267,20 +272,22 @@ where
         authorization: Option<Authorization>,
         p2p_handler: FlashblocksHandle,
         builder_sk: SigningKey,
-        authorizer_vk: VerifyingKey,
+        authorizer_sk: SigningKey,
         block_time: u64,
         flashblock_interval: u64,
         cancel: CancelOnDrop,
+        flashblocks_state: FlashblocksState,
     ) -> Self {
         Self {
             best: Box::new(best),
             authorization,
             builder_sk,
-            authorizer_vk,
+            authorizer_sk,
             block_time,
             flashblock_interval,
             cancel,
             p2p_handler,
+            flashblocks_state,
         }
     }
 }
@@ -315,6 +322,119 @@ where
         let mut transactions_offset = 0;
         let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
+        // 2. Wait for clearance from the p2p handler
+        let p2p_handler = self.p2p_handler.clone();
+
+        let state = tokio::task::block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(async {
+                p2p_handler.await_clearance().await;
+                self.flashblocks_state.0.read().await
+            })
+        });
+
+        // TODO: We shouldn't re-execute the transitions here, but we have to because of a lack of context
+        // on the [`FlashblocksPayloadV1`]. We need to know `total_fees` which can't be determined without
+        // re-executing the transactions. This information exists on the Receipt, but we currently aren't including any metadata.
+        if !state.is_empty() {
+            info!("State is non-empty - re-executing transactions to aggregate trie updates and receipts");
+            // Re-execute the transactions to aggregate the trie updates, and receipts.
+            let db = StateProviderDatabase::new(&state_provider);
+            let mut db = State::builder()
+                .with_database(db)
+                .with_bundle_update()
+                .build();
+            // construct the block builder
+            let mut builder = ctx.block_builder(&mut db)?;
+
+            let aggregated_state =
+                reduce_all(state.clone()).ok_or(PayloadBuilderError::MissingPayload)?;
+
+            let base = aggregated_state
+                .base
+                .as_ref()
+                .ok_or(PayloadBuilderError::MissingPayload)?;
+
+            let mut info = ExecutionInfo::default();
+
+            for tx in aggregated_state.diff.transactions {
+                let envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
+                    .expect("pre-confirmed transactions are always decodable");
+
+                let recovered = envelope
+                    .try_clone_into_recovered_unchecked()
+                    .expect("pre-confirmed transactions are always valid");
+
+                let gas_used = match builder.execute_transaction(recovered.clone()) {
+                    Ok(gas_used) => gas_used,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        trace!(target: "payload_builder", %error, ?tx, "Error in transaction, skipping.");
+                        continue;
+                    }
+                    Err(err) => {
+                        // this is an error that we should treat as fatal for this attempt
+                        return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
+                    }
+                };
+
+                info.total_fees += if envelope.is_deposit() {
+                    U256::ZERO
+                } else {
+                    let miner_fee = recovered
+                        .effective_tip_per_gas(base.base_fee_per_gas.to())
+                        .expect("fee is always valid; execution succeeded");
+
+                    U256::from(miner_fee) * U256::from(gas_used)
+                };
+            }
+
+            let BlockBuilderOutcome {
+                execution_result,
+                hashed_state,
+                trie_updates,
+                block,
+            } = builder.finish(&state_provider)?;
+
+            let sealed_block = Arc::new(block.sealed_block().clone());
+
+            let execution_outcome = ExecutionOutcome::new(
+                db.take_bundle(),
+                vec![execution_result.receipts],
+                block.number(),
+                Vec::new(),
+            );
+
+            // create the executed block data
+            let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> =
+                ExecutedBlockWithTrieUpdates {
+                    block: ExecutedBlock {
+                        recovered_block: Arc::new(block),
+                        execution_output: Arc::new(execution_outcome),
+                        hashed_state: Arc::new(hashed_state),
+                    },
+                    trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
+                };
+
+            let payload = OpBuiltPayload::new(
+                ctx.payload_id(),
+                sealed_block.clone(),
+                info.total_fees,
+                Some(executed),
+            );
+
+            debug_assert_eq!(
+                sealed_block.hash(),
+                aggregated_state.diff.block_hash,
+                "Block hash mismatch"
+            );
+
+            // Freeze the payload
+            return Ok(BuildOutcomeKind::Freeze(payload));
+        }
+
         // 2. Create the block builder
         let state = StateProviderDatabase::new(&state_provider);
         let mut state = State::builder()
@@ -344,8 +464,8 @@ where
             let authorization = Authorization::new(
                 payload.payload_id,
                 ctx.attributes().timestamp(),
-                &self.builder_sk,
-                self.authorizer_vk,
+                &self.authorizer_sk,
+                self.builder_sk.verifying_key(),
             );
 
             AuthorizedPayload::new(&self.builder_sk, authorization, payload)
@@ -371,6 +491,8 @@ where
 
         // 5. Repeat executing transactions from the pool every `flashblock_interval` milliseconds\
         loop {
+            flashblock_idx += 1;
+
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
 
             let span = span!(
@@ -381,7 +503,7 @@ where
             );
 
             match notify {
-                Some(None) => {
+                Some(()) => {
                     let _enter = span.enter();
 
                     debug!(target: "payload_builder", "building flashblock");
@@ -446,14 +568,11 @@ where
                 }
 
                 // tx was dropped, resolve the most recent payload
-                // TODO: Update this
                 _ => {
                     debug!(target: "payload_builder", "no more flashblocks to build, resolving payload");
                     break;
                 }
             }
-
-            flashblock_idx += 1;
         }
 
         let BlockBuilderOutcome {
@@ -584,16 +703,11 @@ where
     /// Spawns a task responsible for cancelling, and initiating building of new flashblock payloads.
     ///
     /// A job will be initiated every `flashblock_interval` as long as clearance has been given from the p2p handler.
-    /// There are two possible outcomes:
-    /// 1. Clearance is yielded by the p2p handler - b
-    fn spawn_flashblock_job_manager(
-        &self,
-        tx: tokio::sync::mpsc::Sender<Option<FlashblocksPayloadV1>>,
-    ) {
+    fn spawn_flashblock_job_manager(&self, tx: tokio::sync::mpsc::Sender<()>) {
         let block_time = self.block_time;
         let flashblock_interval = self.flashblock_interval;
 
-        let _p2p_handler = self.p2p_handler.clone();
+        let p2p_handler = self.p2p_handler.clone();
 
         let cancel = self.cancel.clone();
         let span = span!(tracing::Level::DEBUG, "flashblock_job_manager");
@@ -616,12 +730,11 @@ where
                     // and drop the sender to resolve the most recent payload.
                     drop(tx);
                 },
+
                 // Wait for clearance from the p2p handler.
                 // This checks whether another builder is already building flashblocks. If so, we want to build on top of the latest flashblock published over p2p.
-
                 _ = async {
                     loop {
-                        let instant = Instant::now();
                         let _tx = tx.clone();
                         if cancel.is_cancelled() {
                             debug!(target: "payload_builder", "parent cancel was dropped, cancelling flashblock job");
@@ -630,36 +743,17 @@ where
                             break;
                         }
 
-                        tokio::select! {
-                            _ = flashblock_interval.tick() => {
-                                // Flashblock interval has elapsed, wait for clearance from the p2p handler.
-                                // TODO:
-                                // tokio::select! {
-                                //     _ = p2p_handler.wait_for_clearance() => {
-                                //         debug!(target: "payload_builder", "flashblock clearance granted, building flashblock");
-                                //         // clearance granted, we can build the next flashblock on top of the parent
-                                //         // queue the next flashblock job, but there's no benefit in cancelling the current job
-                                //         // here we are exceeding `flashblock_interval` on the current job, but we want to give it `block_time` to finish.
-                                //         // because the next job will also exceed `flashblock_interval`.
-                                //         if let Err(err) = tx.send(None).await {
-                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                //         }
-                                //     },
-                                //     flashblock = flashblocks_rx.recv() => {
-                                //         // flashblock was received over p2p, we can build on top of it
-                                //         if let Err(err) = tx.send(flashblock).await {
-                                //             warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                //         }
-                                //     },
-                                // }
+                       let (_, _) = tokio::join!(
+                            flashblock_interval.tick(),
+                            p2p_handler.await_clearance()
+                        );
 
-                                if let Err(err) = tx.send(None).await {
-                                    warn!(target: "payload_builder", %err, "failed to send flashblock job notification");
-                                }
-                                let elapsed = instant.elapsed();
-                                debug!(target: "payload_builder", ?elapsed, "flashblock interval exceeded, queuing next flashblock job");
-                            },
-                       }
+                        // if we reach here, we have clearance to build a new flashblock
+                        debug!(target: "payload_builder", "flashblock interval exceeded, and clearance granted building new flashblock");
+                        if let Err(e) = tx.send(()).await {
+                            warn!(target: "payload_builder", %e, "failed to send flashblock job");
+                            break;
+                        }
                     }
                 } => {
                     // either the parent payload job was cancelled, or all flashblocks were built.
@@ -713,6 +807,11 @@ where
         .skip(transactions_offset)
         .map(|tx| tx.encoded_2718().into())
         .collect::<Vec<_>>();
+
+    info!(
+        "Building flashblock payload with {:?} transactions",
+        transactions
+    );
 
     FlashblocksPayloadV1 {
         payload_id: ctx.payload_id(),

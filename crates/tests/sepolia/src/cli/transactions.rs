@@ -22,7 +22,6 @@ use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::usize;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::{debug, error, info};
@@ -494,7 +493,7 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
         let proof = proof.clone();
         let identity = identity.clone();
 
-        let _ = tokio::spawn(async move {
+        tokio::spawn(async move {
             send_uo_task(
                 i,
                 provider,
@@ -520,11 +519,11 @@ pub async fn send_aa(args: SendAAArgs) -> eyre::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_uo_task(
     index: usize,
     provider: Arc<impl Provider>,
     _permit: OwnedSemaphorePermit,
-
     signer: PrivateKeySigner,
     safe: Address,
     module: Address,
@@ -549,6 +548,7 @@ async fn send_uo_task(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_uo_task_inner(
     provider: Arc<impl Provider>,
     signer: PrivateKeySigner,

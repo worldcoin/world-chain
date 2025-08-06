@@ -55,6 +55,7 @@ reth-db-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-provider = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", features = [
     "test-utils",
 ] }
+reth-rpc-engine-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-basic-payload-builder = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-transaction-pool = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-rpc-server-types = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
@@ -143,13 +144,14 @@ jsonrpsee-core = { version = "0.25.1" }
 jsonrpsee-types = "0.25.1"
 
 # 3rd party
-rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "24acb80" }
-flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "24acb80" }
+rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "974cc1855b5c20d2e5977b4179a7da1731574604" }
+flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "974cc1855b5c20d2e5977b4179a7da1731574604" }
 
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-tungstenite = "0.26.2"
 futures = "0.3"
+futures-util = "*"
 chrono = "0.4"
 thiserror = "1"
 strum = { version = "0.27", features = ["derive"] }
@@ -179,7 +181,7 @@ bon = "3.3.0"
 rayon = "1.10.0"
 auto_impl = "1"
 async-trait = "0.1.88"
-
+tower = "0.5"
 # WIP
 # [patch."https://github.com/0xOsiris/reth"]
 # reth = { path = "../../paradigmxyz/reth/bin/reth" }
