@@ -14423,6 +14423,7 @@ dependencies = [
  "flashblocks",
  "flashblocks-p2p",
  "futures",
+ "futures-util",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth",

@@ -21,7 +21,6 @@ flashblocks-p2p.workspace = true
 
 # reth
 reth-db.workspace = true
-
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
@@ -47,6 +46,7 @@ reth-optimism-payload-builder.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-optimism-node.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde"] }

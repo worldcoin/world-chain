@@ -58,7 +58,7 @@ use rollup_boost::{
 };
 use std::{fmt::Debug, sync::Arc};
 use tokio::runtime::Handle;
-use tracing::{debug, span, trace, warn};
+use tracing::{debug, info, span, trace, warn};
 
 pub mod executor;
 pub mod job;
@@ -88,7 +88,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The p2p flashblocks handler.
     pub p2p_handler: FlashblocksHandle,
     pub ctx_builder: CtxBuilder,
-    pub authorizer_vk: VerifyingKey,
+    pub authorizer_sk: SigningKey,
     pub builder_sk: SigningKey,
     pub flashblocks_state: FlashblocksState,
 }
@@ -113,7 +113,7 @@ where
             flashblock_interval: self.flashblock_interval,
             p2p_handler: self.p2p_handler.clone(),
             ctx_builder: self.ctx_builder.clone(),
-            authorizer_vk: self.authorizer_vk,
+            authorizer_sk: self.authorizer_sk.clone(),
             builder_sk: self.builder_sk.clone(),
         }
     }
@@ -164,7 +164,7 @@ where
             None,
             self.p2p_handler.clone(),
             self.builder_sk.clone(),
-            self.authorizer_vk,
+            self.authorizer_sk.clone(),
             self.block_time,
             self.flashblock_interval,
             cancel.clone(),
@@ -257,7 +257,7 @@ where
     pub authorization: Option<Authorization>,
     pub p2p_handler: FlashblocksHandle,
     pub builder_sk: SigningKey,
-    pub authorizer_vk: VerifyingKey,
+    pub authorizer_sk: SigningKey,
     pub block_time: u64,
     pub flashblock_interval: u64,
     pub cancel: CancelOnDrop,
@@ -275,7 +275,7 @@ where
         authorization: Option<Authorization>,
         p2p_handler: FlashblocksHandle,
         builder_sk: SigningKey,
-        authorizer_vk: VerifyingKey,
+        authorizer_sk: SigningKey,
         block_time: u64,
         flashblock_interval: u64,
         cancel: CancelOnDrop,
@@ -285,7 +285,7 @@ where
             best: Box::new(best),
             authorization,
             builder_sk,
-            authorizer_vk,
+            authorizer_sk,
             block_time,
             flashblock_interval,
             cancel,
@@ -466,8 +466,8 @@ where
             let authorization = Authorization::new(
                 payload.payload_id,
                 ctx.attributes().timestamp(),
-                &self.builder_sk,
-                self.authorizer_vk,
+                &self.authorizer_sk,
+                self.builder_sk.verifying_key(),
             );
 
             AuthorizedPayload::new(&self.builder_sk, authorization, payload)
@@ -493,6 +493,8 @@ where
 
         // 5. Repeat executing transactions from the pool every `flashblock_interval` milliseconds\
         loop {
+            flashblock_idx += 1;
+
             let notify = tokio::task::block_in_place(|| rx.blocking_recv());
 
             let span = span!(
@@ -573,8 +575,6 @@ where
                     break;
                 }
             }
-
-            flashblock_idx += 1;
         }
 
         let BlockBuilderOutcome {
@@ -809,6 +809,11 @@ where
         .skip(transactions_offset)
         .map(|tx| tx.encoded_2718().into())
         .collect::<Vec<_>>();
+
+    info!(
+        "Building flashblock payload with {:?} transactions",
+        transactions
+    );
 
     FlashblocksPayloadV1 {
         payload_id: ctx.payload_id(),
