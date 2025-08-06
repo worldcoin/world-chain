@@ -31,7 +31,7 @@ reth-optimism-primitives.workspace = true
 reth-optimism-storage.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
-reth-primitives = { workspace = true, optional = true }
+reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
 reth-optimism-forks.workspace = true
@@ -47,7 +47,7 @@ reth-rpc-engine-api.workspace = true
 
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
-alloy-rpc-types = { workspace = true, optional = true }
+alloy-rpc-types.workspace = true
 alloy-sol-types = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -94,12 +94,10 @@ test = [
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
     "dep:reth-tracing",
-    "dep:reth-primitives",
     "dep:reth-primitives-traits",
     "dep:reth-prune-types",
     "dep:reth-trie",
     "dep:reth-db",
-    "dep:alloy-rpc-types",
     "dep:alloy-sol-types",
     "dep:alloy-eips",
     "dep:revm-primitives",
