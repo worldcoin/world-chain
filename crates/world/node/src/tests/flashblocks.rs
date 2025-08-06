@@ -30,7 +30,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{span, warn};
+use tracing::span;
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{

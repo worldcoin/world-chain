@@ -52,10 +52,7 @@ use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProvider, StatePro
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::inspector::NoOpInspector;
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
-};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::{fmt::Debug, sync::Arc};
 use tokio::runtime::Handle;
 use tracing::{debug, info, span, trace, warn};

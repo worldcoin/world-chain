@@ -16,7 +16,7 @@ use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
-use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
+use rollup_boost::ed25519_dalek::SigningKey;
 use rollup_boost::FlashblocksPayloadV1;
 use tokio::sync::broadcast;
 use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
