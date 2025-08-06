@@ -181,7 +181,7 @@ impl WorldChainFlashblocksNode {
             .consensus(OpConsensusBuilder::default())
     }
 
-    /// Returns [``] with configured arguments.
+    /// Returns [`OpAddOnsBuilder`] with configured arguments.
     pub fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
         OpAddOnsBuilder::default()
             .with_sequencer(self.args.rollup_args.sequencer.clone())
