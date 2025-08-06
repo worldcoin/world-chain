@@ -56,11 +56,6 @@ where
             ChainSpec: EthereumHardforks,
             Payload: EngineTypes<ExecutionData = OpExecutionData>,
         >,
-        // TODO: Bound Network = OurCustomNetwork to get access to the FlashblocksHandler
-        // This will give us the ability to grab the stream here.
-        // Additionally we'll want to store `FlashblocksState` on our `Network` type, so we can use it
-        // from `NodeContext`, and `AddOnsContext` this will allow us to initialize the Any other RPC module overrides with the `FlashblocksState`
-        // After initializing the NodeComponents
     >,
     EV: EngineValidatorBuilder<N>,
 {
