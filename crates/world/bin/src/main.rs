@@ -5,8 +5,9 @@ use reth_optimism_node::{OpAddOns, OpEngineValidatorBuilder};
 use reth_tracing::tracing::info;
 use tokio::sync::broadcast;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
-use world_chain_builder_node::flashblocks::rpc::WorldChainEngineApiBuilder;
-use world_chain_builder_node::flashblocks::WorldChainFlashblocksNode;
+use world_chain_builder_node::flashblocks_node::rpc::WorldChainEngineApiBuilder;
+use world_chain_builder_node::flashblocks_node::WorldChainFlashblocksNode;
+use world_chain_builder_node::FlashblocksState;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -43,6 +44,8 @@ fn main() {
 
                 let (flashblocks_tx, _) = broadcast::channel(100);
 
+                let state = FlashblocksState::default();
+
                 let flashblocks_handle = FlashblocksHandle::new(
                     authorizer_vk,
                     flashblocks_args.flashblocks_builder_sk.clone(),
@@ -52,9 +55,11 @@ fn main() {
                 let engine_builder = WorldChainEngineApiBuilder {
                     engine_validator_builder: OpEngineValidatorBuilder::default(),
                     flashblocks_handle: flashblocks_handle.clone(),
+                    flashblocks_state: state.clone(),
                 };
 
-                let node = WorldChainFlashblocksNode::new(args.clone(), flashblocks_handle);
+                let node =
+                    WorldChainFlashblocksNode::new(args.clone(), flashblocks_handle, state.clone());
 
                 let handle = builder
                     .with_types::<WorldChainFlashblocksNode>()

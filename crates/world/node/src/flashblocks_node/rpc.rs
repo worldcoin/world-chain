@@ -19,6 +19,8 @@ pub struct WorldChainEngineApiBuilder<EV> {
     pub engine_validator_builder: EV,
     /// The flashblocks handler.
     pub flashblocks_handle: FlashblocksHandle,
+    /// The flashblocks state.
+    pub flashblocks_state: FlashblocksState,
 }
 
 impl<N, EV> EngineApiBuilder<N> for WorldChainEngineApiBuilder<EV>
@@ -51,6 +53,7 @@ where
         let Self {
             engine_validator_builder,
             flashblocks_handle,
+            flashblocks_state,
         } = self;
 
         let engine_validator = engine_validator_builder.build(ctx).await?;
@@ -79,7 +82,7 @@ where
 
         let op_engine_api_ext = OpEngineApiExt::new(
             op_engine_api,
-            FlashblocksState::default(),
+            flashblocks_state,
             ctx.node.task_executor(),
             flashblocks_handle.flashblock_stream(),
         );

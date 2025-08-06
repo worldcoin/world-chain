@@ -1,7 +1,3 @@
-use crate::args::WorldChainArgs;
-use crate::flashblocks::rpc::WorldChainEngineApiBuilder;
-use crate::flashblocks::service_builder::FlashblocksPayloadServiceBuilder;
-use crate::node::WorldChainPoolBuilder;
 use flashblocks::rpc::engine::FlashblocksState;
 use flashblocks_p2p::net::FlashblocksNetworkBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
@@ -28,6 +24,11 @@ use rollup_boost::ed25519_dalek::SigningKey;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
+use crate::args::WorldChainArgs;
+use crate::flashblocks_node::rpc::WorldChainEngineApiBuilder;
+use crate::flashblocks_node::service_builder::FlashblocksPayloadServiceBuilder;
+use crate::node::WorldChainPoolBuilder;
+
 mod payload_builder_builder;
 pub mod rpc;
 pub mod service_builder;
@@ -47,6 +48,8 @@ pub struct WorldChainFlashblocksNode {
     pub da_config: OpDAConfig,
     /// The flashblocks handler.
     pub flashblocks_handle: FlashblocksHandle,
+    /// The flashblocks state.
+    pub flashblocks_state: FlashblocksState,
 }
 
 /// A [`ComponentsBuilder`] with its generic arguements set to a stack of World Chain Flashblocks specific builders.
@@ -64,11 +67,16 @@ pub type WorldChainFlashblocksNodeComponentBuilder<
 
 impl WorldChainFlashblocksNode {
     /// Creates a new instance of the World Chain node type.
-    pub fn new(args: WorldChainArgs, flashblocks_handle: FlashblocksHandle) -> Self {
+    pub fn new(
+        args: WorldChainArgs,
+        flashblocks_handle: FlashblocksHandle,
+        flashblocks_state: FlashblocksState,
+    ) -> Self {
         Self {
             args,
             da_config: OpDAConfig::default(),
             flashblocks_handle,
+            flashblocks_state,
         }
     }
 
@@ -104,6 +112,7 @@ impl WorldChainFlashblocksNode {
                     flashblocks_args: _,
                 },
             flashblocks_handle,
+            flashblocks_state,
             ..
         } = self;
 
@@ -126,8 +135,6 @@ impl WorldChainFlashblocksNode {
 
         let fb_network_builder =
             FlashblocksNetworkBuilder::new(op_network_builder, flashblocks_handle.clone());
-
-        let flashblocks_state = FlashblocksState::default();
 
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -154,12 +161,10 @@ impl WorldChainFlashblocksNode {
                     authorizer_sk.clone(),
                     flashblocks_args.flashblocks_builder_sk.clone(),
                     flashblocks_handle.clone(),
-                    flashblocks_state,
+                    flashblocks_state.clone(),
                 )
                 .with_da_config(self.da_config.clone()),
-                flashblocks_args
-                    .flashblocks_builder_sk
-                    .verifying_key(),
+                flashblocks_args.flashblocks_builder_sk.verifying_key(),
                 authorizer_sk,
                 flashblocks_handle.clone(),
             ))

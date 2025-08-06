@@ -337,6 +337,7 @@ where
         // on the [`FlashblocksPayloadV1`]. We need to know `total_fees` which can't be determined without
         // re-executing the transactions. This information exists on the Receipt, but we currently aren't including any metadata.
         if !state.is_empty() {
+            info!("State is non-empty - re-executing transactions to aggregate trie updates and receipts");
             // Re-execute the transactions to aggregate the trie updates, and receipts.
             let db = StateProviderDatabase::new(&state_provider);
             let mut db = State::builder()
