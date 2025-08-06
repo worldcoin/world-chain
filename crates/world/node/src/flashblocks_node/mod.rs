@@ -86,6 +86,15 @@ impl WorldChainFlashblocksNode {
         self
     }
 
+    /// Returns the [`WorldChainEngineApiBuilder`] for the World Chain node.
+    pub fn engine_api_builder(&self) -> WorldChainEngineApiBuilder<OpEngineValidatorBuilder> {
+        WorldChainEngineApiBuilder {
+            engine_validator_builder: OpEngineValidatorBuilder::default(),
+            flashblocks_handle: self.flashblocks_handle.clone(),
+            flashblocks_state: self.flashblocks_state.clone(),
+        }
+    }
+
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(&self) -> WorldChainFlashblocksNodeComponentBuilder<Node>
     where
@@ -209,7 +218,9 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        unimplemented!("WorldChainFlashblocksNode does not implement add_ons yet")
+        self.add_ons_builder()
+            .build::<_, OpEngineValidatorBuilder, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>>()
+            .with_engine_api(self.engine_api_builder())
     }
 }
 

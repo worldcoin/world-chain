@@ -1,11 +1,10 @@
 use clap::Parser;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use reth_node_builder::node::Node;
 use reth_optimism_cli::Cli;
-use reth_optimism_node::{OpAddOns, OpEngineValidatorBuilder};
 use reth_tracing::tracing::info;
 use tokio::sync::broadcast;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
-use world_chain_builder_node::flashblocks_node::rpc::WorldChainEngineApiBuilder;
 use world_chain_builder_node::flashblocks_node::WorldChainFlashblocksNode;
 use world_chain_builder_node::FlashblocksState;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
@@ -52,19 +51,13 @@ fn main() {
                     flashblocks_tx.clone(),
                 );
 
-                let engine_builder = WorldChainEngineApiBuilder {
-                    engine_validator_builder: OpEngineValidatorBuilder::default(),
-                    flashblocks_handle: flashblocks_handle.clone(),
-                    flashblocks_state: state.clone(),
-                };
-
                 let node =
                     WorldChainFlashblocksNode::new(args.clone(), flashblocks_handle, state.clone());
 
                 let handle = builder
                     .with_types::<WorldChainFlashblocksNode>()
                     .with_components(node.components())
-                    .with_add_ons(OpAddOns::default().with_engine_api(engine_builder))
+                    .with_add_ons(node.add_ons())
                     .extend_rpc_modules(move |ctx| {
                         let provider = ctx.provider().clone();
                         let pool = ctx.pool().clone();

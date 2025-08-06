@@ -1,7 +1,11 @@
+use alloy_primitives::FixedBytes;
 use alloy_rpc_types::engine::ClientVersionV1;
 use flashblocks::rpc::engine::{FlashblocksState, OpEngineApiExt};
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_p2p::protocol::handler::{
+    FlashblocksHandle, FlashblocksP2PCtx, FlashblocksP2PState,
+};
 use op_alloy_rpc_types_engine::OpExecutionData;
+use parking_lot::lock_api::Mutex;
 use reth::{
     payload::PayloadStore,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA},
@@ -12,6 +16,8 @@ use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
+use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
+use std::sync::Arc;
 
 /// Builder for basic [`OpEngineApiExt`] implementation.
 pub struct WorldChainEngineApiBuilder<EV> {
@@ -21,6 +27,26 @@ pub struct WorldChainEngineApiBuilder<EV> {
     pub flashblocks_handle: FlashblocksHandle,
     /// The flashblocks state.
     pub flashblocks_state: FlashblocksState,
+}
+
+impl<EV: Default> Default for WorldChainEngineApiBuilder<EV> {
+    fn default() -> Self {
+        let (tx, _) = tokio::sync::broadcast::channel(0);
+        let (peer_tx, _) = tokio::sync::broadcast::channel(0);
+        Self {
+            engine_validator_builder: EV::default(),
+            flashblocks_handle: FlashblocksHandle {
+                ctx: FlashblocksP2PCtx {
+                    authorizer_vk: VerifyingKey::default(),
+                    builder_sk: SigningKey::from_bytes(FixedBytes::<32>::default().as_ref()),
+                    peer_tx,
+                    flashblock_tx: tx,
+                },
+                state: Arc::new(Mutex::new(FlashblocksP2PState::default())),
+            },
+            flashblocks_state: FlashblocksState::default(),
+        }
+    }
 }
 
 impl<N, EV> EngineApiBuilder<N> for WorldChainEngineApiBuilder<EV>

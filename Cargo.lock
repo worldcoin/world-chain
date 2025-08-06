@@ -14426,6 +14426,7 @@ dependencies = [
  "futures-util",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
+ "parking_lot",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
