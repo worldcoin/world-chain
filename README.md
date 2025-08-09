@@ -1,6 +1,8 @@
 
 <p align="center">
-  <img src="assets/world-chain.png" alt="World Chain">
+  <a href="https://world.org/world-chain" target="_blank" rel="noopener noreferrer">
+    <img src="assets/world-chain.png" alt="World Chain">
+  </a>
 </p>
 
 # World Chain
