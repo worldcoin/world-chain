@@ -35,7 +35,7 @@ impl From<DateMarker> for NaiveDate {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DateMarkerParsingError {
     #[error("invalid length - expected 6 characters got {actual}")]
-    InvaldLength { actual: usize },
+    InvalidLength { actual: usize },
     #[error("error parsing month - {0}")]
     InvalidMonth(std::num::ParseIntError),
     #[error("month out of range - expected 01-12 got {month}")]
@@ -49,7 +49,7 @@ impl FromStr for DateMarker {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() != 6 {
-            return Err(DateMarkerParsingError::InvaldLength { actual: s.len() });
+            return Err(DateMarkerParsingError::InvalidLength { actual: s.len() });
         }
 
         let month = &s[..2];
