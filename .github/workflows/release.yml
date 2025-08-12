@@ -44,7 +44,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}
@@ -158,7 +158,7 @@ jobs:
             binary: world-chain-builder
     runs-on: ${{ matrix.runner }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -195,7 +195,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Download artifacts
