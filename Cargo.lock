@@ -3792,42 +3792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flashblocks"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-op-evm",
- "alloy-primitives 1.2.1",
- "alloy-rpc-types-engine",
- "clap",
- "flashblocks-p2p",
- "futures",
- "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
- "reth",
- "reth-basic-payload-builder",
- "reth-chain-state",
- "reth-chainspec",
- "reth-evm",
- "reth-optimism-chainspec",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
- "reth-payload-util",
- "reth-primitives",
- "reth-provider",
- "reth-transaction-pool",
- "revm",
- "rollup-boost",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "flashblocks-p2p"
 version = "0.1.0"
 source = "git+https://github.com/flashbots/rollup-boost?rev=24acb80#24acb8097e0ecb2a5758b348d618a672d3f69d26"
@@ -14346,6 +14310,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "dotenvy",
+ "flashblocks-p2p",
  "futures",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -14379,6 +14344,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-db",
  "revm",
+ "rollup-boost",
  "serde",
  "serde_json",
  "tikv-jemallocator",
@@ -14404,9 +14370,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-builder-flashblocks"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-op-evm",
+ "alloy-primitives 1.2.1",
+ "alloy-rpc-types-engine",
+ "clap",
+ "color-eyre",
+ "dashmap 6.1.0",
+ "flashblocks-p2p",
+ "futures",
+ "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-optimism-chainspec",
+ "reth-optimism-forks",
+ "reth-optimism-node",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-optimism-rpc",
+ "reth-payload-util",
+ "reth-primitives",
+ "reth-provider",
+ "reth-transaction-pool",
+ "revm",
+ "rollup-boost",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "world-chain-builder-node"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
@@ -14419,10 +14426,11 @@ dependencies = [
  "clap",
  "color-eyre",
  "criterion",
- "flashblocks",
  "flashblocks-p2p",
  "futures",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "parking_lot",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -14446,6 +14454,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
+ "reth-rpc-engine-api",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
@@ -14453,11 +14462,13 @@ dependencies = [
  "revm-primitives",
  "rollup-boost",
  "semaphore-rs",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "world-chain-builder-flashblocks",
  "world-chain-builder-payload",
  "world-chain-builder-pbh",
  "world-chain-builder-pool",
@@ -14479,7 +14490,6 @@ dependencies = [
  "alloy-sol-types 1.2.1",
  "color-eyre",
  "derive_more 2.0.1",
- "flashblocks",
  "op-alloy-rpc-types",
  "reth",
  "reth-basic-payload-builder",
@@ -14500,6 +14510,7 @@ dependencies = [
  "semaphore-rs",
  "tokio",
  "tracing",
+ "world-chain-builder-flashblocks",
  "world-chain-builder-pool",
  "world-chain-builder-rpc",
 ]

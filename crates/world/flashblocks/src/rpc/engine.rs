@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin};
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
@@ -20,56 +20,19 @@ use reth_chainspec::EthereumHardforks;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::FlashblocksPayloadV1;
-use tokio::sync::RwLock;
+use rollup_boost::{Authorization, FlashblocksPayloadV1};
 
-pub type Flashblocks = Vec<FlashblocksPayloadV1>;
+use crate::primitives::FlashblocksState;
 
-/// The current state of all known pre confirmations received over the P2P layer
-/// or generated from the payload building job of this node.
-///
-/// The state is flushed when FCU is received with a parent hash that matches the block hash
-/// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
-/// in which case the pre confirmations were not included as part of the canonical chain.
-#[derive(Debug, Clone)]
-pub struct FlashblocksState(pub Arc<RwLock<Flashblocks>>);
-
-impl Default for FlashblocksState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FlashblocksState {
-    /// Creates a new instance of [`FlashblocksState`].
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(Vec::new())))
-    }
-
-    /// Returns a reference to the latest flashblock.
-    pub async fn last(&self) -> Option<FlashblocksPayloadV1> {
-        self.0.read().await.last().cloned()
-    }
-
-    /// Appends a new flashblock to the state.
-    pub async fn push(&self, payload: FlashblocksPayloadV1) {
-        let mut state = self.0.write().await;
-        state.retain(|p| p.payload_id == payload.payload_id);
-        state.push(payload);
-    }
-
-    /// Clears the current state of flashblocks.
-    pub async fn clear(&self) {
-        self.0.write().await.clear();
-    }
-}
-
+/// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// The current store of all pre confirmations ahead of the canonical chain.
     flashblocks_state: FlashblocksState,
+    /// A watch channel notifier to the jobs generator.
+    _to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -81,6 +44,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         flashblocks_state: FlashblocksState,
         executor: impl TaskSpawner,
         stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
+        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     ) -> Self {
         executor.spawn_critical(
             "subscription_handle",
@@ -90,6 +54,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         Self {
             inner,
             flashblocks_state,
+            _to_jobs_generator: to_jobs_generator,
         }
     }
 

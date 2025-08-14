@@ -41,7 +41,7 @@ world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
 world-chain-builder-chainspec = { path = "crates/world/chainspec" }
 world-chain-builder-test-utils = { path = "crates/world/test-utils" }
-flashblocks = { path = "crates/world/flashblocks" }
+world-chain-builder-flashblocks = { path = "crates/world/flashblocks" }
 
 # reth
 reth = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
@@ -76,6 +76,7 @@ reth-payload-validator = { git = "https://github.com/0xOsiris/reth", rev = "1bb4
 reth-revm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", default-features = false }
 reth-tasks = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-chainspec = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
+reth-rpc-engine-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 
 # reth-optimism
 reth-primitives = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
@@ -179,6 +180,7 @@ bon = "3.3.0"
 rayon = "1.10.0"
 auto_impl = "1"
 async-trait = "0.1.88"
+dashmap = "6.1.0"
 
 # WIP
 # [patch."https://github.com/0xOsiris/reth"]

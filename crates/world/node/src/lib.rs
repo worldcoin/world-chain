@@ -4,6 +4,8 @@ pub mod args;
 pub mod flashblocks;
 pub mod node;
 
+pub use world_chain_builder_flashblocks::primitives::*;
+
 #[cfg(any(feature = "test", test))]
 pub mod test_utils;
 

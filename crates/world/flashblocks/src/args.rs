@@ -43,6 +43,22 @@ pub struct FlashblocksArgs {
         required = false,
     )]
     pub flashblocks_builder_sk: SigningKey,
+
+    #[arg(
+        long = "flashblock.authorizer_sk",
+        env = "FLASHBLOCKS_AUTHORIZOR_VK",
+        value_parser = parse_vk,
+        required = false,
+    )]
+    pub flashblocks_authorizer_sk: Option<SigningKey>,
+
+    #[arg(
+        long = "flashblock.authorization_enabled",
+        env,
+        default_value_t = false,
+        help = "Enable authorization for flashblocks"
+    )]
+    pub flashblocks_authorization_enabled: bool,
 }
 
 #[cfg(test)]
@@ -66,6 +82,8 @@ mod tests {
             flashblock_host: "127.0.0.1".parse().unwrap(),
             flashblocks_authorizor_vk: None,
             flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
+            flashblocks_authorization_enabled: false,
+            flashblocks_authorizer_sk: None,
         };
 
         let args = CommandParser::<FlashblocksArgs>::parse_from([
