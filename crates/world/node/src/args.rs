@@ -1,7 +1,7 @@
 use alloy_primitives::Address;
 use clap::value_parser;
-use flashblocks::args::FlashblocksArgs;
 use reth_optimism_node::args::RollupArgs;
+use world_chain_builder_flashblocks::args::FlashblocksArgs;
 
 #[derive(Debug, Clone, Default, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]

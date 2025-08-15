@@ -1,11 +1,13 @@
 use clap::Parser;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use reth_node_builder::node::Node;
+use reth_node_builder::Node;
 use reth_optimism_cli::Cli;
+use reth_payload_builder::PayloadId;
 use reth_tracing::tracing::info;
+use rollup_boost::Authorization;
 use tokio::sync::broadcast;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
-use world_chain_builder_node::flashblocks_node::WorldChainFlashblocksNode;
+use world_chain_builder_node::flashblocks::WorldChainFlashblocksNode;
 use world_chain_builder_node::FlashblocksState;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
@@ -51,8 +53,20 @@ fn main() {
                     flashblocks_tx.clone(),
                 );
 
-                let node =
-                    WorldChainFlashblocksNode::new(args.clone(), flashblocks_handle, state.clone());
+                let authorization = Authorization::new(
+                    PayloadId::default(),
+                    0,
+                    &flashblocks_args.flashblocks_builder_sk.clone(),
+                    authorizer_vk,
+                );
+                let (to_jobs_generator, _) = tokio::sync::watch::channel(authorization);
+
+                let node = WorldChainFlashblocksNode::new(
+                    args.clone(),
+                    state,
+                    Some(flashblocks_handle),
+                    to_jobs_generator,
+                );
 
                 let handle = builder
                     .with_types::<WorldChainFlashblocksNode>()
@@ -69,7 +83,6 @@ fn main() {
                     })
                     .launch()
                     .await?;
-
                 handle.node_exit_future.await
             } else {
                 let node = WorldChainNode::new(args.clone());

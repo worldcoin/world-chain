@@ -16,11 +16,12 @@ world-chain-builder-node.workspace = true
 world-chain-builder-rpc.workspace = true
 world-chain-builder-chainspec.workspace = true
 
-# rollup-boost
+rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
 
 # reth
 reth-db.workspace = true
+
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
@@ -46,7 +47,6 @@ reth-optimism-payload-builder.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-node.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde"] }
@@ -67,6 +67,7 @@ clap.workspace = true
 serde.workspace = true
 eyre.workspace = true
 parking_lot.workspace = true
+tokio.workspace = true
 
 # rpc
 serde_json.workspace = true
@@ -74,7 +75,6 @@ serde_json.workspace = true
 # test-utils dependencies
 reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
-tokio.workspace = true
 tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]
