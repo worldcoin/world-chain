@@ -30,7 +30,7 @@ use crate::{
     primitives::{BlockMetaData, Flashblock, FlashblocksState},
 };
 
-/// A type that initiates payload building jobs on the [`FlashblocksPayloadBuilder`].
+/// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
@@ -57,6 +57,7 @@ pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
 impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// Creates a new [`WorldChainPayloadJobGenerator`] with the given config and custom
     /// [`PayloadBuilder`]
+    #[allow(clippy::too_many_arguments)]
     pub fn with_builder(
         client: Client,
         executor: Tasks,

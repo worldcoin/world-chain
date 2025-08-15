@@ -51,4 +51,3 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
-dashmap.workspace = true

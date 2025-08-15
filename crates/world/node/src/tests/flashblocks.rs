@@ -47,8 +47,8 @@ pub struct NodeContext {
     pub node: WorldChainNode<WorldChainFlashblocksNode>,
     pub p2p_handle: FlashblocksHandle,
     pub state: FlashblocksState,
-    pub auth_listener: tokio::sync::watch::Receiver<Authorization>,
     pub builder_vk: VerifyingKey,
+    pub _auth_listener: tokio::sync::watch::Receiver<Authorization>,
 }
 
 pub async fn setup_flashblocks(
@@ -179,7 +179,7 @@ pub async fn setup_flashblocks(
             node,
             p2p_handle: flashblocks_handle,
             state,
-            auth_listener: rx,
+            _auth_listener: rx,
             builder_vk: flashblocks_args
                 .flashblocks_builder_sk
                 .clone()
@@ -338,6 +338,8 @@ async fn test_flashblocks_fork_choice_updated_v3_with_authorization() -> eyre::R
     nodes[2].node.submit_payload(built_payload.clone()).await?;
 
     driver.gen = |_| None;
+
+    // Make the latest flashblock the cannonical head of
     let _ = driver
         .drive(0, authorization, &mut nodes[0].node, hash)
         .await?;

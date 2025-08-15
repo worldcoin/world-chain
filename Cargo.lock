@@ -14382,7 +14382,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "clap",
  "color-eyre",
- "dashmap 6.1.0",
  "flashblocks-p2p",
  "futures",
  "jsonrpsee 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",

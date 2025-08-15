@@ -1,7 +1,7 @@
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.89.0"
 license = "MIT"
 homepage = "https://world.org/world-chain"
 repository = "https://github.com/worldcoin/world-chain/"
