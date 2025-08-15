@@ -1,9 +1,13 @@
 //! Utilities for running world chain builder end-to-end tests.
 use crate::args::WorldChainArgs;
 use crate::flashblocks::WorldChainFlashblocksNode;
-use alloy_eips::Decodable2718;
-use alloy_network::eip2718::Encodable2718;
-use alloy_primitives::{Bytes, TxHash};
+use crate::tests::common::EngineDriver;
+use crate::tests::get_chain_spec;
+use crate::tests::*;
+
+use alloy_consensus::Block;
+use alloy_eips::BlockNumberOrTag;
+use alloy_rpc_types_engine::PayloadId;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt;
 use op_alloy_consensus::OpTxEnvelope;
@@ -11,17 +15,18 @@ use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::Node;
 use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
+use reth::chainspec::EthChainSpec;
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::node::NodeTestContext;
-use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::utils::optimism_payload_attributes;
+use reth_optimism_node::OpPayloadBuilderAttributes;
+use reth_primitives::RecoveredBlock;
 use reth_provider::providers::BlockchainProvider;
-use revm_primitives::Address;
+use reth_provider::BlockReaderIdExt;
 use rollup_boost::ed25519_dalek::{SigningKey, VerifyingKey};
 use rollup_boost::{Authorization, FlashblocksPayloadV1};
-use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Range;
 use std::sync::Arc;
@@ -29,15 +34,12 @@ use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{info, span};
 use world_chain_builder_flashblocks::args::FlashblocksArgs;
-use world_chain_builder_flashblocks::primitives::FlashblocksState;
+use world_chain_builder_flashblocks::primitives::{Flashblock, Flashblocks, FlashblocksState};
 use world_chain_builder_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::signer;
 use world_chain_builder_test_utils::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
-
-use crate::test_utils::tx;
-use crate::tests::{get_chain_spec, WorldChainBuilderTestContext, WorldChainNode, BASE_CHAIN_ID};
 
 use reth_node_api::PayloadBuilderAttributes;
 
@@ -45,7 +47,8 @@ pub struct NodeContext {
     pub node: WorldChainNode<WorldChainFlashblocksNode>,
     pub p2p_handle: FlashblocksHandle,
     pub state: FlashblocksState,
-    pub auth_listener: tokio::sync::watch::Receiver<Option<Authorization>>,
+    pub auth_listener: tokio::sync::watch::Receiver<Authorization>,
+    pub builder_vk: VerifyingKey,
 }
 
 pub async fn setup_flashblocks(
@@ -69,7 +72,7 @@ pub async fn setup_flashblocks(
             deadline: Duration::from_millis(4000),
             max_payload_tasks: 1,
             gas_limit: Some(25_000_000),
-            interval: Duration::from_millis(1000),
+            interval: Duration::from_millis(200),
             ..Default::default()
         })
         .with_unused_ports();
@@ -82,7 +85,7 @@ pub async fn setup_flashblocks(
     node_config.network.addr = [127, 0, 0, 1].into();
 
     let mut node_contexts = Vec::<NodeContext>::with_capacity(num_nodes as usize);
-    let auth_sk = SigningKey::from_bytes(&[10; 32]);
+
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
         let _enter = span.enter();
@@ -91,9 +94,8 @@ pub async fn setup_flashblocks(
             flashblock_interval: 200,
             flashblock_host: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             flashblock_port: 9002 + idx as u16,
-            flashblocks_authorizor_vk: Some(auth_sk.verifying_key()),
+            flashblocks_authorizor_vk: Some(authorizer_vk),
             flashblocks_builder_sk: SigningKey::from_bytes(&[idx; 32]),
-            flashblocks_authorizer_sk: Some(auth_sk.clone()),
             flashblocks_authorization_enabled: true,
         };
 
@@ -107,7 +109,13 @@ pub async fn setup_flashblocks(
             flashblocks_tx.clone(),
         );
 
-        let (to_jobs_generator, _) = tokio::sync::watch::channel(None::<Authorization>);
+        let authorization = Authorization::new(
+            PayloadId::default(),
+            0,
+            &flashblocks_args.flashblocks_builder_sk.clone(),
+            authorizer_vk,
+        );
+        let (to_jobs_generator, rx) = tokio::sync::watch::channel(authorization);
 
         let node = WorldChainFlashblocksNode::new(
             WorldChainArgs {
@@ -116,7 +124,7 @@ pub async fn setup_flashblocks(
                 signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
                 world_id: DEV_WORLD_ID,
                 builder_private_key: signer(6).to_bytes().to_string(),
-                flashblocks_args: Some(flashblocks_args),
+                flashblocks_args: Some(flashblocks_args.clone()),
                 ..Default::default()
             },
             state.clone(),
@@ -153,6 +161,9 @@ pub async fn setup_flashblocks(
         let mut node =
             NodeTestContext::new(node, optimism_payload_attributes::<OpTxEnvelope>).await?;
 
+        node.update_forkchoice(op_chain_spec.genesis_hash(), op_chain_spec.genesis_hash())
+            .await?;
+
         // Connect each node in a chain.
         if let Some(previous_node) = node_contexts.last_mut() {
             previous_node.node.connect(&mut node).await;
@@ -163,11 +174,16 @@ pub async fn setup_flashblocks(
                 node.connect(&mut first_node.node).await;
             }
         }
+
         let node_ctx = NodeContext {
             node,
             p2p_handle: flashblocks_handle,
             state,
-            auth_listener: to_jobs_generator.subscribe(),
+            auth_listener: rx,
+            builder_vk: flashblocks_args
+                .flashblocks_builder_sk
+                .clone()
+                .verifying_key(),
         };
 
         node_contexts.push(node_ctx);
@@ -176,260 +192,166 @@ pub async fn setup_flashblocks(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_flashblocks() -> eyre::Result<()> {
+async fn test_flashblocks_fork_choice_updated_v3_with_authorization() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let authorizer_vk = SigningKey::from_bytes(&[1; 32]).verifying_key();
-    let (signers_, mut nodes, _task_manager) = setup_flashblocks(3, authorizer_vk).await?;
+    let authorizer_sk = SigningKey::from_bytes(&[42; 32]);
+    // Create authorizer keys
+    let authorizer_vk = authorizer_sk.verifying_key();
 
-    let node = nodes
-        .first_mut()
-        .expect("At least one node should be present");
+    // Setup nodes with flashblocks
+    let (_signers, mut nodes, _task_manager) = setup_flashblocks(3, authorizer_vk).await?;
 
-    let messages = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
+    // Create message collectors for each node to capture p2p flashblocks
+    let messages_node_0 = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
+    let messages_node_1 = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
+    let messages_node_2 = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
 
-    let messages_clone: Arc<RwLock<Vec<FlashblocksPayloadV1>>> = messages.clone();
-    let p2p_handle = node.p2p_handle.clone();
+    let messages_clone_0 = messages_node_0.clone();
+    let messages_clone_1 = messages_node_1.clone();
+    let messages_clone_2 = messages_node_2.clone();
+
+    // Get p2p handles for all nodes
+    let p2p_handle_0 = nodes[0].p2p_handle.clone();
+    let p2p_handle_1 = nodes[1].p2p_handle.clone();
+    let p2p_handle_2 = nodes[2].p2p_handle.clone();
+
+    let state_0 = nodes[0].state.clone();
+    let state_1 = nodes[1].state.clone();
+    let state_2 = nodes[2].state.clone();
+
+    // Spawn tasks to listen for flashblocks from all nodes
     let _handle = tokio::spawn(async move {
-        let mut stream = p2p_handle.flashblock_stream();
-        while let Some(message) = stream.next().await {
-            info!(
-                target: "reth::e2e::flashblocks",
-                "Received flashblock payload: {} with {} txs",
-                message.payload_id,
-                message.diff.transactions.len()
-            );
-            messages_clone.write().await.push(message);
-        }
+        let fut_0 = async move {
+            let mut stream = p2p_handle_0.flashblock_stream();
+            while let Some(message) = stream.next().await {
+                info!(
+                    target: "reth::e2e::flashblocks::auth",
+                    "Node 0 received flashblock payload: {} with {} txs",
+                    message.payload_id,
+                    message.diff.transactions.len()
+                );
+                messages_clone_0.write().await.push(message);
+            }
+        };
+
+        let fut_1 = async move {
+            let mut stream = p2p_handle_1.flashblock_stream();
+            while let Some(message) = stream.next().await {
+                info!(
+                    target: "reth::e2e::flashblocks::auth",
+                    "Node 1 received flashblock payload: {} with {} txs",
+                    message.payload_id,
+                    message.diff.transactions.len()
+                );
+                messages_clone_1.write().await.push(message);
+            }
+        };
+
+        let fut_2 = async move {
+            let mut stream = p2p_handle_2.flashblock_stream();
+            while let Some(message) = stream.next().await {
+                info!(
+                    target: "reth::e2e::flashblocks::auth",
+                    "Node 2 received flashblock payload: {} with {} txs",
+                    message.payload_id,
+                    message.diff.transactions.len()
+                );
+                messages_clone_2.write().await.push(message);
+            }
+        };
+
+        tokio::join!(fut_0, fut_1, fut_2);
     });
 
-    let node = &mut node.node;
-    let mut txns: Vec<Bytes> = vec![];
+    let builder_vk = nodes[0].builder_vk;
 
-    for i in 0..10 {
-        let raw_tx = tx(BASE_CHAIN_ID, None, 0, Address::random(), 21_000);
-        let signed = TransactionTestContext::sign_tx(signer(i as u32), raw_tx).await; // use a new signer for each transaction
-        txns.push(signed.encoded_2718().into());
-    }
+    let authorization = |attributes: OpPayloadBuilderAttributes<OpTxEnvelope>| {
+        Authorization::new(
+            attributes.payload_id(),
+            attributes.timestamp(),
+            &authorizer_sk,
+            builder_vk,
+        )
+    };
 
-    let mut flashblocks_interval = tokio::time::interval(Duration::from_millis(200));
-    flashblocks_interval.tick().await;
+    let mut driver = EngineDriver::default();
 
-    // trigger new payload building draining the pool
-    let eth_attr = node.payload.new_payload().await.unwrap();
+    let current_head = nodes[0]
+        .node
+        .inner
+        .provider()
+        .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)
+        .unwrap()
+        .unwrap();
 
-    // first event is the payload attributes
-    node.payload.expect_attr_event(eth_attr.clone()).await?;
+    let built_payload = driver
+        .drive(10, authorization, &mut nodes[0].node, current_head.hash())
+        .await?
+        .unwrap();
 
-    for tx in &txns[..4] {
-        node.rpc.inject_tx(tx.clone()).await?;
-    }
+    let aggr_state_1 = Flashblock::reduce(Flashblocks(state_1.0.read().await.0.clone()));
+    let aggr_state_2 = Flashblock::reduce(Flashblocks(state_2.0.read().await.0.clone()));
 
-    // insert transactions into the pool after the first flashblock.
-    flashblocks_interval.tick().await;
-    for tx in &txns[4..] {
-        node.rpc.inject_tx(tx.clone()).await?;
-    }
-
-    // wait for the payload builder to have finished building
-    node.payload
-        .wait_for_built_payload(eth_attr.payload_id())
-        .await;
-
-    // ensure we're also receiving the built payload as event
-    let payload = node.payload.expect_built_payload().await?;
-
-    let block = payload.into_sealed_block();
-
-    info!(
-        target: "reth::e2e::flashblocks",
-        "Built block #{} with {} txs",
-        block.header().number,
-        block.body().transactions.len()
-    );
-
-    let payload_transactions = block
-        .body()
-        .transactions()
-        .map(|tx| tx.hash())
-        .collect::<HashSet<_>>();
-
-    let mut flashblock_payload_txns: HashSet<TxHash> = HashSet::new();
-
-    let flashblock_payloads = messages.read().await;
     println!(
-        "Received {} flashblocks payloads",
-        flashblock_payloads.len()
+        "Node 0 has {} flashblocks in state",
+        state_0.0.read().await.0.len()
     );
-    for fb_payload in flashblock_payloads.iter() {
-        assert_eq!(fb_payload.payload_id, eth_attr.payload_id());
-        flashblock_payload_txns.extend(fb_payload.diff.transactions.iter().map(|tx| {
-            let decoded =
-                OpTxEnvelope::decode_2718(&mut tx.as_ref()).expect("Failed to decode transaction");
-            decoded.hash().clone()
-        }));
-    }
+    println!(
+        "Node 1 has {} flashblocks in state",
+        state_1.0.read().await.0.len()
+    );
+    println!(
+        "Node 2 has {} flashblocks in state",
+        state_2.0.read().await.0.len()
+    );
 
-    // Assert that block transactions length is the aggregate of all the flashblock payload diffs
+    let block_1 = RecoveredBlock::<Block<OpTxEnvelope>>::try_from(aggr_state_1.clone().unwrap())
+        .expect("Failed to recover block from flashblocks state on node 1");
+    let block_2 = RecoveredBlock::<Block<OpTxEnvelope>>::try_from(aggr_state_2.clone().unwrap())
+        .expect("Failed to recover block from flashblocks state on node 2");
+
     assert_eq!(
-        flashblock_payload_txns.len(),
-        payload_transactions.len(),
-        "Flashblocks payloads should contain all transactions from the built payload"
+        built_payload
+            .clone()
+            .into_sealed_block()
+            .header()
+            .hash_slow(),
+        block_1.sealed_block().header().hash_slow(),
+        "Node 1 should have the same block as the built payload"
     );
 
-    // // Assert that all transactions in the block are present in the flashblocks payloads
-    for tx in payload_transactions {
-        assert!(
-            flashblock_payload_txns.contains(tx),
-            "Flashblocks payloads should contain transaction: {:?}",
-            tx
-        );
-    }
-
-    // Assert all transactions have been accounted for
     assert_eq!(
-        block.body().transactions.len(),
-        10,
-        "Block should contain all transactions"
+        built_payload
+            .clone()
+            .into_sealed_block()
+            .header()
+            .hash_slow(),
+        block_2.sealed_block().header().hash_slow(),
+        "Node 2 should have the same block as the built payload"
     );
 
-    // Spin up World Chain Node with Cannonical Payload Builder
-    let mut world_chain_node_test_context = WorldChainBuilderTestContext::setup().await?;
+    let hash = built_payload.clone().into_sealed_block().hash();
 
-    // Inject all of the same transactions
-    for tx in &block.body().transactions {
-        world_chain_node_test_context
-            .node
-            .rpc
-            .inject_tx(tx.encoded_2718().into())
-            .await?;
-    }
+    // Submit the built payload to all nodes
+    nodes[0].node.submit_payload(built_payload.clone()).await?;
+    nodes[1].node.submit_payload(built_payload.clone()).await?;
+    nodes[2].node.submit_payload(built_payload.clone()).await?;
 
-    // Build the block
-    let payload = world_chain_node_test_context.node.advance_block().await?;
+    driver.gen = |_| None;
+    let _ = driver
+        .drive(0, authorization, &mut nodes[0].node, hash)
+        .await?;
+    let _ = driver
+        .drive(0, authorization, &mut nodes[1].node, hash)
+        .await?;
+    let _ = driver
+        .drive(0, authorization, &mut nodes[2].node, hash)
+        .await?;
 
-    // Assert the blocks match
-    assert_eq!(
-        payload.into_sealed_block().header(),
-        block.header(),
-        "World Chain Node should have built the same block as the Flashblocks Node"
-    );
+    // state should be cleared after FCU
+    assert!(state_0.0.read().await.0.is_empty());
+    assert!(state_1.0.read().await.0.is_empty());
+    assert!(state_2.0.read().await.0.is_empty());
 
     Ok(())
 }
-
-// #[tokio::test(flavor = "multi_thread")]
-// async fn test_flashblocks_failover() -> eyre::Result<()> {
-//     reth_tracing::init_test_tracing();
-//     let authorizer_vk = SigningKey::from_bytes(&[0; 32]).verifying_key();
-//     let (_signers, mut nodes, _task_manager, p2p_handles) =
-//         setup_flashblocks(33, authorizer_vk).await?;
-
-//     let messages_node_0 = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
-//     let messages_node_1 = Arc::new(RwLock::new(Vec::<FlashblocksPayloadV1>::new()));
-
-//     let messages_clone_node_0: Arc<RwLock<Vec<FlashblocksPayloadV1>>> = messages_node_0.clone();
-//     let messages_clone_node_1: Arc<RwLock<Vec<FlashblocksPayloadV1>>> = messages_node_1.clone();
-
-//     let _handle = tokio::spawn(async move {
-//         let flashblocks_handle_0 = p2p_handles
-//             .first()
-//             .expect("At least one p2p handle should be present")
-//             .clone();
-
-//         let flashblocks_handle_1 = p2p_handles
-//             .get(1)
-//             .expect("At least two p2p handles should be present")
-//             .clone();
-
-//         let fut_0 = async move {
-//             let mut stream = flashblocks_handle_0.flashblock_stream();
-//             while let Some(message) = stream.next().await {
-//                 messages_clone_node_0.write().await.push(message);
-//             }
-//         };
-
-//         let fut_1 = async move {
-//             let mut stream = flashblocks_handle_1.flashblock_stream();
-//             while let Some(message) = stream.next().await {
-//                 messages_clone_node_1.write().await.push(message);
-//             }
-//         };
-
-//         tokio::join!(fut_0, fut_1);
-//     });
-
-//     // insert 10 transactions into the pool of the first node
-//     for i in 0..10 {
-//         let raw_tx = tx(BASE_CHAIN_ID, None, i, Address::random(), 21_000);
-//         let signed = TransactionTestContext::sign_tx(signer(0), raw_tx).await; // use a new signer for each transaction
-//         nodes[0].rpc.inject_tx(signed.encoded_2718().into()).await?;
-//     }
-
-//     // insert 10 transactions into the pool of the second node
-//     for i in 0..10 {
-//         let raw_tx = tx(BASE_CHAIN_ID, None, i + 10, Address::random(), 21_000);
-//         let signed = TransactionTestContext::sign_tx(signer(1), raw_tx).await; // use a new signer for each transaction
-//         nodes[1].rpc.inject_tx(signed.encoded_2718().into()).await?;
-//     }
-
-//     let mut interval = tokio::time::interval(Duration::from_millis(400));
-//     // trigger new payload building job draining the pool of node_0
-//     let eth_attr = nodes[0].payload.new_payload().await.unwrap();
-
-//     // first event is the payload attributes
-//     nodes[0].payload.expect_attr_event(eth_attr.clone()).await?;
-
-//     interval.tick().await;
-//     interval.tick().await;
-
-//     // trigger a payload building job on node_1
-//     let eth_attr_1 = nodes[1].payload.new_payload().await.unwrap();
-
-//     // first event is the payload attributes
-//     nodes[1]
-//         .payload
-//         .expect_attr_event(eth_attr_1.clone())
-//         .await?;
-
-//     // wait for the payload builder to have finished building on node_0
-//     nodes[0]
-//         .payload
-//         .wait_for_built_payload(eth_attr.payload_id())
-//         .await;
-
-//     // wait for the payload builder to have finished building on node_1
-//     nodes[1]
-//         .payload
-//         .wait_for_built_payload(eth_attr_1.payload_id())
-//         .await;
-
-//     // ensure we're also receiving the built payload as event
-//     let payload = nodes[0].payload.expect_built_payload().await?;
-//     let payload_1 = nodes[1].payload.expect_built_payload().await?;
-
-//     assert_eq!(
-//         payload.clone().into_sealed_block().header(),
-//         payload_1.clone().into_sealed_block().header(),
-//         "Both nodes should have built the same block"
-//     );
-
-//     let flashblock_payloads_0 = messages_node_0.read().await;
-//     let flashblock_payloads_1 = messages_node_1.read().await;
-
-//     let payloads_node_0 = flashblock_payloads_0
-//         .iter()
-//         .map(|fb| fb.payload_id)
-//         .collect::<HashSet<_>>();
-
-//     let payloads_node_1 = flashblock_payloads_1
-//         .iter()
-//         .map(|fb| fb.payload_id)
-//         .collect::<HashSet<_>>();
-
-//     assert_eq!(
-//         payloads_node_0, payloads_node_1,
-//         "Both nodes should have received the same flashblocks payloads"
-//     );
-
-//     Ok(())
-// }

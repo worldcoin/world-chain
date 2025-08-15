@@ -32,6 +32,7 @@ use crate::args::WorldChainArgs;
 use crate::node::WorldChainNode as OtherWorldChainNode;
 use crate::test_utils::{raw_pbh_bundle_bytes, tx};
 
+mod common;
 mod flashblocks;
 
 pub(crate) type WorldChainNode<N> =

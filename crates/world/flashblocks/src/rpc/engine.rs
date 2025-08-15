@@ -7,6 +7,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use futures::{Stream, StreamExt};
+use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
@@ -21,18 +22,19 @@ use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use rollup_boost::{Authorization, FlashblocksPayloadV1};
+use tracing::info;
 
 use crate::primitives::FlashblocksState;
 
 /// TODO: Extend Engine API with Authorized FCU Methods
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// The current store of all pre confirmations ahead of the canonical chain.
     flashblocks_state: FlashblocksState,
     /// A watch channel notifier to the jobs generator.
-    _to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -44,7 +46,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         flashblocks_state: FlashblocksState,
         executor: impl TaskSpawner,
         stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
-        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+        to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
     ) -> Self {
         executor.spawn_critical(
             "subscription_handle",
@@ -54,7 +56,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         Self {
             inner,
             flashblocks_state,
-            _to_jobs_generator: to_jobs_generator,
+            to_jobs_generator,
         }
     }
 
@@ -233,6 +235,14 @@ where
     /// It is up to the consumer of [`FlashblocksState`] to ensure that the block number of the latest
     /// flashblock is 1 + latest block number in the canonical chain.
     pub async fn handle_fork_choice_updated(&self, fork_choice_state: ForkchoiceState) {
+        info!(
+            ?fork_choice_state,
+            "Handling fork choice updated for flashblocks state"
+        );
+        let latest = self.flashblocks_state.last().await;
+        let block_hash = latest.as_ref().map(|p| p.diff.block_hash);
+        info!(?block_hash, "Latest flashblock in state");
+        info!(?fork_choice_state.head_block_hash, "Fork choice head block hash");
         let confirmed = self
             .flashblocks_state
             .last()
@@ -249,9 +259,73 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
-    Self: OpEngineApiServer<EngineT>,
+    Self: OpEngineApiServer<EngineT> + FlashblocksEngineApiExtServer<EngineT> + Clone,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
-        self.into_rpc().remove_context()
+        let mut module = RpcModule::new(());
+        module
+            .merge(OpEngineApiServer::into_rpc(self.clone()))
+            .unwrap();
+
+        module
+            .merge(FlashblocksEngineApiExtServer::into_rpc(self))
+            .unwrap();
+
+        module.remove_context()
+    }
+}
+
+#[rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+pub trait FlashblocksEngineApiExt<Engine: EngineTypes> {
+    #[method(name = "flashblocks_forkChoiceUpdatedV3")]
+    async fn flashblocks_fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+        authorization: Option<Authorization>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+}
+
+#[async_trait]
+impl<Provider, EngineT, Pool, Validator, ChainSpec> FlashblocksEngineApiExtServer<EngineT>
+    for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
+    Pool: TransactionPool + 'static,
+    Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    async fn flashblocks_fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+        authorization: Option<Authorization>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        info!(
+            ?fork_choice_state,
+            "Received flashblocks_fork_choice_updated_v3"
+        );
+
+        if payload_attributes.is_some() && authorization.is_none()
+            || authorization.is_some() && payload_attributes.is_none()
+        {
+            return Err(ErrorObject::owned(
+                -32000,
+                "Both payload attributes and authorization must be provided together",
+                None::<()>,
+            ));
+        }
+
+        if let Some(a) = authorization {
+            self.to_jobs_generator.send_modify(|b| *b = a)
+        }
+
+        let (res, _) = tokio::join!(
+            self.inner
+                .fork_choice_updated_v3(fork_choice_state, payload_attributes),
+            self.handle_fork_choice_updated(fork_choice_state)
+        );
+        Ok(res?)
     }
 }

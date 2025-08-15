@@ -2,6 +2,7 @@ use clap::Parser;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use reth_node_builder::Node;
 use reth_optimism_cli::Cli;
+use reth_payload_builder::PayloadId;
 use reth_tracing::tracing::info;
 use rollup_boost::Authorization;
 use tokio::sync::broadcast;
@@ -52,7 +53,13 @@ fn main() {
                     flashblocks_tx.clone(),
                 );
 
-                let (to_jobs_generator, _) = tokio::sync::watch::channel(None::<Authorization>);
+                let authorization = Authorization::new(
+                    PayloadId::default(),
+                    0,
+                    &flashblocks_args.flashblocks_builder_sk.clone(),
+                    authorizer_vk,
+                );
+                let (to_jobs_generator, _) = tokio::sync::watch::channel(authorization);
 
                 let node = WorldChainFlashblocksNode::new(
                     args.clone(),

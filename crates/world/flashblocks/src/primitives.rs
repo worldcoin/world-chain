@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
 };
+use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{FixedBytes, B256, U256};
@@ -15,10 +17,6 @@ use reth::{api::BuiltPayload, payload::PayloadBuilderAttributes};
 
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_chainspec::EthChainSpec;
-use reth_evm::op_revm::OpSpecId;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
@@ -28,8 +26,6 @@ use rollup_boost::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-
-use crate::PayloadBuilderCtx;
 
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
@@ -169,7 +165,7 @@ impl Flashblock {
                 acc.base = next.flashblock.base;
             }
 
-            acc.diff.gas_used += next.flashblock.diff.gas_used;
+            acc.diff.gas_used = next.flashblock.diff.gas_used;
 
             acc.diff
                 .transactions
@@ -198,7 +194,6 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
             "Cannot convert Flashblock to RecoveredBlock without base"
         ))?;
         let diff = value.flashblock.diff.clone();
-
         let header = Header {
             parent_beacon_block_root: Some(base.parent_beacon_block_root),
             state_root: diff.state_root,
@@ -211,18 +206,18 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
             transactions_root: ordered_trie_root_with_encoder(&diff.transactions, |tx, e| {
                 *e = tx.as_ref().to_vec()
             }),
-            ommers_hash: B256::ZERO,
-            blob_gas_used: None,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            blob_gas_used: Some(0),
             difficulty: U256::ZERO,
             number: base.block_number,
             gas_limit: base.gas_limit,
             gas_used: diff.gas_used,
             timestamp: base.timestamp,
             extra_data: base.extra_data.clone(),
-            mix_hash: B256::ZERO,
-            nonce: FixedBytes::default(),
-            requests_hash: None,
-            excess_blob_gas: None,
+            mix_hash: base.prev_randao,
+            nonce: BEACON_NONCE.into(),
+            requests_hash: None, // TODO: Isthmus
+            excess_blob_gas: Some(0),
         };
 
         let transactions_encoded = diff

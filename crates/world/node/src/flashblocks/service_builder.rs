@@ -7,10 +7,7 @@ use reth_node_builder::{
 };
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
-};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use world_chain_builder_flashblocks::{
     payload::generator::{FlashblocksJobGeneratorConfig, WorldChainPayloadJobGenerator},
     primitives::FlashblocksState,
@@ -24,10 +21,9 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: FlashblocksHandle,
     flashblocks_state: FlashblocksState,
-    authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+    authorizations_rx: tokio::sync::watch::Receiver<Authorization>,
     authorization_enabled: bool,
     builder_sk: SigningKey,
-    authorizer_sk: SigningKey,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -36,10 +32,9 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         pb: PB,
         p2p_handler: FlashblocksHandle,
         flashblocks_state: FlashblocksState,
-        authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+        authorizations_rx: tokio::sync::watch::Receiver<Authorization>,
         authorization_enabled: bool,
         builder_sk: SigningKey,
-        authorizer_sk: SigningKey,
     ) -> Self {
         Self {
             pb,
@@ -48,7 +43,6 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             authorizations_rx,
             authorization_enabled,
             builder_sk,
-            authorizer_sk,
         }
     }
 }
@@ -85,7 +79,6 @@ where
             self.authorizations_rx.clone(),
             self.flashblocks_state,
             self.builder_sk,
-            self.authorizer_sk,
         );
 
         let (payload_service, payload_service_handle) =

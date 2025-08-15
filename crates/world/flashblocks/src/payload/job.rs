@@ -4,13 +4,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use alloy_consensus::BlockHeader;
-use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
-    api::{BuiltPayload, PayloadBuilderError, PayloadKind},
+    api::{PayloadBuilderError, PayloadKind},
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
     tasks::TaskSpawner,
@@ -22,7 +20,7 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use rollup_boost::{ed25519_dalek::{SigningKey, VerifyingKey}, Authorization, Authorized, AuthorizedPayload};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization, AuthorizedPayload};
 use tokio::{
     sync::oneshot,
     time::{Interval, Sleep},
@@ -67,7 +65,7 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// See [`PayloadBuilder`]
     pub(crate) builder: Builder,
     /// The authorization information for this job
-    pub(crate) authorization: Option<Authorization>,
+    pub(crate) authorization: Authorization,
     /// The deadline when this job should resolve.
     pub(crate) deadline: Pin<Box<Sleep>>,
     /// The interval at which we should attempt to build new payloads
@@ -80,14 +78,10 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) best_payload_changed: bool,
     /// Tracks whether we should trigger an immediate build on the next poll
     pub(crate) ready_for_next_build: bool,
-    /// Authorization enabled.
-    pub(crate) authorization_enabled: bool,
     /// Block index
     pub(crate) block_index: u64,
     /// The builder signing key
     pub(crate) builder_signing_key: SigningKey,
-    /// The authorizer verifying key
-    pub(crate) authorizer_verifying_key: VerifyingKey,
 }
 
 impl<Tasks, Builder> WorldChainPayloadJob<Tasks, Builder>
@@ -123,29 +117,20 @@ where
 
         if let Some(pre_built_payload) = self.pre_built_payload.clone() {
             self.best_payload = PayloadState::Frozen(pre_built_payload);
-        } else {
-            if let Some(auth) = self.authorization {
-                if self.authorization_enabled {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "authorization enabled, starting to publish");
-                    self.p2p_handler.start_publishing(auth);
-                } else {
-                    trace!(target: "payload_builder", id=%self.config.payload_id(), "authorization disabled, not publishing");
-                }
-            }
-
-            self.executor.spawn_blocking(Box::pin(async move {
-                let _permit = guard.acquire().await;
-                let args = BuildArguments {
-                    cached_reads,
-                    config: payload_config,
-                    cancel,
-                    best_payload,
-                };
-
-                let result = builder.try_build(args);
-                let _ = tx.send(result);
-            }));
         }
+
+        self.executor.spawn_blocking(Box::pin(async move {
+            let _permit = guard.acquire().await;
+            let args = BuildArguments {
+                cached_reads,
+                config: payload_config,
+                cancel,
+                best_payload,
+            };
+
+            let result = builder.try_build(args);
+            let _ = tx.send(result);
+        }));
 
         self.pending_block = Some(PendingPayload::new(_cancel, rx));
     }
@@ -155,21 +140,20 @@ where
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
     ) {
-        let auth = self.authorization.expect("authorization must be set to publish flashblocks");
-
         let offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
-        let flashblock = Flashblock::new(&payload, self.config.clone(), self.block_index, offset);
+        let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
 
-        if self.authorization_enabled {
-            debug!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
-            let authorized =
-                AuthorizedPayload::new(&self.builder_signing_key, auth, flashblock.flashblock().clone().into());
+        trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
+        let authorized = AuthorizedPayload::new(
+            &self.builder_signing_key,
+            self.authorization,
+            flashblock.flashblock().clone(),
+        );
 
-            let _ = self.p2p_handler.publish_new(authorized);
-        }
+        let _ = self.p2p_handler.publish_new(authorized);
     }
 }
 
@@ -201,6 +185,7 @@ where
         loop {
             match tick_fut.as_mut().poll(cx) {
                 Poll::Ready(_) => {
+                    trace!(target: "payload_builder", id=%this.config.payload_id(), "interval ticked, attempting to spawn new build job");
                     break;
                 }
                 Poll::Pending => continue,
@@ -221,11 +206,13 @@ where
                     } => {
                         let prev = this.best_payload.clone();
                         this.cached_reads = Some(cached_reads);
-                        debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                        trace!(target: "job_generator", value = %payload.fees(), "building new best payload");
                         this.best_payload = PayloadState::Best(payload.clone());
-                        
+
                         let mut clearance = Box::pin(p2p.await_clearance());
-                        loop { if clearance.poll_unpin(cx).is_ready() { break; } }
+                        while clearance.poll_unpin(cx).is_pending() {
+                            cx.waker().wake_by_ref();
+                        }
                         this.publish_payload(&payload, &prev.payload().cloned());
                         this.block_index += 1;
                         this.spawn_build_job();

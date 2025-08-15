@@ -26,7 +26,7 @@ reth-db = { workspace = true, optional = true }
 reth-node-builder.workspace = true
 reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-node.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-optimism-primitives.workspace = true
 reth-optimism-storage.workspace = true
 reth-optimism-payload-builder.workspace = true
@@ -47,6 +47,7 @@ reth-node-api.workspace = true
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-sol-types = { workspace = true, optional = true }
 revm-primitives = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
@@ -86,6 +87,8 @@ criterion.workspace = true
 semaphore-rs = { workspace = true, features = ["depth_30"] }
 serde_json.workspace = true
 chrono.workspace = true
+tower.workspace = true
+jsonrpsee.workspace = true
 
 [features]
 default = []

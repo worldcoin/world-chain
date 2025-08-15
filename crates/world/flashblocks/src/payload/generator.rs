@@ -1,13 +1,9 @@
 use std::{
-    future::Future,
-    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::PayloadId;
-use dashmap::DashMap;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_consensus::OpTxEnvelope;
@@ -25,15 +21,11 @@ use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
-};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use tokio::runtime::Handle;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{
-    builder,
     payload::job::WorldChainPayloadJob,
     primitives::{BlockMetaData, Flashblock, FlashblocksState},
 };
@@ -53,15 +45,13 @@ pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
     /// The cached authorizations for payload ids.
-    authorization: Option<Arc<DashMap<PayloadId, Authorization>>>,
+    authorizations: tokio::sync::watch::Receiver<Authorization>,
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
     flashblocks_state: FlashblocksState,
     /// The signing key for the builder
     builder_sk: SigningKey,
-    /// The verifying key for the authorizer
-    authorizer_vk: SigningKey,
 }
 
 impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
@@ -73,25 +63,10 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
         config: FlashblocksJobGeneratorConfig,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
-        auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+        auth_rx: tokio::sync::watch::Receiver<Authorization>,
         flashblocks_state: FlashblocksState,
         builder_sk: SigningKey,
-        authorizer_vk: SigningKey,
     ) -> Self {
-        let cache = if config.enable_authorization {
-            info!("Flashblocks job generator authorization enabled");
-            let authorizations = Authorizations::new(auth_rx);
-            let cache = authorizations.cache();
-            executor.spawn_critical(
-                "flashblocks-auth-updates",
-                authorizations.subscribe_to_updates(),
-            );
-            Some(cache)
-        } else {
-            info!("Flashblocks job generator authorization disabled");
-            None
-        };
-
         Self {
             client,
             executor,
@@ -100,9 +75,8 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
             flashblocks_state,
             pre_cached: None,
             p2p_handler,
-            authorization: cache,
+            authorizations: auth_rx,
             builder_sk,
-            authorizer_vk,
         }
     }
 
@@ -192,24 +166,26 @@ where
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(1);
+
         let maybe_pre_state = self.check_for_pre_state(&config.attributes)?;
-        let mock_auth = // just for testing
-            Authorization::new(
-                config.payload_id(),
-                config.attributes.timestamp(),
-                &self.authorizer_vk,
-                self.builder_sk.verifying_key(),
-            );
-        let authorization = if let Some(auth_cache) = &self.authorization {
-            Some(
-                auth_cache
-                    .get(&config.attributes.payload_id())
-                    .map(|e| *e)
-                    .unwrap_or(mock_auth),
-            )
-        } else {
-            None
+
+        let payload_id = config.attributes.payload_id();
+        let mut authorization = self.authorizations.clone();
+        let pending = async move {
+            let _ = authorization
+                .wait_for(|a| a.payload_id == payload_id)
+                .await
+                .is_ok();
+            *authorization.borrow()
         };
+
+        let authorization = tokio::task::block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(pending)
+        });
+
+        // Notify the P2P handler to start publishing for this authorization
+        self.p2p_handler.start_publishing(authorization);
 
         let mut job = WorldChainPayloadJob {
             config,
@@ -227,10 +203,8 @@ where
             pre_built_payload: maybe_pre_state,
             best_payload_changed: false,
             ready_for_next_build: false,
-            authorization_enabled: self.config.enable_authorization,
             block_index: 0,
             builder_signing_key: self.builder_sk.clone(),
-            authorizer_verifying_key: self.authorizer_vk.verifying_key().clone(),
         };
 
         // start the first job right away
@@ -370,40 +344,4 @@ fn duration_until(unix_timestamp_secs: u64) -> Duration {
         .unwrap_or_default();
     let timestamp = Duration::from_secs(unix_timestamp_secs);
     timestamp.saturating_sub(unix_now)
-}
-
-pub struct Authorizations {
-    /// Authorized payload ids to build
-    cache: Arc<DashMap<PayloadId, Authorization>>,
-    /// A subscriber for authorization updates
-    authorizations_subscriber: tokio::sync::watch::Receiver<Option<Authorization>>,
-}
-
-impl Authorizations {
-    pub fn new(
-        authorizations_subscriber: tokio::sync::watch::Receiver<Option<Authorization>>,
-    ) -> Self {
-        Self {
-            cache: Arc::new(DashMap::new()),
-            authorizations_subscriber,
-        }
-    }
-
-    pub fn cache(&self) -> Arc<DashMap<PayloadId, Authorization>> {
-        self.cache.clone()
-    }
-}
-
-impl Authorizations {
-    pub fn subscribe_to_updates(mut self) -> Pin<Box<impl Future<Output = ()>>> {
-        Box::pin(async move {
-            tokio::select! {
-                _ = self.authorizations_subscriber.changed() => {
-                    if let Some(authorization) = *self.authorizations_subscriber.borrow_and_update() {
-                        self.cache.insert(authorization.payload_id, authorization);
-                    }
-                }
-            }
-        })
-    }
 }

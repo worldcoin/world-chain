@@ -36,7 +36,7 @@ pub mod rpc;
 pub mod service_builder;
 
 /// Type configuration for a regular World Chain node.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WorldChainFlashblocksNode {
     /// Additional World Chain args
@@ -53,7 +53,13 @@ pub struct WorldChainFlashblocksNode {
     /// The flashblocks state.
     pub flashblocks_state: FlashblocksState,
     /// A watch channel notifier to the jobs generator.
-    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+}
+
+impl Default for WorldChainFlashblocksNode {
+    fn default() -> Self {
+        unreachable!()
+    }
 }
 
 /// A [`ComponentsBuilder`] with its generic arguements set to a stack of World Chain Flashblocks specific builders.
@@ -72,7 +78,7 @@ impl WorldChainFlashblocksNode {
         args: WorldChainArgs,
         flashblocks_state: FlashblocksState,
         flashblocks_handle: Option<FlashblocksHandle>,
-        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+        to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
     ) -> Self {
         Self {
             args,
@@ -92,11 +98,22 @@ impl WorldChainFlashblocksNode {
             ..
         } = self;
 
+        let flashblock_args = self
+            .args
+            .flashblocks_args
+            .as_ref()
+            .expect("Flashblocks args must be set to create the engine API builder");
+
+        let verifying_key = flashblock_args
+            .flashblocks_authorizor_vk
+            .unwrap_or(flashblock_args.flashblocks_builder_sk.verifying_key());
+
         WorldChainEngineApiBuilder {
             engine_validator_builder: OpEngineValidatorBuilder::default(),
             flashblocks_handle: flashblocks_handle.clone(),
             flashblocks_state: Some(flashblocks_state.clone()),
-            to_jobs_generator: Some(to_jobs_generator.clone()),
+            to_jobs_generator: to_jobs_generator.clone(),
+            verifying_key,
         }
     }
 
@@ -173,11 +190,6 @@ impl WorldChainFlashblocksNode {
                 self.to_jobs_generator.clone().subscribe(),
                 flashblocks_args.flashblocks_authorization_enabled,
                 flashblocks_args.flashblocks_builder_sk.clone(),
-                flashblocks_args
-                    .flashblocks_authorizer_sk
-                    .as_ref()
-                    .unwrap()
-                    .clone(),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
@@ -186,7 +198,8 @@ impl WorldChainFlashblocksNode {
 
     /// Returns [`OpAddOnsBuilder`] with configured arguments.
     pub fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
-        reth_optimism_node::OpAddOnsBuilder::default()
+        let add_ons = OpAddOnsBuilder::default();
+        add_ons
             .with_sequencer(self.args.rollup_args.sequencer.clone())
             .with_sequencer_headers(self.args.rollup_args.sequencer_headers.clone())
             .with_da_config(self.da_config.clone())
@@ -223,9 +236,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        self.add_ons_builder()
-            .build::<_, OpEngineValidatorBuilder, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>>()
-            .with_engine_api(self.engine_api_builder())
+        OpAddOns::default().with_engine_api(self.engine_api_builder())
     }
 }
 

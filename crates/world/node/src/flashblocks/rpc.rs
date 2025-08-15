@@ -11,10 +11,9 @@ use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
-use rollup_boost::Authorization;
+use rollup_boost::{ed25519_dalek::VerifyingKey, Authorization};
 use world_chain_builder_flashblocks::{primitives::FlashblocksState, rpc::engine::OpEngineApiExt};
 
-#[derive(Default)]
 /// Builder for basic [`OpEngineApiExt`] implementation.
 pub struct WorldChainEngineApiBuilder<EV> {
     /// The engine validator builder.
@@ -24,14 +23,22 @@ pub struct WorldChainEngineApiBuilder<EV> {
     /// The flashblocks state.
     pub flashblocks_state: Option<FlashblocksState>,
     /// A watch channel notifier to the jobs generator.
-    pub to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+    /// Verifying key for authorizations.
+    pub verifying_key: VerifyingKey,
+}
+
+impl<EV> Default for WorldChainEngineApiBuilder<EV> {
+    fn default() -> Self {
+        unreachable!()
+    }
 }
 
 impl<N, EV> EngineApiBuilder<N> for WorldChainEngineApiBuilder<EV>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: EthereumHardforks,
+            ChainSpec: EthereumHardforks + Clone,
             Payload: EngineTypes<ExecutionData = OpExecutionData>,
         >,
     >,
@@ -54,11 +61,11 @@ where
             flashblocks_handle,
             flashblocks_state,
             to_jobs_generator,
+            ..
         } = self;
 
         let flashblocks_handle = flashblocks_handle.expect("Flashblocks handle is required");
         let flashblocks_state = flashblocks_state.expect("Flashblocks state is required");
-        let to_jobs_generator = to_jobs_generator.expect("Authorization sender is required");
 
         let engine_validator = engine_validator_builder.build(ctx).await?;
 
@@ -69,6 +76,8 @@ where
             commit: VERGEN_GIT_SHA.to_string(),
         };
 
+        let mut capabilities = EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied());
+        capabilities.add_capability("flashblocks_forkChoiceUpdatedV3");
         let inner = EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
@@ -77,13 +86,12 @@ where
             ctx.node.pool().clone(),
             Box::new(ctx.node.task_executor().clone()),
             client,
-            EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied()),
+            capabilities,
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
         );
 
         let op_engine_api = OpEngineApi::new(inner);
-
         let op_engine_api_ext = OpEngineApiExt::new(
             op_engine_api,
             flashblocks_state,
