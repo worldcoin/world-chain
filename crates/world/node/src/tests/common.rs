@@ -16,22 +16,6 @@ use tracing::info;
 use world_chain_builder_flashblocks::rpc::engine::FlashblocksEngineApiExtClient;
 use world_chain_builder_test_utils::utils::signer;
 
-pub fn attributes(timestamp: u64) -> Option<OpPayloadAttributes> {
-    Some(OpPayloadAttributes {
-        payload_attributes: PayloadAttributes {
-            timestamp,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: Address::ZERO,
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: vec![].into(),
-        no_tx_pool: Some(false),
-        gas_limit: Some(30_000_000),
-        eip_1559_params: None,
-    })
-}
-
 pub struct EngineDriver {
     pub timestamp: u64,
     pub gen: fn(u64) -> Option<OpPayloadAttributes>,
@@ -120,4 +104,20 @@ impl EngineDriver {
             Ok(None)
         }
     }
+}
+
+pub fn attributes(timestamp: u64) -> Option<OpPayloadAttributes> {
+    Some(OpPayloadAttributes {
+        payload_attributes: PayloadAttributes {
+            timestamp,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+        },
+        transactions: vec![].into(),
+        no_tx_pool: Some(false),
+        gas_limit: Some(30_000_000),
+        eip_1559_params: None,
+    })
 }

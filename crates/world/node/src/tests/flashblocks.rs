@@ -192,7 +192,8 @@ pub async fn setup_flashblocks(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_flashblocks_fork_choice_updated_v3_with_authorization() -> eyre::Result<()> {
+async fn test_flashblocks() -> eyre::Result<()> {
+    // ------------------------- Simple Flashblock Block -------------------------
     reth_tracing::init_test_tracing();
     let authorizer_sk = SigningKey::from_bytes(&[42; 32]);
     // Create authorizer keys
@@ -354,6 +355,8 @@ async fn test_flashblocks_fork_choice_updated_v3_with_authorization() -> eyre::R
     assert!(state_0.0.read().await.0.is_empty());
     assert!(state_1.0.read().await.0.is_empty());
     assert!(state_2.0.read().await.0.is_empty());
+
+    // ------------------------ Sequencer Failover ----------------------------------
 
     Ok(())
 }

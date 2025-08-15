@@ -306,15 +306,16 @@ where
         let mut builder =
             Self::block_builder(&mut state, transactions.clone(), receipts, gas_used, ctx)?;
 
-        // 1. apply pre-execution changes
+        // 3. apply pre-execution changes
         builder.apply_pre_execution_changes()?;
 
-        // 3. Execute Deposit transactions
+        // 4. Execute Deposit transactions
         let mut info = ctx
             .execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?;
 
-        // 3. if mem pool transactions are requested we execute them
+        // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
+        // flashblocks
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
             let mut best_txns = BestPayloadTxns::new(best_txs)
@@ -334,10 +335,10 @@ where
             }
         }
 
-        // 4. Build the block
+        // 6. Build the block
         let build_outcome = builder.finish(&state_provider)?;
 
-        // 5. Seal the block
+        // 7. Seal the block
         let BlockBuilderOutcome {
             execution_result,
             block,

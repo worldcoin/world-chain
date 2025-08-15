@@ -239,10 +239,7 @@ where
             ?fork_choice_state,
             "Handling fork choice updated for flashblocks state"
         );
-        let latest = self.flashblocks_state.last().await;
-        let block_hash = latest.as_ref().map(|p| p.diff.block_hash);
-        info!(?block_hash, "Latest flashblock in state");
-        info!(?fork_choice_state.head_block_hash, "Fork choice head block hash");
+
         let confirmed = self
             .flashblocks_state
             .last()

@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -20,12 +20,14 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization, AuthorizedPayload};
+use rollup_boost::{
+    ed25519_dalek::SigningKey, Authorization, AuthorizedPayload, FlashblocksPayloadV1,
+};
 use tokio::{
     sync::oneshot,
     time::{Interval, Sleep},
 };
-use tracing::{debug, info, span, trace};
+use tracing::{debug, error, info, span, trace};
 
 use crate::primitives::Flashblock;
 
@@ -135,25 +137,34 @@ where
         self.pending_block = Some(PendingPayload::new(_cancel, rx));
     }
 
+    /// Publishes a new payload to the [`FlashblocksHandle`] after every build job has resolved.
+    ///
+    /// An [`AuthorizedPayload<FlashblockPayloadV1>`] signed by the builder is sent to
+    /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
+    /// See: [`FlashblocksHandle::publish_new`].
     pub fn publish_payload(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
-    ) {
+    ) -> Result<(), FlashblocksP2PError> {
         let offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
-
         trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
-        let authorized = AuthorizedPayload::new(
-            &self.builder_signing_key,
-            self.authorization,
-            flashblock.flashblock().clone(),
-        );
 
-        let _ = self.p2p_handler.publish_new(authorized);
+        self.p2p_handler.publish_new(self.authorization_for(flashblock.into_flashblock()))
+            .inspect_err(|err| {
+                error!(target: "payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
+            })
+    }
+
+    pub fn authorization_for(
+        &self,
+        payload: FlashblocksPayloadV1,
+    ) -> AuthorizedPayload<FlashblocksPayloadV1> {
+        AuthorizedPayload::new(&self.builder_signing_key, self.authorization, payload)
     }
 }
 
@@ -170,6 +181,42 @@ where
 {
     type Output = Result<(), PayloadBuilderError>;
 
+    /// Polls the payload builder job to drive payload construction and management.
+    ///
+    /// This implementation follows a state-driven approach with the following logic:
+    ///
+    /// # Flow
+    ///
+    /// 1. **Deadline Check**: First checks if the payload building deadline has been reached.
+    ///    If so, returns [`Poll::Ready(Ok(()))`] to complete the job.
+    ///
+    /// 2. **Interval Tick**: Polls the interval timer to determine when to spawn new build jobs.
+    ///    - If the interval is ready, continues to spawn a new build job
+    ///    - If pending, schedules a wake-up and returns [`Poll::Pending`]
+    ///
+    /// 3. **Pending Block Processing**: If there's a pending block being built:
+    ///    - Processes build outcomes ([`BuildOutcome::Better`], [`BuildOutcome::Freeze`], [`BuildOutcome::Aborted`])
+    ///    - [`BuildOutcome::Better`]:
+    ///         - Each successive payload is a pre-commitment to the next payload.
+    ///         - We will continuously build on top of the best payload until the job is resolved.
+    ///    - [`BuildOutcome::Freeze`]: marks payload as frozen and stops further building
+    ///    - [`BuildOutcome::Aborted`]: handles cancellation and potential respawning
+    ///    - On errors: logs and continues operation
+    ///    - If still pending: restores the future and returns [`Poll::Pending`]
+    ///
+    /// 4. **New Job Spawning**: If no pending block exists, spawns a new build job
+    ///    and continues polling.
+    ///
+    /// # Pre-confirmation Behavior
+    ///
+    /// Each time we hit [`BuildOutcome::Better`], we increment `block_index` and create a new
+    /// pre-confirmation on top of the current best payload. This allows for iterative improvement
+    /// where each successive build acts as a pre-commitment to the next block state.
+    ///
+    /// # Returns
+    ///
+    /// The polling continues until either the deadline is reached or an error occurs, returning
+    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready(Ok(()))`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let _span = span!(target: "payload_builder", tracing::Level::DEBUG, "poll").entered();
         let _enter = _span.enter();
@@ -182,14 +229,8 @@ where
 
         let mut tick_fut = Box::pin(this.interval.tick());
 
-        loop {
-            match tick_fut.as_mut().poll(cx) {
-                Poll::Ready(_) => {
-                    trace!(target: "payload_builder", id=%this.config.payload_id(), "interval ticked, attempting to spawn new build job");
-                    break;
-                }
-                Poll::Pending => continue,
-            }
+        while tick_fut.as_mut().poll(cx).is_pending() {
+            cx.waker().wake_by_ref();
         }
 
         drop(tick_fut);
@@ -206,14 +247,22 @@ where
                     } => {
                         let prev = this.best_payload.clone();
                         this.cached_reads = Some(cached_reads);
-                        trace!(target: "job_generator", value = %payload.fees(), "building new best payload");
-                        this.best_payload = PayloadState::Best(payload.clone());
 
+                        trace!(target: "job_generator", value = %payload.fees(), "building new best payload");
                         let mut clearance = Box::pin(p2p.await_clearance());
                         while clearance.poll_unpin(cx).is_pending() {
                             cx.waker().wake_by_ref();
                         }
-                        this.publish_payload(&payload, &prev.payload().cloned());
+
+                        // Freeze the last pre-confirmation if we no longer have clearance to
+                        // publish.
+                        if this
+                            .publish_payload(&payload, &prev.payload().cloned())
+                            .is_ok()
+                        {
+                            this.best_payload = PayloadState::Best(payload.clone());
+                        }
+                        // increment the pre-confirmation index
                         this.block_index += 1;
                         this.spawn_build_job();
                     }

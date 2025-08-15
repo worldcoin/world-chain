@@ -137,6 +137,10 @@ impl Flashblock {
         &self.flashblock
     }
 
+    pub fn into_flashblock(self) -> FlashblocksPayloadV1 {
+        self.flashblock
+    }
+
     pub fn payload_id(&self) -> &FixedBytes<8> {
         &self.flashblock.payload_id.0
     }
