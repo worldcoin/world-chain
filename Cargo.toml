@@ -77,7 +77,7 @@ reth-revm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c", default
 reth-tasks = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-chainspec = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-rpc-engine-api = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
-
+reth-network-api = {git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 # reth-optimism
 reth-primitives = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
 reth-optimism-evm = { git = "https://github.com/0xOsiris/reth", rev = "1bb4f2c" }
