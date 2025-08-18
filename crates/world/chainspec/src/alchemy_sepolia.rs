@@ -18,28 +18,29 @@ pub const CHAIN_ID: u64 = 69420;
 pub static ALCHEMY_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/alchemy_sepolia.json"))
         .expect("Can't deserialize Alchemy Sepolia genesis json");
-    let hardforks = ALCHEMY_SEPOLIA_HARDFORKS.clone();
-    OpChainSpec {
-        inner: ChainSpec {
-            chain: Chain::from(CHAIN_ID),
-            genesis_header: SealedHeader::new(
-                make_op_genesis_header(&genesis, &hardforks),
-                b256!("257d26bac7028be25e0ed40c496325ab505818709f0b8d58b12205aa4ca972f4"),
-            ),
-            genesis,
-            paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks,
-            base_fee_params: BaseFeeParamsKind::Variable(
-                vec![
-                    (EthereumHardfork::London.boxed(), BaseFeeParams::new(50, 10)),
-                    (OpHardfork::Canyon.boxed(), BaseFeeParams::new(250, 10)),
-                ]
-                .into(),
-            ),
-            ..Default::default()
-        },
-    }
-    .into()
+    // let hardforks = ALCHEMY_SEPOLIA_HARDFORKS.clone();
+    OpChainSpec::from_genesis(genesis).into()
+    // OpChainSpec {
+    //     inner: ChainSpec {
+    //         chain: Chain::from(CHAIN_ID),
+    //         genesis_header: SealedHeader::new(
+    //             make_op_genesis_header(&genesis, &hardforks),
+    //             b256!("257d26bac7028be25e0ed40c496325ab505818709f0b8d58b12205aa4ca972f4"),
+    //         ),
+    //         genesis,
+    //         paris_block_and_final_difficulty: Some((0, U256::from(0))),
+    //         hardforks,
+    //         base_fee_params: BaseFeeParamsKind::Variable(
+    //             vec![
+    //                 (EthereumHardfork::London.boxed(), BaseFeeParams::new(50, 10)),
+    //                 (OpHardfork::Canyon.boxed(), BaseFeeParams::new(250, 10)),
+    //             ]
+    //             .into(),
+    //         ),
+    //         ..Default::default()
+    //     },
+    // }
+    // .into()
 });
 
 /// Alchemy Sepolia list of hardforks.
