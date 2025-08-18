@@ -1,10 +1,9 @@
-use alloy_consensus::{SignableTransaction, Transaction};
+use alloy_consensus::{BlockHeader, SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
 use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
@@ -37,6 +36,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tracing::{error, trace};
+use world_chain_builder_flashblocks::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
@@ -169,7 +169,7 @@ where
                 .gas_limit
                 .unwrap_or(self.inner.parent().gas_limit),
             parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: self.inner.extra_data()?,
+            extra_data: self.inner.parent().extra_data().clone(),
         };
 
         // Prepare EVM environment.

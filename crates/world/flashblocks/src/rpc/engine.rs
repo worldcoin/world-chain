@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin};
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
@@ -7,12 +7,13 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use futures::{Stream, StreamExt};
+use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
 };
 use reth::{
-    api::{EngineTypes, EngineValidator},
+    api::{EngineApiValidator, EngineTypes},
     rpc::api::IntoEngineApiRpcModule,
     tasks::TaskSpawner,
 };
@@ -20,86 +21,20 @@ use reth_chainspec::EthereumHardforks;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::FlashblocksPayloadV1;
-use tokio::sync::RwLock;
+use rollup_boost::{Authorization, FlashblocksPayloadV1};
+use tracing::info;
 
-pub type Flashblocks = Vec<FlashblocksPayloadV1>;
+use crate::primitives::{Flashblock, FlashblocksState};
 
-// Reduces a Vector of FlashblocksPayloadV1 into a single FlashblocksPayloadV1
-pub fn reduce_all(payloads: Flashblocks) -> Option<FlashblocksPayloadV1> {
-    let mut iter = payloads.into_iter();
-    let mut acc = iter.next()?;
-
-    for next in iter {
-        debug_assert_eq!(
-            acc.payload_id, next.payload_id,
-            "all flashblocks should have the same payload_id"
-        );
-
-        if acc.base.is_none() && next.base.is_some() {
-            acc.base = next.base;
-        }
-
-        acc.diff.gas_used += next.diff.gas_used;
-
-        acc.diff.transactions.extend(next.diff.transactions);
-        acc.diff.withdrawals.extend(next.diff.withdrawals);
-
-        acc.diff.state_root = next.diff.state_root;
-        acc.diff.receipts_root = next.diff.receipts_root;
-        acc.diff.logs_bloom = next.diff.logs_bloom;
-        acc.diff.block_hash = next.diff.block_hash;
-        acc.diff.withdrawals_root = next.diff.withdrawals_root;
-    }
-
-    Some(acc)
-}
-
-/// The current state of all known pre confirmations received over the P2P layer
-/// or generated from the payload building job of this node.
-///
-/// The state is flushed when FCU is received with a parent hash that matches the block hash
-/// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
-/// in which case the pre confirmations were not included as part of the canonical chain.
+/// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
-pub struct FlashblocksState(pub Arc<RwLock<Flashblocks>>);
-
-impl Default for FlashblocksState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FlashblocksState {
-    /// Creates a new instance of [`FlashblocksState`].
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(Vec::new())))
-    }
-
-    /// Returns a reference to the latest flashblock.
-    pub async fn last(&self) -> Option<FlashblocksPayloadV1> {
-        self.0.read().await.last().cloned()
-    }
-
-    /// Appends a new flashblock to the state.
-    pub async fn push(&self, payload: FlashblocksPayloadV1) {
-        let mut state = self.0.write().await;
-        state.retain(|p| p.payload_id == payload.payload_id);
-        state.push(payload);
-    }
-
-    /// Clears the current state of flashblocks.
-    pub async fn clear(&self) {
-        self.0.write().await.clear();
-    }
-}
-
-#[derive(Debug)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// The current store of all pre confirmations ahead of the canonical chain.
     flashblocks_state: FlashblocksState,
+    /// A watch channel notifier to the jobs generator.
+    to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -111,6 +46,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         flashblocks_state: FlashblocksState,
         executor: impl TaskSpawner,
         stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
+        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     ) -> Self {
         executor.spawn_critical(
             "subscription_handle",
@@ -120,6 +56,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         Self {
             inner,
             flashblocks_state,
+            to_jobs_generator,
         }
     }
 
@@ -136,7 +73,11 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     ) -> Pin<Box<impl Future<Output = ()> + Send + 'static>> {
         Box::pin(async move {
             while let Some(payload) = stream.next().await {
-                flashblocks_state.push(payload).await;
+                flashblocks_state
+                    .push(Flashblock {
+                        flashblock: payload,
+                    })
+                    .await;
             }
         })
     }
@@ -149,7 +90,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
@@ -289,7 +230,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Handles a [`ForkchoiceState`] update by checking if the latest flashblock matches the
@@ -298,11 +239,16 @@ where
     /// It is up to the consumer of [`FlashblocksState`] to ensure that the block number of the latest
     /// flashblock is 1 + latest block number in the canonical chain.
     pub async fn handle_fork_choice_updated(&self, fork_choice_state: ForkchoiceState) {
+        info!(
+            ?fork_choice_state,
+            "Handling fork choice updated for flashblocks state"
+        );
+
         let confirmed = self
             .flashblocks_state
             .last()
             .await
-            .map(|p| p.diff.block_hash == fork_choice_state.head_block_hash);
+            .map(|p| p.flashblock.diff.block_hash == fork_choice_state.head_block_hash);
 
         if confirmed.unwrap_or(false) {
             self.flashblocks_state.clear().await;
@@ -314,9 +260,73 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     EngineT: EngineTypes,
-    Self: OpEngineApiServer<EngineT>,
+    Self: OpEngineApiServer<EngineT> + FlashblocksEngineApiExtServer<EngineT> + Clone,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
-        self.into_rpc().remove_context()
+        let mut module = RpcModule::new(());
+        module
+            .merge(OpEngineApiServer::into_rpc(self.clone()))
+            .unwrap();
+
+        module
+            .merge(FlashblocksEngineApiExtServer::into_rpc(self))
+            .unwrap();
+
+        module.remove_context()
+    }
+}
+
+#[rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+pub trait FlashblocksEngineApiExt<Engine: EngineTypes> {
+    #[method(name = "flashblocks_forkChoiceUpdatedV3")]
+    async fn flashblocks_fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+        authorization: Option<Authorization>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+}
+
+#[async_trait]
+impl<Provider, EngineT, Pool, Validator, ChainSpec> FlashblocksEngineApiExtServer<EngineT>
+    for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    async fn flashblocks_fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+        authorization: Option<Authorization>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        info!(
+            ?fork_choice_state,
+            "Received flashblocks_fork_choice_updated_v3"
+        );
+
+        if payload_attributes.is_some() && authorization.is_none()
+            || authorization.is_some() && payload_attributes.is_none()
+        {
+            return Err(ErrorObject::owned(
+                -32000,
+                "Both payload attributes and authorization must be provided together",
+                None::<()>,
+            ));
+        }
+
+        if let Some(a) = authorization {
+            self.to_jobs_generator.send_modify(|b| *b = Some(a))
+        }
+
+        let (res, _) = tokio::join!(
+            self.inner
+                .fork_choice_updated_v3(fork_choice_state, payload_attributes),
+            self.handle_fork_choice_updated(fork_choice_state)
+        );
+        Ok(res?)
     }
 }
