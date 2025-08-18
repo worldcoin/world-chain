@@ -129,7 +129,7 @@ where
                         )
                         .await?;
 
-                        let _ = self
+                        self
                             .tx
                             .send(engine_payload)
                             .await

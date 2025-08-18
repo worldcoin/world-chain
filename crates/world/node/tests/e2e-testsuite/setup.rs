@@ -43,14 +43,16 @@ where
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     pub node: WorldChainNodeTestContext<T>,
-    pub ext_context: <T as WorldChainNodeContext<
-        FullNodeTypesAdapter<
-            WorldChainNode<T>,
-            TmpDB,
-            BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
-        >,
-    >>::ExtContext,
+    pub ext_context: WorldChainNodeExtContext<T>,
 }
+
+type WorldChainNodeExtContext<T> = <T as WorldChainNodeContext<
+    FullNodeTypesAdapter<
+        WorldChainNode<T>,
+        TmpDB,
+        BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
+    >,
+>>::ExtContext;
 
 type WorldChainNodeTestContext<T> = NodeHelperType<
     WorldChainNode<T>,
@@ -167,7 +169,7 @@ where
         }
 
         let world_chain_test_node = WorldChainTestingNodeContext {
-            node: node,
+            node,
             ext_context,
         };
 
