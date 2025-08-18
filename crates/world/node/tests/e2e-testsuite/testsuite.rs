@@ -262,7 +262,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         .expect("valid recovered block");
 
     let hash = block.hash_slow();
-    
+
     let aggregated_flashblocks_0 = Flashblock::reduce(Flashblocks(
         flashblocks_0_clone
             .lock()
