@@ -14460,7 +14460,6 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
- "reth-optimism-storage",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

@@ -12,6 +12,10 @@ WS_PORT_NUM = 8546
 DEBUG_PORT_NUM = 5555
 MAX_UNSAFE_INTERVAL = 50
 
+AUTHORIZER_SK = "0x722d0eaa68f03330030c332258a73fb32c27a8c56a2a818e65a483b992852a12"
+FLASHBLOCKS_BUILDER_VK = "0xc1d3e001731f19f0a1b895f131a10718e24d3f50ebd834080a9b857fb01e3342"
+
+
 def launch(
     plan,
     params,
@@ -79,7 +83,9 @@ def get_service_config(
         "--log-level=debug",
         "--debug-host=0.0.0.0",
         "--debug-server-port={0}".format(DEBUG_PORT_NUM),
-
+        "--flashblocks={0}".format("true"),
+        "--flashblocks-builder-vk={0}".format(FLASHBLOCKS_BUILDER_VK),
+        "--flashblocks-authorizer-sk={0}".format(AUTHORIZER_SK),
     ]
 
     return ServiceConfig(

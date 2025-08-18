@@ -26,6 +26,10 @@ def run(plan, args={}):
                 "launcher": rollup_boost.new_rollup_boost_launcher,
                 "launch_method": rollup_boost.launch,
             },
+            "el_launcher": {
+                "launcher": world_chain_builder.new_op_reth_launcher,
+                "launch_method": world_chain_builder.launch,
+            },
         },
     )
 
@@ -53,11 +57,11 @@ def run(plan, args={}):
     builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
     # Extract HTTP RPC url of 2 Reth nodes
-    reth_srv_0 = plan.get_service("op-el-2151908-2-op-reth-op-node-op-kurtosis")
+    reth_srv_0 = plan.get_service("op-el-2151908-2-custom-op-node-op-kurtosis")
     reth_rpc_port_0 = reth_srv_0.ports["rpc"].number
     reth_rpc_url_0 = "http://{0}:{1}".format(reth_srv_0.ip_address, reth_rpc_port_0)
 
-    reth_srv_1 = plan.get_service("op-el-2151908-3-op-reth-op-node-op-kurtosis")
+    reth_srv_1 = plan.get_service("op-el-2151908-3-custom-op-node-op-kurtosis")
     reth_rpc_port_1 = reth_srv_1.ports["rpc"].number
     reth_rpc_url_1 = "http://{0}:{1}".format(reth_srv_1.ip_address, reth_rpc_port_1)
 

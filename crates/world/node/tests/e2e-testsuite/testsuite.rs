@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use alloy_network::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::b64;
+use alloy_primitives::{b64, hex};
 use alloy_rpc_types::TransactionRequest;
 use futures::StreamExt;
-
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;

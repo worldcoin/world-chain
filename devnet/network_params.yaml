@@ -8,10 +8,14 @@ optimism_package:
     - participants:
       - el_type: op-geth
         cl_type: op-node
+        el_image: world-chain-node:latest
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-      - el_type: op-reth
-      - el_type: op-reth
+      - el_type: custom
+        cl_type: op-node
+      - el_type: custom
+        cl_type: op-node
+        el_image: world-chain-node:latest
       network_params: 
         seconds_per_slot: 2
         fjord_time_offset: 0
@@ -19,7 +23,7 @@ optimism_package:
         holocene_time_offset: 0
         isthmus_time_offset: 20
       mev_params:
-        image: "flashbots/rollup-boost:sha-e23bcc2"
+        image: "leytont/rollup-boost:p2p"
         type: custom
       additional_services:
         - rollup-boost
