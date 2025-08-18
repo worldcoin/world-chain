@@ -9,6 +9,3 @@ pub use world_chain_builder_flashblocks::primitives::*;
 
 #[cfg(any(feature = "test", test))]
 pub mod test_utils;
-
-// #[cfg(test)]
-// mod tests;

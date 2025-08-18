@@ -55,7 +55,6 @@ alloy-sol-types = { workspace = true, optional = true }
 
 op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
-op-alloy-network.workspace = true
 
 revm-primitives = { workspace = true, optional = true }
 

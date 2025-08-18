@@ -14438,7 +14438,6 @@ dependencies = [
  "futures",
  "jsonrpsee 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-consensus",
- "op-alloy-network",
  "op-alloy-rpc-types-engine",
  "parking_lot",
  "rand 0.9.2",
