@@ -50,9 +50,7 @@ fn main() {
                         node_exit_future,
                         node: _node,
                     } = builder
-                        .with_types::<WorldChainNode<BasicContext>>()
-                        .with_components(node.components_builder())
-                        .with_add_ons(node.add_ons())
+                        .node(node)
                         .extend_rpc_modules(move |ctx| {
                             let provider = ctx.provider().clone();
                             let pool = ctx.pool().clone();

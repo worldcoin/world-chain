@@ -1,4 +1,4 @@
-use alloy_consensus::{SignableTransaction, Transaction};
+use alloy_consensus::{BlockHeader, SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
 use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
@@ -169,7 +169,7 @@ where
                 .gas_limit
                 .unwrap_or(self.inner.parent().gas_limit),
             parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: self.inner.extra_data()?,
+            extra_data: self.inner.parent().extra_data().clone(),
         };
 
         // Prepare EVM environment.

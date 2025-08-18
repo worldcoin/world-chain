@@ -16,6 +16,7 @@ use reth::rpc::compat::RpcTypes;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
+    rpc::BasicEngineValidatorBuilder,
     NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
@@ -28,7 +29,7 @@ use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
     Authorization,
 };
-use tokio::sync::broadcast;
+
 use world_chain_builder_flashblocks::primitives::FlashblocksState;
 use world_chain_builder_pool::BasicWorldChainPool;
 
@@ -149,6 +150,7 @@ where
         OpEthApiBuilder,
         OpEngineValidatorBuilder,
         WorldChainEngineApiBuilder<OpEngineValidatorBuilder>,
+        BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
     >;
 
     type ExtContext = FlashblocksComponentsContext;
@@ -218,7 +220,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         self.add_ons_builder()
-            .build::<_, OpEngineValidatorBuilder, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>>()
+            .build::<_, OpEngineValidatorBuilder, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>, BasicEngineValidatorBuilder<OpEngineValidatorBuilder>>()
             .with_engine_api(self.engine_api_builder())
     }
 
@@ -281,8 +283,6 @@ impl From<WorldChainNodeConfig> for FlashblocksContext {
 
 impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let (flashblocks_tx, _) = broadcast::channel(100);
-
         let flashblocks_state = FlashblocksState::default();
 
         let authorizer_vk = value
@@ -297,8 +297,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
                     .verifying_key(),
             );
         let builder_sk = value.args.flashblocks_args.flashblocks_builder_sk.clone();
-        let flashblocks_handle =
-            FlashblocksHandle::new(authorizer_vk, builder_sk.clone(), flashblocks_tx.clone());
+        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
         Self {

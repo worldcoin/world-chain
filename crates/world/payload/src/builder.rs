@@ -142,24 +142,8 @@ where
             builder_private_key,
         } = self;
 
-        let OpPayloadBuilder {
-            compute_pending_block,
-            evm_config,
-            config,
-            pool,
-            client,
-            ..
-        } = inner;
-
         WorldChainPayloadBuilder {
-            inner: OpPayloadBuilder {
-                compute_pending_block,
-                evm_config,
-                config,
-                pool,
-                client,
-                best_transactions,
-            },
+            inner: inner.with_transactions(best_transactions),
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,

@@ -117,3 +117,7 @@ test = [
     "dep:futures",
     "dep:chrono",
 ]
+
+[[test]]
+name = "e2e-testsuite"
+path = "tests/e2e-testsuite/main.rs"

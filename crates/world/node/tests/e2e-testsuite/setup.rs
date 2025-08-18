@@ -153,7 +153,7 @@ where
 
         node.update_forkchoice(genesis.hash(), genesis.hash())
             .await?;
-        // info!("Launched node {} with genesis hash: {:?}", idx, genesis.hardforks());
+
         // Connect each node in a chain.
         if let Some(previous_node) = node_contexts.last_mut() {
             previous_node.node.connect(&mut node).await;
@@ -186,7 +186,7 @@ where
             .push(NodeClient::new(rpc, auth, url));
     }
 
-    Ok((0..num_nodes, node_contexts, tasks, environment))
+    Ok((0..5, node_contexts, tasks, environment))
 }
 
 pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {

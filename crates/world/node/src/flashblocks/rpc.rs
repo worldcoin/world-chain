@@ -1,12 +1,12 @@
 use alloy_rpc_types::engine::ClientVersionV1;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use op_alloy_rpc_types_engine::OpExecutionData;
-use reth::{
-    payload::PayloadStore,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA},
+use reth::version::version_metadata;
+use reth::{payload::PayloadStore, version::CLIENT_CODE};
+use reth_node_api::{
+    AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };
-use reth_node_api::{AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes};
-use reth_node_builder::rpc::{EngineApiBuilder, EngineValidatorBuilder};
+use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
 use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
@@ -49,7 +49,8 @@ where
             Payload: EngineTypes<ExecutionData = OpExecutionData>,
         >,
     >,
-    EV: EngineValidatorBuilder<N>,
+    EV: PayloadValidatorBuilder<N>,
+    EV::Validator: EngineApiValidator<<N::Types as NodeTypes>::Payload> + Clone,
 {
     type EngineApi = OpEngineApiExt<
         N::Provider,
@@ -79,8 +80,8 @@ where
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
             name: OP_NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
 
         let mut capabilities = EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied());
