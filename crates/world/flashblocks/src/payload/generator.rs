@@ -45,7 +45,7 @@ pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
     /// The cached authorizations for payload ids.
-    authorizations: tokio::sync::watch::Receiver<Authorization>,
+    authorizations: tokio::sync::watch::Receiver<Option<Authorization>>,
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
@@ -64,7 +64,7 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
         config: FlashblocksJobGeneratorConfig,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
-        auth_rx: tokio::sync::watch::Receiver<Authorization>,
+        auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         flashblocks_state: FlashblocksState,
         builder_sk: SigningKey,
     ) -> Self {
@@ -163,7 +163,7 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
-
+        let interval = Box::pin(tokio::time::sleep(self.config.interval));
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(1);
@@ -174,10 +174,11 @@ where
         let mut authorization = self.authorizations.clone();
         let pending = async move {
             let _ = authorization
-                .wait_for(|a| a.payload_id == payload_id)
+                .wait_for(|a| a.is_some_and(|auth| auth.payload_id == payload_id))
                 .await
                 .is_ok();
-            *authorization.borrow()
+
+            authorization.borrow().unwrap()
         };
 
         let authorization = tokio::task::block_in_place(|| {
@@ -192,7 +193,8 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            interval: tokio::time::interval(self.config.interval),
+            flashblock_deadline: interval,
+            interval: self.config.interval,
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,

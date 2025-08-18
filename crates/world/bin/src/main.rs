@@ -1,14 +1,12 @@
 use clap::Parser;
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use reth_node_builder::Node;
+use reth_node_builder::NodeHandle;
 use reth_optimism_cli::Cli;
-use reth_payload_builder::PayloadId;
+use reth_optimism_node::OpDAConfig;
 use reth_tracing::tracing::info;
-use rollup_boost::Authorization;
-use tokio::sync::broadcast;
 use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
-use world_chain_builder_node::flashblocks::WorldChainFlashblocksNode;
-use world_chain_builder_node::FlashblocksState;
+use world_chain_builder_node::args::NodeContextType;
+use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
+use world_chain_builder_node::node::WorldChainNodeConfig;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -37,71 +35,61 @@ fn main() {
     if let Err(err) =
         Cli::<WorldChainChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
+            let node_config = WorldChainNodeConfig {
+                args: args.clone(),
+                da_config: OpDAConfig::default(),
+            };
 
-            if let Some(flashblocks_args) = args.flashblocks_args.clone() {
-                let authorizer_vk = flashblocks_args
-                    .flashblocks_authorizor_vk
-                    .unwrap_or(flashblocks_args.flashblocks_builder_sk.verifying_key());
+            let node_context = node_config.clone().into();
 
-                let (flashblocks_tx, _) = broadcast::channel(100);
-
-                let state = FlashblocksState::default();
-
-                let flashblocks_handle = FlashblocksHandle::new(
-                    authorizer_vk,
-                    flashblocks_args.flashblocks_builder_sk.clone(),
-                    flashblocks_tx.clone(),
-                );
-
-                let authorization = Authorization::new(
-                    PayloadId::default(),
-                    0,
-                    &flashblocks_args.flashblocks_builder_sk.clone(),
-                    authorizer_vk,
-                );
-                let (to_jobs_generator, _) = tokio::sync::watch::channel(authorization);
-
-                let node = WorldChainFlashblocksNode::new(
-                    args.clone(),
-                    state,
-                    Some(flashblocks_handle),
-                    to_jobs_generator,
-                );
-
-                let handle = builder
-                    .with_types::<WorldChainFlashblocksNode>()
-                    .with_components(node.components())
-                    .with_add_ons(node.add_ons())
-                    .extend_rpc_modules(move |ctx| {
-                        let provider = ctx.provider().clone();
-                        let pool = ctx.pool().clone();
-                        let sequencer_client = args.rollup_args.sequencer.map(SequencerClient::new);
-                        let eth_api_ext =
-                            WorldChainEthApiExt::new(pool, provider, sequencer_client);
-                        ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                        Ok(())
-                    })
-                    .launch()
-                    .await?;
-                handle.node_exit_future.await
-            } else {
-                let node = WorldChainNode::new(args.clone());
-                let handle = builder
-                    .node(node)
-                    .extend_rpc_modules(move |ctx| {
-                        let provider = ctx.provider().clone();
-                        let pool = ctx.pool().clone();
-                        let sequencer_client = args.rollup_args.sequencer.map(SequencerClient::new);
-                        let eth_api_ext =
-                            WorldChainEthApiExt::new(pool, provider, sequencer_client);
-                        ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                        Ok(())
-                    })
-                    .launch()
-                    .await?;
-
-                handle.node_exit_future.await
+            match node_context {
+                NodeContextType::Basic => {
+                    info!(target: "reth::cli", "Starting in Basic mode");
+                    let node = WorldChainNode::<BasicContext>::new(node_config.clone());
+                    let NodeHandle {
+                        node_exit_future,
+                        node: _node,
+                    } = builder
+                        .node(node)
+                        .extend_rpc_modules(move |ctx| {
+                            let provider = ctx.provider().clone();
+                            let pool = ctx.pool().clone();
+                            let sequencer_client =
+                                args.rollup_args.sequencer.map(SequencerClient::new);
+                            let eth_api_ext =
+                                WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                            ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                            Ok(())
+                        })
+                        .launch()
+                        .await?;
+                    node_exit_future.await?;
+                }
+                NodeContextType::Flashblocks => {
+                    info!(target: "reth::cli", "Starting in Flashblocks mode");
+                    let node = WorldChainNode::<FlashblocksContext>::new(node_config);
+                    let NodeHandle {
+                        node_exit_future,
+                        node: _node,
+                    } = builder
+                        .node(node)
+                        .extend_rpc_modules(move |ctx| {
+                            let provider = ctx.provider().clone();
+                            let pool = ctx.pool().clone();
+                            let sequencer_client =
+                                args.rollup_args.sequencer.map(SequencerClient::new);
+                            let eth_api_ext =
+                                WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                            ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                            Ok(())
+                        })
+                        .launch()
+                        .await?;
+                    node_exit_future.await?;
+                }
             }
+
+            Ok(())
         })
     {
         eprintln!("Error: {err:?}");

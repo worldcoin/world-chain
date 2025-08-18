@@ -30,7 +30,7 @@ use tokio::sync::RwLock;
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
 pub struct Flashblock {
-    flashblock: FlashblocksPayloadV1,
+    pub flashblock: FlashblocksPayloadV1,
 }
 
 impl Flashblock {
@@ -50,7 +50,7 @@ impl Flashblock {
                     .attributes
                     .payload_attributes
                     .parent_beacon_block_root
-                    .unwrap(),
+                    .unwrap_or_default(),
                 parent_hash: config.attributes.parent(),
                 fee_recipient: config
                     .attributes
@@ -181,8 +181,8 @@ impl Flashblock {
             acc.diff.state_root = next.flashblock.diff.state_root;
             acc.diff.receipts_root = next.flashblock.diff.receipts_root;
             acc.diff.logs_bloom = next.flashblock.diff.logs_bloom;
-            acc.diff.block_hash = next.flashblock.diff.block_hash;
             acc.diff.withdrawals_root = next.flashblock.diff.withdrawals_root;
+            acc.diff.block_hash = next.flashblock.diff.block_hash;
         }
 
         Some(Flashblock { flashblock: acc })
@@ -199,7 +199,7 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
         ))?;
         let diff = value.flashblock.diff.clone();
         let header = Header {
-            parent_beacon_block_root: Some(base.parent_beacon_block_root),
+            parent_beacon_block_root: None,
             state_root: diff.state_root,
             receipts_root: diff.receipts_root,
             logs_bloom: diff.logs_bloom,
@@ -250,12 +250,8 @@ pub struct Flashblocks(pub Vec<Flashblock>);
 
 impl Flashblocks {
     /// Creates a new instance of [`Flashblocks`] from a vector of [`FlashblocksPayloadV1`].
-    pub fn from_payloads(payloads: Vec<FlashblocksPayloadV1>) -> Self {
-        let flashblocks = payloads
-            .into_iter()
-            .map(|p| Flashblock { flashblock: p })
-            .collect();
-        Flashblocks(flashblocks)
+    pub fn from_payloads(payloads: Vec<Flashblock>) -> Self {
+        Flashblocks(payloads)
     }
 }
 
@@ -291,17 +287,17 @@ impl FlashblocksState {
     }
 
     /// Returns a reference to the latest flashblock.
-    pub async fn last(&self) -> Option<FlashblocksPayloadV1> {
-        self.0.read().await.0.last().map(|f| f.flashblock().clone())
+    pub async fn last(&self) -> Option<Flashblock> {
+        self.0.read().await.0.last().cloned()
     }
 
     /// Appends a new flashblock to the state.
-    pub async fn push(&self, payload: FlashblocksPayloadV1) {
+    pub async fn push(&self, payload: Flashblock) {
         let mut state = self.0.write().await;
-        state.0.retain(|p| *p.payload_id() == payload.payload_id.0);
-        state.0.push(Flashblock {
-            flashblock: payload,
-        });
+        state
+            .0
+            .retain(|p| *p.payload_id() == payload.flashblock.payload_id.0);
+        state.0.push(payload);
     }
 
     /// Clears the current state of flashblocks.

@@ -13,7 +13,7 @@ use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
 };
 use reth::{
-    api::{EngineTypes, EngineValidator},
+    api::{EngineApiValidator, EngineTypes},
     rpc::api::IntoEngineApiRpcModule,
     tasks::TaskSpawner,
 };
@@ -24,7 +24,7 @@ use reth_transaction_pool::TransactionPool;
 use rollup_boost::{Authorization, FlashblocksPayloadV1};
 use tracing::info;
 
-use crate::primitives::FlashblocksState;
+use crate::primitives::{Flashblock, FlashblocksState};
 
 /// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     /// The current store of all pre confirmations ahead of the canonical chain.
     flashblocks_state: FlashblocksState,
     /// A watch channel notifier to the jobs generator.
-    to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+    to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -46,7 +46,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         flashblocks_state: FlashblocksState,
         executor: impl TaskSpawner,
         stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
-        to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     ) -> Self {
         executor.spawn_critical(
             "subscription_handle",
@@ -73,7 +73,11 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     ) -> Pin<Box<impl Future<Output = ()> + Send + 'static>> {
         Box::pin(async move {
             while let Some(payload) = stream.next().await {
-                flashblocks_state.push(payload).await;
+                flashblocks_state
+                    .push(Flashblock {
+                        flashblock: payload,
+                    })
+                    .await;
             }
         })
     }
@@ -86,7 +90,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
@@ -226,7 +230,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Handles a [`ForkchoiceState`] update by checking if the latest flashblock matches the
@@ -244,7 +248,7 @@ where
             .flashblocks_state
             .last()
             .await
-            .map(|p| p.diff.block_hash == fork_choice_state.head_block_hash);
+            .map(|p| p.flashblock.diff.block_hash == fork_choice_state.head_block_hash);
 
         if confirmed.unwrap_or(false) {
             self.flashblocks_state.clear().await;
@@ -290,7 +294,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn flashblocks_fork_choice_updated_v3(
@@ -315,7 +319,7 @@ where
         }
 
         if let Some(a) = authorization {
-            self.to_jobs_generator.send_modify(|b| *b = a)
+            self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
         let (res, _) = tokio::join!(

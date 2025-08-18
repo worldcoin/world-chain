@@ -13,7 +13,7 @@ use world_chain_builder_flashblocks::{
     primitives::FlashblocksState,
 };
 
-use crate::flashblocks::WorldChainFlashblocksNode;
+use crate::{context::FlashblocksContext, node::WorldChainNode};
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
 #[derive(Debug, Clone)]
@@ -21,8 +21,7 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: FlashblocksHandle,
     flashblocks_state: FlashblocksState,
-    authorizations_rx: tokio::sync::watch::Receiver<Authorization>,
-    authorization_enabled: bool,
+    authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
     builder_sk: SigningKey,
 }
 
@@ -32,8 +31,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         pb: PB,
         p2p_handler: FlashblocksHandle,
         flashblocks_state: FlashblocksState,
-        authorizations_rx: tokio::sync::watch::Receiver<Authorization>,
-        authorization_enabled: bool,
+        authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         builder_sk: SigningKey,
     ) -> Self {
         Self {
@@ -41,7 +39,6 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
-            authorization_enabled,
             builder_sk,
         }
     }
@@ -50,7 +47,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
 impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
     for FlashblocksPayloadServiceBuilder<PB>
 where
-    Node: FullNodeTypes<Types = WorldChainFlashblocksNode>,
+    Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
     Pool: TransactionPool,
     EvmConfig: Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,
@@ -67,8 +64,7 @@ where
 
         let payload_job_config = FlashblocksJobGeneratorConfig::default()
             .interval(conf.interval)
-            .deadline(conf.deadline)
-            .authorization(self.authorization_enabled);
+            .deadline(conf.deadline);
 
         let payload_generator = WorldChainPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
