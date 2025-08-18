@@ -168,10 +168,7 @@ where
             }
         }
 
-        let world_chain_test_node = WorldChainTestingNodeContext {
-            node,
-            ext_context,
-        };
+        let world_chain_test_node = WorldChainTestingNodeContext { node, ext_context };
 
         node_contexts.push(world_chain_test_node);
     }

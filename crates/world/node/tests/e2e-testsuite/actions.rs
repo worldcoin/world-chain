@@ -129,8 +129,7 @@ where
                         )
                         .await?;
 
-                        self
-                            .tx
+                        self.tx
                             .send(engine_payload)
                             .await
                             .map_err(|e| eyre!("Failed to send payload via channel: {}", e))?;
