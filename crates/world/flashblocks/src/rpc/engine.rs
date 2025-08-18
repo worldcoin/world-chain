@@ -34,7 +34,7 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     /// The current store of all pre confirmations ahead of the canonical chain.
     flashblocks_state: FlashblocksState,
     /// A watch channel notifier to the jobs generator.
-    to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+    to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -46,7 +46,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         flashblocks_state: FlashblocksState,
         executor: impl TaskSpawner,
         stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
-        to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     ) -> Self {
         executor.spawn_critical(
             "subscription_handle",
@@ -315,7 +315,7 @@ where
         }
 
         if let Some(a) = authorization {
-            self.to_jobs_generator.send_modify(|b| *b = a)
+            self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
         let (res, _) = tokio::join!(

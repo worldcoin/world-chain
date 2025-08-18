@@ -23,7 +23,7 @@ pub struct WorldChainEngineApiBuilder<EV> {
     /// The flashblocks state.
     pub flashblocks_state: Option<FlashblocksState>,
     /// A watch channel notifier to the jobs generator.
-    pub to_jobs_generator: tokio::sync::watch::Sender<Authorization>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     /// Verifying key for authorizations.
     pub verifying_key: VerifyingKey,
 }

@@ -16,7 +16,8 @@ use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
-use crate::flashblocks::WorldChainFlashblocksNode;
+use crate::context::FlashblocksContext;
+use crate::node::WorldChainNode;
 
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
@@ -154,7 +155,7 @@ impl<Node, S, Txs>
     PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>, OpEvmConfig>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
-    Node: FullNodeTypes<Types = WorldChainFlashblocksNode>,
+    Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
     <Node as FullNodeTypes>::Provider:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     S: BlobStore + Clone,

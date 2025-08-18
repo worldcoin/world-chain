@@ -5,46 +5,40 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::{
-    BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder,
-    PoolBuilderConfigOverrides,
+    ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
 };
 use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
 };
 
-use reth::network::types::NetPrimitivesFor;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 
 use reth_engine_local::LocalPayloadAttributesBuilder;
 
-use reth_node_api::PayloadAttributesBuilder;
+use reth_evm::ConfigureEvm;
+use reth_node_api::{NodeAddOns, PayloadAttributesBuilder};
 use reth_node_builder::components::{NetworkBuilder, PayloadServiceBuilder};
 use reth_node_builder::{DebugNode, FullNodeComponents, PayloadTypes, PrimitivesTy, TxTy};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::args::RollupArgs;
-use reth_optimism_node::node::{
-    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpNodeTypes,
-};
-use reth_optimism_node::txpool::{OpPooledTx, OpTransactionValidator};
+use reth_optimism_node::node::{OpConsensusBuilder, OpExecutorBuilder};
+use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEngineApiBuilder, OpEngineTypes, OpEvmConfig, OpFullNodeTypes,
-    OpPayloadAttributes, OpPayloadBuilderAttributes, OpStorage,
+    OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
+    OpStorage,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
 
-use reth_optimism_rpc::eth::OpEthApiBuilder;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, StateProviderFactory,
 };
-use reth_transaction_pool::{BlobStore, Pool, PoolPooledTx, PoolTransaction, TransactionPool};
+
+use reth_transaction_pool::BlobStore;
 use reth_trie_db::MerklePatriciaTrie;
 
-use revm_primitives::hardfork::SpecId::TANGERINE;
 use tracing::{debug, info};
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
@@ -55,35 +49,10 @@ use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::args::WorldChainArgs;
 
-type WorldChainPool<N: FullNodeTypes> = WorldChainTransactionPool<
-    <N as FullNodeTypes>::Provider,
-    DiskFileBlobStore,
-    WorldChainPooledTransaction,
->;
-
-pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
-    From<WorldChainArgs> + Clone + Debug + Unpin + Send + Sync + 'static   
-{
-    type Net: NetworkBuilder<N, WorldChainPool<N>>;
-
-    type PayloadServiceBuilder: PayloadServiceBuilder<N, WorldChainPool<N>, OpEvmConfig>;
-
-    type Components: NodeComponentsBuilder<
-        N,
-        Components: FullNodeComponents<Evm = OpEvmConfig, Types = WorldChainNode<Self>>
-    >;
-
-    fn components(self) -> Self::Components;
-}
-
-/// Type configuration for a regular World Chain node.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct WorldChainNode<T> {
-    /// World Chain Args
+#[derive(Debug, Clone, Default)]
+pub struct WorldChainNodeConfig {
+    /// World Chain Specific CLI arguements
     pub args: WorldChainArgs,
-    /// Additional World Chain args
-    pub context: T,
     /// Data availability configuration for the OP builder.
     ///
     /// Used to throttle the size of the data availability payloads (configured by the batcher via
@@ -91,12 +60,86 @@ pub struct WorldChainNode<T> {
     ///
     /// By default no throttling is applied.
     pub da_config: OpDAConfig,
-    /// A type
+}
+
+/// Context trait for World Chain node implementations.
+///
+/// This trait defines the configuration context required for setting up a World Chain node,
+/// including the EVM configuration, network builder, payload service, and various components
+/// and add-ons. Implementors provide the necessary types and builders to construct a fully
+/// functional World Chain node.
+///
+/// The trait is parameterized by `N`, which must be a `FullNodeTypes` with `Types = WorldChainNode<Self>`,
+/// ensuring type safety between the context and the node it configures.
+pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>: Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
+{
+    /// The EVM configuration used for this World Chain node.
+    ///
+    /// Provides the execution environment configuration, including gas settings,
+    /// precompiles, and other EVM-specific parameters for World Chain.
+    type Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>> + 'static;
+
+    /// The network builder for establishing P2P connections and protocol handling.
+    ///
+    /// Configures the networking layer, including peer discovery, message propagation,
+    /// and transaction pool synchronization for the World Chain network.
+    type Net: NetworkBuilder<N, WorldChainTransactionPool<N::Provider, DiskFileBlobStore>> + 'static;
+
+    /// Builder for the payload service that handles block building and validation.
+    ///
+    /// Responsible for constructing execution payloads, managing the transaction pool,
+    /// and coordinating with the consensus layer for block production.
+    type PayloadServiceBuilder: PayloadServiceBuilder<
+        N,
+        WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
+        Self::Evm,
+    >;
+
+    /// Builder for the core node components.
+    ///
+    /// Constructs essential node services including the RPC server, transaction pool,
+    /// block executor, and other fundamental components required for node operation.
+    type ComponentsBuilder: NodeComponentsBuilder<N>;
+
+    /// Customizable add-on types for extending node functionality.
+    ///
+    /// Allows for optional extensions such as additional RPC endpoints, custom metrics,
+    /// or specialized services that enhance the base World Chain node capabilities.
+    type AddOns: NodeAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
+
+    /// Any peripheral context or extensions required by the node.
+    type ExtContext: Debug + 'static;
+
+    /// Creates and returns the components builder for this node context.
+    ///
+    /// This method consumes the context and produces a builder that will construct
+    /// the core node components using the configuration provided by this context.
+    fn components(self) -> Self::ComponentsBuilder;
+
+    /// Returns the add-ons configuration for extending node functionality.
+    ///
+    /// Provides access to optional extensions and customizations that can be
+    /// applied to the World Chain node beyond its core functionality.
+    fn add_ons(&self) -> Self::AddOns;
+
+    /// Returns the extension context for the node.
+    fn ext_context(&self) -> Self::ExtContext;
+}
+
+/// A Generic World Chain node type.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct WorldChainNode<T> {
+    /// World Chain Args
+    pub config: WorldChainNodeConfig,
+    /// Marker type that defines the `Components` and `AddOns` types for this node.
     _marker: PhantomData<T>,
 }
 
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of World Chain specific builders.
-pub type WorldChainNodeComponentBuilder<Node, T: WorldChainNodeContext<Node>> = ComponentsBuilder<
+pub type WorldChainNodeComponentBuilder<Node, T> = ComponentsBuilder<
     Node,
     WorldChainPoolBuilder,
     <T as WorldChainNodeContext<Node>>::PayloadServiceBuilder,
@@ -105,109 +148,55 @@ pub type WorldChainNodeComponentBuilder<Node, T: WorldChainNodeContext<Node>> = 
     OpConsensusBuilder,
 >;
 
-impl<T> WorldChainNode<T>
-where
-    T: From<WorldChainArgs>,
-{
+impl<T> WorldChainNode<T> {
     /// Creates a new instance of the World Chain node type.
-    pub fn new(args: WorldChainArgs) -> Self {
+    pub fn new(config: WorldChainNodeConfig) -> Self {
         Self {
-            args: args.clone(),
-            context: args.into(),
-            da_config: OpDAConfig::default(),
+            config,
             _marker: PhantomData,
         }
     }
 
-    /// Configure the data availability configuration for the OP builder.
-    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
-        self.da_config = da_config;
-        self
-    }
-
     /// Returns the components for the given [`WorldChainArgs`].
-    pub fn components<Node>(&self) -> T::Components
+    pub fn components<Node>(&self) -> T::ComponentsBuilder
     where
         Node: FullNodeTypes<Types = Self>,
-        T: WorldChainNodeContext<Node>,
+        T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        // let WorldChainArgs {
-        //     rollup_args,
-        //     verified_blockspace_capacity,
-        //     pbh_entrypoint,
-        //     signature_aggregator,
-        //     world_id,
-        //     builder_private_key,
-        //     flashblocks_args: _,
-        // } = self.args.clone();
+        <T as WorldChainNodeContext<Node>>::components(self.config.to_owned().into())
+    }
 
-        // let RollupArgs {
-        //     disable_txpool_gossip,
-        //     compute_pending_block,
-        //     discovery_v4,
-        //     ..
-        // } = rollup_args;
-
-        // // ComponentsBuilder::default()
-        // //     .node_types::<Node>()
-        // //     .pool(WorldChainPoolBuilder::new(
-        // //         pbh_entrypoint,
-        // //         signature_aggregator,
-        // //         world_id,
-        // //     ))
-        // //     .executor(OpExecutorBuilder::default())
-        // //     .payload(BasicPayloadServiceBuilder::new(
-        // //         WorldChainPayloadBuilderBuilder::new(
-        // //             compute_pending_block,
-        // //             verified_blockspace_capacity,
-        // //             pbh_entrypoint,
-        // //             signature_aggregator,
-        // //             builder_private_key,
-        // //         )
-        // //         .with_da_config(self.da_config.clone()),
-        // //     ))
-        // //     .network(OpNetworkBuilder {
-        // //         disable_txpool_gossip,
-        // //         disable_discovery_v4: !discovery_v4,
-        // //     })
-        // //     .executor(OpExecutorBuilder::default())
-        // //     .consensus(OpConsensusBuilder::default())
-
-        <T as WorldChainNodeContext<Node>>::components(self.args.to_owned().into())
+    pub fn add_ons<Node>(&self) -> T::AddOns
+    where
+        Node: FullNodeTypes<Types = Self>,
+        T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
+    {
+        <T as WorldChainNodeContext<Node>>::add_ons(&self.config.to_owned().into())
     }
 }
 
 impl<N, T> Node<N> for WorldChainNode<T>
 where
     N: FullNodeTypes<Types = Self>,
-    T: WorldChainNodeContext<N>,
-    WorldChainNodeComponentBuilder<N, T>: NodeComponentsBuilder<N>,
+    T: WorldChainNodeContext<N> + From<WorldChainNodeConfig>,
 {
-    type ComponentsBuilder = T::Components;
+    type ComponentsBuilder = T::ComponentsBuilder;
 
-    type AddOns = OpAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >;
+    type AddOns = T::AddOns;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components(self)
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        Self::AddOns::builder()
-            .with_sequencer(self.args.rollup_args.sequencer.clone())
-            .with_da_config(self.da_config.clone())
-            .build()
+        Self::add_ons(self)
     }
 }
 
 impl<N, T> DebugNode<N> for WorldChainNode<T>
 where
     N: FullNodeComponents<Types = Self>,
-    T: WorldChainNodeContext<N>,
+    T: WorldChainNodeContext<N> + From<WorldChainNodeConfig>,
     WorldChainNodeComponentBuilder<N, T>: NodeComponentsBuilder<N>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
@@ -229,66 +218,6 @@ impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainN
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct SimpleContext(WorldChainArgs);
-
-impl From<WorldChainArgs> for SimpleContext {
-    fn from(value: WorldChainArgs) -> Self {
-        Self(value)
-    }
-}
-
-impl<N: FullNodeTypes<Types: OpNodeTypes>> WorldChainNodeContext<N> for SimpleContext {
-    type Net = OpNetworkBuilder;
-
-    type PayloadServiceBuilder = BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>;
-
-    type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
-
-    fn components(self) -> Self::ComponentsBuilder {
-        let Self(WorldChainArgs {
-            rollup_args,
-            verified_blockspace_capacity,
-            pbh_entrypoint,
-            signature_aggregator,
-            world_id,
-            builder_private_key,
-            flashblocks_args: _,
-        }) = self;
-
-        let RollupArgs {
-            disable_txpool_gossip,
-            compute_pending_block,
-            discovery_v4,
-            ..
-        } = rollup_args;
-
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(WorldChainPoolBuilder::new(
-                pbh_entrypoint,
-                signature_aggregator,
-                world_id,
-            ))
-            .executor(OpExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::new(
-                WorldChainPayloadBuilderBuilder::new(
-                    compute_pending_block,
-                    verified_blockspace_capacity,
-                    pbh_entrypoint,
-                    signature_aggregator,
-                    builder_private_key,
-                ), // .with_da_config(self.da_config.clone()),
-            ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
-            .executor(OpExecutorBuilder::default())
-            .consensus(OpConsensusBuilder::default())
-    }
 }
 
 /// A basic World Chain transaction pool.

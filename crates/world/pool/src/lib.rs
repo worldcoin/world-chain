@@ -1,7 +1,7 @@
 #![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
 
 use ordering::WorldChainOrdering;
-use reth::transaction_pool::{Pool, TransactionValidationTaskExecutor};
+use reth::{api::FullNodeTypes, transaction_pool::{blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor}};
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
@@ -24,4 +24,11 @@ pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> =
     TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T>>,
     WorldChainOrdering<WorldChainPooledTransaction>,
     S,
+>;
+
+/// A wrapper type with sensible defaults for the World Chain transaction pool.
+pub type BasicWorldChainPool<N> = WorldChainTransactionPool<
+    <N as FullNodeTypes>::Provider,
+    DiskFileBlobStore,
+    WorldChainPooledTransaction,
 >;
