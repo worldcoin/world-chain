@@ -65,7 +65,7 @@ where
 
     type ExtContext = ();
 
-    fn components(self) -> Self::ComponentsBuilder {
+    fn components(&self) -> Self::ComponentsBuilder {
         let Self(WorldChainNodeConfig {
             args:
                 WorldChainArgs {
@@ -78,7 +78,7 @@ where
                     flashblocks_args: _,
                 },
             da_config,
-        }) = self;
+        }) = self.clone();
 
         let RollupArgs {
             disable_txpool_gossip,
@@ -120,9 +120,7 @@ where
             .build()
     }
 
-    fn ext_context(&self) -> Self::ExtContext {
-        
-    }
+    fn ext_context(&self) -> Self::ExtContext {}
 }
 
 #[derive(Clone, Debug)]
@@ -155,7 +153,7 @@ where
 
     type ExtContext = FlashblocksComponentsContext;
 
-    fn components(self) -> Self::ComponentsBuilder {
+    fn components(&self) -> Self::ComponentsBuilder {
         let Self {
             config:
                 WorldChainNodeConfig {
@@ -172,7 +170,7 @@ where
                     da_config,
                 },
             components_context,
-        } = self;
+        } = self.clone();
 
         let RollupArgs {
             disable_txpool_gossip,
@@ -251,8 +249,7 @@ impl FlashblocksContext {
     /// Returns the [`WorldChainEngineApiBuilder`] for the World Chain node.
     fn engine_api_builder(&self) -> WorldChainEngineApiBuilder<OpEngineValidatorBuilder> {
         let Self {
-            components_context,
-            ..
+            components_context, ..
         } = self;
 
         WorldChainEngineApiBuilder {
@@ -300,11 +297,8 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
                     .verifying_key(),
             );
         let builder_sk = value.args.flashblocks_args.flashblocks_builder_sk.clone();
-        let flashblocks_handle = FlashblocksHandle::new(
-            authorizer_vk,
-            builder_sk.clone(),
-            flashblocks_tx.clone(),
-        );
+        let flashblocks_handle =
+            FlashblocksHandle::new(authorizer_vk, builder_sk.clone(), flashblocks_tx.clone());
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
         Self {

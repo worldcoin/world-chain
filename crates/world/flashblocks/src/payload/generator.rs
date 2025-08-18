@@ -163,7 +163,7 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
-
+        let interval = Box::pin(tokio::time::sleep(self.config.interval));
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(1);
@@ -193,7 +193,8 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            interval: tokio::time::interval(self.config.interval),
+            flashblock_deadline: interval,
+            interval: self.config.interval,
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,

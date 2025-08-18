@@ -24,7 +24,7 @@ use reth_transaction_pool::TransactionPool;
 use rollup_boost::{Authorization, FlashblocksPayloadV1};
 use tracing::info;
 
-use crate::primitives::FlashblocksState;
+use crate::primitives::{Flashblock, FlashblocksState};
 
 /// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
@@ -73,7 +73,11 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     ) -> Pin<Box<impl Future<Output = ()> + Send + 'static>> {
         Box::pin(async move {
             while let Some(payload) = stream.next().await {
-                flashblocks_state.push(payload).await;
+                flashblocks_state
+                    .push(Flashblock {
+                        flashblock: payload,
+                    })
+                    .await;
             }
         })
     }
@@ -244,7 +248,7 @@ where
             .flashblocks_state
             .last()
             .await
-            .map(|p| p.diff.block_hash == fork_choice_state.head_block_hash);
+            .map(|p| p.flashblock.diff.block_hash == fork_choice_state.head_block_hash);
 
         if confirmed.unwrap_or(false) {
             self.flashblocks_state.clear().await;

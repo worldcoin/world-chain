@@ -11,6 +11,7 @@ use reth::builder::{
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
 };
 
+use reth::rpc::eth::EthApiTypes;
 use reth::transaction_pool::blobstore::DiskFileBlobStore;
 use reth::transaction_pool::TransactionValidationTaskExecutor;
 
@@ -19,11 +20,15 @@ use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{NodeAddOns, PayloadAttributesBuilder};
 use reth_node_builder::components::{NetworkBuilder, PayloadServiceBuilder};
-use reth_node_builder::{DebugNode, FullNodeComponents, PayloadTypes, PrimitivesTy, TxTy};
+use reth_node_builder::rpc::{EngineValidatorAddOn, RethRpcAddOns};
+use reth_node_builder::{
+    DebugNode, FullNodeComponents, NodeComponents, PayloadTypes, PrimitivesTy, TxTy,
+};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::node::{OpConsensusBuilder, OpExecutorBuilder};
-use reth_optimism_node::txpool::OpTransactionValidator;
+use reth_optimism_node::txpool::{OpPooledTx, OpTransactionValidator};
 use reth_optimism_node::{
     OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
     OpStorage,
@@ -36,14 +41,14 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, StateProviderFactory,
 };
 
-use reth_transaction_pool::BlobStore;
+use reth_transaction_pool::{BlobStore, TransactionPool};
 use reth_trie_db::MerklePatriciaTrie;
 
 use tracing::{debug, info};
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
 use world_chain_builder_pool::root::WorldChainRootValidator;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
 
@@ -71,7 +76,8 @@ pub struct WorldChainNodeConfig {
 ///
 /// The trait is parameterized by `N`, which must be a `FullNodeTypes` with `Types = WorldChainNode<Self>`,
 /// ensuring type safety between the context and the node it configures.
-pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>: Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
+pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
+    Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
 {
     /// The EVM configuration used for this World Chain node.
     ///
@@ -99,15 +105,27 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
     ///
     /// Constructs essential node services including the RPC server, transaction pool,
     /// block executor, and other fundamental components required for node operation.
-    type ComponentsBuilder: NodeComponentsBuilder<N>;
+    type ComponentsBuilder: NodeComponentsBuilder<
+        N,
+        Components: NodeComponents<
+            N,
+            Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
+            Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        >,
+    >;
 
     /// Customizable add-on types for extending node functionality.
     ///
     /// Allows for optional extensions such as additional RPC endpoints, custom metrics,
     /// or specialized services that enhance the base World Chain node capabilities.
     type AddOns: NodeAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-    >;
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        > + RethRpcAddOns<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+            EthApi: EthApiTypes,
+        > + EngineValidatorAddOn<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        >;
 
     /// Any peripheral context or extensions required by the node.
     type ExtContext: Debug + 'static;
@@ -116,7 +134,7 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
     ///
     /// This method consumes the context and produces a builder that will construct
     /// the core node components using the configuration provided by this context.
-    fn components(self) -> Self::ComponentsBuilder;
+    fn components(&self) -> Self::ComponentsBuilder;
 
     /// Returns the add-ons configuration for extending node functionality.
     ///
@@ -133,7 +151,7 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
 #[non_exhaustive]
 pub struct WorldChainNode<T> {
     /// World Chain Args
-    pub config: WorldChainNodeConfig,
+    pub node_context: T,
     /// Marker type that defines the `Components` and `AddOns` types for this node.
     _marker: PhantomData<T>,
 }
@@ -148,11 +166,14 @@ pub type WorldChainNodeComponentBuilder<Node, T> = ComponentsBuilder<
     OpConsensusBuilder,
 >;
 
-impl<T> WorldChainNode<T> {
+impl<T> WorldChainNode<T>
+where
+    T: From<WorldChainNodeConfig> + Clone,
+{
     /// Creates a new instance of the World Chain node type.
     pub fn new(config: WorldChainNodeConfig) -> Self {
         Self {
-            config,
+            node_context: config.into(),
             _marker: PhantomData,
         }
     }
@@ -163,7 +184,7 @@ impl<T> WorldChainNode<T> {
         Node: FullNodeTypes<Types = Self>,
         T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        <T as WorldChainNodeContext<Node>>::components(self.config.to_owned().into())
+        <T as WorldChainNodeContext<Node>>::components(&self.node_context)
     }
 
     pub fn add_ons<Node>(&self) -> T::AddOns
@@ -171,7 +192,15 @@ impl<T> WorldChainNode<T> {
         Node: FullNodeTypes<Types = Self>,
         T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        <T as WorldChainNodeContext<Node>>::add_ons(&self.config.to_owned().into())
+        <T as WorldChainNodeContext<Node>>::add_ons(&self.node_context)
+    }
+
+    pub fn ext_context<Node>(&self) -> T::ExtContext
+    where
+        Node: FullNodeTypes<Types = Self>,
+        T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
+    {
+        <T as WorldChainNodeContext<Node>>::ext_context(&self.node_context)
     }
 }
 

@@ -28,9 +28,16 @@ pub struct WorldChainEngineApiBuilder<EV> {
     pub verifying_key: VerifyingKey,
 }
 
-impl<EV> Default for WorldChainEngineApiBuilder<EV> {
+impl<EV: Default> Default for WorldChainEngineApiBuilder<EV> {
     fn default() -> Self {
-        unreachable!()
+        let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
+        Self {
+            engine_validator_builder: Default::default(),
+            flashblocks_handle: None,
+            flashblocks_state: None,
+            to_jobs_generator,
+            verifying_key: VerifyingKey::from_bytes(&[0u8; 32]).expect("valid key"),
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 use alloy_primitives::Address;
 use clap::value_parser;
+use rand::Rng;
 use reth_optimism_node::args::RollupArgs;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
@@ -94,14 +95,16 @@ pub struct FlashblocksArgs {
 
 impl Default for FlashblocksArgs {
     fn default() -> Self {
+        let builder_sk = SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>());
+
         Self {
             flashblocks_enabled: false,
-            flashblock_block_time: 1000,
+            flashblock_block_time: 1500,
             flashblock_interval: 200,
             flashblock_host: "127.0.0.1".parse().unwrap(),
             flashblock_port: 9002,
-            flashblocks_authorizor_vk: None,
-            flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
+            flashblocks_authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+            flashblocks_builder_sk: builder_sk,
         }
     }
 }
@@ -119,7 +122,6 @@ impl From<WorldChainNodeConfig> for NodeContextType {
         }
     }
 }
-    
 
 #[cfg(test)]
 mod tests {

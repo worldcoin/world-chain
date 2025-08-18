@@ -1,4 +1,5 @@
 use clap::Parser;
+use reth_node_builder::Node;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::Cli;
 use reth_optimism_node::OpDAConfig;
@@ -11,7 +12,6 @@ use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
 use world_chain_builder_rpc::WorldChainEthApiExt;
-
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -50,7 +50,9 @@ fn main() {
                         node_exit_future,
                         node: _node,
                     } = builder
-                        .node(node)
+                        .with_types::<WorldChainNode<BasicContext>>()
+                        .with_components(node.components_builder())
+                        .with_add_ons(node.add_ons())
                         .extend_rpc_modules(move |ctx| {
                             let provider = ctx.provider().clone();
                             let pool = ctx.pool().clone();

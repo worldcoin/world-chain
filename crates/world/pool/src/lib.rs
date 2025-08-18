@@ -1,7 +1,10 @@
 #![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
 
 use ordering::WorldChainOrdering;
-use reth::{api::FullNodeTypes, transaction_pool::{blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor}};
+use reth::{
+    api::FullNodeTypes,
+    transaction_pool::{blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor},
+};
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
