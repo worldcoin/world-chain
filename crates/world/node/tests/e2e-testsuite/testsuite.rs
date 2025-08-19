@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use alloy_network::eip2718::Encodable2718;
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{b64, hex};
+use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
+use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
 use futures::StreamExt;
 use parking_lot::Mutex;
@@ -10,15 +7,14 @@ use reth::chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_api::{Block, PayloadAttributes};
-use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_node::OpPayloadAttributes;
+use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::RecoveredBlock;
-use revm_primitives::{Address, B256, U256};
-use rollup_boost::ed25519_dalek::SigningKey;
-use rollup_boost::Authorization;
+use revm_primitives::{Address, RecoveredBlock, B256, U256};
+use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
+use std::sync::Arc;
 use tracing::info;
+
 use world_chain_builder_node::context::FlashblocksContext;
 use world_chain_builder_node::{
     context::BasicContext,

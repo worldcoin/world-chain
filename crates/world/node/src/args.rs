@@ -1,5 +1,3 @@
-use std::net::IpAddr;
-
 use alloy_primitives::Address;
 use clap::value_parser;
 use rand::Rng;
@@ -61,6 +59,7 @@ pub struct FlashblocksArgs {
         help = "Enable flashblocks for this builder"
     )]
     pub flashblocks_enabled: bool,
+
     /// The payload building interval in milliseconds.
     #[arg(long = "flashblock.block_time", env, default_value = "1000")]
     pub flashblock_block_time: u64,
@@ -69,16 +68,8 @@ pub struct FlashblocksArgs {
     #[arg(long = "flashblock.interval", env, default_value = "200")]
     pub flashblock_interval: u64,
 
-    /// The host to bind the Flashblocks WebSocket server to.
-    #[arg(long = "flashblock.host", env, default_value = "127.0.0.1")]
-    pub flashblock_host: IpAddr,
-
-    /// The port to bind the Flashblocks WebSocket server to.
-    #[arg(long = "flashblock.port", env, default_value = "9002")]
-    pub flashblock_port: u16,
-
     #[arg(
-        long = "flashblock.authorizor_sk",
+        long = "flashblock.authorizor_vk",
         env = "FLASHBLOCKS_AUTHORIZOR_VK", 
         value_parser = parse_vk,
         required = false,
@@ -101,8 +92,6 @@ impl Default for FlashblocksArgs {
             flashblocks_enabled: false,
             flashblock_block_time: 1500,
             flashblock_interval: 200,
-            flashblock_host: "127.0.0.1".parse().unwrap(),
-            flashblock_port: 9002,
             flashblocks_authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
             flashblocks_builder_sk: builder_sk,
         }
@@ -141,8 +130,6 @@ mod tests {
         let expected_args = FlashblocksArgs {
             flashblock_block_time: 1,
             flashblock_interval: 200,
-            flashblock_port: 9002,
-            flashblock_host: "127.0.0.1".parse().unwrap(),
             flashblocks_authorizor_vk: None,
             flashblocks_builder_sk: SigningKey::from_bytes(&[0; 32]),
             flashblocks_enabled: false,

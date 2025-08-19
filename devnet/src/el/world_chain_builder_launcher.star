@@ -67,21 +67,21 @@ BUILDER_PRIVATE_KEY = (
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 )
 
-FLASHBLOCKS_BUILDER_SK = "0x40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62"
-FLASHBLOCKS_BUILDER_SK_1 = "0x2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70"
-FLASHBLOCKS_BUILDER_SK_2 = "0x09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b"
+FLASHBLOCKS_BUILDER_SK = "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62"
+FLASHBLOCKS_BUILDER_SK_1 = "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70"
+FLASHBLOCKS_BUILDER_SK_2 = "09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b"
 
-FLASHBLOCKS_AUTHORIZER_VK = "0x97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f"
+FLASHBLOCKS_AUTHORIZER_VK = "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f"
 
-def builder_sk_for_index(service_name):
+def sk_for_service(service_name):
     if service_name == "op-el-builder-2151908-1-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK
-    elif service_name == "op-el-2151908-2-custom-op-node-op-kurtosis":
+    elif service_name == "op-el-builder-2151908-2-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK_1
-    elif service_name == "op-el-2151908-3-custom-op-node-op-kurtosis":
+    elif service_name == "op-el-builder-2151908-3-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK_2
     else:
-        fail("Invalid builder index {0}, must be 0, 1, or 2".format(idx))
+        fail("Invalid service name: {0}".format(service_name))
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -132,7 +132,6 @@ def launch(
     sequencer_context,
     observability_helper,
     supervisors_params,
-    builder_idx
 ):
     log_level = ethereum_package_input_parser.get_client_log_level_or_default(
         participant.el_builder_log_level, global_log_level, VERBOSITY_LEVELS
@@ -154,7 +153,6 @@ def launch(
         sequencer_enabled,
         sequencer_context,
         observability_helper,
-        builder_idx
     )
 
     service = plan.add_service(service_name, config)
@@ -193,13 +191,12 @@ def get_config(
     sequencer_enabled,
     sequencer_context,
     observability_helper,
-    builder_idx
 ):
     public_ports = {}
     discovery_port = DISCOVERY_PORT_NUM
     used_ports = get_used_ports(discovery_port)
     ports = dict(used_ports)
-    signing_key = builder_sk_for_index(builder_idx)
+    signing_key = sk_for_service(service_name)
     cmd = [
         "node",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
@@ -234,8 +231,8 @@ def get_config(
         "--builder.world_id={0}".format(WORLD_ID),
         "--flashblock.block_time={0}".format(2000),
         "--flashblock.interval={0}".format(200),
-        "--flashblocks.enabled=true",
-        "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
+        "--flashblock.enabled",
+        "--flashblock.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblock.builder_sk={0}".format(signing_key),
     ]
 

@@ -7,7 +7,7 @@ default:
 # Spawns the devnet
 devnet-up: deploy-devnet deploy-contracts
 
-deploy-devnet: build
+deploy-devnet:
   @just ./devnet/devnet-up
 
 build:

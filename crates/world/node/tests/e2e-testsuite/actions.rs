@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use alloy_rpc_types::{Header, Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use eyre::eyre::{eyre, Result};
@@ -8,7 +9,7 @@ use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use revm_primitives::{Bytes, B256};
 use rollup_boost::Authorization;
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
 use world_chain_builder_flashblocks::rpc::engine::FlashblocksEngineApiExtClient;
@@ -204,7 +205,7 @@ where
 
 impl<F> GenerateFlashblocksPayloadAttributes<F>
 where
-    F: Fn(OpPayloadAttributes) -> Authorization + Send + Sync + Clone +'static,
+    F: Fn(OpPayloadAttributes) -> Authorization + Send + Sync + Clone + 'static,
 {
     /// Create a new action with authorization generator
     pub fn new(authorization_generator: F) -> Self {
@@ -524,7 +525,8 @@ where
                 pick_producer.execute(env).await?;
 
                 // Generate payload attributes
-                let mut generate_attrs = GenerateFlashblocksPayloadAttributes::new(self.authorization_generator.clone());
+                let mut generate_attrs =
+                    GenerateFlashblocksPayloadAttributes::new(self.authorization_generator.clone());
                 generate_attrs.execute(env).await?;
 
                 // Generate the next payload using flashblocks
