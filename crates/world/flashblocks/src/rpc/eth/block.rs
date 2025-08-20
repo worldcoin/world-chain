@@ -1,15 +1,14 @@
 //! Loads and formats OP block RPC response.
 
 use reth_optimism_rpc::OpEthApiError;
-// use crate::rpc::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock},
     FromEvmError, RpcConvert, RpcNodeCore,
 };
 
-use crate::rpc::eth::OpEthApi;
+use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthBlocks for OpEthApi<N, Rpc>
+impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -17,7 +16,7 @@ where
 {
 }
 
-impl<N, Rpc> LoadBlock for OpEthApi<N, Rpc>
+impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,

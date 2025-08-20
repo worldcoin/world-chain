@@ -6,9 +6,9 @@ use reth_rpc_eth_api::{
     FromEvmError, RpcConvert, RpcNodeCore,
 };
 
-use crate::rpc::eth::OpEthApi;
+use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthCall for OpEthApi<N, Rpc>
+impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -16,7 +16,7 @@ where
 {
 }
 
-impl<N, Rpc> EstimateCall for OpEthApi<N, Rpc>
+impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -24,7 +24,7 @@ where
 {
 }
 
-impl<N, Rpc> Call for OpEthApi<N, Rpc>
+impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -32,11 +32,11 @@ where
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
-        self.inner.eth_api.gas_cap()
+        self.inner.call_gas_limit()
     }
 
     #[inline]
     fn max_simulate_blocks(&self) -> u64 {
-        self.inner.eth_api.max_simulate_blocks()
+        self.inner.max_simulate_blocks()
     }
 }
