@@ -54,7 +54,7 @@ use world_chain_builder_pool::WorldChainTransactionPool;
 
 use crate::args::WorldChainArgs;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct WorldChainNodeConfig {
     /// World Chain Specific CLI arguements
     pub args: WorldChainArgs,
