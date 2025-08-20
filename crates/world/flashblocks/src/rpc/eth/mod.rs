@@ -13,9 +13,9 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_rpc::{
-    eth::OpRpcConvert, OpEthApi, OpEthApiBuilder, OpEthApiError, SequencerClient,
+    eth::{EthApiNodeBackend, OpRpcConvert},
+    OpEthApi, OpEthApiBuilder, OpEthApiError, SequencerClient,
 };
-use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
@@ -31,16 +31,12 @@ use reth_tasks::{
     TaskSpawner,
 };
 
-/// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
-pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
-
-/// OP-Reth `Eth` API implementation.
+/// Flashblocks `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
 ///
-/// This wraps a default `Eth` implementation, and provides additional functionality where the
-/// optimism spec deviates from the default (ethereum) spec, e.g. transaction forwarding to the
-/// sequencer, receipts, additional RPC fields for transaction receipts.
+/// This wraps a default `Op-Eth` implementation, and provides additional functionality where the
+/// flashblocks spec deviates from the default (optimism) spec
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
