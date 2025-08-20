@@ -235,6 +235,7 @@ impl FlashblocksContext {
             ..
         } = self;
         OpAddOnsBuilder::default()
+            // .with_rpc_middleware(rpc_middleware)
             .with_sequencer(rollup_args.sequencer.clone())
             .with_sequencer_headers(rollup_args.sequencer_headers.clone())
             .with_da_config(da_config.clone())
