@@ -1,28 +1,14 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::transaction::TransactionInfo;
-// use crate::{OpEthApi, OpEthApiError, SequencerClient};
+use crate::rpc::eth::FlashblocksEthApi;
 use alloy_primitives::{Bytes, B256};
-// use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
-use reth_optimism_primitives::DepositReceipt;
 use reth_optimism_rpc::{OpEthApiError, SequencerClient};
-use reth_primitives::transaction::SignedTransaction;
-// use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    try_into_op_tx_info, FromEthApiError, RpcConvert, RpcNodeCore, TxInfoMapper,
+    RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{errors::ProviderError, ReceiptProvider};
-use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
-};
-use std::fmt::{Debug, Formatter};
 
-use crate::rpc::eth::OpEthApi;
-
-impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
+impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
@@ -71,62 +57,20 @@ where
     }
 }
 
-impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
+impl<N, Rpc> LoadTransaction for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
 }
 
-impl<N, Rpc> OpEthApi<N, Rpc>
+impl<N, Rpc> FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.inner.sequencer_client.clone()
-    }
-}
-
-/// Optimism implementation of [`TxInfoMapper`].
-///
-/// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
-/// Otherwise, it works like regular Ethereum implementation, i.e. uses [`TransactionInfo`].
-pub struct OpTxInfoMapper<Provider> {
-    provider: Provider,
-}
-
-impl<Provider: Clone> Clone for OpTxInfoMapper<Provider> {
-    fn clone(&self) -> Self {
-        Self {
-            provider: self.provider.clone(),
-        }
-    }
-}
-
-impl<Provider> Debug for OpTxInfoMapper<Provider> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpTxInfoMapper").finish()
-    }
-}
-
-impl<Provider> OpTxInfoMapper<Provider> {
-    /// Creates [`OpTxInfoMapper`] that uses [`ReceiptProvider`] borrowed from given `eth_api`.
-    pub const fn new(provider: Provider) -> Self {
-        Self { provider }
-    }
-}
-
-impl<T, Provider> TxInfoMapper<T> for OpTxInfoMapper<Provider>
-where
-    T: OpTransaction + SignedTransaction,
-    Provider: ReceiptProvider<Receipt: DepositReceipt>,
-{
-    type Out = OpTransactionInfo;
-    type Err = ProviderError;
-
-    fn try_map(&self, tx: &T, tx_info: TransactionInfo) -> Result<Self::Out, ProviderError> {
-        try_into_op_tx_info(&self.provider, tx, tx_info)
+        self.inner.raw_tx_forwarder()
     }
 }

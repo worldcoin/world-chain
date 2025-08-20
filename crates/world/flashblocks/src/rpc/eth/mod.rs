@@ -10,17 +10,19 @@ mod pending_block;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
+use reth_node_api::{FullNodeComponents, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
-use reth_optimism_rpc::{eth::receipt::OpReceiptConverter, OpEthApiError, SequencerClient};
-use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_optimism_rpc::{
+    eth::OpRpcConvert, OpEthApi, OpEthApiBuilder, OpEthApiError, SequencerClient,
+};
+use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
         EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, SignableTxRequest,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
+    SignableTxRequest,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{ProviderHeader, ProviderTx};
@@ -28,9 +30,6 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc};
-
-use crate::rpc::eth::transaction::OpTxInfoMapper;
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
@@ -45,12 +44,12 @@ pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-pub struct OpEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
+pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Gateway to node's core components.
-    inner: Arc<OpEthApiInner<N, Rpc>>,
+    inner: OpEthApi<N, Rpc>,
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for OpEthApi<N, Rpc> {
+impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for FlashblocksEthApi<N, Rpc> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -58,18 +57,9 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for OpEthApi<N, Rpc> {
     }
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
+impl<N: RpcNodeCore, Rpc: RpcConvert> FlashblocksEthApi<N, Rpc> {
     /// Creates a new `OpEthApi`.
-    pub fn new(
-        eth_api: EthApiNodeBackend<N, Rpc>,
-        sequencer_client: Option<SequencerClient>,
-        min_suggested_priority_fee: U256,
-    ) -> Self {
-        let inner = Arc::new(OpEthApiInner {
-            eth_api,
-            sequencer_client,
-            min_suggested_priority_fee,
-        });
+    pub fn new(inner: OpEthApi<N, Rpc>) -> Self {
         Self { inner }
     }
 
@@ -82,13 +72,13 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.sequencer_client()
     }
 
-    /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
-    pub const fn builder() -> OpEthApiBuilder<Rpc> {
-        OpEthApiBuilder::new()
-    }
+    // /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
+    // pub const fn builder() -> FlashblocksEthApiBuilder<Rpc> {
+    //     FlashblocksEthApiBuilder::new()
+    // }
 }
 
-impl<N, Rpc> EthApiTypes for OpEthApi<N, Rpc>
+impl<N, Rpc> EthApiTypes for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
@@ -98,11 +88,11 @@ where
     type RpcConvert = Rpc;
 
     fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        self.inner.eth_api.tx_resp_builder()
+        self.inner.tx_resp_builder()
     }
 }
 
-impl<N, Rpc> RpcNodeCore for OpEthApi<N, Rpc>
+impl<N, Rpc> RpcNodeCore for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
@@ -115,37 +105,37 @@ where
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
-        self.inner.eth_api.pool()
+        self.inner.pool()
     }
 
     #[inline]
     fn evm_config(&self) -> &Self::Evm {
-        self.inner.eth_api.evm_config()
+        self.inner.evm_config()
     }
 
     #[inline]
     fn network(&self) -> &Self::Network {
-        self.inner.eth_api.network()
+        self.inner.network()
     }
 
     #[inline]
     fn provider(&self) -> &Self::Provider {
-        self.inner.eth_api.provider()
+        self.inner.provider()
     }
 }
 
-impl<N, Rpc> RpcNodeCoreExt for OpEthApi<N, Rpc>
+impl<N, Rpc> RpcNodeCoreExt for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<N::Primitives> {
-        self.inner.eth_api.cache()
+        self.inner.cache()
     }
 }
 
-impl<N, Rpc> EthApiSpec for OpEthApi<N, Rpc>
+impl<N, Rpc> EthApiSpec for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
@@ -155,37 +145,37 @@ where
 
     #[inline]
     fn starting_block(&self) -> U256 {
-        self.inner.eth_api.starting_block()
+        self.inner.starting_block()
     }
 
     #[inline]
     fn signers(&self) -> &SignersForApi<Self> {
-        self.inner.eth_api.signers()
+        self.inner.signers()
     }
 }
 
-impl<N, Rpc> SpawnBlocking for OpEthApi<N, Rpc>
+impl<N, Rpc> SpawnBlocking for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.eth_api.task_spawner()
+        self.inner.io_task_spawner()
     }
 
     #[inline]
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.eth_api.blocking_task_pool()
+        self.inner.tracing_task_pool()
     }
 
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
-        self.inner.eth_api.blocking_task_guard()
+        self.inner.tracing_task_guard()
     }
 }
 
-impl<N, Rpc> LoadFee for OpEthApi<N, Rpc>
+impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -193,44 +183,38 @@ where
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
-        self.inner.eth_api.gas_oracle()
+        self.inner.gas_oracle()
     }
 
     #[inline]
     fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
-        self.inner.eth_api.fee_history_cache()
+        self.inner.fee_history_cache()
     }
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
-        let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        self.inner
-            .eth_api
-            .gas_oracle()
-            .op_suggest_tip_cap(min_tip)
-            .await
-            .map_err(Into::into)
+        LoadFee::suggested_priority_fee(&self.inner).await
     }
 }
 
-impl<N, Rpc> LoadState for OpEthApi<N, Rpc>
+impl<N, Rpc> LoadState for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
 
-impl<N, Rpc> EthState for OpEthApi<N, Rpc>
+impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
-        self.inner.eth_api.eth_proof_window()
+        self.inner.max_proof_window()
     }
 }
 
-impl<N, Rpc> EthFees for OpEthApi<N, Rpc>
+impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -238,7 +222,7 @@ where
 {
 }
 
-impl<N, Rpc> Trace for OpEthApi<N, Rpc>
+impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -246,7 +230,7 @@ where
 {
 }
 
-impl<N, Rpc> AddDevSigners for OpEthApi<N, Rpc>
+impl<N, Rpc> AddDevSigners for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<
@@ -254,120 +238,49 @@ where
     >,
 {
     fn with_dev_accounts(&self) {
-        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
+        self.inner.with_dev_accounts()
     }
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApi<N, Rpc> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpEthApi").finish_non_exhaustive()
+impl<N: RpcNodeCore, Rpc: RpcConvert> std::fmt::Debug for FlashblocksEthApi<N, Rpc> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlashblocksEthApi").finish_non_exhaustive()
     }
 }
-
-/// Container type `OpEthApi`
-pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
-    /// Gateway to node's core components.
-    eth_api: EthApiNodeBackend<N, Rpc>,
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_client: Option<SequencerClient>,
-    /// Minimum priority fee enforced by OP-specific logic.
-    ///
-    /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
-    min_suggested_priority_fee: U256,
-}
-
-impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApiInner<N, Rpc> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpEthApiInner").finish()
-    }
-}
-
-impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApiInner<N, Rpc> {
-    /// Returns a reference to the [`EthApiNodeBackend`].
-    const fn eth_api(&self) -> &EthApiNodeBackend<N, Rpc> {
-        &self.eth_api
-    }
-
-    /// Returns the configured sequencer client, if any.
-    const fn sequencer_client(&self) -> Option<&SequencerClient> {
-        self.sequencer_client.as_ref()
-    }
-}
-
-/// Converter for OP RPC types.
-pub type OpRpcConvert<N, NetworkT> = RpcConverter<
-    NetworkT,
-    <N as FullNodeComponents>::Evm,
-    OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-    (),
-    OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
->;
 
 /// Builds [`OpEthApi`] for Optimism.
-#[derive(Debug)]
-pub struct OpEthApiBuilder<NetworkT = Optimism> {
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_url: Option<String>,
-    /// Headers to use for the sequencer client requests.
-    sequencer_headers: Vec<String>,
-    /// Minimum suggested priority fee (tip)
-    min_suggested_priority_fee: u64,
-    /// Marker for network types.
-    _nt: PhantomData<NetworkT>,
+#[derive(Default, Debug)]
+pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
+    inner: OpEthApiBuilder<NetworkT>,
 }
 
-impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
-    fn default() -> Self {
-        Self {
-            sequencer_url: None,
-            sequencer_headers: Vec::new(),
-            min_suggested_priority_fee: 1_000_000,
-            _nt: PhantomData,
-        }
-    }
-}
+// impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
+//     fn default() -> Self {
+//         Self {
+//             sequencer_url: None,
+//             sequencer_headers: Vec::new(),
+//             min_suggested_priority_fee: 1_000_000,
+//             _nt: PhantomData,
+//         }
+//     }
+// }
 
-impl<NetworkT> OpEthApiBuilder<NetworkT> {
+impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
-    pub const fn new() -> Self {
-        Self {
-            sequencer_url: None,
-            sequencer_headers: Vec::new(),
-            min_suggested_priority_fee: 1_000_000,
-            _nt: PhantomData,
-        }
-    }
-
-    /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
-        self.sequencer_url = sequencer_url;
-        self
-    }
-
-    /// With headers to use for the sequencer client requests.
-    pub fn with_sequencer_headers(mut self, sequencer_headers: Vec<String>) -> Self {
-        self.sequencer_headers = sequencer_headers;
-        self
-    }
-
-    /// With minimum suggested priority fee (tip)
-    pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
-        self.min_suggested_priority_fee = min;
-        self
+    pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
+        Self { inner }
     }
 }
 
-impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
+impl<N, NetworkT> EthApiBuilder<N> for FlashblocksEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>>,
-    NetworkT: RpcTypes,
+    NetworkT: RpcTypes + Default,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
-    OpEthApi<N, OpRpcConvert<N, NetworkT>>:
+    FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
-    type EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>;
+    type EthApi = FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         todo!()
