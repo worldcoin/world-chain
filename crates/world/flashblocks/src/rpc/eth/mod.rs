@@ -254,17 +254,6 @@ pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
 }
 
-// impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
-//     fn default() -> Self {
-//         Self {
-//             sequencer_url: None,
-//             sequencer_headers: Vec::new(),
-//             min_suggested_priority_fee: 1_000_000,
-//             _nt: PhantomData,
-//         }
-//     }
-// }
-
 impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
@@ -279,40 +268,13 @@ where
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
     FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+    OpEthApi<N, OpRpcConvert<N, NetworkT>>:
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
     type EthApi = FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        todo!()
-        // let Self {
-        //     sequencer_url,
-        //     sequencer_headers,
-        //     min_suggested_priority_fee,
-        //     ..
-        // } = self;
-        // let rpc_converter =
-        //     RpcConverter::new(OpReceiptConverter::new(ctx.components.provider().clone()))
-        //         .with_mapper(OpTxInfoMapper::new(ctx.components.provider().clone()));
-        //
-        // let eth_api = ctx
-        //     .eth_api_builder()
-        //     .with_rpc_converter(rpc_converter)
-        //     .build_inner();
-        //
-        // let sequencer_client = if let Some(url) = sequencer_url {
-        //     Some(
-        //         SequencerClient::new_with_headers(&url, sequencer_headers)
-        //             .await
-        //             .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
-        //     )
-        // } else {
-        //     None
-        // };
-        //
-        // Ok(OpEthApi::new(
-        //     eth_api,
-        //     sequencer_client,
-        //     U256::from(min_suggested_priority_fee),
-        // ))
+        let inner = self.inner.build_eth_api(ctx).await;
+        Ok(FlashblocksEthApi::new(inner?))
     }
 }
