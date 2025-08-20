@@ -25,11 +25,10 @@ use std::{
     time::Duration,
 };
 use tracing::span;
-
-use world_chain_builder_node::{
-    args::WorldChainArgs,
-    node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext},
-};
+use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
+use world_chain_builder_node::test_utils::test_config;
+use world_chain_builder_test_utils::utils::{account, tree_root};
+use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
 use world_chain_builder_pool::{
     root::LATEST_ROOT_SLOT,
@@ -37,10 +36,6 @@ use world_chain_builder_pool::{
     BasicWorldChainPool,
 };
 use world_chain_builder_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
-use world_chain_builder_test_utils::{
-    utils::{account, signer, tree_root},
-    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
 
@@ -115,18 +110,11 @@ where
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
         let _enter = span.enter();
-        let config = WorldChainArgs {
-            verified_blockspace_capacity: 70,
-            pbh_entrypoint: PBH_DEV_ENTRYPOINT,
-            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-            world_id: DEV_WORLD_ID,
-            builder_private_key: signer(6).to_bytes().to_string(),
-            ..Default::default()
-        };
+        let config = test_config();
 
         let node = WorldChainNode::<T>::new(WorldChainNodeConfig {
-            args: config.clone(),
-            ..Default::default()
+            args: config.args.clone(),
+            da_config: Default::default(),
         });
 
         let ext_context = node.ext_context();
@@ -142,7 +130,7 @@ where
             .extend_rpc_modules(move |ctx| {
                 let provider = ctx.provider().clone();
                 let pool = ctx.pool().clone();
-                let sequencer_client = config.rollup_args.sequencer.map(SequencerClient::new);
+                let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
                 let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
                 ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                 Ok(())

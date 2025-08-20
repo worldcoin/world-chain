@@ -33,7 +33,7 @@ use rollup_boost::{
 use world_chain_builder_flashblocks::primitives::FlashblocksState;
 use world_chain_builder_pool::BasicWorldChainPool;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct BasicContext(WorldChainNodeConfig);
 
 impl From<WorldChainNodeConfig> for BasicContext {
@@ -68,16 +68,9 @@ where
 
     fn components(&self) -> Self::ComponentsBuilder {
         let Self(WorldChainNodeConfig {
-            args:
-                WorldChainArgs {
-                    rollup_args,
-                    verified_blockspace_capacity,
-                    pbh_entrypoint,
-                    signature_aggregator,
-                    world_id,
-                    builder_private_key,
-                    flashblocks_args: _,
-                },
+            args: WorldChainArgs {
+                rollup, builder, ..
+            },
             da_config,
         }) = self.clone();
 
@@ -86,23 +79,23 @@ where
             compute_pending_block,
             discovery_v4,
             ..
-        } = rollup_args;
+        } = rollup;
 
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(WorldChainPoolBuilder::new(
-                pbh_entrypoint,
-                signature_aggregator,
-                world_id,
+                builder.pbh_entrypoint,
+                builder.signature_aggregator,
+                builder.world_id,
             ))
             .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
                 WorldChainPayloadBuilderBuilder::new(
                     compute_pending_block,
-                    verified_blockspace_capacity,
-                    pbh_entrypoint,
-                    signature_aggregator,
-                    builder_private_key,
+                    builder.verified_blockspace_capacity,
+                    builder.pbh_entrypoint,
+                    builder.signature_aggregator,
+                    builder.private_key,
                 )
                 .with_da_config(da_config),
             ))
@@ -116,7 +109,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
-            .with_sequencer(self.0.args.rollup_args.sequencer.clone())
+            .with_sequencer(self.0.args.rollup.sequencer.clone())
             .with_da_config(self.0.da_config.clone())
             .build()
     }
@@ -161,13 +154,9 @@ where
                 WorldChainNodeConfig {
                     args:
                         WorldChainArgs {
-                            rollup_args,
-                            verified_blockspace_capacity,
-                            pbh_entrypoint,
-                            signature_aggregator,
-                            world_id,
-                            builder_private_key,
-                            flashblocks_args,
+                            rollup,
+                            builder,
+                            flashblocks,
                         },
                     da_config,
                 },
@@ -179,7 +168,7 @@ where
             compute_pending_block,
             discovery_v4,
             ..
-        } = rollup_args;
+        } = rollup;
 
         let op_network_builder = OpNetworkBuilder {
             disable_txpool_gossip,
@@ -191,27 +180,29 @@ where
             components_context.network_handle.clone(),
         );
 
+        let flashblocks = flashblocks.unwrap();
+
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(WorldChainPoolBuilder::new(
-                pbh_entrypoint,
-                signature_aggregator,
-                world_id,
+                builder.pbh_entrypoint,
+                builder.signature_aggregator,
+                builder.world_id,
             ))
             .executor(OpExecutorBuilder::default())
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     compute_pending_block,
-                    verified_blockspace_capacity,
-                    pbh_entrypoint,
-                    signature_aggregator,
-                    builder_private_key.clone(),
+                    builder.verified_blockspace_capacity,
+                    builder.pbh_entrypoint,
+                    builder.signature_aggregator,
+                    builder.private_key.clone(),
                 )
                 .with_da_config(da_config.clone()),
                 components_context.network_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
-                flashblocks_args.flashblocks_builder_sk.clone(),
+                flashblocks.builder_sk.clone(),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
@@ -234,7 +225,11 @@ impl FlashblocksContext {
         let Self {
             config:
                 WorldChainNodeConfig {
-                    args: WorldChainArgs { rollup_args, .. },
+                    args:
+                        WorldChainArgs {
+                            rollup: rollup_args,
+                            ..
+                        },
                     da_config,
                 },
             ..
@@ -284,19 +279,15 @@ impl From<WorldChainNodeConfig> for FlashblocksContext {
 impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
     fn from(value: WorldChainNodeConfig) -> Self {
         let flashblocks_state = FlashblocksState::default();
-
-        let authorizer_vk = value
+        let flashblocks = value
             .args
-            .flashblocks_args
-            .flashblocks_authorizor_vk
-            .unwrap_or(
-                value
-                    .args
-                    .flashblocks_args
-                    .flashblocks_builder_sk
-                    .verifying_key(),
-            );
-        let builder_sk = value.args.flashblocks_args.flashblocks_builder_sk.clone();
+            .flashblocks
+            .expect("Flashblocks args must be present");
+
+        let authorizer_vk = flashblocks
+            .authorizor_vk
+            .unwrap_or(flashblocks.builder_sk.verifying_key());
+        let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);

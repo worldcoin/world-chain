@@ -48,6 +48,7 @@ use world_chain_builder_test_utils::{
     utils::{pbh_bundle, pbh_multicall, signer, user_op},
     PBH_DEV_ENTRYPOINT,
 };
+use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_SIGNATURE_AGGREGATOR};
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
@@ -55,6 +56,40 @@ use world_chain_builder_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
+
+use rand::Rng as _;
+use reth_optimism_node::OpDAConfig;
+use rollup_boost::ed25519_dalek::SigningKey;
+
+use crate::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
+use crate::node::WorldChainNodeConfig;
+
+pub fn test_config() -> WorldChainNodeConfig {
+    let builder = BuilderArgs {
+        verified_blockspace_capacity: 70,
+        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+        signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+        world_id: DEV_WORLD_ID,
+        private_key: signer(6).to_bytes().to_string(),
+    };
+
+    let flashblocks = FlashblocksArgs {
+        enabled: true,
+        block_time: 1500,
+        flashblock_interval: 200,
+        authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+        builder_sk: SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>()),
+    };
+
+    WorldChainNodeConfig {
+        args: WorldChainArgs {
+            rollup: Default::default(),
+            builder,
+            flashblocks: Some(flashblocks),
+        },
+        da_config: OpDAConfig::default(),
+    }
+}
 
 pub const DEV_CHAIN_ID: u64 = 2151908;
 

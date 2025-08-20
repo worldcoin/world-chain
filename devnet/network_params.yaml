@@ -7,15 +7,12 @@ optimism_package:
   chains:
     - participants:
       - el_type: op-geth
-        cl_type: op-node
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-        cl_builder_type: op-node
       - el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-        cl_builder_type: op-node
-        count: 2
-        
+      - el_builder_type: custom
+        el_builder_image: world-chain-builder:latest
       network_params: 
         seconds_per_slot: 2
         fjord_time_offset: 0
