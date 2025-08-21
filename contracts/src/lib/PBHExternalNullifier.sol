@@ -56,7 +56,7 @@ library PBHExternalNullifier {
 
     /// @notice Verifies the validity of a PBHExternalNullifier by checking its components.
     /// @param externalNullifier The external nullifier to verify.
-    /// @param numPbhPerMonth The number of PBH transactions allotted to each World ID per month, 0 indexed.
+    /// @param numPbhPerMonth The number of PBH transactions alloted to each World ID per month, 0 indexed.
     ///         For example, if `numPbhPerMonth` is 30, a user can submit 30 PBH txs
     ///         using nonce 0, 1,..., 29.
     /// @param signalHash The signal hash associated with the PBHPayload.

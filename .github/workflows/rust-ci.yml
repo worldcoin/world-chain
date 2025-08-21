@@ -17,7 +17,7 @@ jobs:
   cargo-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - name: Cache
@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 20
     name: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -80,6 +80,6 @@ jobs:
             key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
             restore-keys: cargo-test-   
         - name: clippy
-          run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+          run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
         
 

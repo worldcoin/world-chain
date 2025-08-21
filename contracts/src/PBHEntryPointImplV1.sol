@@ -33,7 +33,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     /// @dev The EntryPoint where Aggregated PBH Bundles will be proxied to.
     IEntryPoint public entryPoint;
 
-    /// @notice The number of PBH transactions allotted to each World ID per month, 0 indexed.
+    /// @notice The number of PBH transactions alloted to each World ID per month, 0 indexed.
     ///         For example, if `numPbhPerMonth` is 29, a user can submit 30 PBH txs
     uint16 public numPbhPerMonth;
 
@@ -368,7 +368,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
 
     /// @notice Returns the index of the first unspent nullifier hash in the given list.
     /// @notice This function assumes the input array represents nullifier hashes that are
-    /// @notice generated from the same semaphore key and monotonically increasing nonces.
+    /// @notice generated from the same sempahore key and monotonically increasing nonces.
     /// @param hashes The list of nullifier hashes to search through.
     /// @return The index of the first unspent nullifier hash in the given list.
     /// @dev Returns -1 if no unspent nullifier hash is found.
