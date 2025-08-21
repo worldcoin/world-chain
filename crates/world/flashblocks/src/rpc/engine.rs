@@ -278,7 +278,7 @@ where
 
 #[rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 pub trait FlashblocksEngineApiExt<Engine: EngineTypes> {
-    #[method(name = "flashblocks_forkChoiceUpdatedV3")]
+    #[method(name = "flashblocks_forkchoiceUpdatedV3")]
     async fn flashblocks_fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
