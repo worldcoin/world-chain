@@ -103,7 +103,6 @@ where
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 

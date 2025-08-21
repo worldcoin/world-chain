@@ -51,6 +51,7 @@ flashblocks-p2p.workspace = true
 tokio.workspace = true
 
 # misc
+parking_lot.workspace = true
 tracing.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee.workspace = true
