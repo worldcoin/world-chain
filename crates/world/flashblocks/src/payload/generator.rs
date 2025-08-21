@@ -204,8 +204,6 @@ where
             authorization,
             p2p_handler: self.p2p_handler.clone(),
             pre_built_payload: maybe_pre_state,
-            best_payload_changed: false,
-            ready_for_next_build: false,
             block_index: 0,
             builder_signing_key: self.builder_sk.clone(),
         };
