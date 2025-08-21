@@ -76,9 +76,9 @@ FLASHBLOCKS_AUTHORIZER_VK = "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92
 def sk_for_service(service_name):
     if service_name == "op-el-builder-2151908-1-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK
-    elif service_name == "op-el-builder-2151908-2-custom-op-node-op-kurtosis":
+    elif service_name == "op-el-2151908-1-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK_1
-    elif service_name == "op-el-builder-2151908-3-custom-op-node-op-kurtosis":
+    elif service_name == "op-el-2151908-2-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK_2
     else:
         fail("Invalid service name: {0}".format(service_name))
