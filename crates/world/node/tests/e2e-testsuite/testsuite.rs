@@ -4,6 +4,7 @@ use alloy_rpc_types::TransactionRequest;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
+use reth::primitives::RecoveredBlock;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_api::{Block, PayloadAttributes};
@@ -11,7 +12,6 @@ use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
 use revm_primitives::{Address, B256, U256};
-use reth::primitives::RecoveredBlock;
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use tracing::info;

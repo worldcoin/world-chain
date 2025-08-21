@@ -9,9 +9,13 @@ optimism_package:
       - el_type: op-geth
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-      - el_builder_type: custom
+      - el_type: custom
+        el_image: world-chain-builder:latest
+        el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-      - el_builder_type: custom
+      - el_type: custom
+        el_image: world-chain-builder:latest
+        el_builder_type: custom
         el_builder_image: world-chain-builder:latest
       network_params: 
         seconds_per_slot: 2

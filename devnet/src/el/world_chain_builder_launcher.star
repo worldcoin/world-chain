@@ -80,6 +80,8 @@ def sk_for_service(service_name):
         return FLASHBLOCKS_BUILDER_SK_1
     elif service_name == "op-el-2151908-2-custom-op-node-op-kurtosis":
         return FLASHBLOCKS_BUILDER_SK_2
+    elif service_name == "op-el-2151908-3-custom-op-node-op-kurtosis":
+        return FLASHBLOCKS_BUILDER_SK_2
     else:
         fail("Invalid service name: {0}".format(service_name))
 
