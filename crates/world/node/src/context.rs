@@ -211,7 +211,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         self.add_ons_builder()
-            .build::<_, OpEngineValidatorBuilder, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>, BasicEngineValidatorBuilder<OpEngineValidatorBuilder>>()
+            .build::<_, _, WorldChainEngineApiBuilder<OpEngineValidatorBuilder>, _>()
             .with_engine_api(self.engine_api_builder())
     }
 
