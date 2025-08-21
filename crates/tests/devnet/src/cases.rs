@@ -204,7 +204,7 @@ where
     info!(
         block = %receipt.unwrap().block_number().unwrap_or_default(),
         block_number_min = %latest,
-        block_number_max = %latest + 2,
+        block_number_max = %latest + 10,
         hash = ?hash,
         "Transaction Receipt Received"
     );
