@@ -14393,6 +14393,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types-engine",
+ "parking_lot",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",

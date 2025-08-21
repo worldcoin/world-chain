@@ -21,11 +21,11 @@ use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 
+use parking_lot::RwLock;
 use rollup_boost::{
     ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
@@ -272,7 +272,9 @@ impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
 /// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
 /// in which case the pre confirmations were not included as part of the canonical chain.
 #[derive(Debug, Clone)]
-pub struct FlashblocksState(pub Arc<RwLock<Flashblocks>>);
+pub struct FlashblocksState {
+    flashblocks: Arc<RwLock<Flashblocks>>,
+}
 
 impl Default for FlashblocksState {
     fn default() -> Self {
@@ -283,17 +285,24 @@ impl Default for FlashblocksState {
 impl FlashblocksState {
     /// Creates a new instance of [`FlashblocksState`].
     pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(Flashblocks::default())))
+        Self {
+            flashblocks: Arc::new(RwLock::new(Flashblocks::default())),
+        }
     }
 
     /// Returns a reference to the latest flashblock.
-    pub async fn last(&self) -> Option<Flashblock> {
-        self.0.read().await.0.last().cloned()
+    pub fn last(&self) -> Option<Flashblock> {
+        self.flashblocks.read().0.last().cloned()
+    }
+
+    /// Returns a reference to the latest flashblock.
+    pub fn flashblocks(&self) -> Flashblocks {
+        self.flashblocks.read().clone()
     }
 
     /// Appends a new flashblock to the state.
-    pub async fn push(&self, payload: Flashblock) {
-        let mut state = self.0.write().await;
+    pub fn push(&self, payload: Flashblock) {
+        let mut state = self.flashblocks.write();
         state
             .0
             .retain(|p| *p.payload_id() == payload.flashblock.payload_id.0);
@@ -301,7 +310,7 @@ impl FlashblocksState {
     }
 
     /// Clears the current state of flashblocks.
-    pub async fn clear(&self) {
-        self.0.write().await.0.clear();
+    pub fn clear(&self) {
+        self.flashblocks.write().0.clear();
     }
 }

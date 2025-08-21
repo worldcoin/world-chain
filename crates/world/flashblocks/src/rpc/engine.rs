@@ -73,11 +73,9 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     ) -> Pin<Box<impl Future<Output = ()> + Send + 'static>> {
         Box::pin(async move {
             while let Some(payload) = stream.next().await {
-                flashblocks_state
-                    .push(Flashblock {
-                        flashblock: payload,
-                    })
-                    .await;
+                flashblocks_state.push(Flashblock {
+                    flashblock: payload,
+                });
             }
         })
     }
@@ -132,12 +130,10 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        let (res, _) = tokio::join!(
-            self.inner
-                .fork_choice_updated_v1(fork_choice_state, payload_attributes),
-            self.handle_fork_choice_updated(fork_choice_state)
-        );
-        Ok(res?)
+        self.handle_fork_choice_updated(fork_choice_state);
+        self.inner
+            .fork_choice_updated_v1(fork_choice_state, payload_attributes)
+            .await
     }
 
     async fn fork_choice_updated_v2(
@@ -145,12 +141,10 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        let (res, _) = tokio::join!(
-            self.inner
-                .fork_choice_updated_v2(fork_choice_state, payload_attributes),
-            self.handle_fork_choice_updated(fork_choice_state)
-        );
-        Ok(res?)
+        self.handle_fork_choice_updated(fork_choice_state);
+        self.inner
+            .fork_choice_updated_v2(fork_choice_state, payload_attributes)
+            .await
     }
 
     async fn fork_choice_updated_v3(
@@ -158,12 +152,10 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        let (res, _) = tokio::join!(
-            self.inner
-                .fork_choice_updated_v3(fork_choice_state, payload_attributes),
-            self.handle_fork_choice_updated(fork_choice_state)
-        );
-        Ok(res?)
+        self.handle_fork_choice_updated(fork_choice_state);
+        self.inner
+            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
+            .await
     }
 
     async fn get_payload_v2(
@@ -238,7 +230,7 @@ where
     ///
     /// It is up to the consumer of [`FlashblocksState`] to ensure that the block number of the latest
     /// flashblock is 1 + latest block number in the canonical chain.
-    pub async fn handle_fork_choice_updated(&self, fork_choice_state: ForkchoiceState) {
+    pub fn handle_fork_choice_updated(&self, fork_choice_state: ForkchoiceState) {
         info!(
             ?fork_choice_state,
             "Handling fork choice updated for flashblocks state"
@@ -247,11 +239,10 @@ where
         let confirmed = self
             .flashblocks_state
             .last()
-            .await
             .map(|p| p.flashblock.diff.block_hash == fork_choice_state.head_block_hash);
 
         if confirmed.unwrap_or(false) {
-            self.flashblocks_state.clear().await;
+            self.flashblocks_state.clear();
         }
     }
 }
@@ -322,11 +313,10 @@ where
             self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
-        let (res, _) = tokio::join!(
-            self.inner
-                .fork_choice_updated_v3(fork_choice_state, payload_attributes),
-            self.handle_fork_choice_updated(fork_choice_state)
-        );
-        Ok(res?)
+        self.handle_fork_choice_updated(fork_choice_state);
+
+        self.inner
+            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
+            .await
     }
 }
