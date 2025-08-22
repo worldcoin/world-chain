@@ -231,11 +231,9 @@ def get_config(
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
-        "--flashblock.block_time={0}".format(2000),
-        "--flashblock.interval={0}".format(200),
-        "--flashblock.enabled",
-        "--flashblock.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
-        "--flashblock.builder_sk={0}".format(signing_key),
+        "--flashblocks.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
+        "--flashblocks.builder_sk={0}".format(signing_key),
+        "--flashblocks.enabled"
     ]
 
     observability.expose_metrics_port(ports)

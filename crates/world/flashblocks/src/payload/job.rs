@@ -142,7 +142,7 @@ where
     /// An [`AuthorizedPayload<FlashblockPayloadV1>`] signed by the builder is sent to
     /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
     /// See: [`FlashblocksHandle::publish_new`].
-    pub fn publish_payload(
+    pub(crate) fn publish_payload(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
@@ -160,7 +160,7 @@ where
             })
     }
 
-    pub fn authorization_for(
+    pub(crate) fn authorization_for(
         &self,
         payload: FlashblocksPayloadV1,
     ) -> AuthorizedPayload<FlashblocksPayloadV1> {
@@ -218,7 +218,7 @@ where
     /// The polling continues until either the deadline is reached or an error occurs, returning
     /// [`Poll::Pending`] for ongoing work or [`Poll::Ready(Ok(()))`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _span = span!(target: "jobs_generator", tracing::Level::DEBUG, "poll").entered();
+        let _span = span!(target: "jobs_generator", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
         let this = self.get_mut();
         // check if the deadline is reached
