@@ -17,6 +17,7 @@ use reth::{
     rpc::api::IntoEngineApiRpcModule,
     tasks::TaskSpawner,
 };
+use reth_chain_state::CanonicalInMemoryState;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
@@ -70,9 +71,11 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     fn spawn_subscription_handle(
         mut stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
         flashblocks_state: FlashblocksState,
+        canonical_in_memory_state: CanonicalInMemoryState,
     ) -> Pin<Box<impl Future<Output = ()> + Send + 'static>> {
         Box::pin(async move {
             while let Some(payload) = stream.next().await {
+                canonical_in_memory_state.set_pending_block(todo!());
                 flashblocks_state.push(Flashblock {
                     flashblock: payload,
                 });

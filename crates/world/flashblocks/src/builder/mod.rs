@@ -390,6 +390,7 @@ where
         }
     }
 
+    // Use this
     pub fn block_builder<Ctx, DB, N, Tx>(
         db: &'a mut State<DB>,
         transactions: Vec<Recovered<N::SignedTx>>,

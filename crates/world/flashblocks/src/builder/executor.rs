@@ -26,9 +26,10 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
+use reth_node_api::NodeTypesWithDB;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
+use reth_optimism_node::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_primitives::{DepositReceipt, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
@@ -38,6 +39,8 @@ use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
+
+use crate::PayloadBuilderCtxBuilder;
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
@@ -556,3 +559,43 @@ where
         self.inner.into_executor()
     }
 }
+
+// /// A global factory for creating [`FlashblocksBlockBuilder`] for flashblocks.
+// ///
+// /// - Caches previously built flashblocks to avoid re-execution of the same transactions
+// /// withing a block.
+// /// - Updates the pending block with the latest built flashblock.
+// pub struct FlashblocksBlockBuilderFactory<'a, N, P, T, Evm>
+// where
+//     N: NodeTypesWithDB,
+//     P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, T>,
+// {
+//     executor_factory: FlashblocksBlockExecutorFactory,
+//     evm: Evm,
+//     _marker: std::marker::PhantomData<T>,
+// }
+//
+// impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilderFactory<'a, N, Evm> {
+//     pub fn new(executor_factory: FlashblocksBlockExecutorFactory, evm: Evm) -> Self {
+//         tokio::spawn(async move {
+//             // This is a placeholder for any async initialization that might be needed.
+//             // For example, if the EVM needs to be initialized asynchronously.
+//         });
+//
+//         Self {
+//             executor_factory,
+//             evm,
+//         }
+//     }
+//
+//     pub fn block_builder(
+//         &self,
+//         ctx: OpBlockExecutionCtx,
+//         parent: &'a SealedHeader<N::BlockHeader>,
+//         executor: FlashblocksBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+//         transactions: Vec<Recovered<N::SignedTx>>,
+//         chain_spec: Arc<OpChainSpec>,
+//     ) -> FlashblocksBlockBuilder<'a, N, Evm> {
+//         FlashblocksBlockBuilder::new(ctx, parent, executor, transactions, chain_spec)
+//     }
+// }
