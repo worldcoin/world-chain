@@ -27,7 +27,7 @@ pub const TEST_MODULES: [Address; 6] = [
 pub const WC_SEPOLIA_CHAIN_ID: u64 = 4801;
 pub const DEV_CHAIN_ID: u64 = 2151908;
 
-pub const PBH_NONCE_KEY : u64 = 0x7062687478;
+pub const PBH_NONCE_KEY: u64 = 0x7062687478;
 
 pub const DEVNET_ENTRYPOINT: Address = address!("0000000071727De22E5E9d8BAf0edAc6f37da032");
 

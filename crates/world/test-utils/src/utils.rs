@@ -53,7 +53,8 @@ pub struct InclusionProof {
 pub fn generate_user_op_nonce(sequence: U256, use_pbh_prefix: bool) -> U256 {
     let key = if use_pbh_prefix {
         // Build 192-bit key: top 40 bits = PBH_NONCE_KEY, remaining 152 bits random.
-        (U256::from(PBH_NONCE_KEY) << 152) | (U256::from_be_bytes(Address::random().into_word().0) >> 8)
+        (U256::from(PBH_NONCE_KEY) << 152)
+            | (U256::from_be_bytes(Address::random().into_word().0) >> 8)
     } else {
         (U256::ZERO << 152) | (U256::from_be_bytes(Address::random().into_word().0) >> 8)
     };
@@ -273,15 +274,13 @@ pub fn user_op_sepolia(
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> IEntryPoint::PackedUserOperation {
     let user_op_nonce;
-    
+
     if let (Some(_), Some(_)) = (&identity, &inclusion_proof) {
         user_op_nonce = generate_user_op_nonce(nonce, true);
-
     } else {
         user_op_nonce = generate_user_op_nonce(nonce, false);
     };
 
-    
     let mut user_op = PackedUserOperation {
         sender: safe,
         nonce: user_op_nonce,
@@ -755,7 +754,7 @@ mod tests {
     #[test]
     fn test_pbh_nonce_key() {
         let nonce = generate_user_op_nonce(U256::ZERO, true);
-        println!("nonce (hex): {:#x}", nonce);   // 0x-prefixed, lowercase
+        println!("nonce (hex): {:#x}", nonce); // 0x-prefixed, lowercase
         assert_eq!(nonce >> 216, U256::from(PBH_NONCE_KEY)); // Extract top 5 bytes
     }
 }
