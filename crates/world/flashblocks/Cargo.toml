@@ -42,6 +42,10 @@ flashblocks-p2p.workspace = true
 # tokio
 tokio.workspace = true
 
+# metrics
+metrics.workspace = true
+metrics-derive.workspace = true
+
 # misc
 tracing.workspace = true
 jsonrpsee-core.workspace = true
@@ -50,4 +54,3 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
-

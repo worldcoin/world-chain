@@ -27,7 +27,7 @@ use rollup_boost::{
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 
-use crate::primitives::Flashblock;
+use crate::{metrics::PayloadBuilderMetrics, primitives::Flashblock};
 
 /// A payload job that continuously spawns new build tasks at regular intervals, each building on top of the previous `best_payload`.
 ///
@@ -57,9 +57,8 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     pub(crate) cached_reads: Option<CachedReads>,
-    /// TODO: Add Metrics
     // /// metrics for this type
-    // pub(crate) metrics: PayloadBuilderMetrics,
+    pub(crate) metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -109,7 +108,7 @@ where
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
-        // self.metrics.inc_initiated_payload_builds();
+        self.metrics.inc_initiated_payload_builds();
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -216,7 +215,7 @@ where
     /// # Returns
     ///
     /// The polling continues until either the deadline is reached or an error occurs, returning
-    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready(Ok(()))`] when complete.
+    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let _span = span!(target: "jobs_generator", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
@@ -282,7 +281,7 @@ where
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
                     debug!(target: "jobs_generator", %error, "payload build attempt failed");
-                    // this.metrics.inc_failed_payload_builds();
+                    this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
                     this.pending_block = Some(fut);
@@ -320,7 +319,7 @@ where
             // Note: it is assumed that this is unlikely to happen, as the payload job is
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
-            // self.metrics.inc_requested_empty_payload();
+            self.metrics.inc_requested_empty_payload();
             self.builder.build_empty_payload(self.config.clone())
         }
     }

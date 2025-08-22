@@ -14390,6 +14390,8 @@ dependencies = [
  "futures",
  "jsonrpsee 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "metrics",
+ "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth",
