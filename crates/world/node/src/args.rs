@@ -65,7 +65,8 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.enabled",
         env,
-        help = "Enable flashblocks for this builder"
+        help = "Enable flashblocks for this builder",
+        required = false
     )]
     pub enabled: bool,
 
