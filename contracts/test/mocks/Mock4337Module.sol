@@ -10,7 +10,7 @@ import {ISafe} from "@4337/interfaces/Safe.sol";
 import "forge-std/console.sol";
 
 contract Mock4337Module is PBHSafe4337Module {
-    constructor(address entryPoint, address _pbhSignatureAggregator, uint32 _pbhNonceKey)
+    constructor(address entryPoint, address _pbhSignatureAggregator, uint40 _pbhNonceKey)
         PBHSafe4337Module(entryPoint, _pbhSignatureAggregator, _pbhNonceKey)
     {}
 
