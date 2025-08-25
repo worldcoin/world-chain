@@ -34,6 +34,10 @@ where
     pub payload_attributes: OpPayloadAttributes,
     /// Authorization Generator
     pub authorization_generator: T,
+    /// The block interval
+    pub block_interval: Duration,
+    /// Whether to send `flashblocks_forkchoiceUpdatedV3`
+    pub flashblocks: bool,
     /// Sender to return the mined payload
     pub tx: tokio::sync::mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
 }
@@ -49,6 +53,8 @@ where
         expected_hash: Option<B256>,
         payload_attributes: OpPayloadAttributes,
         authorization_generator: T,
+        block_interval: Duration,
+        flashblocks: bool,
         tx: tokio::sync::mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
     ) -> Self {
         Self {
@@ -57,6 +63,8 @@ where
             expected_hash,
             payload_attributes,
             authorization_generator,
+            block_interval,
+            flashblocks,
             tx,
         }
     }
@@ -103,7 +111,7 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let fcu_result =
+            let fcu_result = if self.flashblocks {
                 FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
                     &engine_client,
                     fork_choice_state,
@@ -112,12 +120,20 @@ where
                         self.payload_attributes.clone(),
                     )),
                 )
-                .await?;
+                .await?
+            } else {
+                EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                    &engine_client,
+                    fork_choice_state,
+                    Some(self.payload_attributes.clone()),
+                )
+                .await?
+            };
 
             debug!("FCU result: {:?}", fcu_result);
 
             // wait the deadline interval
-            std::thread::sleep(std::time::Duration::from_millis(2000));
+            std::thread::sleep(self.block_interval);
 
             // check if we got a valid payload ID
             match fcu_result.payload_status.status {

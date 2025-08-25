@@ -7,16 +7,22 @@ optimism_package:
   chains:
     - participants:
       - el_type: op-geth
+        cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
       - el_type: custom
         el_image: world-chain-builder:latest
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
+        cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
       - el_type: custom
         el_image: world-chain-builder:latest
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
+        cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
       network_params: 
         seconds_per_slot: 2
         fjord_time_offset: 0
@@ -37,19 +43,6 @@ optimism_package:
   global_node_selectors: {}
   global_tolerations: []
   persistent: false
-  challengers:
-    challenger0: &x-challenger
-      participants: "*"
-      cannon_trace_types: ["super-cannon", "super-permissioned"]
-    challenger1:
-      <<: *x-challenger
-  superchains:
-    superchain0:
-  supervisors:
-    supervisor0: &x-supervisor
-      superchain: superchain0
-    supervisor1:
-      <<: *x-supervisor
 ethereum_package:
   participants:
   - el_type: geth

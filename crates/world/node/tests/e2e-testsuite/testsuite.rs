@@ -11,7 +11,7 @@ use reth_node_api::{Block, PayloadAttributes};
 use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
-use revm_primitives::{Address, B256, U256};
+use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use tracing::info;
@@ -147,8 +147,13 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (_, mut nodes, _tasks, mut environment) =
+    let (_, mut nodes, _tasks, mut flashblocks_env) =
         setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+
+    let (_, mut basic_nodes, _tasks, mut basic_env) =
+        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+
+    let basic_worldchain_node = basic_nodes.first_mut().unwrap();
 
     let ext_context_1 = nodes[0].ext_context.clone();
     let ext_context_2 = nodes[1].ext_context.clone();
@@ -193,11 +198,12 @@ async fn test_flashblocks() -> eyre::Result<()> {
         )
         .await;
         let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
-        let _ = node
-            .node
-            .rpc
-            .inject_tx(envelope.encoded_2718().into())
-            .await?;
+        let tx: Bytes = envelope.encoded_2718().into();
+
+        let _ = tokio::join!(
+            node.node.rpc.inject_tx(tx.clone()),
+            basic_worldchain_node.node.rpc.inject_tx(tx)
+        );
     }
 
     let ext_context = node.ext_context.clone();
@@ -236,28 +242,58 @@ async fn test_flashblocks() -> eyre::Result<()> {
         gas_limit: Some(30_000_000),
     };
 
-    let mut action = crate::actions::AssertMineBlock::new(
+    let _tx = tx.clone();
+
+    let mut flashblocks_action = crate::actions::AssertMineBlock::new(
+        0,
+        vec![],
+        Some(B256::ZERO),
+        attributes.clone(),
+        authorization_generator.clone(),
+        std::time::Duration::from_millis(2000),
+        true,
+        tx.clone(),
+    )
+    .await;
+
+    let mut basic_action = crate::actions::AssertMineBlock::new(
         0,
         vec![],
         Some(B256::ZERO),
         attributes.clone(),
         authorization_generator,
+        std::time::Duration::from_millis(2000),
+        false,
         tx,
     )
     .await;
 
-    action.execute(&mut environment).await?;
+    flashblocks_action.execute(&mut flashblocks_env).await?;
 
-    let envelope = rx.recv().await.expect("should receive payload");
+    let flashblocks_envelope = rx.recv().await.expect("should receive payload");
 
-    let block = envelope
+    basic_action.execute(&mut basic_env).await?;
+
+    let basic_envelope = rx.recv().await.expect("should receive payload");
+
+    let flashblock_block = flashblocks_envelope
         .execution_payload
         .try_into_block::<OpTransactionSigned>()
         .expect("valid block")
         .try_into_recovered()
         .expect("valid recovered block");
 
-    let hash = block.hash_slow();
+    let basic_block = basic_envelope
+        .execution_payload
+        .try_into_block::<OpTransactionSigned>()
+        .expect("valid block")
+        .try_into_recovered()
+        .expect("valid recovered block");
+
+    let hash = flashblock_block.hash_slow();
+    let basic_hash = basic_block.hash_slow();
+
+    assert_eq!(hash, basic_hash, "Blocks from both nodes should match");
 
     let aggregated_flashblocks_0 = Flashblock::reduce(Flashblocks(
         flashblocks_0_clone
@@ -300,3 +336,6 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     Ok(())
 }
+
+// TODO: Mock failover scenario test
+// - Assert Mined block of both nodes is identical in a failover scenario for FCU's with the same parent attributes
