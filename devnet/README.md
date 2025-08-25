@@ -3,7 +3,7 @@
 The World Chain Devnet is an wrapper around the [optimism-package]() used to test the World Chain Block builder.
 
 # Deployment
-To deploy the devnet first make sure you have [kurtosis-cli](), and [just]() installed.
+To deploy the devnet first make sure you have [kurtosis-cli](https://docs.kurtosis.com/install) and [just](https://just.systems/man/en/) installed.
 
 Then run the following command from the project root:
 
