@@ -10,7 +10,8 @@ _net = import_module("/src/util/net.star")
 # FIXME This don't seem to be passed to the command
 WS_PORT_NUM = 8546
 DEBUG_PORT_NUM = 5555
-MAX_UNSAFE_INTERVAL = 50
+MAX_UNSAFE_INTERVAL = 18446744073709551615
+
 
 def launch(
     plan,
@@ -79,7 +80,6 @@ def get_service_config(
         "--log-level=debug",
         "--debug-host=0.0.0.0",
         "--debug-server-port={0}".format(DEBUG_PORT_NUM),
-
     ]
 
     return ServiceConfig(

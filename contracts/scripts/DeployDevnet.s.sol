@@ -38,7 +38,8 @@ contract DeployDevnet is Script {
     uint256 constant INITIAL_ROOT =
         0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
     uint256 public constant MAX_PBH_GAS_LIMIT = 30000000;
-    uint32 public constant PBH_NONCE_KEY = 1123123123;
+    uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
+    
     address[] public authorizedBuilders = [BUILDER];
 
     function run() public {

@@ -54,7 +54,7 @@ library TestUtils {
         bytes memory data = abi.encodeCall(Safe4337Module.executeUserOp, (address(0), 0, new bytes(0), 0));
         uo = PackedUserOperation({
             sender: sender,
-            nonce: (nonceKey << 64) + nonce,
+            nonce: (nonceKey << 216) + nonce,
             initCode: new bytes(0),
             callData: data,
             accountGasLimits: 0x0000000000000000000000000000ffd300000000000000000000000000000000,
