@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
 };
-use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
@@ -14,32 +11,17 @@ use op_alloy_consensus::OpBlock;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::Block as _;
 use reth::api::BlockBody as _;
-use reth::payload::EthPayloadBuilderAttributes;
-use reth::revm::cancelled::CancelOnDrop;
 use reth::{api::BuiltPayload, payload::PayloadBuilderAttributes};
-use reth_optimism_forks::OpHardforks;
-use reth_provider::{ChainSpecProvider, StateProviderFactory as _};
-use reth_rpc_eth_api::RpcNodeCore;
-
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_node_api::NodeTypesWithDB;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
-};
+use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 
-use parking_lot::RwLock;
-use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use rollup_boost::{
     ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::builder::executor::FlashblocksBlockExecutorFactory;
-use crate::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
@@ -267,6 +249,10 @@ impl Flashblocks {
     pub fn from_payloads(payloads: Vec<Flashblock>) -> Self {
         Flashblocks(payloads)
     }
+
+    pub fn payload_id(&self) -> Option<&FixedBytes<8>> {
+        self.0.first().map(|fb| fb.payload_id())
+    }
 }
 
 impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
@@ -276,264 +262,5 @@ impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
     fn try_from(value: Flashblocks) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
         let reduced = Flashblock::reduce(value).ok_or(eyre!("No flashblocks to reduce"))?;
         reduced.try_into()
-    }
-}
-
-/// The current state of all known pre confirmations received over the P2P layer
-/// or generated from the payload building job of this node.
-///
-/// The state is flushed when FCU is received with a parent hash that matches the block hash
-/// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
-/// in which case the pre confirmations were not included as part of the canonical chain.
-#[derive(Debug, Clone)]
-pub struct FlashblocksState<N, P, T>
-where
-    N: NodeTypesWithDB,
-    P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, T>,
-{
-    components: N,
-    da_config: OpDAConfig,
-    flashblocks: Arc<RwLock<Flashblocks>>,
-    state_provider: BlockchainProvider<N>,
-    executor_factory: FlashblocksBlockExecutorFactory,
-    payload_builder_ctx_builder: P,
-    latest_payload: Option<OpBuiltPayload>,
-
-    _marker: std::marker::PhantomData<T>,
-}
-
-// #[derive(Debug, Clone)]
-// pub struct FlashblocksStateInner {
-//     flashblocks: Flashblocks,
-//     payload_ctx: Option<OpPayloadAttributes>,
-// }
-
-impl<N, P, T> FlashblocksState<N, P, T>
-where
-    N: NodeTypesWithDB
-        + ProviderNodeTypes
-        + RpcNodeCore<Evm = OpEvmConfig>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, T>,
-{
-    /// Creates a new instance of [`FlashblocksState`].
-    pub fn new(
-        components: N,
-        da_config: OpDAConfig,
-        state_provider: BlockchainProvider<N>,
-        executor_factory: FlashblocksBlockExecutorFactory,
-        payload_builder_ctx_builder: P,
-    ) -> Self {
-        Self {
-            components,
-            da_config,
-            flashblocks: Arc::new(RwLock::new(Flashblocks::default())),
-            state_provider,
-            executor_factory,
-            payload_builder_ctx_builder,
-            latest_payload: None,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    /// Returns a reference to the latest flashblock.
-    pub fn last(&self) -> Option<Flashblock> {
-        self.flashblocks.read().0.last().cloned()
-    }
-
-    /// Returns a reference to the latest flashblock.
-    pub fn flashblocks(&self) -> Flashblocks {
-        self.flashblocks.read().clone()
-    }
-
-    /// Appends a new flashblock to the state.
-    pub fn push(&self, payload: Flashblock) {
-        let mut state = self.flashblocks.write();
-        if payload.flashblock.index == 0 {
-            // Since flahblocks are pushed strictly in order, we can always clear
-            // self.latest_payload = None;
-            state.0.clear();
-        }
-        state.0.push(payload);
-        let cancel = CancelOnDrop::default();
-
-        let first = state.0.first().unwrap().flashblock;
-        let base = first.base.as_ref().unwrap();
-
-        let eth_attrs = EthPayloadBuilderAttributes {
-            id: todo!(),
-            parent: base.parent_hash,
-            timestamp: base.timestamp,
-            suggested_fee_recipient: base.fee_recipient,
-            prev_randao: base.prev_randao,
-            withdrawals: Withdrawals(first.diff.withdrawals.clone()),
-            parent_beacon_block_root: todo!(),
-        };
-        let attributes = OpPayloadBuilderAttributes {
-            payload_attributes: eth_attrs,
-            no_tx_pool: false,
-            transactions: vec![],
-            gas_limit: None,
-            eip_1559_params: None,
-        };
-
-        let head = self
-            .state_provider
-            .state_by_block_hash(base.parent_hash)
-            .ok();
-
-        let config = PayloadConfig::new(todo!(), attributes);
-        let payload_builder_ctx = self.payload_builder_ctx_builder.build::<T>(
-            self.components.evm_config().clone(),
-            self.da_config.clone(),
-            self.components.chain_spec(),
-            config,
-            &cancel,
-            self.latest_payload,
-        );
-
-        // let Self { best } = self;
-        // let span = span!(
-        //     tracing::Level::INFO,
-        //     "flashblock_builder",
-        //     id = %ctx.payload_id(),
-        // );
-        //
-        // let _enter = span.enter();
-        //
-        // debug!(target: "payload_builder", "building new payload");
-        //
-        // let state = StateProviderDatabase::new(&state_provider);
-        //
-        // // 1. Prepare the db
-        // let (bundle, receipts, transactions, gas_used) = if let Some(payload) = &best_payload {
-        //     // if we have a best payload we will always have a bundle
-        //     let execution_result = &payload
-        //         .executed_block()
-        //         .ok_or(PayloadBuilderError::MissingPayload)?
-        //         .execution_output;
-        //
-        //     let receipts = execution_result
-        //         .receipts
-        //         .iter()
-        //         .flatten()
-        //         .cloned()
-        //         .collect();
-        //
-        //     let transactions = payload
-        //         .block()
-        //         .body()
-        //         .transactions_iter()
-        //         .cloned()
-        //         .map(|tx| {
-        //             tx.try_into_recovered()
-        //                 .map_err(|_| PayloadBuilderError::Other(eyre!("tx recovery failed").into()))
-        //         })
-        //         .collect::<Result<Vec<_>, _>>()?;
-        //
-        //     (
-        //         execution_result.bundle.clone(),
-        //         receipts,
-        //         transactions,
-        //         Some(payload.block().gas_used()),
-        //     )
-        // } else {
-        //     (BundleState::default(), Vec::new(), Vec::new(), None)
-        // };
-        //
-        // let gas_limit = ctx
-        //     .attributes()
-        //     .gas_limit
-        //     .unwrap_or(ctx.parent().gas_limit)
-        //     .saturating_sub(gas_used.unwrap_or(0));
-        //
-        // let bundle_is_empty = bundle.is_empty();
-        //
-        // let mut state = State::builder()
-        //     .with_database(state)
-        //     .with_bundle_prestate(bundle)
-        //     .with_bundle_update()
-        //     .build();
-        //
-        // // 2. Create the block builder
-        // let mut builder =
-        //     Self::block_builder(&mut state, transactions.clone(), receipts, gas_used, ctx)?;
-        //
-        // // Only execute the sequencer transactions on the first payload. The sequencer transactions
-        // // will already be in the [`BundleState`] at this point if the `bundle` non-empty.
-        // let mut info = if bundle_is_empty {
-        //     // 3. apply pre-execution changes
-        //     builder.apply_pre_execution_changes()?;
-        //
-        //     // 4. Execute Deposit transactions
-        //     ctx.execute_sequencer_transactions(&mut builder)
-        //         .map_err(PayloadBuilderError::other)?
-        // } else {
-        //     ExecutionInfo::default()
-        // };
-        //
-        // // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
-        // // flashblocks
-        // if !ctx.attributes().no_tx_pool {
-        //     let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-        //     let mut best_txns = BestPayloadTxns::new(best_txs)
-        //         .with_prev(transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>());
-        //
-        //     if ctx
-        //         .execute_best_transactions(&mut info, &mut builder, best_txns.guard(), gas_limit)?
-        //         .is_none()
-        //     {
-        //         warn!(target: "payload_builder", "payload build cancelled");
-        //         if let Some(best_payload) = best_payload {
-        //             // we can return the previous best payload since we didn't include any new txs
-        //             return Ok(BuildOutcomeKind::Freeze(best_payload));
-        //         } else {
-        //             return Err(PayloadBuilderError::MissingPayload);
-        //         }
-        //     }
-        // }
-        //
-        // // 6. Build the block
-        // let build_outcome = builder.finish(&state_provider)?;
-        //
-        // // 7. Seal the block
-        // let BlockBuilderOutcome {
-        //     execution_result,
-        //     block,
-        //     hashed_state,
-        //     trie_updates,
-        // } = build_outcome;
-        //
-        // let sealed_block = Arc::new(block.sealed_block().clone());
-        //
-        // let execution_outcome = ExecutionOutcome::new(
-        //     state.take_bundle(),
-        //     vec![execution_result.receipts.clone()],
-        //     block.number(),
-        //     Vec::new(),
-        // );
-        //
-        // // create the executed block data
-        // let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
-        //     block: ExecutedBlock {
-        //         recovered_block: Arc::new(block),
-        //         execution_output: Arc::new(execution_outcome),
-        //         hashed_state: Arc::new(hashed_state),
-        //     },
-        //     trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
-        // };
-        //
-        // let payload = OpBuiltPayload::new(
-        //     ctx.payload_id(),
-        //     sealed_block,
-        //     info.total_fees,
-        //     Some(executed),
-        // );
-    }
-
-    /// Clears the current state of flashblocks.
-    pub fn clear(&self) {
-        // TODO:verify that pending state is automatically flushed here
-        self.flashblocks.write().0.clear();
     }
 }

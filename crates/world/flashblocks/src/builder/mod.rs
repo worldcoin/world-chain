@@ -232,7 +232,7 @@ where
     /// Builds the payload on top of the state.
     pub fn build<Ctx, Tx>(
         self,
-        state_provider: impl StateProvider + Clone,
+        state_provider: impl StateProvider,
         ctx: &Ctx,
         best_payload: Option<OpBuiltPayload>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
