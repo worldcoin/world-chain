@@ -1,5 +1,5 @@
 use alloy_eips::eip2718::WithEncoded;
-use eyre::eyre::bail;
+use alloy_rpc_types_engine::PayloadId;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
 use reth_node_builder::BuilderContext;
@@ -7,7 +7,6 @@ use reth_payload_util::BestPayloadTransactions;
 use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
-use tracing::error;
 use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{
@@ -596,7 +595,7 @@ pub struct FlashblocksStateExecutor {
 
 #[derive(Debug, Clone)]
 pub struct FlashblocksStateExecutorInner {
-    flashblocks: Flashblocks,
+    flashblocks: Option<Flashblocks>,
     latest_payload: Option<(OpBuiltPayload, u64)>,
 }
 
@@ -606,7 +605,7 @@ impl FlashblocksStateExecutor {
     /// This function spawn a task that handles updates. It should only be called once.
     pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
-            flashblocks: Flashblocks::default(),
+            flashblocks: None,
             latest_payload: None,
         }));
 
@@ -637,38 +636,43 @@ impl FlashblocksStateExecutor {
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
-                    let mut state = this.inner.write();
-                    if flashblock.index == 0 {
-                        // Since flahblocks are pushed strictly in order, we can always clear
-                        // self.latest_payload = None;
-                        if flashblock.base.is_none() {
-                            error!("first flashblock must have a base")
-                        }
-                        state.flashblocks.0.clear();
-                    } else {
-                        if flashblock.index != state.flashblocks.0.len() as u64 {
-                            error!("flashblocks must be pushed in order")
-                        }
-                        if let Some(this) = state.flashblocks.0.first() {
-                            if this.flashblock.payload_id != flashblock.payload_id {
-                                error!("flashblock payload id must be sequential")
-                            }
-                        }
-                    }
+                    let FlashblocksStateExecutorInner {
+                        ref mut flashblocks,
+                        ref mut latest_payload,
+                        ..
+                    } = *this.inner.write();
 
                     let flashblock = Flashblock { flashblock };
-                    state.flashblocks.0.push(flashblock.clone());
+                    let (flashblocks, _new_payload) = match flashblocks {
+                        Some(ref mut f) => {
+                            if let Some(latest_payload) = latest_payload {
+                                if latest_payload.0.id() == flashblock.flashblock.payload_id
+                                    && latest_payload.1 >= flashblock.flashblock.index
+                                {
+                                    // Already processed this flashblock
+                                    continue;
+                                }
+                            }
+
+                            let new_payload = f.push(flashblock.clone()).unwrap();
+                            (f, new_payload)
+                        }
+                        None => {
+                            *flashblocks =
+                                Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                            (flashblocks.as_mut().unwrap(), true)
+                        }
+                    };
+
+                    let flashblock = flashblocks.last();
 
                     let cancel = CancelOnDrop::default();
-
-                    let first = &state.flashblocks.0.first().as_ref().unwrap().flashblock;
-                    let base = first.base.as_ref().unwrap();
+                    let base = flashblocks.base();
 
                     let transactions = flashblock
-                        .flashblock
                         .diff
                         .transactions
-                        .into_iter()
+                        .iter()
                         .map(|b| {
                             let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(&b)?;
                             eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
@@ -677,12 +681,12 @@ impl FlashblocksStateExecutor {
                         .unwrap();
 
                     let eth_attrs = EthPayloadBuilderAttributes {
-                        id: first.payload_id,
+                        id: PayloadId(flashblocks.payload_id().to_owned()),
                         parent: base.parent_hash,
                         timestamp: base.timestamp,
                         suggested_fee_recipient: base.fee_recipient,
                         prev_randao: base.prev_randao,
-                        withdrawals: Withdrawals(first.diff.withdrawals.clone()),
+                        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
                         parent_beacon_block_root: Some(base.parent_beacon_block_root),
                     };
 
@@ -698,20 +702,20 @@ impl FlashblocksStateExecutor {
                         parent_hash: base.parent_hash,
                         ommers_hash: EMPTY_OMMER_ROOT_HASH,
                         beneficiary: Default::default(),
-                        state_root: first.diff.state_root,
+                        state_root: flashblock.diff.state_root,
                         transactions_root: EMPTY_ROOT_HASH,
-                        receipts_root: first.diff.receipts_root,
-                        logs_bloom: first.diff.logs_bloom,
+                        receipts_root: flashblock.diff.receipts_root,
+                        logs_bloom: flashblock.diff.logs_bloom,
                         difficulty: Default::default(),
                         number: base.block_number,
                         gas_limit: base.gas_limit,
-                        gas_used: first.diff.gas_used,
+                        gas_used: flashblock.diff.gas_used,
                         timestamp: base.timestamp,
                         extra_data: base.extra_data.clone(),
                         mix_hash: Default::default(),
                         nonce: B64::ZERO,
                         base_fee_per_gas: None,
-                        withdrawals_root: Some(first.diff.withdrawals_root),
+                        withdrawals_root: Some(flashblock.diff.withdrawals_root),
                         blob_gas_used: None,
                         excess_blob_gas: None,
                         parent_beacon_block_root: Some(base.parent_beacon_block_root),
@@ -727,7 +731,7 @@ impl FlashblocksStateExecutor {
                         chain_spec.clone(),
                         config,
                         &cancel,
-                        state.latest_payload.as_ref().map(|p| p.0.clone()),
+                        latest_payload.as_ref().map(|p| p.0.clone()),
                     );
 
                     let best = |_| BestPayloadTransactions::new(vec![].into_iter());
@@ -736,15 +740,19 @@ impl FlashblocksStateExecutor {
                         .build(
                             provider.state_by_block_hash(base.parent_hash).unwrap(),
                             &builder_ctx,
-                            state.latest_payload.as_ref().map(|p| p.0.clone()),
+                            latest_payload.as_ref().map(|p| p.0.clone()),
                         )
                         .unwrap();
+
                     let payload = match outcome {
                         BuildOutcomeKind::Better { payload } => payload,
                         BuildOutcomeKind::Freeze(payload) => payload,
                         _ => continue,
                     };
-                    state.latest_payload = Some((payload.clone(), flashblock.flashblock.index));
+                    *latest_payload = Some((payload.clone(), flashblock.index));
+
+                    // The default engine api implementation should reset the in memory pending
+                    // state on new_payload.
                     provider
                         .in_memory_state()
                         .set_pending_block(payload.executed_block().unwrap());
@@ -757,53 +765,47 @@ impl FlashblocksStateExecutor {
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
         built_payload: OpBuiltPayload,
     ) -> eyre::Result<()> {
-        let mut lock = self.inner.write();
-
-        let AuthorizedMsg::FlashblocksPayloadV1(ref payload) = authorized_payload.authorized.msg
+        let AuthorizedMsg::FlashblocksPayloadV1(flashblock) =
+            authorized_payload.authorized.msg.clone()
         else {
             unreachable!()
         };
 
-        if payload.index == 0 {
-            // Since flahblocks are pushed strictly in order, we can always clear
-            if payload.base.is_none() {
-                bail!("first flashblock must have a base")
-            }
-            lock.flashblocks.0.clear();
-        } else {
-            if payload.index != lock.flashblocks.0.len() as u64 {
-                bail!("flashblocks must be pushed in order")
-            }
-            if let Some(this) = lock.flashblocks.0.first() {
-                if this.flashblock.payload_id != payload.payload_id {
-                    bail!("flashblock payload id must be sequential")
-                }
-            }
-        }
-
         self.p2p_handle.publish_new(authorized_payload.clone())?;
 
-        lock.flashblocks.0.push(Flashblock {
-            flashblock: payload.clone(),
-        });
-        lock.latest_payload = Some((built_payload, payload.index));
+        let FlashblocksStateExecutorInner {
+            ref mut flashblocks,
+            ref mut latest_payload,
+            ..
+        } = *self.inner.write();
+
+        let index = flashblock.index;
+        let flashblock = Flashblock { flashblock };
+        let (_flashblocks, _new_payload) = match flashblocks {
+            Some(ref mut f) => {
+                let new_payload = f.push(flashblock.clone()).unwrap();
+                (f, new_payload)
+            }
+            None => {
+                *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                (flashblocks.as_mut().unwrap(), true)
+            }
+        };
+
+        *latest_payload = Some((built_payload, index));
 
         Ok(())
     }
 
     /// Returns a reference to the latest flashblock.
     pub fn last(&self) -> Option<Flashblock> {
-        self.inner.read().flashblocks.0.last().cloned()
+        self.inner.read().flashblocks.as_ref().map(|f| Flashblock {
+            flashblock: f.last().clone(),
+        })
     }
 
     /// Returns a reference to the latest flashblock.
-    pub fn flashblocks(&self) -> Flashblocks {
+    pub fn flashblocks(&self) -> Option<Flashblocks> {
         self.inner.read().flashblocks.clone()
-    }
-
-    /// Clears the current state of flashblocks.
-    pub fn clear(&self) {
-        // TODO:verify that pending state is automatically flushed here
-        self.inner.write().flashblocks.0.clear();
     }
 }

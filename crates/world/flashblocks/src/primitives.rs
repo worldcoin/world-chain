@@ -6,7 +6,7 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{FixedBytes, B256, U256};
-use eyre::eyre::eyre;
+use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpBlock;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::Block as _;
@@ -241,17 +241,93 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
 }
 
 /// A collection of flashblocks mapped to the same payload ID.
+///
+/// Guaranteed to be
+/// - Non-empty
+/// - All flashblocks have the same payload ID
+/// - Flashblocks have contiguous indices starting from 0
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Flashblocks(pub Vec<Flashblock>);
+pub struct Flashblocks(Vec<Flashblock>);
 
 impl Flashblocks {
-    /// Creates a new instance of [`Flashblocks`] from a vector of [`FlashblocksPayloadV1`].
-    pub fn from_payloads(payloads: Vec<Flashblock>) -> Self {
-        Flashblocks(payloads)
+    /// Creates a new `Flashblocks` collection from the given vector of flashblocks.
+    ///
+    /// Validates that the collection is non-empty, all flashblocks have the same payload ID,
+    /// and that the indices are contiguous starting from 0.
+    /// Returns an error if any of these conditions are not met.
+    pub fn new(flashblocks: Vec<Flashblock>) -> eyre::Result<Self> {
+        if flashblocks.is_empty() {
+            bail!("Flashblocks cannot be empty")
+        }
+
+        let mut iter = flashblocks.iter();
+
+        let first = iter.next().unwrap();
+        if first.flashblock.base.is_none() {
+            bail!("The first flashblock must contain the base payload");
+        }
+
+        let payload_id = first.payload_id();
+        if iter.any(|fb| fb.payload_id() != payload_id) {
+            bail!("All flashblocks must have the same payload_id")
+        }
+
+        for (i, fb) in flashblocks.iter().enumerate() {
+            if fb.flashblock.index != i as u64 {
+                bail!("Flashblocks must have contiguous indices starting from 0");
+            }
+        }
+
+        Ok(Self(flashblocks))
     }
 
-    pub fn payload_id(&self) -> Option<&FixedBytes<8>> {
-        self.0.first().map(|fb| fb.payload_id())
+    /// Pushes a new flashblock into the collection.
+    ///
+    /// If the new flashblock has a different payload ID, the collection is cleared
+    /// and the new flashblock is added as the first element (index must be 0).
+    /// If the new flashblock has the same payload ID, it is added to the end
+    /// of the collection (index must be contiguous).
+    /// Returns `Ok(true)` if the collection was reset, `Ok(false)` if the flashblock
+    /// was added to the existing collection, or an error if the conditions are not met.
+    pub fn push(&mut self, flashblock: Flashblock) -> eyre::Result<bool> {
+        if flashblock.payload_id() != self.payload_id() {
+            if flashblock.flashblock.index != 0 {
+                bail!("New flashblock has different payload_id and index is not 0");
+            }
+            let Some(base) = &flashblock.flashblock.base else {
+                bail!("New flashblock has different payload_id and must contain the base payload");
+            };
+            if base.timestamp <= self.base().timestamp {
+                bail!("New flashblock has different payload_id and must have a later timestamp than the current base");
+            }
+
+            self.0.clear();
+            self.0.push(flashblock);
+            return Ok(true);
+        }
+
+        if flashblock.flashblock.index != (self.0.len() as u64) {
+            bail!("New flashblock index is not contiguous");
+        }
+
+        self.0.push(flashblock);
+        Ok(false)
+    }
+
+    pub fn last(&self) -> &FlashblocksPayloadV1 {
+        &self.0.last().unwrap().flashblock
+    }
+
+    pub fn flashblocks(&self) -> &[Flashblock] {
+        &self.0
+    }
+
+    pub fn payload_id(&self) -> &FixedBytes<8> {
+        self.0.first().unwrap().payload_id()
+    }
+
+    pub fn base(&self) -> &ExecutionPayloadBaseV1 {
+        &self.0.first().unwrap().flashblock.base.as_ref().unwrap()
     }
 }
 
