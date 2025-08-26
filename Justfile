@@ -5,7 +5,7 @@ default:
     @just --list
 
 # Spawns the devnet
-devnet-up: deploy-devnet
+devnet-up: deploy-devnet deploy-contracts
 
 deploy-devnet: build
   @just ./devnet/devnet-up

@@ -67,11 +67,20 @@ BUILDER_PRIVATE_KEY = (
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 )
 
-FLASHBLOCKS_BUILDER_SK = "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62"
-FLASHBLOCKS_BUILDER_SK_1 = "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70"
-FLASHBLOCKS_BUILDER_SK_2 = "09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b"
+FLASHBLOCKS_BUILDER_SK = (
+    "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62"
+)
+FLASHBLOCKS_BUILDER_SK_1 = (
+    "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70"
+)
+FLASHBLOCKS_BUILDER_SK_2 = (
+    "09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b"
+)
 
-FLASHBLOCKS_AUTHORIZER_VK = "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f"
+FLASHBLOCKS_AUTHORIZER_VK = (
+    "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f"
+)
+
 
 def sk_for_service(service_name):
     if service_name == "op-el-builder-2151908-1-custom-op-node-op-kurtosis":
@@ -84,6 +93,7 @@ def sk_for_service(service_name):
         return FLASHBLOCKS_BUILDER_SK_2
     else:
         fail("Invalid service name: {0}".format(service_name))
+
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -235,7 +245,8 @@ def get_config(
         "--builder.deadline={0}".format("6"),
         "--flashblocks.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblocks.builder_sk={0}".format(signing_key),
-        "--flashblocks.enabled"
+        "--flashblocks.enabled",
+        "--block-interval={0}".format(4294967295),
     ]
 
     observability.expose_metrics_port(ports)

@@ -8,9 +8,8 @@ rundler = import_module("./src/bundler/rundler/rundler_launcher.star")
 static_files = import_module("./src/static_files/static_files.star")
 
 tx_proxy = import_module("./src/tx-proxy/tx_proxy_launcher.star")
-rollup_boost = import_module(
-    "./src/rollup-boost/launcher.star"
-)
+rollup_boost = import_module("./src/rollup-boost/launcher.star")
+
 
 # TODO: HA Deployment with op-conductor
 def run(plan, args={}):
