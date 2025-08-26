@@ -46,6 +46,7 @@ ethereum_package:
   participants:
   - el_type: geth
     cl_type: teku
+    cl_image: ethpandaops/teku:master-5a2aa76
   network_params:
     preset: minimal
     genesis_delay: 5

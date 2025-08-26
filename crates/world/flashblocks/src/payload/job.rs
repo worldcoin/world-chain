@@ -220,21 +220,19 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        // First wait for the 200ms interval to complete
-        if this.flashblock_deadline.as_mut().poll(cx).is_ready() {
-            // Reset the interval for the next iteration
-            this.flashblock_deadline
-                .as_mut()
-                .reset(tokio::time::Instant::now() + this.interval);
+        let network_handle = this.p2p_handler.clone();
+        let fut = pin!(network_handle.await_clearance());
 
-            // Now wait for network clearance before proceeding
-            let network_handle = this.p2p_handler.clone();
-            ready!(pin!(network_handle.await_clearance()).poll(cx));
+        let joined_fut = pin!(futures::future::join(
+            fut,
+            this.flashblock_deadline.as_mut()
+        ));
 
-            trace!(target: "payload_builder", id=%this.config.payload_id(), "interval elapsed, and clearance granted");
-        } else {
-            return Poll::Pending;
-        }
+        ready!(joined_fut.poll(cx));
+
+        this.flashblock_deadline
+            .as_mut()
+            .reset(tokio::time::Instant::now() + this.interval);
 
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {

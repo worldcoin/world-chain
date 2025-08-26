@@ -8,6 +8,7 @@ use crate::{
 
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
+use alloy_primitives::U256;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -255,7 +256,8 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         // 1. Prepare the db
-        let (bundle, receipts, transactions, gas_used) = if let Some(payload) = &best_payload {
+        let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
+        {
             // if we have a best payload we will always have a bundle
             let execution_result = &payload
                 .executed_block()
@@ -289,9 +291,10 @@ where
                 receipts,
                 transactions,
                 Some(payload.block().gas_used()),
+                payload.fees(),
             )
         } else {
-            (BundleState::default(), Vec::new(), Vec::new(), None)
+            (BundleState::default(), vec![], vec![], None, U256::ZERO)
         };
 
         let gas_limit = ctx
@@ -379,7 +382,7 @@ where
         let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
-            info.total_fees,
+            info.total_fees + fees,
             Some(executed),
         );
 

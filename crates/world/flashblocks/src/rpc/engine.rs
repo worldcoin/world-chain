@@ -313,10 +313,7 @@ where
             self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
-        self.handle_fork_choice_updated(fork_choice_state);
-
-        self.inner
-            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
+        self.fork_choice_updated_v3(fork_choice_state, payload_attributes)
             .await
     }
 }
