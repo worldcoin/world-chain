@@ -1,5 +1,5 @@
 use clap::Parser;
-use reth_node_builder::{FullNodeComponents, NodeHandle};
+use reth_node_builder::NodeHandle;
 use reth_optimism_cli::Cli;
 use reth_optimism_node::OpDAConfig;
 use reth_tracing::tracing::info;
@@ -52,7 +52,6 @@ fn main() {
                     } = builder
                         .node(node)
                         .extend_rpc_modules(move |ctx| {
-                            ctx.node().evm_config();
                             let provider = ctx.provider().clone();
                             let pool = ctx.pool().clone();
                             let sequencer_client = args.rollup.sequencer.map(SequencerClient::new);

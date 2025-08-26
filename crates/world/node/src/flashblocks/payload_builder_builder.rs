@@ -3,15 +3,12 @@ use eyre::eyre::Context;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
 use reth::chainspec::EthChainSpec;
-use reth_node_api::FullNodeComponents;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_payload_util::PayloadTransactions;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::BlobStore;
 use world_chain_builder_flashblocks::builder::executor::FlashblocksStateExecutor;
@@ -181,7 +178,7 @@ where
     Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
     <Node as FullNodeTypes>::Provider:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
-    Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
+    Node::Provider: InMemoryState<Primitives = OpPrimitives>,
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {

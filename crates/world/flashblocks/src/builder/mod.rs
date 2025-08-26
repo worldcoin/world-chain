@@ -405,7 +405,6 @@ where
         PayloadBuilderError,
     >
     where
-        // Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
         Tx: PoolTransaction + OpPooledTx,
         N: NodePrimitives<
             Block = alloy_consensus::Block<OpTransactionSigned>,

@@ -3,7 +3,7 @@ use eyre::eyre::bail;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
 use reth_node_builder::BuilderContext;
-use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
+use reth_payload_util::BestPayloadTransactions;
 use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -42,10 +42,10 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
+use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_node::{
     OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
     OpRethReceiptBuilder,
@@ -61,7 +61,7 @@ use revm::state::Bytecode;
 use revm::DatabaseCommit;
 
 use crate::primitives::{Flashblock, Flashblocks};
-use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
+use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");

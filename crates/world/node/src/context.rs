@@ -200,7 +200,6 @@ where
                     components_context.flashblocks_state.clone(),
                 )
                 .with_da_config(da_config.clone()),
-                da_config.clone(),
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
