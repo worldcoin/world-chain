@@ -27,7 +27,7 @@ use rollup_boost::{
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 
-use crate::primitives::Flashblock;
+use crate::{builder::executor::FlashblocksStateExecutor, primitives::Flashblock};
 
 /// A payload job that continuously spawns new build tasks at regular intervals, each building on top of the previous `best_payload`.
 ///
@@ -74,6 +74,8 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) interval: Duration,
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
+    /// The flashblocks state executor
+    pub(crate) flashblocks_state: FlashblocksStateExecutor,
     /// Any pre-confirmed state on the Payload ID corresponding to this job
     pub(crate) pre_built_payload: Option<Builder::BuiltPayload>,
     /// Block index
@@ -147,7 +149,10 @@ where
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
         trace!(target: "jobs_generator", id=%self.config.payload_id(), "creating authorized flashblock");
 
-        self.p2p_handler.publish_new(self.authorization_for(flashblock.into_flashblock()))
+        let authorized_payload = self.authorization_for(flashblock.into_flashblock());
+
+        self.flashblocks_state
+            .publish_built_payload(authorized_payload, payload.to_owned())
             .inspect_err(|err| {
                 error!(target: "jobs_generator", id=%self.config.payload_id(), %err, "failed to publish new payload");
             })

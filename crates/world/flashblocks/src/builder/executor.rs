@@ -1,10 +1,11 @@
 use alloy_eips::eip2718::WithEncoded;
 use alloy_rpc_types_engine::PayloadId;
+use flashblocks_p2p::protocol::error::FlashblocksP2PError;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
 use reth_node_builder::BuilderContext;
 use reth_payload_util::BestPayloadTransactions;
-use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
+use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
 use world_chain_provider::InMemoryState;
@@ -674,7 +675,7 @@ impl FlashblocksStateExecutor {
                         .transactions
                         .iter()
                         .map(|b| {
-                            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(&b)?;
+                            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
                             eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
                         })
                         .collect::<eyre::Result<Vec<_>>>()
@@ -764,12 +765,8 @@ impl FlashblocksStateExecutor {
         &self,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
         built_payload: OpBuiltPayload,
-    ) -> eyre::Result<()> {
-        let AuthorizedMsg::FlashblocksPayloadV1(flashblock) =
-            authorized_payload.authorized.msg.clone()
-        else {
-            unreachable!()
-        };
+    ) -> Result<(), FlashblocksP2PError> {
+        let flashblock = authorized_payload.msg().clone();
 
         self.p2p_handle.publish_new(authorized_payload.clone())?;
 
