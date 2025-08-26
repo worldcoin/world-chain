@@ -47,6 +47,7 @@ where
     T: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync,
 {
     /// Create a new `AssertMineBlock` action
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         node_idx: usize,
         transactions: Vec<Bytes>,
