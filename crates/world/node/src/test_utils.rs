@@ -75,8 +75,6 @@ pub fn test_config() -> WorldChainNodeConfig {
 
     let flashblocks = FlashblocksArgs {
         enabled: true,
-        block_time: 1500,
-        flashblock_interval: 200,
         authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
         builder_sk: SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>()),
     };

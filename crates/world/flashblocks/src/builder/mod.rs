@@ -44,7 +44,7 @@ use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span, warn};
+use tracing::{debug, span, trace, warn};
 
 pub mod executor;
 pub mod payload_txns;
@@ -279,6 +279,10 @@ where
                         .map_err(|_| PayloadBuilderError::Other(eyre!("tx recovery failed").into()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+
+            let bundle = execution_result.bundle.clone();
+
+            trace!(target: "payload_builder", bundle = ?bundle, "using best payload");
 
             (
                 execution_result.bundle.clone(),

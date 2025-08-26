@@ -149,6 +149,10 @@ jsonrpsee = { version = "0.25.1", features = ["server", "client", "macros"] }
 jsonrpsee-core = { version = "0.25.1" }
 jsonrpsee-types = "0.25.1"
 
+# metrics
+metrics = "0.24.0"
+metrics-derive = "0.1"
+
 # 3rd party
 rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "171cfbc502b441f543d3f7921a575a92cd11a10a" }
 flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "171cfbc502b441f543d3f7921a575a92cd11a10a" }

@@ -2,12 +2,14 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use eyre::eyre::eyre;
 use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
-use reth::builder::Node;
-use reth::builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
+use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth::network::PeersHandleProvider;
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
 use reth_e2e_test_utils::{Adapter, NodeHelperType, TmpDB};
+use reth_node_api::{
+    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes,
+};
 use reth_node_builder::rpc::{EngineValidatorAddOn, RethRpcAddOns};
 use reth_node_builder::{NodeComponents, NodeComponentsBuilder};
 use reth_node_core::args::RpcServerArgs;
@@ -16,23 +18,24 @@ use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
 use revm_primitives::U256;
-use std::collections::BTreeMap;
-use std::ops::Range;
-use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    ops::Range,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 use tracing::span;
 use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
 use world_chain_builder_node::test_utils::test_config;
-use world_chain_builder_pool::root::LATEST_ROOT_SLOT;
-use world_chain_builder_pool::validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
-use world_chain_builder_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 use world_chain_builder_test_utils::utils::{account, tree_root};
 use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
-use reth_node_api::{
-    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes,
+use world_chain_builder_pool::{
+    root::LATEST_ROOT_SLOT,
+    validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
+    BasicWorldChainPool,
 };
-use world_chain_builder_pool::BasicWorldChainPool;
+use world_chain_builder_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
 
