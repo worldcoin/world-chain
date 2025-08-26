@@ -32,7 +32,6 @@ impl<EV: Default> Default for WorldChainEngineApiBuilder<EV> {
         Self {
             engine_validator_builder: Default::default(),
             flashblocks_handle: None,
-            // flashblocks_state: None,
             to_jobs_generator,
             verifying_key: VerifyingKey::from_bytes(&[0u8; 32]).expect("valid key"),
         }

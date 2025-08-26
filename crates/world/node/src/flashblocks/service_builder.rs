@@ -3,7 +3,7 @@ use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
-    BuilderContext, NodeComponentsBuilder,
+    BuilderContext,
 };
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_provider::CanonStateSubscriptions;
@@ -63,9 +63,6 @@ where
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         let payload_builder = self.pb.build_payload_builder(ctx, pool, evm_config).await?;
-
-        let flashblocks_state =
-            FlashblocksStateExecutor::new(self.p2p_handler.clone(), self.da_config.clone());
 
         let conf = ctx.config().builder.clone();
 
