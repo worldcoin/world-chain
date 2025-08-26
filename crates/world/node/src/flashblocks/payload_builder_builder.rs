@@ -134,13 +134,10 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 
-        Node::Provider:
-            InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        // P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, OpPooledTransaction> + 'static,
         S: BlobStore + Clone,
-        Txs: OpPayloadTransactions<WorldChainPooledTransaction>
-            + PayloadTransactions<Transaction: OpPooledTx>,
+        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
             client: ctx.provider().clone(),
@@ -155,7 +152,11 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
         };
 
         self.flashblocks_state
-            .launch::<_, _, WorldChainPooledTransaction>(ctx, ctx_builder.clone());
+            .launch::<_, _, WorldChainPooledTransaction>(
+                ctx,
+                ctx_builder.clone(),
+                evm_config.clone(),
+            );
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
@@ -178,14 +179,11 @@ impl<Node, S, Txs>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    // <Node as FullNodeTypes>::Provider:
-    //     StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
-    Node::Provider:
-        InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
+    <Node as FullNodeTypes>::Provider:
+        StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
     S: BlobStore + Clone,
-    // Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-    Txs: OpPayloadTransactions<WorldChainPooledTransaction>
-        + PayloadTransactions<Transaction: OpPooledTx>,
+    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {
     type PayloadBuilder = FlashblocksPayloadBuilder<
         WorldChainTransactionPool<Node::Provider, S>,

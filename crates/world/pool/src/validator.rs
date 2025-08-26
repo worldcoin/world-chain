@@ -25,7 +25,6 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
-use world_chain_provider::InMemoryState;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -59,30 +58,20 @@ where
     pbh_signature_aggregator: Address,
 }
 
-impl<P, Tx> WorldChainTransactionValidator<P, Tx>
+impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
 where
-    // P: InMemoryState + StateProviderFactory,
-    // N: NodeTypesWithDB + ProviderNodeTypes,
-    // Client: ChainSpecProvider<ChainSpec: OpHardforks>
-    //     + StateProviderFactory
-    //     + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
-    P: InMemoryState
-        + ChainSpecProvider<ChainSpec: OpHardforks>
+    Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
-        inner: OpTransactionValidator<P, Tx>,
-        root_validator: WorldChainRootValidator<P>,
+        inner: OpTransactionValidator<Client, Tx>,
+        root_validator: WorldChainRootValidator<Client>,
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
     ) -> Result<Self, WorldChainTransactionPoolError> {
-        // let o = inner.client().pending().unwrap().include_str
-        // let mem = inner.client().canonical_in_memory_state();
-        // mem.set_pending_block(pending);
-        // let o = inner.client().pending().unwrap();
         let state = inner.client().state_by_block_id(BlockId::latest())?;
         // The `num_pbh_txs` storage is in a packed slot at a 160 bit offset consuming 16 bits.
         let max_pbh_nonce: u16 = ((state
@@ -122,7 +111,7 @@ where
     }
 
     /// Get a reference to the inner transaction validator.
-    pub fn inner(&self) -> &OpTransactionValidator<P, Tx> {
+    pub fn inner(&self) -> &OpTransactionValidator<Client, Tx> {
         &self.inner
     }
 
@@ -268,8 +257,7 @@ where
             return self.inner.validate_one(origin, transaction.clone()).await;
         }
 
-        // self.validate_pbh(origin, transaction).await
-        todo!()
+        self.validate_pbh(origin, transaction).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

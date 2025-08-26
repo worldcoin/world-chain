@@ -618,13 +618,15 @@ impl FlashblocksStateExecutor {
     }
 
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node, P, Tx>(&self, ctx: &BuilderContext<Node>, payload_builder_ctx_builder: P)
-    where
-        // Txs: PayloadTransactions<Transaction: OpPooledTx>,
+    pub fn launch<Node, P, Tx>(
+        &self,
+        ctx: &BuilderContext<Node>,
+        payload_builder_ctx_builder: P,
+        evm_config: OpEvmConfig,
+    ) where
         Tx: OpPooledTx,
         Node: FullNodeTypes,
-        Node::Provider:
-            InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Tx> + 'static,
     {
@@ -720,7 +722,7 @@ impl FlashblocksStateExecutor {
                     let config = PayloadConfig::new(sealed_header, attributes);
 
                     let builder_ctx = payload_builder_ctx_builder.build(
-                        provider.evm_config().clone(),
+                        evm_config.clone(),
                         this.da_config.clone(),
                         chain_spec.clone(),
                         config,
