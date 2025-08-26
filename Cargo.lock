@@ -14422,6 +14422,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "world-chain-provider",
 ]
 
 [[package]]
@@ -14495,6 +14496,7 @@ dependencies = [
  "world-chain-builder-pool",
  "world-chain-builder-rpc",
  "world-chain-builder-test-utils",
+ "world-chain-provider",
 ]
 
 [[package]]
@@ -14595,8 +14597,10 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "world-chain-builder-flashblocks",
  "world-chain-builder-pbh",
  "world-chain-builder-test-utils",
+ "world-chain-provider",
 ]
 
 [[package]]
@@ -14641,6 +14645,15 @@ dependencies = [
  "serde",
  "test-case",
  "world-chain-builder-pbh",
+]
+
+[[package]]
+name = "world-chain-provider"
+version = "0.1.0"
+dependencies = [
+ "reth-chain-state",
+ "reth-node-api",
+ "reth-provider",
 ]
 
 [[package]]

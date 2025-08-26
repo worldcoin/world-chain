@@ -27,6 +27,7 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
 use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
+use world_chain_provider::InMemoryState;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -60,21 +61,23 @@ where
     pbh_signature_aggregator: Address,
 }
 
-impl<N, Tx> WorldChainTransactionValidator<BlockchainProvider<N>, Tx>
+impl<P, Tx> WorldChainTransactionValidator<P, Tx>
 where
-    N: NodeTypesWithDB + ProviderNodeTypes,
+    // P: InMemoryState + StateProviderFactory,
+    // N: NodeTypesWithDB + ProviderNodeTypes,
     // Client: ChainSpecProvider<ChainSpec: OpHardforks>
     //     + StateProviderFactory
     //     + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
-    BlockchainProvider<N>: ChainSpecProvider<ChainSpec: OpHardforks>
+    P: InMemoryState
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
-        inner: OpTransactionValidator<BlockchainProvider<N>, Tx>,
-        root_validator: WorldChainRootValidator<BlockchainProvider<N>>,
+        inner: OpTransactionValidator<P, Tx>,
+        root_validator: WorldChainRootValidator<P>,
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
     ) -> Result<Self, WorldChainTransactionPoolError> {
@@ -121,7 +124,7 @@ where
     }
 
     /// Get a reference to the inner transaction validator.
-    pub fn inner(&self) -> &OpTransactionValidator<BlockchainProvider<N>, Tx> {
+    pub fn inner(&self) -> &OpTransactionValidator<P, Tx> {
         &self.inner
     }
 

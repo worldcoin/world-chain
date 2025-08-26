@@ -4,12 +4,14 @@ use flashblocks_p2p::protocol::error::FlashblocksP2PError;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
 use reth::api::BlockBody;
+use reth_node_builder::BuilderContext;
 use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
 use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::{mpsc, Arc};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::{error, warn};
+use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, BlockHeader as _, Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::eip4895::Withdrawals;
@@ -43,7 +45,10 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{BuiltPayload as _, NodeTypesWithDB, PayloadBuilderError};
+use reth_node_api::{
+    BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes, NodeTypesWithDB,
+    PayloadBuilderError,
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
@@ -600,6 +605,7 @@ where
 pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
+    da_config: OpDAConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -612,34 +618,32 @@ impl FlashblocksStateExecutor {
     /// Creates a new instance of [`FlashblocksStateExecutor`].
     ///
     /// This function spawn a task that handles updates. It should only be called once.
-    pub fn new<N, P, Txs>(
-        components: N,
-        da_config: OpDAConfig,
-        state_provider_factory: BlockchainProvider<N>,
-        // executor_factory: FlashblocksBlockExecutorFactory,
-        payload_builder_ctx_builder: P,
-        p2p_handle: FlashblocksHandle,
-    ) -> Self
-    where
-        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
-        N: NodeTypesWithDB
-            + ProviderNodeTypes
-            + RpcNodeCore<Evm = OpEvmConfig>
-            + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, OpPooledTransaction> + 'static,
-    {
-        let mut stream = p2p_handle.flashblock_stream();
-
+    pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
             flashblocks: Flashblocks::default(),
             latest_payload: None,
         }));
 
-        let canonical_in_memory_state = state_provider_factory.canonical_in_memory_state();
+        Self {
+            inner,
+            p2p_handle,
+            da_config,
+        }
+    }
 
-        let val = Self { inner, p2p_handle };
-
-        let this = val.clone();
+    pub fn launch<Node, P, Txs>(&self, ctx: &BuilderContext<Node>, payload_builder_ctx_builder: P)
+    where
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
+        Node: FullNodeTypes,
+        Node::Provider:
+            InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
+        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
+        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, OpPooledTransaction> + 'static,
+    {
+        let mut stream = self.p2p_handle.flashblock_stream();
+        let this = self.clone();
+        let provider = ctx.provider().clone();
+        let chain_spec = ctx.chain_spec().clone();
 
         tokio::spawn(async move {
             while let Some(flashblock) = stream.next().await {
@@ -706,10 +710,10 @@ impl FlashblocksStateExecutor {
 
                 let config = PayloadConfig::new(sealed_header, attributes);
 
-                let ctx = payload_builder_ctx_builder.build::<Txs>(
-                    components.evm_config().clone(),
-                    da_config.clone(),
-                    components.chain_spec(),
+                let builder_ctx = payload_builder_ctx_builder.build::<Txs>(
+                    provider.evm_config().clone(),
+                    this.da_config.clone(),
+                    chain_spec.clone(),
                     config,
                     &cancel,
                     state.latest_payload.as_ref().map(|p| p.0.clone()),
@@ -717,17 +721,24 @@ impl FlashblocksStateExecutor {
 
                 let best = |_| BestPayloadTransactions::new(vec![].into_iter());
 
-                FlashblockBuilder::new(best).build(
-                    state_provider_factory
-                        .state_by_block_hash(base.parent_hash)
-                        .unwrap(),
-                    &ctx,
-                    state.latest_payload.as_ref().map(|p| p.0.clone()),
-                );
+                let outcome = FlashblockBuilder::new(best)
+                    .build(
+                        provider.state_by_block_hash(base.parent_hash).unwrap(),
+                        &builder_ctx,
+                        state.latest_payload.as_ref().map(|p| p.0.clone()),
+                    )
+                    .unwrap();
+                let payload = match outcome {
+                    BuildOutcomeKind::Better { payload } => payload,
+                    BuildOutcomeKind::Freeze(payload) => payload,
+                    _ => continue,
+                };
+                state.latest_payload = Some((payload.clone(), flashblock.flashblock.index));
+                provider
+                    .in_memory_state()
+                    .set_pending_block(payload.executed_block().unwrap());
             }
         });
-
-        val
     }
 
     pub fn publish_built_payload(

@@ -166,8 +166,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
     let flashblocks_1_clone = flashblocks_1.clone();
 
     tokio::spawn(async move {
-        let stream_0 = ext_context_1.network_handle.flashblock_stream();
-        let stream_1 = ext_context_2.network_handle.flashblock_stream();
+        let stream_0 = ext_context_1.flashblocks_handle.flashblock_stream();
+        let stream_1 = ext_context_2.flashblocks_handle.flashblock_stream();
 
         futures::pin_mut!(stream_0);
         futures::pin_mut!(stream_1);

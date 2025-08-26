@@ -10,6 +10,8 @@ repository.workspace = true
 [dependencies]
 world-chain-builder-pbh.workspace = true
 world-chain-builder-test-utils = { workspace = true, optional = true }
+world-chain-builder-flashblocks.workspace = true
+world-chain-provider.workspace = true
 
 reth.workspace = true
 reth-db.workspace = true
@@ -41,7 +43,7 @@ op-alloy-consensus.workspace = true
 
 # 3rd party
 tokio.workspace = true
-semaphore-rs = { workspace = true, features = ["depth_30"]}
+semaphore-rs = { workspace = true, features = ["depth_30"] }
 eyre = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true

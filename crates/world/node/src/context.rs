@@ -30,8 +30,9 @@ use rollup_boost::{
     Authorization,
 };
 
-use world_chain_builder_flashblocks::primitives::FlashblocksState;
+use world_chain_builder_flashblocks::builder::executor::FlashblocksStateExecutor;
 use world_chain_builder_pool::BasicWorldChainPool;
+use world_chain_provider::InMemoryState;
 
 #[derive(Clone, Debug)]
 pub struct BasicContext(WorldChainNodeConfig);
@@ -42,8 +43,8 @@ impl From<WorldChainNodeConfig> for BasicContext {
     }
 }
 
-impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeContext<N>
-    for BasicContext
+impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<BasicContext>>>
+    WorldChainNodeContext<N> for BasicContext
 where
     BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
         N,
@@ -122,8 +123,8 @@ pub struct FlashblocksContext {
     components_context: FlashblocksComponentsContext,
 }
 
-impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
-    for FlashblocksContext
+impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<FlashblocksContext>>>
+    WorldChainNodeContext<N> for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
         N,
@@ -176,7 +177,7 @@ where
 
         let fb_network_builder = FlashblocksNetworkBuilder::new(
             op_network_builder,
-            components_context.network_handle.clone(),
+            components_context.flashblocks_handle.clone(),
         );
 
         let flashblocks = flashblocks.unwrap();
@@ -198,7 +199,8 @@ where
                     builder.private_key.clone(),
                 )
                 .with_da_config(da_config.clone()),
-                components_context.network_handle.clone(),
+                da_config.clone(),
+                components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
                 flashblocks.builder_sk.clone(),
@@ -250,8 +252,8 @@ impl FlashblocksContext {
 
         WorldChainEngineApiBuilder {
             engine_validator_builder: OpEngineValidatorBuilder::default(),
-            flashblocks_handle: Some(components_context.network_handle.clone()),
-            flashblocks_state: Some(components_context.flashblocks_state.clone()),
+            flashblocks_handle: Some(components_context.flashblocks_handle.clone()),
+            // flashblocks_state: Some(components_context.flashblocks_state.clone()),
             to_jobs_generator: components_context.to_jobs_generator.clone(),
             verifying_key: components_context.authorizer_vk,
         }
@@ -259,8 +261,8 @@ impl FlashblocksContext {
 }
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
-    pub network_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksState,
+    pub flashblocks_handle: FlashblocksHandle,
+    pub flashblocks_state: FlashblocksStateExecutor,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
     pub builder_sk: SigningKey,
@@ -277,7 +279,6 @@ impl From<WorldChainNodeConfig> for FlashblocksContext {
 
 impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let flashblocks_state = FlashblocksState::default();
         let flashblocks = value
             .args
             .flashblocks
@@ -289,10 +290,13 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
+        let flashblocks_state =
+            FlashblocksStateExecutor::new(flashblocks_handle.clone(), value.da_config.clone());
+
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
         Self {
-            network_handle: flashblocks_handle,
             flashblocks_state,
+            flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
             builder_sk,

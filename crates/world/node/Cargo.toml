@@ -16,6 +16,7 @@ world-chain-builder-pool.workspace = true
 world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
 world-chain-builder-flashblocks.workspace = true
+world-chain-provider.workspace = true
 
 rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
@@ -33,7 +34,7 @@ reth-optimism-storage.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
-reth-primitives-traits = { workspace = true, optional = true  }
+reth-primitives-traits = { workspace = true, optional = true }
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-optimism-forks.workspace = true
@@ -120,3 +121,4 @@ test = [
 [[test]]
 name = "e2e-testsuite"
 path = "tests/e2e-testsuite/main.rs"
+

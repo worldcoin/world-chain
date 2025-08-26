@@ -51,6 +51,7 @@ use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
+use world_chain_provider::InMemoryState;
 
 use crate::args::WorldChainArgs;
 
@@ -291,6 +292,7 @@ impl WorldChainPoolBuilder {
 impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
+    Node::Provider: InMemoryState,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 

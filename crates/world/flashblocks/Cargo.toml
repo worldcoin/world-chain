@@ -7,6 +7,9 @@ license.workspace = true
 
 
 [dependencies]
+# internal
+world-chain-provider.workspace = true
+
 # reth
 reth.workspace = true
 reth-basic-payload-builder.workspace = true

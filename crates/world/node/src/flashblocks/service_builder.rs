@@ -3,14 +3,15 @@ use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
-    BuilderContext,
+    BuilderContext, NodeComponentsBuilder,
 };
+use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use world_chain_builder_flashblocks::{
+    builder::executor::FlashblocksStateExecutor,
     payload::generator::{FlashblocksJobGeneratorConfig, WorldChainPayloadJobGenerator},
-    primitives::FlashblocksState,
 };
 
 use crate::{context::FlashblocksContext, node::WorldChainNode};
@@ -19,8 +20,9 @@ use crate::{context::FlashblocksContext, node::WorldChainNode};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
+    da_config: OpDAConfig,
     p2p_handler: FlashblocksHandle,
-    flashblocks_state: FlashblocksState,
+    flashblocks_state: FlashblocksStateExecutor,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
     builder_sk: SigningKey,
 }
@@ -29,13 +31,15 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     /// Create a new [`FlashblocksPayloadServiceBuilder`].
     pub const fn new(
         pb: PB,
+        da_config: OpDAConfig,
         p2p_handler: FlashblocksHandle,
-        flashblocks_state: FlashblocksState,
+        flashblocks_state: FlashblocksStateExecutor,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         builder_sk: SigningKey,
     ) -> Self {
         Self {
             pb,
+            da_config,
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
@@ -59,6 +63,9 @@ where
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         let payload_builder = self.pb.build_payload_builder(ctx, pool, evm_config).await?;
+
+        let flashblocks_state =
+            FlashblocksStateExecutor::new(self.p2p_handler.clone(), self.da_config.clone());
 
         let conf = ctx.config().builder.clone();
 
