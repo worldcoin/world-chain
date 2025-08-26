@@ -1,4 +1,3 @@
-use std::{future::Future, pin::Pin};
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
@@ -6,7 +5,7 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
@@ -23,7 +22,6 @@ use reth_transaction_pool::TransactionPool;
 use rollup_boost::Authorization;
 use tracing::info;
 
-use crate::{builder::executor::FlashblocksStateExecutor, primitives::Flashblock};
 
 /// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]

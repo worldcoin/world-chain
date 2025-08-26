@@ -1,6 +1,5 @@
-use alloy_eips::eip2718::{Eip2718Result, WithEncoded};
-use eyre::eyre::{bail, eyre};
-use flashblocks_p2p::protocol::error::FlashblocksP2PError;
+use alloy_eips::eip2718::WithEncoded;
+use eyre::eyre::bail;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
 use reth::api::BlockBody;
@@ -8,9 +7,8 @@ use reth_node_builder::BuilderContext;
 use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
 use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tracing::{error, warn};
+use std::sync::Arc;
+use tracing::error;
 use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, BlockHeader as _, Eip658Value, Header, Transaction, TxReceipt};
@@ -24,10 +22,8 @@ use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
 use reth::revm::cancelled::CancelOnDrop;
-use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
     StateChangeSource, SystemCaller,
@@ -46,34 +42,29 @@ use reth_evm::{
 };
 use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{
-    BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes, NodeTypesWithDB,
-    PayloadBuilderError,
+    BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
+use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_node::{
     OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
     OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadTransactions};
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_provider::{
-    BlockExecutionResult, ChainSpecProvider, ExecutionOutcome, StateProvider,
+    BlockExecutionResult, ChainSpecProvider, StateProvider,
     StateProviderFactory as _,
 };
 use reth_rpc_eth_api::RpcNodeCore;
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
 
-use crate::builder::payload_txns::BestPayloadTxns;
 use crate::primitives::{Flashblock, Flashblocks};
 use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
 

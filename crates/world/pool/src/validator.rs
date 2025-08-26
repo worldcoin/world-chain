@@ -13,7 +13,6 @@ use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use reth::api::NodeTypesWithDB;
 use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -22,7 +21,6 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, SealedBlock};
-use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
