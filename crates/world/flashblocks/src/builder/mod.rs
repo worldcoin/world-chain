@@ -31,7 +31,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_optimism_payload_builder::{builder::ExecutionInfo, config::OpBuilderConfig};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
@@ -44,7 +44,7 @@ use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span, warn};
+use tracing::{debug, span, trace, warn};
 
 pub mod executor;
 pub mod payload_txns;
@@ -280,6 +280,10 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
+            let bundle = execution_result.bundle.clone();
+
+            trace!(target: "payload_builder", bundle = ?bundle, "using best payload");
+
             (
                 execution_result.bundle.clone(),
                 receipts,
@@ -296,6 +300,8 @@ where
             .unwrap_or(ctx.parent().gas_limit)
             .saturating_sub(gas_used.unwrap_or(0));
 
+        let bundle_is_empty = bundle.is_empty();
+
         let mut state = State::builder()
             .with_database(state)
             .with_bundle_prestate(bundle)
@@ -306,13 +312,18 @@ where
         let mut builder =
             Self::block_builder(&mut state, transactions.clone(), receipts, gas_used, ctx)?;
 
-        // 3. apply pre-execution changes
-        builder.apply_pre_execution_changes()?;
+        // Only execute the sequencer transactions on the first payload. The sequencer transactions
+        // will already be in the [`BundleState`] at this point if the `bundle` non-empty.
+        let mut info = if bundle_is_empty {
+            // 3. apply pre-execution changes
+            builder.apply_pre_execution_changes()?;
 
-        // 4. Execute Deposit transactions
-        let mut info = ctx
-            .execute_sequencer_transactions(&mut builder)
-            .map_err(PayloadBuilderError::other)?;
+            // 4. Execute Deposit transactions
+            ctx.execute_sequencer_transactions(&mut builder)
+                .map_err(PayloadBuilderError::other)?
+        } else {
+            ExecutionInfo::default()
+        };
 
         // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
         // flashblocks

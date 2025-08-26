@@ -75,10 +75,6 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) p2p_handler: FlashblocksHandle,
     /// Any pre-confirmed state on the Payload ID corresponding to this job
     pub(crate) pre_built_payload: Option<Builder::BuiltPayload>,
-    /// A bool tracking whether we can start building the next payload on top of the previous one
-    pub(crate) best_payload_changed: bool,
-    /// Tracks whether we should trigger an immediate build on the next poll
-    pub(crate) ready_for_next_build: bool,
     /// Block index
     pub(crate) block_index: u64,
     /// The builder signing key
@@ -113,9 +109,6 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
 
-        self.ready_for_next_build = false;
-        self.best_payload_changed = false;
-
         if let Some(pre_built_payload) = self.pre_built_payload.clone() {
             self.best_payload = PayloadState::Frozen(pre_built_payload);
         }
@@ -140,6 +133,7 @@ where
     ///
     /// An [`AuthorizedPayload<FlashblockPayloadV1>`] signed by the builder is sent to
     /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
+    /// 
     /// See: [`FlashblocksHandle::publish_new`].
     pub(crate) fn publish_payload(
         &self,
@@ -254,7 +248,7 @@ where
                         this.best_payload = PayloadState::Best(payload.clone());
                         this.cached_reads = Some(cached_reads);
 
-                        trace!(target: "payload_builder", value = %payload.fees(), "building new best payload");
+                        trace!(target: "payload_builder", current_value = %payload.fees(), "building new best payload");
                         // publish the new payload to the p2p network
                         if let Err(err) = this.publish_payload(&payload, &prev.payload().cloned()) {
                             error!(target: "payload_builder", %err, "failed to publish new payload to p2p network");
@@ -267,7 +261,7 @@ where
                         this.spawn_build_job();
                     }
                     BuildOutcome::Freeze(payload) => {
-                        debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                        trace!(target: "payload_builder", "payload frozen, no further building will occur");
                         this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {

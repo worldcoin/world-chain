@@ -204,8 +204,6 @@ where
             authorization,
             p2p_handler: self.p2p_handler.clone(),
             pre_built_payload: maybe_pre_state,
-            best_payload_changed: false,
-            ready_for_next_build: false,
             block_index: 0,
             builder_signing_key: self.builder_sk.clone(),
         };
@@ -251,13 +249,10 @@ where
         attributes: &<Builder as PayloadBuilder>::Attributes,
     ) -> Result<Option<Builder::BuiltPayload>, PayloadBuilderError> {
         // check for any pending pre state received over p2p
-        let state = tokio::task::block_in_place(|| {
-            let handle = Handle::current();
-            handle.block_on(async { self.flashblocks_state.0.read().await })
-        });
+        let state = self.flashblocks_state.flashblocks();
 
         if !state.0.is_empty() {
-            let block = Flashblock::reduce(state.clone());
+            let block = Flashblock::reduce(state);
             if let Some(flashblock) = block {
                 if *flashblock.payload_id() == attributes.payload_id().0 {
                     // If we have a pre-confirmed state, we can use it to build the payload

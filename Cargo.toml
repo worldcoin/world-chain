@@ -58,6 +58,9 @@ reth-provider = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", 
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-rpc-server-types = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
+reth-rpc = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
+reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
+reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -97,6 +100,7 @@ reth-tracing = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-storage = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 
 # alloy op
 op-alloy-consensus = "0.18.14"
