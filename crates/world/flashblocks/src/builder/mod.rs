@@ -230,16 +230,20 @@ where
     Txs: PayloadTransactions,
 {
     /// Builds the payload on top of the state.
-    pub fn build<Ctx, Tx>(
+    pub fn build<Ctx>(
         self,
         state_provider: impl StateProvider,
         ctx: &Ctx,
         best_payload: Option<OpBuiltPayload>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        Tx: PoolTransaction<Consensus = OpTxEnvelope> + OpPooledTx,
-        Txs: PayloadTransactions<Transaction = Tx>,
-        Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+        Txs: PayloadTransactions,
+        Txs::Transaction: OpPooledTx,
+        Ctx: PayloadBuilderCtx<
+            Evm = OpEvmConfig,
+            Transaction = Txs::Transaction,
+            ChainSpec = OpChainSpec,
+        >,
     {
         let Self { best } = self;
         let span = span!(
@@ -401,7 +405,8 @@ where
         PayloadBuilderError,
     >
     where
-        Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
+        // Tx: PoolTransaction<Consensus = OpTransactionSigned> + OpPooledTx,
+        Tx: PoolTransaction + OpPooledTx,
         N: NodePrimitives<
             Block = alloy_consensus::Block<OpTransactionSigned>,
             BlockHeader = alloy_consensus::Header,

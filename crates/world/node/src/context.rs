@@ -197,6 +197,7 @@ where
                     builder.pbh_entrypoint,
                     builder.signature_aggregator,
                     builder.private_key.clone(),
+                    components_context.flashblocks_state.clone(),
                 )
                 .with_da_config(da_config.clone()),
                 da_config.clone(),

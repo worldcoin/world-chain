@@ -45,7 +45,7 @@ use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
 use reth_optimism_node::{
     OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
     OpRethReceiptBuilder,
@@ -620,12 +620,12 @@ impl FlashblocksStateExecutor {
     /// Launches the executor to listen for new flashblocks and build payloads.
     pub fn launch<Node, P, Txs>(&self, ctx: &BuilderContext<Node>, payload_builder_ctx_builder: P)
     where
-        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
+        Txs: PayloadTransactions<Transaction: OpPooledTx>,
         Node: FullNodeTypes,
         Node::Provider:
             InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, OpPooledTransaction> + 'static,
+        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Txs::Transaction> + 'static,
     {
         let mut stream = self.p2p_handle.flashblock_stream();
         let this = self.clone();
