@@ -86,7 +86,7 @@ pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transacti
     /// # Returns
     ///
     /// A configured [`PayloadBuilderCtx`] ready for use in payload building.
-    fn build<Txs>(
+    fn build(
         &self,
         evm: EvmConfig,
         da_config: OpDAConfig,

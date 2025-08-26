@@ -119,7 +119,7 @@ where
             best_payload,
         } = args;
 
-        let ctx = self.ctx_builder.build::<Txs>(
+        let ctx = self.ctx_builder.build(
             self.evm_config.clone(),
             self.config.da_config.clone(),
             self.client.chain_spec(),

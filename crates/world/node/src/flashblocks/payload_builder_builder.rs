@@ -154,7 +154,8 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
                 .context("Failed to parse builder private key")?,
         };
 
-        self.flashblocks_state.launch(ctx, ctx_builder.clone());
+        self.flashblocks_state
+            .launch::<_, _, WorldChainPooledTransaction>(ctx, ctx_builder.clone());
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
@@ -177,10 +178,14 @@ impl<Node, S, Txs>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    <Node as FullNodeTypes>::Provider:
-        StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    // <Node as FullNodeTypes>::Provider:
+    //     StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    Node::Provider:
+        InMemoryState<Primitives = OpPrimitives> + FullNodeComponents<Evm = OpEvmConfig>,
     S: BlobStore + Clone,
-    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
+    // Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
+    Txs: OpPayloadTransactions<WorldChainPooledTransaction>
+        + PayloadTransactions<Transaction: OpPooledTx>,
 {
     type PayloadBuilder = FlashblocksPayloadBuilder<
         WorldChainTransactionPool<Node::Provider, S>,
