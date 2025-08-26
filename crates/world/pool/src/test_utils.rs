@@ -48,6 +48,6 @@ impl InMemoryState for MockEthProvider {
     type Primitives = EthPrimitives;
 
     fn in_memory_state(&self) -> CanonicalInMemoryState<Self::Primitives> {
-        todo!()
+        unimplemented!()
     }
 }

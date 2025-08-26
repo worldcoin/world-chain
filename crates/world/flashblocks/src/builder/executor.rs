@@ -2,7 +2,6 @@ use alloy_eips::eip2718::WithEncoded;
 use eyre::eyre::bail;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
-use reth::api::BlockBody;
 use reth_node_builder::BuilderContext;
 use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
 use rollup_boost::{AuthorizedMsg, AuthorizedPayload, FlashblocksPayloadV1};
@@ -11,12 +10,14 @@ use std::sync::Arc;
 use tracing::error;
 use world_chain_provider::InMemoryState;
 
-use alloy_consensus::{Block, BlockHeader as _, Eip658Value, Header, Transaction, TxReceipt};
+use alloy_consensus::{
+    Block, Eip658Value, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
+};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
+use alloy_primitives::{address, b256, hex, Address, Bytes, B256, B64};
 use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
@@ -41,9 +42,7 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{
-    BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes,
-};
+use reth_node_api::{BuiltPayload as _, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTransaction;
@@ -54,11 +53,7 @@ use reth_optimism_node::{
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::{
-    BlockExecutionResult, ChainSpecProvider, StateProvider,
-    StateProviderFactory as _,
-};
-use reth_rpc_eth_api::RpcNodeCore;
+use reth_provider::{BlockExecutionResult, StateProvider, StateProviderFactory as _};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
@@ -622,6 +617,7 @@ impl FlashblocksStateExecutor {
         }
     }
 
+    /// Launches the executor to listen for new flashblocks and build payloads.
     pub fn launch<Node, P, Txs>(&self, ctx: &BuilderContext<Node>, payload_builder_ctx_builder: P)
     where
         Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
@@ -635,101 +631,122 @@ impl FlashblocksStateExecutor {
         let this = self.clone();
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
-
-        tokio::spawn(async move {
-            while let Some(flashblock) = stream.next().await {
-                let mut state = this.inner.write();
-                if flashblock.index == 0 {
-                    // Since flahblocks are pushed strictly in order, we can always clear
-                    // self.latest_payload = None;
-                    if flashblock.base.is_none() {
-                        error!("first flashblock must have a base")
-                    }
-                    state.flashblocks.0.clear();
-                } else {
-                    if flashblock.index != state.flashblocks.0.len() as u64 {
-                        error!("flashblocks must be pushed in order")
-                    }
-                    if let Some(this) = state.flashblocks.0.first() {
-                        if this.flashblock.payload_id != flashblock.payload_id {
-                            error!("flashblock payload id must be sequential")
+        ctx.task_executor()
+            .spawn_critical("flashblocks executor", async move {
+                while let Some(flashblock) = stream.next().await {
+                    let mut state = this.inner.write();
+                    if flashblock.index == 0 {
+                        // Since flahblocks are pushed strictly in order, we can always clear
+                        // self.latest_payload = None;
+                        if flashblock.base.is_none() {
+                            error!("first flashblock must have a base")
+                        }
+                        state.flashblocks.0.clear();
+                    } else {
+                        if flashblock.index != state.flashblocks.0.len() as u64 {
+                            error!("flashblocks must be pushed in order")
+                        }
+                        if let Some(this) = state.flashblocks.0.first() {
+                            if this.flashblock.payload_id != flashblock.payload_id {
+                                error!("flashblock payload id must be sequential")
+                            }
                         }
                     }
-                }
 
-                let flashblock = Flashblock { flashblock };
-                state.flashblocks.0.push(flashblock.clone());
+                    let flashblock = Flashblock { flashblock };
+                    state.flashblocks.0.push(flashblock.clone());
 
-                let cancel = CancelOnDrop::default();
+                    let cancel = CancelOnDrop::default();
 
-                let first = &state.flashblocks.0.first().as_ref().unwrap().flashblock;
-                let base = first.base.as_ref().unwrap();
+                    let first = &state.flashblocks.0.first().as_ref().unwrap().flashblock;
+                    let base = first.base.as_ref().unwrap();
 
-                let transactions = flashblock
-                    .flashblock
-                    .diff
-                    .transactions
-                    .into_iter()
-                    .map(|b| {
-                        let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(&b)?;
-                        eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
-                    })
-                    .collect::<eyre::Result<Vec<_>>>()
-                    .unwrap();
+                    let transactions = flashblock
+                        .flashblock
+                        .diff
+                        .transactions
+                        .into_iter()
+                        .map(|b| {
+                            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(&b)?;
+                            eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
+                        })
+                        .collect::<eyre::Result<Vec<_>>>()
+                        .unwrap();
 
-                let eth_attrs = EthPayloadBuilderAttributes {
-                    id: first.payload_id,
-                    parent: base.parent_hash,
-                    timestamp: base.timestamp,
-                    suggested_fee_recipient: base.fee_recipient,
-                    prev_randao: base.prev_randao,
-                    withdrawals: Withdrawals(first.diff.withdrawals.clone()),
-                    parent_beacon_block_root: Some(base.parent_beacon_block_root),
-                };
+                    let eth_attrs = EthPayloadBuilderAttributes {
+                        id: first.payload_id,
+                        parent: base.parent_hash,
+                        timestamp: base.timestamp,
+                        suggested_fee_recipient: base.fee_recipient,
+                        prev_randao: base.prev_randao,
+                        withdrawals: Withdrawals(first.diff.withdrawals.clone()),
+                        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+                    };
 
-                let attributes = OpPayloadBuilderAttributes {
-                    payload_attributes: eth_attrs,
-                    no_tx_pool: false,
-                    transactions: transactions.clone(),
-                    gas_limit: None,
-                    eip_1559_params: None,
-                };
+                    let attributes = OpPayloadBuilderAttributes {
+                        payload_attributes: eth_attrs,
+                        no_tx_pool: false,
+                        transactions: transactions.clone(),
+                        gas_limit: None,
+                        eip_1559_params: None,
+                    };
 
-                // TODO:
-                let header = alloy_consensus::Header::default();
-                let sealed_header = Arc::new(SealedHeader::new_unhashed(header));
+                    let header = Header {
+                        parent_hash: base.parent_hash,
+                        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+                        beneficiary: Default::default(),
+                        state_root: first.diff.state_root,
+                        transactions_root: EMPTY_ROOT_HASH,
+                        receipts_root: first.diff.receipts_root,
+                        logs_bloom: first.diff.logs_bloom,
+                        difficulty: Default::default(),
+                        number: base.block_number,
+                        gas_limit: base.gas_limit,
+                        gas_used: first.diff.gas_used,
+                        timestamp: base.timestamp,
+                        extra_data: base.extra_data.clone(),
+                        mix_hash: Default::default(),
+                        nonce: B64::ZERO,
+                        base_fee_per_gas: None,
+                        withdrawals_root: Some(first.diff.withdrawals_root),
+                        blob_gas_used: None,
+                        excess_blob_gas: None,
+                        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+                        requests_hash: None,
+                    };
+                    let sealed_header = Arc::new(SealedHeader::new_unhashed(header));
 
-                let config = PayloadConfig::new(sealed_header, attributes);
+                    let config = PayloadConfig::new(sealed_header, attributes);
 
-                let builder_ctx = payload_builder_ctx_builder.build::<Txs>(
-                    provider.evm_config().clone(),
-                    this.da_config.clone(),
-                    chain_spec.clone(),
-                    config,
-                    &cancel,
-                    state.latest_payload.as_ref().map(|p| p.0.clone()),
-                );
-
-                let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-
-                let outcome = FlashblockBuilder::new(best)
-                    .build(
-                        provider.state_by_block_hash(base.parent_hash).unwrap(),
-                        &builder_ctx,
+                    let builder_ctx = payload_builder_ctx_builder.build::<Txs>(
+                        provider.evm_config().clone(),
+                        this.da_config.clone(),
+                        chain_spec.clone(),
+                        config,
+                        &cancel,
                         state.latest_payload.as_ref().map(|p| p.0.clone()),
-                    )
-                    .unwrap();
-                let payload = match outcome {
-                    BuildOutcomeKind::Better { payload } => payload,
-                    BuildOutcomeKind::Freeze(payload) => payload,
-                    _ => continue,
-                };
-                state.latest_payload = Some((payload.clone(), flashblock.flashblock.index));
-                provider
-                    .in_memory_state()
-                    .set_pending_block(payload.executed_block().unwrap());
-            }
-        });
+                    );
+
+                    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+
+                    let outcome = FlashblockBuilder::new(best)
+                        .build(
+                            provider.state_by_block_hash(base.parent_hash).unwrap(),
+                            &builder_ctx,
+                            state.latest_payload.as_ref().map(|p| p.0.clone()),
+                        )
+                        .unwrap();
+                    let payload = match outcome {
+                        BuildOutcomeKind::Better { payload } => payload,
+                        BuildOutcomeKind::Freeze(payload) => payload,
+                        _ => continue,
+                    };
+                    state.latest_payload = Some((payload.clone(), flashblock.flashblock.index));
+                    provider
+                        .in_memory_state()
+                        .set_pending_block(payload.executed_block().unwrap());
+                }
+            });
     }
 
     pub fn publish_built_payload(
