@@ -14412,7 +14412,6 @@ dependencies = [
  "reth-payload-util",
  "reth-primitives",
  "reth-provider",
- "reth-rpc",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-storage-api",

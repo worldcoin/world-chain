@@ -133,7 +133,7 @@ where
     ///
     /// An [`AuthorizedPayload<FlashblockPayloadV1>`] signed by the builder is sent to
     /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
-    /// 
+    ///
     /// See: [`FlashblocksHandle::publish_new`].
     pub(crate) fn publish_payload(
         &self,
@@ -304,7 +304,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(payload) = self.best_payload.payload() {
-            trace!(target: "payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload"); 
+            trace!(target: "payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
             Ok(payload.clone())
         } else {
             info!(target: "payload_builder", id=%self.config.payload_id(), "no best payload available, building empty payload");
