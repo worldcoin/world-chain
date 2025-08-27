@@ -65,20 +65,13 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.enabled",
         env,
-        help = "Enable flashblocks for this builder"
+        help = "Enable flashblocks for this builder",
+        required = false
     )]
     pub enabled: bool,
 
-    /// The payload building interval in milliseconds.
-    #[arg(long = "flashblocks.block_time", env, default_value = "1000")]
-    pub block_time: u64,
-
-    /// Interval in milliseconds to wait before computing the next pending block.
-    #[arg(long = "flashblocks.interval", env, default_value = "200")]
-    pub flashblock_interval: u64,
-
     #[arg(
-        long = "flashblocks.authorizor_sk",
+        long = "flashblocks.authorizor_vk",
         env = "FLASHBLOCKS_AUTHORIZOR_VK", 
         value_parser = parse_vk,
         required = false,
@@ -123,8 +116,6 @@ mod tests {
     #[test]
     fn parse_args() {
         let expected_args = FlashblocksArgs {
-            block_time: 1,
-            flashblock_interval: 200,
             authorizor_vk: None,
             builder_sk: SigningKey::from_bytes(&[0; 32]),
             enabled: true,
@@ -133,10 +124,6 @@ mod tests {
         let args = CommandParser::<FlashblocksArgs>::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.block_time",
-            "1",
-            "--flashblocks.interval",
-            "200",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])

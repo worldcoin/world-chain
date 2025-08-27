@@ -8,18 +8,28 @@ optimism_package:
     - participants:
       - el_type: op-geth
         cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
         el_builder_type: custom
         el_builder_image: world-chain-builder:latest
-      - el_type: op-reth
-      - el_type: op-reth
+      - el_type: custom
+        el_image: world-chain-builder:latest
+        el_builder_type: custom
+        el_builder_image: world-chain-builder:latest
+        cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
+      - el_type: custom
+        el_image: world-chain-builder:latest
+        el_builder_type: custom
+        el_builder_image: world-chain-builder:latest
+        cl_type: op-node
+        cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
       network_params: 
         seconds_per_slot: 2
         fjord_time_offset: 0
         granite_time_offset: 0
         holocene_time_offset: 0
-        isthmus_time_offset: 20
       mev_params:
-        image: "flashbots/rollup-boost:sha-e23bcc2"
+        image: "leytont/rollup-boost:p2p"
         type: custom
       additional_services:
         - rollup-boost
@@ -32,23 +42,11 @@ optimism_package:
   global_node_selectors: {}
   global_tolerations: []
   persistent: false
-  challengers:
-    challenger0: &x-challenger
-      participants: "*"
-      cannon_trace_types: ["super-cannon", "super-permissioned"]
-    challenger1:
-      <<: *x-challenger
-  superchains:
-    superchain0:
-  supervisors:
-    supervisor0: &x-supervisor
-      superchain: superchain0
-    supervisor1:
-      <<: *x-supervisor
 ethereum_package:
   participants:
   - el_type: geth
     cl_type: teku
+    cl_image: ethpandaops/teku:master-5a2aa76
   network_params:
     preset: minimal
     genesis_delay: 5

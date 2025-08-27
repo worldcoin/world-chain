@@ -267,9 +267,9 @@ where
     }
 }
 
-#[rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+#[rpc(server, client, namespace = "flashblocks", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 pub trait FlashblocksEngineApiExt<Engine: EngineTypes> {
-    #[method(name = "flashblocks_forkChoiceUpdatedV3")]
+    #[method(name = "forkchoiceUpdatedV3")]
     async fn flashblocks_fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -313,10 +313,7 @@ where
             self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
-        self.handle_fork_choice_updated(fork_choice_state);
-
-        self.inner
-            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
+        self.fork_choice_updated_v3(fork_choice_state, payload_attributes)
             .await
     }
 }

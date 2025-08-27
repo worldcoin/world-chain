@@ -27,7 +27,7 @@ use rollup_boost::{
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 
-use crate::primitives::Flashblock;
+use crate::{metrics::PayloadBuilderMetrics, primitives::Flashblock};
 
 /// A payload job that continuously spawns new build tasks at regular intervals, each building on top of the previous `best_payload`.
 ///
@@ -57,9 +57,8 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     pub(crate) cached_reads: Option<CachedReads>,
-    /// TODO: Add Metrics
     // /// metrics for this type
-    // pub(crate) metrics: PayloadBuilderMetrics,
+    pub(crate) metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -105,7 +104,7 @@ where
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
-        // self.metrics.inc_initiated_payload_builds();
+        self.metrics.inc_initiated_payload_builds();
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -134,8 +133,9 @@ where
     ///
     /// An [`AuthorizedPayload<FlashblockPayloadV1>`] signed by the builder is sent to
     /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
+    ///
     /// See: [`FlashblocksHandle::publish_new`].
-    pub fn publish_payload(
+    pub(crate) fn publish_payload(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
@@ -145,15 +145,15 @@ where
             .map_or(0, |p| p.block().body().transactions().count());
 
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
-        trace!(target: "jobs_generator", id=%self.config.payload_id(), "creating authorized flashblock");
+        trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         self.p2p_handler.publish_new(self.authorization_for(flashblock.into_flashblock()))
             .inspect_err(|err| {
-                error!(target: "jobs_generator", id=%self.config.payload_id(), %err, "failed to publish new payload");
+                error!(target: "payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
             })
     }
 
-    pub fn authorization_for(
+    pub(crate) fn authorization_for(
         &self,
         payload: FlashblocksPayloadV1,
     ) -> AuthorizedPayload<FlashblocksPayloadV1> {
@@ -209,32 +209,30 @@ where
     /// # Returns
     ///
     /// The polling continues until either the deadline is reached or an error occurs, returning
-    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready(Ok(()))`] when complete.
+    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _span = span!(target: "jobs_generator", tracing::Level::DEBUG, "poll").entered();
+        let _span = span!(target: "payload_builder", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
         let this = self.get_mut();
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
-            trace!(target: "jobs_generator", "payload building deadline reached");
+            trace!(target: "payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()));
         }
 
-        // First wait for the 200ms interval to complete
-        if this.flashblock_deadline.as_mut().poll(cx).is_ready() {
-            // Reset the interval for the next iteration
-            this.flashblock_deadline
-                .as_mut()
-                .reset(tokio::time::Instant::now() + this.interval);
+        let network_handle = this.p2p_handler.clone();
+        let fut = pin!(network_handle.await_clearance());
 
-            // Now wait for network clearance before proceeding
-            let network_handle = this.p2p_handler.clone();
-            ready!(pin!(network_handle.await_clearance()).poll(cx));
+        let joined_fut = pin!(futures::future::join(
+            fut,
+            this.flashblock_deadline.as_mut()
+        ));
 
-            trace!(target: "jobs_generator", id=%this.config.payload_id(), "interval elapsed, and clearance granted");
-        } else {
-            return Poll::Pending;
-        }
+        ready!(joined_fut.poll(cx));
+
+        this.flashblock_deadline
+            .as_mut()
+            .reset(tokio::time::Instant::now() + this.interval);
 
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
@@ -248,12 +246,12 @@ where
                         this.best_payload = PayloadState::Best(payload.clone());
                         this.cached_reads = Some(cached_reads);
 
-                        trace!(target: "jobs_generator", value = %payload.fees(), "building new best payload");
+                        trace!(target: "payload_builder", current_value = %payload.fees(), "building new best payload");
                         // publish the new payload to the p2p network
                         if let Err(err) = this.publish_payload(&payload, &prev.payload().cloned()) {
-                            error!(target: "jobs_generator", %err, "failed to publish new payload to p2p network");
+                            error!(target: "payload_builder", %err, "failed to publish new payload to p2p network");
                         } else {
-                            trace!(target: "jobs_generator", id=%this.config.payload_id(), "published new best payload to p2p network");
+                            trace!(target: "payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
                         }
 
                         // increment the pre-confirmation index
@@ -261,12 +259,12 @@ where
                         this.spawn_build_job();
                     }
                     BuildOutcome::Freeze(payload) => {
-                        debug!(target: "jobs_generator", "payload frozen, no further building will occur");
+                        trace!(target: "payload_builder", "payload frozen, no further building will occur");
                         this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
-                        trace!(target: "jobs_generator", worse_fees = %fees, "skipped payload build of worse block");
+                        trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
                     }
                     BuildOutcome::Cancelled => {
                         unreachable!("the cancel signal never fired")
@@ -274,8 +272,8 @@ where
                 },
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    debug!(target: "jobs_generator", %error, "payload build attempt failed");
-                    // this.metrics.inc_failed_payload_builds();
+                    debug!(target: "payload_builder", %error, "payload build attempt failed");
+                    this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
                     this.pending_block = Some(fut);
@@ -304,6 +302,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(payload) = self.best_payload.payload() {
+            trace!(target: "payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
             Ok(payload.clone())
         } else {
             info!(target: "payload_builder", id=%self.config.payload_id(), "no best payload available, building empty payload");
@@ -313,7 +312,7 @@ where
             // Note: it is assumed that this is unlikely to happen, as the payload job is
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
-            // self.metrics.inc_requested_empty_payload();
+            self.metrics.inc_requested_empty_payload();
             self.builder.build_empty_payload(self.config.clone())
         }
     }

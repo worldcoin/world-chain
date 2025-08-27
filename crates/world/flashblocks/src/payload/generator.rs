@@ -199,7 +199,7 @@ where
             pending_block: None,
             cached_reads,
             payload_task_guard,
-            // metrics: Default::default(),
+            metrics: Default::default(),
             builder: self.builder.clone(),
             authorization,
             p2p_handler: self.p2p_handler.clone(),
