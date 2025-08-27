@@ -327,7 +327,7 @@ impl Flashblocks {
     }
 
     pub fn base(&self) -> &ExecutionPayloadBaseV1 {
-        &self.0.first().unwrap().flashblock.base.as_ref().unwrap()
+        self.0.first().unwrap().flashblock.base.as_ref().unwrap()
     }
 }
 

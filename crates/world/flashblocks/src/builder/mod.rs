@@ -338,7 +338,7 @@ where
             let unexecuted_txs: Vec<Recovered<OpTxEnvelope>> = ctx
                 .attributes()
                 .sequencer_transactions()
-                .into_iter()
+                .iter()
                 .filter_map(|attr_tx| {
                     let tx_hash = attr_tx.1.hash();
                     if !transactions.iter().any(|tx| *tx.hash() == *tx_hash) {
