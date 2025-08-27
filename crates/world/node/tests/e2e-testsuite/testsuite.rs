@@ -263,25 +263,31 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let hash = block.hash_slow();
 
-    let aggregated_flashblocks_0 = Flashblock::reduce(Flashblocks(
-        flashblocks_0_clone
-            .lock()
-            .iter()
-            .map(|fb| Flashblock {
-                flashblock: fb.clone(),
-            })
-            .collect(),
-    ));
+    let aggregated_flashblocks_0 = Flashblock::reduce(
+        Flashblocks::new(
+            flashblocks_0_clone
+                .lock()
+                .iter()
+                .map(|fb| Flashblock {
+                    flashblock: fb.clone(),
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
 
-    let aggregated_flashblocks_1 = Flashblock::reduce(Flashblocks(
-        flashblocks_1_clone
-            .lock()
-            .iter()
-            .map(|fb| Flashblock {
-                flashblock: fb.clone(),
-            })
-            .collect(),
-    ));
+    let aggregated_flashblocks_1 = Flashblock::reduce(
+        Flashblocks::new(
+            flashblocks_1_clone
+                .lock()
+                .iter()
+                .map(|fb| Flashblock {
+                    flashblock: fb.clone(),
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
 
     let block_0: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
         RecoveredBlock::try_from(aggregated_flashblocks_0.unwrap())

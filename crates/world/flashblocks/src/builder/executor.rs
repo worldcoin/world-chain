@@ -10,15 +10,13 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use world_chain_provider::InMemoryState;
 
-use alloy_consensus::{
-    Block, Eip658Value, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
-};
+use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{address, b256, hex, Address, Bytes, B256, B64};
-use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope};
+use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
+use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
@@ -53,7 +51,10 @@ use reth_optimism_node::{
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::{BlockExecutionResult, StateProvider, StateProviderFactory as _};
+use reth_provider::{
+    BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
@@ -61,7 +62,7 @@ use revm::state::Bytecode;
 use revm::DatabaseCommit;
 
 use crate::primitives::{Flashblock, Flashblocks};
-use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
+use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
@@ -626,7 +627,9 @@ impl FlashblocksStateExecutor {
     ) where
         Tx: OpPooledTx,
         Node: FullNodeTypes,
-        Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>
+            + StateProviderFactory
+            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Tx> + 'static,
     {
@@ -651,6 +654,9 @@ impl FlashblocksStateExecutor {
                                     && latest_payload.1 >= flashblock.flashblock.index
                                 {
                                     // Already processed this flashblock
+                                    provider.in_memory_state().set_pending_block(
+                                        latest_payload.0.executed_block().unwrap(),
+                                    );
                                     continue;
                                 }
                             }
@@ -691,40 +697,27 @@ impl FlashblocksStateExecutor {
                         parent_beacon_block_root: Some(base.parent_beacon_block_root),
                     };
 
+                    let eip1559 = encode_holocene_extra_data(
+                        Default::default(),
+                        chain_spec.base_fee_params_at_block(base.block_number),
+                    )
+                    .unwrap();
+
                     let attributes = OpPayloadBuilderAttributes {
                         payload_attributes: eth_attrs,
                         no_tx_pool: false,
                         transactions: transactions.clone(),
                         gas_limit: None,
-                        eip_1559_params: None,
+                        eip_1559_params: Some(eip1559[0..8].try_into().unwrap()),
                     };
+                    let state_provider = provider.state_by_block_hash(base.parent_hash).unwrap();
+                    let database_provider = provider.database_provider_ro().unwrap();
+                    let sealed_header = database_provider
+                        .sealed_header_by_hash(base.parent_hash)
+                        .unwrap()
+                        .unwrap();
 
-                    let header = Header {
-                        parent_hash: base.parent_hash,
-                        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-                        beneficiary: Default::default(),
-                        state_root: flashblock.diff.state_root,
-                        transactions_root: EMPTY_ROOT_HASH,
-                        receipts_root: flashblock.diff.receipts_root,
-                        logs_bloom: flashblock.diff.logs_bloom,
-                        difficulty: Default::default(),
-                        number: base.block_number,
-                        gas_limit: base.gas_limit,
-                        gas_used: flashblock.diff.gas_used,
-                        timestamp: base.timestamp,
-                        extra_data: base.extra_data.clone(),
-                        mix_hash: Default::default(),
-                        nonce: B64::ZERO,
-                        base_fee_per_gas: None,
-                        withdrawals_root: Some(flashblock.diff.withdrawals_root),
-                        blob_gas_used: None,
-                        excess_blob_gas: None,
-                        parent_beacon_block_root: Some(base.parent_beacon_block_root),
-                        requests_hash: None,
-                    };
-                    let sealed_header = Arc::new(SealedHeader::new_unhashed(header));
-
-                    let config = PayloadConfig::new(sealed_header, attributes);
+                    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
 
                     let builder_ctx = payload_builder_ctx_builder.build(
                         evm_config.clone(),
@@ -735,11 +728,13 @@ impl FlashblocksStateExecutor {
                         latest_payload.as_ref().map(|p| p.0.clone()),
                     );
 
+                    builder_ctx.parent();
+
                     let best = |_| BestPayloadTransactions::new(vec![].into_iter());
 
                     let outcome = FlashblockBuilder::new(best)
                         .build(
-                            provider.state_by_block_hash(base.parent_hash).unwrap(),
+                            state_provider,
                             &builder_ctx,
                             latest_payload.as_ref().map(|p| p.0.clone()),
                         )

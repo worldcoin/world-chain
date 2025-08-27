@@ -9,7 +9,9 @@ use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_provider::{
+    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
+};
 use reth_transaction_pool::BlobStore;
 use world_chain_builder_flashblocks::builder::executor::FlashblocksStateExecutor;
 use world_chain_builder_flashblocks::builder::FlashblocksPayloadBuilder;
@@ -131,7 +133,9 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 
-        Node::Provider: InMemoryState<Primitives = OpPrimitives>, // + FullNodeComponents<Evm = OpEvmConfig>,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>
+            + StateProviderFactory
+            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
@@ -176,8 +180,10 @@ impl<Node, S, Txs>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    <Node as FullNodeTypes>::Provider:
-        StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    <Node as FullNodeTypes>::Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        + Clone
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     Node::Provider: InMemoryState<Primitives = OpPrimitives>,
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
