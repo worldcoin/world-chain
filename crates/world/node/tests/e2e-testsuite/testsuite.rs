@@ -155,6 +155,11 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let basic_worldchain_node = basic_nodes.first_mut().unwrap();
 
+    let (_, mut basic_nodes, _tasks, mut basic_env) =
+        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+
+    let basic_worldchain_node = basic_nodes.first_mut().unwrap();
+
     let ext_context_1 = nodes[0].ext_context.clone();
     let ext_context_2 = nodes[1].ext_context.clone();
 
@@ -198,6 +203,12 @@ async fn test_flashblocks() -> eyre::Result<()> {
         )
         .await;
         let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
+        let tx: Bytes = envelope.encoded_2718().into();
+
+        let _ = tokio::join!(
+            node.node.rpc.inject_tx(tx.clone()),
+            basic_worldchain_node.node.rpc.inject_tx(tx)
+        );
         let tx: Bytes = envelope.encoded_2718().into();
 
         let _ = tokio::join!(
@@ -422,6 +433,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_api_call() -> eyre::Result<()> {
     let (_, nodes, _tasks, mut env) =
         setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;

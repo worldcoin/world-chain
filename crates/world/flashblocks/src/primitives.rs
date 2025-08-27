@@ -307,7 +307,11 @@ impl Flashblocks {
         }
 
         if flashblock.flashblock.index != (self.0.len() as u64) {
-            bail!("New flashblock index is not contiguous");
+            bail!(
+                "New flashblock index is not contiguous expected {}, got {}",
+                self.0.len(),
+                flashblock.flashblock.index
+            );
         }
 
         self.0.push(flashblock);
