@@ -6,9 +6,11 @@ use crate::{
     PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
+use alloy_consensus::Transaction;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
+use alloy_rlp::Encodable;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -26,13 +28,16 @@ use reth_evm::{
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
+use tracing::error;
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_payload_builder::{builder::ExecutionInfo, config::OpBuilderConfig};
+use reth_optimism_payload_builder::{
+    builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
+};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
@@ -329,7 +334,47 @@ where
             ctx.execute_sequencer_transactions(&mut builder)
                 .map_err(PayloadBuilderError::other)?
         } else {
-            ExecutionInfo::default()
+            // bundle is non-empty - execute any transactions from the attributes that do not exist on the `best_payload`
+            let unexecuted_txs: Vec<Recovered<OpTxEnvelope>> = ctx
+                .attributes()
+                .sequencer_transactions()
+                .into_iter()
+                .filter_map(|attr_tx| {
+                    let tx_hash = attr_tx.1.hash();
+                    if !transactions.iter().any(|tx| *tx.hash() == *tx_hash) {
+                        Some(attr_tx.1.clone().try_into_recovered().map_err(|_| {
+                            PayloadBuilderError::Other(eyre!("tx recovery failed").into())
+                        }))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let mut execution_info = ExecutionInfo::default();
+            let base_fee = builder.evm_mut().block().basefee;
+
+            for tx in unexecuted_txs {
+                match builder.execute_transaction(tx.clone()) {
+                    Ok(gas_used) => {
+                        // add gas used by the transaction to cumulative gas used, before creating the
+                        // receipt
+                        execution_info.cumulative_gas_used += gas_used;
+                        execution_info.cumulative_da_bytes_used += tx.length() as u64;
+
+                        // update add to total fees
+                        let miner_fee = tx
+                            .effective_tip_per_gas(base_fee)
+                            .expect("fee is always valid; execution succeeded");
+                        execution_info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+                    }
+                    Err(e) => {
+                        error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
+                    }
+                }
+            }
+
+            execution_info
         };
 
         // 5. Execute transactions from the tx-pool, draining any transactions seen in previous

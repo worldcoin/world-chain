@@ -38,6 +38,7 @@ reth-optimism-chainspec.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 op-alloy-consensus.workspace = true
