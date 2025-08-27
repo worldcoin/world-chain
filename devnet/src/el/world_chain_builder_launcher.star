@@ -67,6 +67,33 @@ BUILDER_PRIVATE_KEY = (
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 )
 
+FLASHBLOCKS_BUILDER_SK = (
+    "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62"
+)
+FLASHBLOCKS_BUILDER_SK_1 = (
+    "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70"
+)
+FLASHBLOCKS_BUILDER_SK_2 = (
+    "09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b"
+)
+
+FLASHBLOCKS_AUTHORIZER_VK = (
+    "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f"
+)
+
+
+def sk_for_service(service_name):
+    if service_name == "op-el-builder-2151908-1-custom-op-node-op-kurtosis":
+        return FLASHBLOCKS_BUILDER_SK
+    elif service_name == "op-el-2151908-1-custom-op-node-op-kurtosis":
+        return FLASHBLOCKS_BUILDER_SK_1
+    elif service_name == "op-el-2151908-2-custom-op-node-op-kurtosis":
+        return FLASHBLOCKS_BUILDER_SK_2
+    elif service_name == "op-el-2151908-3-custom-op-node-op-kurtosis":
+        return FLASHBLOCKS_BUILDER_SK_2
+    else:
+        fail("Invalid service name: {0}".format(service_name))
+
 
 def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
     used_ports = {
@@ -90,9 +117,6 @@ def get_used_ports(discovery_port=DISCOVERY_PORT_NUM):
         METRICS_PORT_ID: ethereum_package_shared_utils.new_port_spec(
             METRICS_PORT_NUM, ethereum_package_shared_utils.TCP_PROTOCOL
         ),
-        FLASHBLOCKS_WS_PORT_ID: ethereum_package_shared_utils.new_port_spec(
-            FLASHBLOCKS_WS_PORT_NUM, ethereum_package_shared_utils.TCP_PROTOCOL
-        )
     }
     return used_ports
 
@@ -184,6 +208,7 @@ def get_config(
     discovery_port = DISCOVERY_PORT_NUM
     used_ports = get_used_ports(discovery_port)
     ports = dict(used_ports)
+    signing_key = sk_for_service(service_name)
     cmd = [
         "node",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
@@ -216,12 +241,12 @@ def get_config(
         "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
         "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--builder.world_id={0}".format(WORLD_ID),
-        "--flashblock.block_time={0}".format(1000),
-        "--flashblock.interval={0}".format(200),
-        "--flashblock.host={0}".format("0.0.0.0"),
-        "--flashblock.port={0}".format(FLASHBLOCKS_WS_PORT_NUM),
-        "--flashblock.builder_sk=0000000000000000000000000000000000000000000000000000000000000000",
-        "--builder.interval={0}".format("1500ms"),
+        "--builder.interval={0}".format("200ms"),
+        "--builder.deadline={0}".format("6"),
+        "--flashblocks.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
+        "--flashblocks.builder_sk={0}".format(signing_key),
+        "--flashblocks.enabled",
+        "--block-interval={0}".format(4294967295),
     ]
 
     observability.expose_metrics_port(ports)
@@ -260,7 +285,8 @@ def get_config(
     env_vars = participant.el_builder_extra_env_vars
     env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
-    env_vars["RUST_LOG"] = "info,payload_builder=trace,flashblocks=trace"
+    env_vars["RUST_LOG"] = "info,payload_builder=trace,engine::persistence=trace"
+    env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,
         "ports": used_ports,

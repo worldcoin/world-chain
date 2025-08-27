@@ -1,4 +1,4 @@
-use alloy_consensus::{BlockHeader, SignableTransaction, Transaction};
+use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::Typed2718;
 use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
@@ -6,6 +6,7 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
+use reth::chainspec::EthChainSpec;
 use reth::payload::{PayloadBuilderAttributes, PayloadId};
 use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
@@ -169,7 +170,19 @@ where
                 .gas_limit
                 .unwrap_or(self.inner.parent().gas_limit),
             parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: self.inner.parent().extra_data().clone(),
+            extra_data: if self
+                .spec()
+                .is_holocene_active_at_timestamp(self.attributes().timestamp())
+            {
+                self.attributes()
+                    .get_holocene_extra_data(
+                        self.spec()
+                            .base_fee_params_at_timestamp(self.attributes().timestamp()),
+                    )
+                    .map_err(PayloadBuilderError::other)?
+            } else {
+                Default::default()
+            }, // TODO: FIXME: Double check this against op-reth
         };
 
         // Prepare EVM environment.

@@ -38,6 +38,7 @@ reth-optimism-chainspec.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 op-alloy-consensus.workspace = true
@@ -51,6 +52,10 @@ flashblocks-p2p.workspace = true
 
 # tokio
 tokio.workspace = true
+
+# metrics
+metrics.workspace = true
+metrics-derive.workspace = true
 
 # misc
 parking_lot.workspace = true
