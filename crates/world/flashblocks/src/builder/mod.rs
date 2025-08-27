@@ -8,6 +8,7 @@ use crate::{
 
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
+use alloy_primitives::U256;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -44,7 +45,7 @@ use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span, warn};
+use tracing::{debug, span, trace, warn};
 
 pub mod executor;
 pub mod payload_txns;
@@ -259,7 +260,8 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         // 1. Prepare the db
-        let (bundle, receipts, transactions, gas_used) = if let Some(payload) = &best_payload {
+        let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
+        {
             // if we have a best payload we will always have a bundle
             let execution_result = &payload
                 .executed_block()
@@ -284,14 +286,19 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
+            let bundle = execution_result.bundle.clone();
+
+            trace!(target: "payload_builder", bundle = ?bundle, "using best payload");
+
             (
                 execution_result.bundle.clone(),
                 receipts,
                 transactions,
                 Some(payload.block().gas_used()),
+                payload.fees(),
             )
         } else {
-            (BundleState::default(), Vec::new(), Vec::new(), None)
+            (BundleState::default(), vec![], vec![], None, U256::ZERO)
         };
 
         let gas_limit = ctx
@@ -379,7 +386,7 @@ where
         let payload = OpBuiltPayload::new(
             ctx.payload_id(),
             sealed_block,
-            info.total_fees,
+            info.total_fees + fees,
             Some(executed),
         );
 

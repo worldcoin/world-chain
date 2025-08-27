@@ -2,6 +2,7 @@
 #![allow(clippy::type_complexity)]
 
 pub mod builder;
+mod metrics;
 pub mod payload;
 pub mod primitives;
 pub mod rpc;

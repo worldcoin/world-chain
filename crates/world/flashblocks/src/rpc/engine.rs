@@ -1,11 +1,9 @@
-
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
-use futures::StreamExt;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
@@ -21,7 +19,6 @@ use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use rollup_boost::Authorization;
 use tracing::info;
-
 
 /// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
@@ -199,9 +196,9 @@ where
     }
 }
 
-#[rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
+#[rpc(server, client, namespace = "flashblocks", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 pub trait FlashblocksEngineApiExt<Engine: EngineTypes> {
-    #[method(name = "flashblocks_forkChoiceUpdatedV3")]
+    #[method(name = "forkchoiceUpdatedV3")]
     async fn flashblocks_fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -245,8 +242,7 @@ where
             self.to_jobs_generator.send_modify(|b| *b = Some(a))
         }
 
-        self.inner
-            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
+        self.fork_choice_updated_v3(fork_choice_state, payload_attributes)
             .await
     }
 }
