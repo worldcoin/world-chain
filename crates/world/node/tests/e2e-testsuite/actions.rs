@@ -15,6 +15,7 @@ use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
 use world_chain_builder_flashblocks::rpc::engine::FlashblocksEngineApiExtClient;
+use world_chain_builder_node::flashblocks::rpc;
 
 // ------------------------------------------------------------------ Block Building Test Actions ------------------------------------------------------------------
 

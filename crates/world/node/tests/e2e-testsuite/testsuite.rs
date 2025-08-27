@@ -204,12 +204,6 @@ async fn test_flashblocks() -> eyre::Result<()> {
             node.node.rpc.inject_tx(tx.clone()),
             basic_worldchain_node.node.rpc.inject_tx(tx)
         );
-        let tx: Bytes = envelope.encoded_2718().into();
-
-        let _ = tokio::join!(
-            node.node.rpc.inject_tx(tx.clone()),
-            basic_worldchain_node.node.rpc.inject_tx(tx)
-        );
     }
 
     let ext_context = node.ext_context.clone();
