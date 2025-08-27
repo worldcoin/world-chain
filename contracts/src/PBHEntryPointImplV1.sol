@@ -374,7 +374,7 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     /// @dev Returns -1 if no unspent nullifier hash is found.
     function getFirstUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
         for (uint256 i = 0; i < hashes.length; ++i) {
-            if (nullifierHashes[i] == 0) {
+            if (nullifierHashes[hashes[i]] == 0) {
                 return int256(i);
             }
         }
