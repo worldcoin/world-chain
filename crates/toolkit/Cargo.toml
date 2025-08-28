@@ -15,7 +15,7 @@ alloy-rlp = { workspace = true }
 
 # 3rd party
 bytes = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
+clap = { workspace = true }
 eyre = { workspace = true }
 hex = { workspace = true }
 reqwest = { workspace = true }
