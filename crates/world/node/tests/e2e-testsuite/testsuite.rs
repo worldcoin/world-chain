@@ -372,7 +372,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .unwrap()
         .as_secs();
 
-    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    let (tx, _) = tokio::sync::mpsc::channel(1);
 
     // Compose a Mine Block action with an eth_getTransactionReceipt action
     let attributes = OpPayloadAttributes {
@@ -449,7 +449,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
         .unwrap()
         .as_secs();
 
-    let (sender, rx) = tokio::sync::mpsc::channel(1);
+    let (sender, _) = tokio::sync::mpsc::channel(1);
 
     // 200ms backoff should be enough time to fetch the pending receipt
     let mut mock_tx: TransactionRequest = tx(
@@ -510,7 +510,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     let call_results = rx.recv().await.expect("should receive call results");
 
     for call_result in call_results {
-        println!("Call result: {:?}", call_result);
+        assert_eq!(call_result.as_ref(), b"");
     }
 
     Ok(())

@@ -31,6 +31,8 @@ use reth_tasks::{
     TaskSpawner,
 };
 
+use crate::builder::executor::FlashblocksStateExecutor;
+
 /// Flashblocks `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -43,20 +45,28 @@ use reth_tasks::{
 pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Gateway to node's core components.
     inner: OpEthApi<N, Rpc>,
+    /// The flashblocks state executor holding the current pending block.
+    /// TODO: We probably don't need to pass this whole type.
+    /// We really only need the [`ExecutionOutcome`] of the current pending block for `LoadReceipt`
+    state_executor: FlashblocksStateExecutor,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for FlashblocksEthApi<N, Rpc> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            state_executor: self.state_executor.clone(),
         }
     }
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> FlashblocksEthApi<N, Rpc> {
     /// Creates a new `OpEthApi`.
-    pub fn new(inner: OpEthApi<N, Rpc>) -> Self {
-        Self { inner }
+    pub fn new(inner: OpEthApi<N, Rpc>, state_executor: FlashblocksStateExecutor) -> Self {
+        Self {
+            inner,
+            state_executor,
+        }
     }
 
     /// Returns a reference to the [`EthApiNodeBackend`].
@@ -245,22 +255,38 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> std::fmt::Debug for FlashblocksEthApi<N, R
 }
 
 /// Builds [`OpEthApi`] for Optimism.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
+    state_executor: FlashblocksStateExecutor,
+}
+
+impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
+    fn default() -> Self {
+        Self {
+            inner: OpEthApiBuilder::default(),
+            state_executor: FlashblocksStateExecutor::default(),
+        }
+    }
 }
 
 impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
-    pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
-        Self { inner }
+    pub const fn new(
+        inner: OpEthApiBuilder<NetworkT>,
+        state_executor: FlashblocksStateExecutor,
+    ) -> Self {
+        Self {
+            inner,
+            state_executor,
+        }
     }
 }
 
 impl<N, NetworkT> EthApiBuilder<N> for FlashblocksEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>>,
-    NetworkT: RpcTypes + Default,
+    NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
     FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
@@ -271,6 +297,6 @@ where
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let inner = self.inner.build_eth_api(ctx).await;
-        Ok(FlashblocksEthApi::new(inner?))
+        Ok(FlashblocksEthApi::new(inner?, self.state_executor))
     }
 }

@@ -595,6 +595,12 @@ pub struct FlashblocksStateExecutor {
     da_config: OpDAConfig,
 }
 
+impl Default for FlashblocksStateExecutor {
+    fn default() -> Self {
+        unimplemented!("FlashblocksStateExecutor::new must be used instead")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FlashblocksStateExecutorInner {
     flashblocks: Option<Flashblocks>,

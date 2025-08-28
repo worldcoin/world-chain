@@ -3,7 +3,9 @@
 use crate::{
     args::WorldChainArgs,
     flashblocks::{
-        payload_builder_builder::FlashblocksPayloadBuilderBuilder, rpc::WorldChainEngineApiBuilder,
+        add_ons::FlashblocksAddOns,
+        payload_builder_builder::FlashblocksPayloadBuilderBuilder,
+        rpc::{FlashblocksAddOnsBuilder, WorldChainEngineApiBuilder},
         service_builder::FlashblocksPayloadServiceBuilder,
     },
     node::{
@@ -21,8 +23,8 @@ use reth_node_builder::{
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpAddOnsBuilder, OpConsensusBuilder, OpEngineApiBuilder,
-    OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
+    OpExecutorBuilder, OpNetworkBuilder,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 use rollup_boost::{
@@ -30,7 +32,9 @@ use rollup_boost::{
     Authorization,
 };
 
-use world_chain_builder_flashblocks::builder::executor::FlashblocksStateExecutor;
+use world_chain_builder_flashblocks::{
+    builder::executor::FlashblocksStateExecutor, rpc::eth::FlashblocksEthApiBuilder,
+};
 use world_chain_builder_pool::BasicWorldChainPool;
 use world_chain_provider::InMemoryState;
 
@@ -138,9 +142,9 @@ where
 
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
 
-    type AddOns = OpAddOns<
+    type AddOns = FlashblocksAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        OpEthApiBuilder,
+        FlashblocksEthApiBuilder,
         OpEngineValidatorBuilder,
         WorldChainEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
@@ -222,7 +226,7 @@ where
 }
 
 impl FlashblocksContext {
-    fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
+    fn add_ons_builder<NetworkT: RpcTypes>(&self) -> FlashblocksAddOnsBuilder<NetworkT> {
         let Self {
             config:
                 WorldChainNodeConfig {
@@ -233,9 +237,10 @@ impl FlashblocksContext {
                         },
                     da_config,
                 },
-            ..
+            components_context,
         } = self;
-        OpAddOnsBuilder::default()
+
+        FlashblocksAddOnsBuilder::new(components_context.flashblocks_state.clone())
             .with_sequencer(rollup_args.sequencer.clone())
             .with_sequencer_headers(rollup_args.sequencer_headers.clone())
             .with_da_config(da_config.clone())
