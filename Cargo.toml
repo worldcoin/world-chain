@@ -91,11 +91,7 @@ reth-optimism-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "
 reth_payload_util = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-forks = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
-reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", features = [
-    "serde",
-    "arbitrary",
-    "reth-codec",
-] }
+reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-e2e-test-utils = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-node-core = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -125,7 +121,6 @@ alloy-network = { version = "1.0.23", default-features = false }
 alloy-primitives = { version = "1.3.0", default-features = false, features = [
     "rand",
     "arbitrary",
-    "rlp",
 ] }
 alloy-rpc-types-eth = { version = "1.0.23", default-features = false }
 alloy-rpc-types = { version = "1.0.23", features = [
