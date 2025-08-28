@@ -29,7 +29,7 @@ chrono.workspace = true
 reqwest.workspace = true
 semaphore-rs.workspace = true
 serde_json.workspace = true
-serde = { workspace = true, features = ["derive"]}
+serde.workspace = true
 rand.workspace = true
 tokio.workspace = true
 tracing.workspace = true
