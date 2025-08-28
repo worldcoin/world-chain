@@ -186,7 +186,10 @@ where
 mod tests {
     use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use world_chain_builder_test_utils::DEV_WORLD_ID;
+    use alloy_primitives::{address, Address};
+
+    /// Devnet World ID for testing
+    const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
     use super::*;
     use alloy_consensus::Block as AlloyBlock;

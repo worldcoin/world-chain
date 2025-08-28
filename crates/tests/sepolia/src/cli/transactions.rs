@@ -30,21 +30,19 @@ use world_chain_builder_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::PBHPayload,
 };
-use world_chain_builder_test_utils::bindings::IEntryPoint::{
-    PackedUserOperation, UserOpsPerAggregator,
-};
-use world_chain_builder_test_utils::bindings::{IMulticall3, IPBHEntryPoint};
-use world_chain_builder_test_utils::utils::{
+use world_chain_test::bindings::IEntryPoint::{PackedUserOperation, UserOpsPerAggregator};
+use world_chain_test::bindings::{IMulticall3, IPBHEntryPoint};
+use world_chain_test::utils::{
     get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
     RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
 };
-use world_chain_builder_test_utils::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
+use world_chain_test::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
 
 use crate::PBH_SIGNATURE_AGGREGATOR;
 
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
 use super::{SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs};
-use world_chain_builder_test_utils::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
+use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {

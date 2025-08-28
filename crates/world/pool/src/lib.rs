@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use ordering::WorldChainOrdering;
 use reth::{
@@ -16,11 +16,6 @@ pub mod ordering;
 pub mod root;
 pub mod tx;
 pub mod validator;
-
-#[cfg(any(feature = "test", test))]
-pub mod mock;
-#[cfg(any(feature = "test", test))]
-pub mod test_utils;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<

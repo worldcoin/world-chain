@@ -7,9 +7,9 @@ homepage = "https://world.org/world-chain"
 repository = "https://github.com/worldcoin/world-chain/"
 
 [workspace]
-resolver = "2"
-members = [
-    "crates/toolkit",
+resolver = "3"
+members = ["crates/tests/*", "crates/toolkit", "crates/world/*"]
+default-members = [
     "crates/world/bin",
     "crates/world/flashblocks",
     "crates/world/node",
@@ -17,14 +17,9 @@ members = [
     "crates/world/rpc",
     "crates/world/pbh",
     "crates/world/pool",
-    "crates/world/test-utils",
     "crates/world/provider",
     "crates/world/chainspec",
-    "crates/tests/sepolia",
-    "crates/tests/devnet",
 ]
-
-default-members = ["crates/world/bin"]
 
 [profile.maxperf]
 codegen-units = 1
@@ -36,14 +31,14 @@ lto = "fat"
 [workspace.dependencies]
 # internal
 world-chain-builder-node = { path = "crates/world/node" }
-world-chain-provider = { path = "crates/world/provider" }
 world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
 world-chain-builder-chainspec = { path = "crates/world/chainspec" }
-world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 world-chain-builder-flashblocks = { path = "crates/world/flashblocks" }
+world-chain-provider = { path = "crates/world/provider" }
+world-chain-test = { path = "crates/world/test" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -78,7 +73,9 @@ reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", default-features = false }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", default-features = false, features = [
+    "std",
+] }
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-rpc-engine-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -130,12 +127,16 @@ alloy-rpc-types = { version = "1.0.23", features = [
     "eth",
 ], default-features = false }
 alloy-rpc-types-engine = { version = "1.0.23" }
-alloy-rlp = { version = "0.3.10", default-features = false }
+alloy-rlp = { version = "0.3.10", default-features = false, features = [
+    "derive",
+] }
 alloy-eips = { version = "1.0.23", default-features = false }
 alloy-genesis = { version = "1.0.24", default-features = false }
 alloy-rpc-types-debug = "1.0.23"
 alloy-signer = { version = "1.0.23", default-features = false }
-alloy-signer-local = { version = "1.0.23", default-features = false }
+alloy-signer-local = { version = "1.0.23", default-features = false, features = [
+    "mnemonic",
+] }
 alloy-sol-types = "1.3.0"
 alloy-serde = { version = "1.0.11", default-features = false }
 
@@ -168,7 +169,7 @@ chrono = "0.4"
 thiserror = "1"
 strum = { version = "0.27", features = ["derive"] }
 bytemuck = "1"
-semaphore-rs = "0.3.1"
+semaphore-rs = { version = "0.3.1", features = ["depth_30"] }
 semaphore-rs-tree = "0.3.1"
 semaphore-rs-proof = "0.3.1"
 clap = { version = "4", features = ["derive", "env"] }

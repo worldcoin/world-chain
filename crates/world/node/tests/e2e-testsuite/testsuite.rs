@@ -15,14 +15,13 @@ use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use tracing::info;
+use world_chain_test::utils::account;
 
+use world_chain_builder_node::context::BasicContext;
 use world_chain_builder_node::context::FlashblocksContext;
-use world_chain_builder_node::{
-    context::BasicContext,
-    test_utils::{raw_pbh_bundle_bytes, tx},
-};
 use world_chain_builder_node::{Flashblock, Flashblocks};
-use world_chain_builder_test_utils::utils::{account, signer};
+use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
+use world_chain_test::utils::signer;
 
 use crate::setup::{setup, CHAIN_SPEC};
 

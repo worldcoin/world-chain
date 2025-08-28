@@ -26,9 +26,9 @@ use std::{
 };
 use tracing::span;
 use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
-use world_chain_builder_node::test_utils::test_config;
-use world_chain_builder_test_utils::utils::{account, tree_root};
-use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
+use world_chain_test::node::test_config;
+use world_chain_test::utils::{account, tree_root};
+use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
 use world_chain_builder_pool::{
     root::LATEST_ROOT_SLOT,
