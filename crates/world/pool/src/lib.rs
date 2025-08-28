@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(test, feature = "test")), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use ordering::WorldChainOrdering;
 use reth::{

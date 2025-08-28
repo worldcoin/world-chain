@@ -20,7 +20,6 @@ rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
 
 reth.workspace = true
-reth-payload-util.workspace = true
 reth-node-builder.workspace = true
 reth-evm.workspace = true
 reth-engine-local.workspace = true
@@ -83,7 +82,6 @@ criterion.workspace = true
 semaphore-rs.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-tower.workspace = true
 jsonrpsee.workspace = true
 parking_lot.workspace = true
 serde.workspace = true

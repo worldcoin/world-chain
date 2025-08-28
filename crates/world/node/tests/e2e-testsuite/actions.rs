@@ -78,7 +78,7 @@ impl EthCall {
 impl Action<OpEngineTypes> for EthCall {
     fn execute<'a>(
         &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
+        _env: &'a mut Environment<OpEngineTypes>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
