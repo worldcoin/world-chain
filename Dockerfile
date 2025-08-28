@@ -1,4 +1,4 @@
-FROM rust:1.88 AS base
+FROM rust:1.89.0-bookworm AS base
 
 ARG FEATURES
 

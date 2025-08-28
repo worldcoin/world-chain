@@ -15,19 +15,27 @@ world-chain-builder-payload.workspace = true
 world-chain-builder-pool.workspace = true
 world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-pbh = { workspace = true, optional = true }
+world-chain-builder-flashblocks.workspace = true
+
+rollup-boost.workspace = true
+flashblocks-p2p.workspace = true
 
 reth.workspace = true
 reth-chain-state = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true }
 reth-node-builder.workspace = true
+reth-evm.workspace = true
+reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-node.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
-reth-primitives = { workspace = true, optional = true }
-reth-primitives-traits = { workspace = true, optional = true }
+reth-optimism-evm.workspace = true
+reth-primitives-traits = { workspace = true, optional = true  }
+reth-primitives.workspace = true
 reth-optimism-forks.workspace = true
+reth-rpc-engine-api.workspace = true
 reth-provider.workspace = true
 reth-prune-types = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
@@ -35,43 +43,62 @@ reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
 reth-e2e-test-utils = { workspace = true, optional = true }
 reth-node-api.workspace = true
+
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
-alloy-rpc-types = { workspace = true, optional = true }
-alloy-sol-types = { workspace = true, optional = true }
-revm-primitives = { workspace = true, optional = true }
-op-alloy-consensus.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types.workspace = true
+alloy-sol-types = { workspace = true, optional = true }
 
-tokio = { workspace = true, optional = true }
+op-alloy-rpc-types-engine.workspace = true
+op-alloy-consensus.workspace = true
+
+revm-primitives = { workspace = true, optional = true }
+
+tokio = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true, optional = true }
 clap.workspace = true
 chrono = { workspace = true, optional = true }
 tracing.workspace = true
-
+rand = { workspace = true, optional = true}
 
 [dev-dependencies]
 world-chain-builder-pbh.workspace = true
 world-chain-builder-rpc.workspace = true
 world-chain-builder-pool = { workspace = true, features = ["test"] }
+world-chain-builder-test-utils.workspace = true
+world-chain-builder-node = { workspace = true, features = ["test"] }
 
+reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
-reth-evm.workspace = true
 reth-node-core.workspace = true
 reth-optimism-consensus.workspace = true
-reth-optimism-evm.workspace = true
 revm-primitives.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+reth-network-api.workspace = true
 
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-signer-local.workspace = true
 alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
 
 criterion.workspace = true
-semaphore-rs = { workspace = true, features = ["depth_30"]}
+semaphore-rs = { workspace = true, features = ["depth_30"] }
 serde_json.workspace = true
 chrono.workspace = true
+tower.workspace = true
+jsonrpsee.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+rand.workspace = true
 
 [features]
 default = []
@@ -80,16 +107,18 @@ test = [
     "world-chain-builder-pbh",
     "dep:reth-e2e-test-utils",
     "dep:reth-chain-state",
-    "dep:reth-primitives",
     "dep:reth-primitives-traits",
     "dep:reth-prune-types",
     "dep:reth-trie",
     "dep:reth-db",
-    "dep:alloy-rpc-types",
     "dep:alloy-sol-types",
     "dep:alloy-eips",
     "dep:revm-primitives",
     "dep:futures",
+    "dep:rand",
     "dep:chrono",
-    "dep:tokio",
 ]
+
+[[test]]
+name = "e2e-testsuite"
+path = "tests/e2e-testsuite/main.rs"

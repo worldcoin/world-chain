@@ -58,7 +58,7 @@ where
                 let mut tries = 0;
                 loop {
                     if tries >= max_retries {
-                        panic!("User Operation not included in a Transaction after {} retries", max_retries);
+                        panic!("User Operation not included in a Transaction after {max_retries} retries");
                     }
                     // Check if the User Operation has been included in a Transaction
                     let resp: RpcUserOperationByHash = bundler_provider
@@ -169,7 +169,7 @@ where
         }
 
         if tries >= retries {
-            panic!("Chain did not progress after {} retries", retries);
+            panic!("Chain did not progress after {retries} retries");
         }
 
         sleep(Duration::from_secs(2)).await;
