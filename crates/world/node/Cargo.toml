@@ -86,7 +86,3 @@ jsonrpsee.workspace = true
 parking_lot.workspace = true
 serde.workspace = true
 rand.workspace = true
-
-[[test]]
-name = "e2e-testsuite"
-path = "tests/e2e-testsuite/main.rs"
