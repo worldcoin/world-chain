@@ -58,7 +58,7 @@ op-alloy-consensus.workspace = true
 
 revm-primitives = { workspace = true, optional = true }
 
-tokio = { workspace = true }
+tokio.workspace = true
 eyre.workspace = true
 futures = { workspace = true, optional = true }
 clap.workspace = true

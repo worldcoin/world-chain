@@ -34,7 +34,7 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
-reth-revm = { workspace = true }
+reth-revm.workspace = true
 reth-trie-db.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, optional = true }
