@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 world-chain-builder-pbh.workspace = true
-world-chain-builder-test-utils = { workspace = true, optional = true }
 world-chain-builder-flashblocks.workspace = true
 world-chain-provider.workspace = true
 
@@ -52,6 +51,7 @@ rayon.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+world-chain-builder-test-utils.workspace = true
 ethers-core.workspace = true
 test-case.workspace = true
 alloy-signer-local.workspace = true
@@ -62,7 +62,7 @@ eyre.workspace = true
 [features]
 default = []
 test = [
-    "world-chain-builder-test-utils",
+    # "world-chain-builder-test-utils",
     "dep:reth-e2e-test-utils",
     "dep:reth-optimism-chainspec",
     "dep:reth-node-ethereum",

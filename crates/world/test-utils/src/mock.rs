@@ -14,7 +14,6 @@ use alloy_primitives::{
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
 use alloy_eips::BlockId;
 use parking_lot::Mutex;
-use reth::revm::revm;
 use reth::{
     api::NodeTypes,
     chainspec::{ChainInfo, ChainSpec},
@@ -39,6 +38,7 @@ use reth_provider::{
     StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
+use reth_revm::revm;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,

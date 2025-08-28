@@ -306,11 +306,11 @@ pub mod tests {
     };
     use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
-    use crate::mock::{ExtendedAccount, MockEthProvider};
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
-    use crate::test_utils::world_chain_validator;
     use crate::tx::WorldChainPooledTransaction;
+    use world_chain_builder_test_utils::mock::{ExtendedAccount, MockEthProvider};
+    use world_chain_builder_test_utils::pool::world_chain_validator;
 
     use super::WorldChainTransactionValidator;
 
@@ -325,7 +325,7 @@ pub mod tests {
         for acc in 0..10 {
             let account_address = account(acc);
 
-            validator.inner.client().add_account(
+            validator.inner().client().add_account(
                 account_address,
                 ExtendedAccount::new(0, alloy_primitives::U256::MAX),
             );
@@ -335,7 +335,7 @@ pub mod tests {
         let root = TREE.root();
 
         // Insert a world id root into the OpWorldId Account
-        validator.inner.client().add_account(
+        validator.inner().client().add_account(
             DEV_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),

@@ -17,11 +17,6 @@ pub mod root;
 pub mod tx;
 pub mod validator;
 
-#[cfg(any(feature = "test", test))]
-pub mod mock;
-#[cfg(any(feature = "test", test))]
-pub mod test_utils;
-
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<
     TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T>>,

@@ -26,7 +26,7 @@ use std::{
 };
 use tracing::span;
 use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
-use world_chain_builder_node::test_utils::test_config;
+use world_chain_builder_test_utils::node::test_config;
 use world_chain_builder_test_utils::utils::{account, tree_root};
 use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
