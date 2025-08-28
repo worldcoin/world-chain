@@ -22,7 +22,7 @@ contract DeploySafe is Script {
         0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address public constant PBH_SIGNATURE_AGGREGATOR =
         0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
-    uint32 public constant PBH_NONCE_KEY = 1123123123;
+    uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     function run() public {
         console.log(

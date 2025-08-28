@@ -29,7 +29,7 @@ contract PBHSafe4337ModuleTest is Test {
     uint256 public ownerKey;
 
     address public constant PBH_SIGNATURE_AGGREGATOR = address(0x123);
-    uint32 public constant PBH_NONCE_KEY = 1123123123;
+    uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     function setUp() public {
         // Create single EOA owner
@@ -87,7 +87,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: address(safe),
-            nonce: uint256(PBH_NONCE_KEY) << 64, // Keep the nonce key format
+            nonce: uint256(PBH_NONCE_KEY) << 216, // Keep the nonce key format
             initCode: "", // Empty for already deployed safe
             callData: "",
             accountGasLimits: bytes32(
@@ -139,7 +139,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: address(safe),
-            nonce: uint256(PBH_NONCE_KEY) << 64, // Keep the nonce key format
+            nonce: uint256(PBH_NONCE_KEY) << 216, // Keep the nonce key format
             initCode: "", // Empty for already deployed safe
             callData: "",
             accountGasLimits: bytes32(
@@ -191,7 +191,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: address(safe),
-            nonce: uint256(PBH_NONCE_KEY) << 64, // Keep the nonce key format
+            nonce: uint256(PBH_NONCE_KEY) << 216, // Keep the nonce key format
             initCode: "", // Empty for already deployed safe
             callData: "",
             accountGasLimits: bytes32(

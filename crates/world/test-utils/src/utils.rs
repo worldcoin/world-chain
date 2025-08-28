@@ -50,6 +50,18 @@ pub struct InclusionProof {
     pub proof: semaphore_rs::poseidon_tree::Proof,
 }
 
+pub fn generate_user_op_nonce(sequence: U256, use_pbh_prefix: bool) -> U256 {
+    let key = if use_pbh_prefix {
+        // Build 192-bit key: top 40 bits = PBH_NONCE_KEY, remaining 152 bits random.
+        (U256::from(PBH_NONCE_KEY) << 152)
+            | (U256::from_be_bytes(Address::random().into_word().0) >> 8)
+    } else {
+        (U256::ZERO << 152) | (U256::from_be_bytes(Address::random().into_word().0) >> 8)
+    };
+    // Place the 192-bit key in the high-order bits of the 256-bit nonce and append the 64-bit sequence.
+    (key << 64) | sequence
+}
+
 pub fn signer(index: u32) -> PrivateKeySigner {
     alloy_signer_local::MnemonicBuilder::<English>::default()
         .phrase(MNEMONIC)
@@ -165,10 +177,9 @@ pub fn user_op(
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> (IEntryPoint::PackedUserOperation, PbhPayload) {
-    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
     let mut user_op = PackedUserOperation {
         sender: TEST_SAFES[acc as usize],
-        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        nonce: generate_user_op_nonce(nonce, true),
         initCode: init_code,
         callData: calldata,
         accountGasLimits: account_gas_limits,
@@ -232,10 +243,9 @@ pub fn partial_user_op_sepolia(
     #[builder(into, default = U256::ZERO)] nonce: U256,
     calldata: Bytes,
 ) -> RpcPartialUserOperation {
-    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
     RpcPartialUserOperation {
         sender: safe,
-        nonce: ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | nonce,
+        nonce: generate_user_op_nonce(nonce, true),
         call_data: calldata,
         signature: bytes!(""),
         verification_gas_limit: Some(U128::from(75_000)),
@@ -263,16 +273,17 @@ pub fn user_op_sepolia(
     gas_fees: FixedBytes<32>,
     #[builder(default = Bytes::default())] paymaster_and_data: Bytes,
 ) -> IEntryPoint::PackedUserOperation {
-    let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
-    let nonce_key = if let (Some(_), Some(_)) = (&identity, &inclusion_proof) {
-        U256::from(PBH_NONCE_KEY)
+    let user_op_nonce;
+
+    if let (Some(_), Some(_)) = (&identity, &inclusion_proof) {
+        user_op_nonce = generate_user_op_nonce(nonce, true);
     } else {
-        U256::ZERO
+        user_op_nonce = generate_user_op_nonce(nonce, false);
     };
 
     let mut user_op = PackedUserOperation {
         sender: safe,
-        nonce: ((rand_key | nonce_key) << 64) | nonce,
+        nonce: user_op_nonce,
         initCode: init_code,
         callData: calldata,
         accountGasLimits: account_gas_limits,
@@ -742,9 +753,8 @@ mod tests {
 
     #[test]
     fn test_pbh_nonce_key() {
-        let rand_key = U256::from_be_bytes(Address::random().into_word().0) << 32;
-        let nonce = ((rand_key | U256::from(PBH_NONCE_KEY)) << 64) | U256::ZERO;
-        let mask = U256::from_str("0xffffffff").unwrap();
-        assert_eq!((nonce >> 64) & mask, U256::from(PBH_NONCE_KEY));
+        let nonce = generate_user_op_nonce(U256::ZERO, true);
+        println!("nonce (hex): {:#x}", nonce); // 0x-prefixed, lowercase
+        assert_eq!(nonce >> 216, U256::from(PBH_NONCE_KEY)); // Extract top 5 bytes
     }
 }
