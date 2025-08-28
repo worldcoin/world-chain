@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-test-utils"
+name = "world-chain-test"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

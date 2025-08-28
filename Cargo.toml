@@ -7,9 +7,9 @@ homepage = "https://world.org/world-chain"
 repository = "https://github.com/worldcoin/world-chain/"
 
 [workspace]
-resolver = "2"
-members = [
-    "crates/toolkit",
+resolver = "3"
+members = ["crates/tests/*", "crates/toolkit", "crates/world/*"]
+default-members = [
     "crates/world/bin",
     "crates/world/flashblocks",
     "crates/world/node",
@@ -17,14 +17,9 @@ members = [
     "crates/world/rpc",
     "crates/world/pbh",
     "crates/world/pool",
-    "crates/world/test-utils",
     "crates/world/provider",
     "crates/world/chainspec",
-    "crates/tests/sepolia",
-    "crates/tests/devnet",
 ]
-
-default-members = ["crates/world/bin"]
 
 [profile.maxperf]
 codegen-units = 1
@@ -36,14 +31,14 @@ lto = "fat"
 [workspace.dependencies]
 # internal
 world-chain-builder-node = { path = "crates/world/node" }
-world-chain-provider = { path = "crates/world/provider" }
 world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
 world-chain-builder-chainspec = { path = "crates/world/chainspec" }
-world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 world-chain-builder-flashblocks = { path = "crates/world/flashblocks" }
+world-chain-provider = { path = "crates/world/provider" }
+world-chain-test = { path = "crates/world/test" }
 
 # reth
 reth = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -98,6 +93,8 @@ reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", r
 reth-optimism-forks = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", features = [
     "serde",
+    "arbitrary",
+    "reth-codec",
 ] }
 reth-e2e-test-utils = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }

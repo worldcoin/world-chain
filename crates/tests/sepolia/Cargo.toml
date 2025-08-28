@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-test-utils.workspace = true
+world-chain-test.workspace = true
 world-chain-builder-pbh.workspace = true
 
 alloy-primitives.workspace = true

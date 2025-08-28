@@ -22,7 +22,7 @@ use world_chain_builder_node::{Flashblock, Flashblocks};
 use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
 use world_chain_test::utils::signer;
 
-use crate::setup::{setup, CHAIN_SPEC};
+use world_chain_test_e2e::setup::{setup, CHAIN_SPEC};
 
 #[tokio::test]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
@@ -242,7 +242,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let _tx = tx.clone();
 
-    let mut flashblocks_action = crate::actions::AssertMineBlock::new(
+    let mut flashblocks_action = world_chain_test_e2e::actions::AssertMineBlock::new(
         0,
         vec![],
         Some(B256::ZERO),
@@ -254,7 +254,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     )
     .await;
 
-    let mut basic_action = crate::actions::AssertMineBlock::new(
+    let mut basic_action = world_chain_test_e2e::actions::AssertMineBlock::new(
         0,
         vec![],
         Some(B256::ZERO),
