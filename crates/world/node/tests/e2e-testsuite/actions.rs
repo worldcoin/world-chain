@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use alloy_eips::BlockId;
 use alloy_rpc_types::{Header, Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use eyre::eyre::{eyre, Result};
@@ -8,7 +9,7 @@ use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use reth_optimism_primitives::OpReceipt;
-use revm_primitives::{Bytes, B256};
+use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::Authorization;
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -16,82 +17,12 @@ use tracing::debug;
 use world_chain_builder_flashblocks::rpc::engine::FlashblocksEngineApiExtClient;
 use world_chain_builder_node::flashblocks::rpc;
 
-#[derive(Debug)]
-pub struct EthGetTransactionReceipt {
-    /// The transaction hash the receipt will be fetched for.
-    pub hash: B256,
-    /// The node index's to query the receipt for.
-    pub node_idxs: Vec<usize>,
-}
-
-impl EthGetTransactionReceipt {
-    /// Creates a new `EthGetTransactionReceipt` action.
-    pub fn new(hash: B256, node_idxs: Vec<usize>) -> Self {
-        Self { hash, node_idxs }
-    }
-}
-
-impl Action<OpEngineTypes> for EthGetTransactionReceipt {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            for node_idx in &self.node_idxs {
-                let rpc_client = env.node_clients[*node_idx].rpc.clone();
-                let receipt: Option<OpReceipt> =
-                    EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        alloy_rpc_types_eth::Block,
-                        OpReceipt,
-                        Header,
-                    >::transaction_receipt(&rpc_client, self.hash)
-                    .await?;
-
-                assert!(receipt.is_some());
-            }
-
-            Ok(())
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct EthCall {
-    /// The transaction to be simulated.
-    pub transaction: Bytes,
-    /// The node index's to simulate the transaction through.
-    pub node_idxs: Vec<usize>,
-}
-
-impl EthCall {
-    /// Creates a new `EthCall` action.
-    pub fn new(transaction: Bytes, node_idxs: Vec<usize>) -> Self {
-        Self {
-            transaction,
-            node_idxs,
-        }
-    }
-}
-
-// TODO:
-impl Action<OpEngineTypes> for EthCall {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
+// ------------------------------------------------------------------ Block Building Test Actions ------------------------------------------------------------------
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
 #[derive(Debug)]
-pub struct AssertMineBlock<T>
-where
-    T: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync,
-{
+pub struct AssertMineBlock<T> {
     /// The node index to mine
     pub node_idx: usize,
     #[allow(dead_code)]
@@ -109,6 +40,8 @@ where
     pub block_interval: Duration,
     /// Whether to send `flashblocks_forkchoiceUpdatedV3`
     pub flashblocks: bool,
+    /// Whether to fetch the payload after mining
+    pub fetch_payload: bool,
     /// Sender to return the mined payload
     pub tx: tokio::sync::mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
 }
@@ -127,6 +60,7 @@ where
         authorization_generator: T,
         block_interval: Duration,
         flashblocks: bool,
+        fetch_payload: bool,
         tx: tokio::sync::mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
     ) -> Self {
         Self {
@@ -137,6 +71,7 @@ where
             authorization_generator,
             block_interval,
             flashblocks,
+            fetch_payload,
             tx,
         }
     }
@@ -204,38 +139,44 @@ where
 
             debug!("FCU result: {:?}", fcu_result);
 
-            // wait the deadline interval
-            std::thread::sleep(self.block_interval);
+            if self.fetch_payload {
+                // wait the deadline interval
+                std::thread::sleep(self.block_interval);
 
-            // check if we got a valid payload ID
-            match fcu_result.payload_status.status {
-                PayloadStatusEnum::Valid => {
-                    if let Some(payload_id) = fcu_result.payload_id {
-                        debug!("Got payload ID: {payload_id}");
+                // check if we got a valid payload ID
+                match fcu_result.payload_status.status {
+                    PayloadStatusEnum::Valid => {
+                        if let Some(payload_id) = fcu_result.payload_id {
+                            debug!("Got payload ID: {payload_id}");
 
-                        // get the payload that was built
-                        let engine_payload = EngineApiClient::<OpEngineTypes>::get_payload_v3(
-                            &engine_client,
-                            payload_id,
-                        )
-                        .await?;
+                            // get the payload that was built
+                            let engine_payload = EngineApiClient::<OpEngineTypes>::get_payload_v3(
+                                &engine_client,
+                                payload_id,
+                            )
+                            .await?;
 
-                        self.tx
-                            .send(engine_payload)
-                            .await
-                            .map_err(|e| eyre!("Failed to send payload via channel: {}", e))?;
+                            self.tx
+                                .send(engine_payload)
+                                .await
+                                .map_err(|e| eyre!("Failed to send payload via channel: {}", e))?;
 
-                        debug!("Mined block with payload ID: {}", payload_id);
-                        Ok(())
-                    } else {
-                        Err(eyre!("No payload ID returned from forkchoiceUpdated"))
+                            debug!("Mined block with payload ID: {}", payload_id);
+                            return Ok(());
+                        } else {
+                            return Err(eyre!("No payload ID returned from forkchoiceUpdated"));
+                        }
+                    }
+                    _ => {
+                        return Err(eyre!(
+                            "Payload status not valid: {:?}",
+                            fcu_result.payload_status
+                        ))
                     }
                 }
-                _ => Err(eyre!(
-                    "Payload status not valid: {:?}",
-                    fcu_result.payload_status
-                )),
-            }
+            };
+
+            Ok(())
         })
     }
 }
@@ -638,6 +579,513 @@ where
             }
 
             debug!("Completed producing {} flashblocks blocks", self.num_blocks);
+            Ok(())
+        })
+    }
+}
+
+// ------------------------------------------------------------------ EthApi Test Actions ------------------------------------------------------------------
+
+/// A composite action that first mines a block, then executes an Ethereum API action.
+///
+/// This action is designed for end-to-end testing scenarios where you need to:
+/// 1. Mine a block with specific transactions/payload attributes
+/// 2. Execute an Ethereum RPC API call against the mined block
+/// # Example
+///
+/// ```rust, ignore
+/// let eth_call = EthCall::new(tx, vec![0, 1, 2], 200, result_tx);
+///
+/// // Combine into composite action
+/// let mut action = EthApiAction::new(mine_block, eth_call);
+///
+/// // Execute: mines block first, then performs eth_call
+/// action.execute(&mut env).await?;
+/// ```
+#[derive(Debug)]
+pub struct EthApiAction<T, A> {
+    pub mine_block: AssertMineBlock<A>,
+    pub action: T,
+}
+
+impl<T, A> EthApiAction<T, A>
+where
+    T: Action<OpEngineTypes> + Send + 'static,
+    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    pub fn new(mine_block: AssertMineBlock<A>, action: T) -> Self {
+        Self { mine_block, action }
+    }
+}
+
+impl<T, A> Action<OpEngineTypes> for EthApiAction<T, A>
+where
+    T: Action<OpEngineTypes> + Send + 'static,
+    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.mine_block.execute(env).await?;
+            self.action.execute(env).await?;
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthGetTransactionReceipt {
+    /// The transaction hash the receipt will be fetched for.
+    pub hash: B256,
+    /// The node index's to query the receipt for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the receipt
+    pub backoff: u64,
+    /// Tx sender for receipt results
+    pub tx: tokio::sync::mpsc::Sender<Vec<Option<OpReceipt>>>,
+}
+
+impl EthGetTransactionReceipt {
+    /// Creates a new `EthGetTransactionReceipt` action.
+    pub fn new(
+        hash: B256,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<Option<OpReceipt>>>,
+    ) -> Self {
+        Self {
+            hash,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthGetTransactionReceipt {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut receipts = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let receipt: Option<OpReceipt> =
+                    EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        OpReceipt,
+                        Header,
+                    >::transaction_receipt(&rpc_client, self.hash)
+                    .await?;
+                receipts.push(receipt);
+            }
+
+            self.tx
+                .send(receipts)
+                .await
+                .map_err(|e| eyre!("Failed to send receipt results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthCall {
+    /// The transaction to be simulated.
+    pub transaction: TransactionRequest,
+    /// The node index's to simulate the transaction through.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before performing the call
+    pub backoff: u64,
+    /// Sender for call results
+    pub tx: tokio::sync::mpsc::Sender<Vec<Bytes>>,
+}
+
+impl EthCall {
+    pub fn new(
+        transaction: TransactionRequest,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<Bytes>>,
+    ) -> Self {
+        Self {
+            transaction,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthCall {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+            let mut futs = vec![];
+            for idx in &self.node_idxs {
+                let fut = async {
+                    let res: Bytes = EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        Header,
+                    >::call(
+                        &env.node_clients[*idx].rpc,
+                        self.transaction.clone(),
+                        Some(BlockId::pending()),
+                        None,
+                        None,
+                    )
+                    .await?;
+
+                    Ok::<_, eyre::Report>(res)
+                };
+
+                futs.push(fut);
+            }
+
+            let results = futures::future::try_join_all(futs).await?;
+
+            self.tx
+                .send(results)
+                .await
+                .map_err(|e| eyre!("Failed to send call results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthGetBlockByHash {
+    /// The block hash to fetch.
+    pub hash: B256,
+    /// The node index's to query the block for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the block
+    pub backoff: u64,
+    /// Tx sender for block results
+    pub tx: tokio::sync::mpsc::Sender<Vec<Option<alloy_rpc_types_eth::Block>>>,
+}
+
+impl EthGetBlockByHash {
+    /// Creates a new `EthGetBlockByHash` action.
+    pub fn new(
+        hash: B256,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<Option<alloy_rpc_types_eth::Block>>>,
+    ) -> Self {
+        Self {
+            hash,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthGetBlockByHash {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut blocks = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let block: Option<alloy_rpc_types_eth::Block> =
+                    EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        Header,
+                    >::block_by_hash(&rpc_client, self.hash, true)
+                    .await?;
+                blocks.push(block);
+            }
+
+            self.tx
+                .send(blocks)
+                .await
+                .map_err(|e| eyre!("Failed to send block results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthGetBalance {
+    /// The address to fetch the balance for.
+    pub address: Address,
+    /// The node index's to query the balance for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the balance
+    pub backoff: u64,
+    /// Tx sender for balance results
+    pub tx: tokio::sync::mpsc::Sender<Vec<U256>>,
+}
+
+impl EthGetBalance {
+    /// Creates a new `EthGetBalance` action.
+    pub fn new(
+        address: Address,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<U256>>,
+    ) -> Self {
+        Self {
+            address,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthGetBalance {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut balances = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let balance: U256 = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    alloy_rpc_types_eth::Block,
+                    alloy_consensus::Receipt,
+                    Header,
+                >::balance(
+                    &rpc_client, self.address, Some(BlockId::pending())
+                )
+                .await?;
+                balances.push(balance);
+            }
+
+            self.tx
+                .send(balances)
+                .await
+                .map_err(|e| eyre!("Failed to send balance results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthGetCode {
+    /// The address to fetch the code for.
+    pub address: Address,
+    /// The node index's to query the code for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the code
+    pub backoff: u64,
+    /// Tx sender for code results
+    pub tx: tokio::sync::mpsc::Sender<Vec<Bytes>>,
+}
+
+impl EthGetCode {
+    /// Creates a new `EthGetCode` action.
+    pub fn new(
+        address: Address,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<Bytes>>,
+    ) -> Self {
+        Self {
+            address,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthGetCode {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut codes = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let code: Bytes = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    alloy_rpc_types_eth::Block,
+                    alloy_consensus::Receipt,
+                    Header,
+                >::get_code(
+                    &rpc_client, self.address, Some(BlockId::pending())
+                )
+                .await?;
+                codes.push(code);
+            }
+
+            self.tx
+                .send(codes)
+                .await
+                .map_err(|e| eyre!("Failed to send code results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthGetTransactionCount {
+    /// The address to fetch the transaction count for.
+    pub address: Address,
+    /// The node index's to query the transaction count for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the transaction count
+    pub backoff: u64,
+    /// Tx sender for transaction count results
+    pub tx: tokio::sync::mpsc::Sender<Vec<U256>>,
+}
+
+impl EthGetTransactionCount {
+    /// Creates a new `EthGetTransactionCount` action.
+    pub fn new(
+        address: Address,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<U256>>,
+    ) -> Self {
+        Self {
+            address,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthGetTransactionCount {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut counts = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let count: U256 = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    alloy_rpc_types_eth::Block,
+                    alloy_consensus::Receipt,
+                    Header,
+                >::transaction_count(
+                    &rpc_client, self.address, Some(BlockId::pending())
+                )
+                .await?;
+                counts.push(count);
+            }
+
+            self.tx.send(counts).await.map_err(|e| {
+                eyre!(
+                    "Failed to send transaction count results via channel: {}",
+                    e
+                )
+            })?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EthStorage {
+    /// The address to fetch the storage for.
+    pub address: Address,
+    /// The storage slot to fetch.
+    pub slot: U256,
+    /// The node index's to query the storage for.
+    pub node_idxs: Vec<usize>,
+    /// Duration in milliseconds of backoff before fetching the storage
+    pub backoff: u64,
+    /// Tx sender for storage results
+    pub tx: tokio::sync::mpsc::Sender<Vec<B256>>,
+}
+
+impl EthStorage {
+    /// Creates a new `EthStorage` action.
+    pub fn new(
+        address: Address,
+        slot: U256,
+        node_idxs: Vec<usize>,
+        backoff: u64,
+        tx: tokio::sync::mpsc::Sender<Vec<B256>>,
+    ) -> Self {
+        Self {
+            address,
+            slot,
+            node_idxs,
+            backoff,
+            tx,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for EthStorage {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(self.backoff)).await;
+
+            let mut storages = vec![];
+            for node_idx in &self.node_idxs {
+                let rpc_client = env.node_clients[*node_idx].rpc.clone();
+                let storage: B256 = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    alloy_rpc_types_eth::Block,
+                    alloy_consensus::Receipt,
+                    Header,
+                >::storage_at(
+                    &rpc_client,
+                    self.address,
+                    self.slot.into(),
+                    Some(BlockId::pending()),
+                )
+                .await?;
+                storages.push(storage);
+            }
+
+            self.tx
+                .send(storages)
+                .await
+                .map_err(|e| eyre!("Failed to send storage results via channel: {}", e))?;
+
             Ok(())
         })
     }
