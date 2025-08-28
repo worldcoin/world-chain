@@ -11,32 +11,21 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-payload.workspace = true
+world-chain-builder-rpc.workspace = true
+world-chain-builder-node.workspace = true
 world-chain-builder-pool.workspace = true
 world-chain-builder-flashblocks.workspace = true
-world-chain-provider.workspace = true
 world-chain-test.workspace = true
 
 rollup-boost.workspace = true
-flashblocks-p2p.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
-reth-evm.workspace = true
-reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
-reth-optimism-payload-builder.workspace = true
-reth-optimism-rpc.workspace = true
-reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
-reth-optimism-forks.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-provider.workspace = true
-reth-trie-db.workspace = true
-reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
 reth-e2e-test-utils.workspace = true
 
@@ -46,39 +35,22 @@ alloy-rpc-types.workspace = true
 alloy-consensus.workspace = true
 
 op-alloy-rpc-types-engine.workspace = true
-op-alloy-consensus.workspace = true
+alloy-genesis.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
+revm-primitives.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
-clap.workspace = true
 tracing.workspace = true
+futures.workspace = true
+serde_json.workspace = true
 
-world-chain-builder-pbh.workspace = true
-world-chain-builder-rpc.workspace = true
-world-chain-builder-node.workspace = true
-
+[dev-dependencies]
+reth-tracing.workspace = true
+parking_lot.workspace = true
 reth-db.workspace = true
 reth-optimism-consensus.workspace = true
-revm-primitives.workspace = true
-reth-basic-payload-builder.workspace = true
-reth-tracing.workspace = true
-reth-network-api.workspace = true
-
-alloy-genesis.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-rpc.workspace = true
 alloy-network.workspace = true
-alloy-signer-local.workspace = true
-alloy-eips.workspace = true
-alloy-rpc-types-engine.workspace = true
-
-tokio-tungstenite.workspace = true
-tokio-util.workspace = true
-
-futures.workspace = true
-criterion.workspace = true
-semaphore-rs.workspace = true
-serde_json.workspace = true
-chrono.workspace = true
-jsonrpsee.workspace = true
-parking_lot.workspace = true
-serde.workspace = true
-rand.workspace = true
