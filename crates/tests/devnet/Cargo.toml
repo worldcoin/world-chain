@@ -11,8 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-node = { workspace = true, features = ["test"]}
-world-chain-builder-pool = { workspace = true, features = ["test"]}
+world-chain-builder-node = { workspace = true, features = ["test"] }
+world-chain-builder-pool = { workspace = true, features = ["test"] }
 world-chain-builder-test-utils.workspace = true
 world-chain-builder-pbh.workspace = true
 
