@@ -34,7 +34,7 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
+reth-revm = { workspace = true }
 reth-trie-db.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, optional = true }
@@ -47,7 +47,7 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde"] }
+reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
 
 # revm 

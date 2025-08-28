@@ -78,7 +78,9 @@ reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", default-features = false }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", default-features = false, features = [
+    "std",
+] }
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-rpc-engine-api = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
@@ -94,7 +96,9 @@ reth-optimism-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "
 reth_payload_util = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-optimism-forks = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
-reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
+reth-optimism-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc", features = [
+    "serde",
+] }
 reth-e2e-test-utils = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
 reth-node-core = { git = "https://github.com/paradigmxyz/reth", rev = "6daf5fc" }
