@@ -27,7 +27,7 @@ alloy-rpc-client.workspace = true
 reth-rpc-layer.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
-semaphore-rs = { workspace = true, features = ["depth_30"]}
+semaphore-rs.workspace = true
 serde_json.workspace = true
 serde = { workspace = true, features = ["derive"]}
 rand.workspace = true

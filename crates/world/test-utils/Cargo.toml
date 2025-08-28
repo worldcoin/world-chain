@@ -25,7 +25,7 @@ alloy-network.workspace = true
 op-alloy-consensus.workspace = true
 
 # 3rd party
-semaphore-rs = { workspace = true, features = ["depth_30"]}
+semaphore-rs.workspace = true
 bon.workspace = true
 serde.workspace = true
 

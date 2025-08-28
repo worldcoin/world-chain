@@ -43,7 +43,7 @@ op-alloy-consensus.workspace = true
 
 # 3rd party
 tokio.workspace = true
-semaphore-rs = { workspace = true, features = ["depth_30"] }
+semaphore-rs.workspace = true
 eyre = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true

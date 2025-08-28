@@ -168,7 +168,7 @@ chrono = "0.4"
 thiserror = "1"
 strum = { version = "0.27", features = ["derive"] }
 bytemuck = "1"
-semaphore-rs = "0.3.1"
+semaphore-rs = { version = "0.3.1", features = ["depth_30"] }
 semaphore-rs-tree = "0.3.1"
 semaphore-rs-proof = "0.3.1"
 clap = { version = "4", features = ["derive", "env"] }
