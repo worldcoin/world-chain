@@ -15,14 +15,13 @@ use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use tracing::info;
+use world_chain_test::utils::account;
 
+use world_chain_builder_node::context::BasicContext;
 use world_chain_builder_node::context::FlashblocksContext;
-use world_chain_builder_node::{
-    context::BasicContext,
-    test_utils::{raw_pbh_bundle_bytes, tx},
-};
 use world_chain_builder_node::{Flashblock, Flashblocks};
-use world_chain_builder_test_utils::utils::signer;
+use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
+use world_chain_test::utils::signer;
 
 use crate::setup::{setup, CHAIN_SPEC};
 
@@ -167,8 +166,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
     let flashblocks_1_clone = flashblocks_1.clone();
 
     tokio::spawn(async move {
-        let stream_0 = ext_context_1.network_handle.flashblock_stream();
-        let stream_1 = ext_context_2.network_handle.flashblock_stream();
+        let stream_0 = ext_context_1.flashblocks_handle.flashblock_stream();
+        let stream_1 = ext_context_2.flashblocks_handle.flashblock_stream();
 
         futures::pin_mut!(stream_0);
         futures::pin_mut!(stream_1);
@@ -252,6 +251,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         authorization_generator.clone(),
         std::time::Duration::from_millis(2000),
         true,
+        true,
         tx.clone(),
     )
     .await;
@@ -264,6 +264,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         authorization_generator,
         std::time::Duration::from_millis(2000),
         false,
+        true,
         tx,
     )
     .await;
@@ -295,25 +296,31 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     assert_eq!(hash, basic_hash, "Blocks from both nodes should match");
 
-    let aggregated_flashblocks_0 = Flashblock::reduce(Flashblocks(
-        flashblocks_0_clone
-            .lock()
-            .iter()
-            .map(|fb| Flashblock {
-                flashblock: fb.clone(),
-            })
-            .collect(),
-    ));
+    let aggregated_flashblocks_0 = Flashblock::reduce(
+        Flashblocks::new(
+            flashblocks_0_clone
+                .lock()
+                .iter()
+                .map(|fb| Flashblock {
+                    flashblock: fb.clone(),
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
 
-    let aggregated_flashblocks_1 = Flashblock::reduce(Flashblocks(
-        flashblocks_1_clone
-            .lock()
-            .iter()
-            .map(|fb| Flashblock {
-                flashblock: fb.clone(),
-            })
-            .collect(),
-    ));
+    let aggregated_flashblocks_1 = Flashblock::reduce(
+        Flashblocks::new(
+            flashblocks_1_clone
+                .lock()
+                .iter()
+                .map(|fb| Flashblock {
+                    flashblock: fb.clone(),
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
 
     let block_0: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
         RecoveredBlock::try_from(aggregated_flashblocks_0.unwrap())
@@ -333,6 +340,177 @@ async fn test_flashblocks() -> eyre::Result<()> {
         hash,
         "Flashblock 1 did not match mined block"
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_api_receipt() -> eyre::Result<()> {
+    let (_, nodes, _tasks, mut env) =
+        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = move |attrs: OpPayloadAttributes| {
+        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
+
+        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
+
+        Authorization::new(
+            payload_id,
+            attrs.timestamp(),
+            &authorizer_sk,
+            ext_context.builder_sk.verifying_key(),
+        )
+    };
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let (tx, _) = tokio::sync::mpsc::channel(1);
+
+    // Compose a Mine Block action with an eth_getTransactionReceipt action
+    let attributes = OpPayloadAttributes {
+        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
+            timestamp,
+            prev_randao: B256::random(),
+            suggested_fee_recipient: Address::random(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+        },
+        transactions: None,
+        no_tx_pool: Some(false),
+        eip_1559_params: Some(b64!("0000000800000008")),
+        gas_limit: Some(30_000_000),
+    };
+
+    let mock_tx =
+        TransactionTestContext::transfer_tx(nodes[0].node.inner.chain_spec().chain_id(), signer(0))
+            .await;
+
+    let raw_tx: Bytes = mock_tx.encoded_2718().into();
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        vec![raw_tx],
+        Some(B256::ZERO),
+        attributes,
+        authorization_generator,
+        std::time::Duration::from_millis(2000),
+        true,
+        false,
+        tx,
+    )
+    .await;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    // 200ms backoff should be enough time to fetch the pending receipt
+    let transaction_receipt =
+        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 200, tx);
+
+    let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
+    action.execute(&mut env).await?;
+
+    let receipts = rx.recv().await.expect("should receive receipts");
+
+    // TODO: Assertions once EthApi is fixed
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_api_call() -> eyre::Result<()> {
+    let (_, nodes, _tasks, mut env) =
+        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = move |attrs: OpPayloadAttributes| {
+        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
+
+        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
+
+        Authorization::new(
+            payload_id,
+            attrs.timestamp(),
+            &authorizer_sk,
+            ext_context.builder_sk.verifying_key(),
+        )
+    };
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let (sender, _) = tokio::sync::mpsc::channel(1);
+
+    // 200ms backoff should be enough time to fetch the pending receipt
+    let mut mock_tx: TransactionRequest = tx(
+        nodes[0].node.inner.chain_spec().chain_id(),
+        None,
+        0,
+        Address::ZERO,
+        21_000,
+    )
+    .value(U256::from(100_000_000_000_000_000u64))
+    .from(account(0));
+
+    let signer = EthereumWallet::from(signer(0));
+    let envelope =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(mock_tx.clone(), &signer)
+            .await
+            .unwrap();
+
+    let raw_tx: Bytes = envelope.encoded_2718().into();
+
+    let attributes = OpPayloadAttributes {
+        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
+            timestamp,
+            prev_randao: B256::random(),
+            suggested_fee_recipient: Address::random(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+        },
+        transactions: Some(vec![raw_tx.clone()]),
+        no_tx_pool: Some(false),
+        eip_1559_params: Some(b64!("0000000800000008")),
+        gas_limit: Some(30_000_000),
+    };
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        vec![],
+        Some(B256::ZERO),
+        attributes,
+        authorization_generator,
+        std::time::Duration::from_millis(2000),
+        true,
+        false,
+        sender,
+    )
+    .await;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    mock_tx.value = Some(U256::from(1));
+
+    let eth_call = crate::actions::EthCall::new(mock_tx, vec![0, 1, 2], 200, tx);
+
+    let mut action = crate::actions::EthApiAction::new(mine_block, eth_call);
+
+    action.execute(&mut env).await?;
+
+    let call_results = rx.recv().await.expect("should receive call results");
+
+    for call_result in call_results {
+        assert_eq!(call_result.as_ref(), b"");
+    }
 
     Ok(())
 }

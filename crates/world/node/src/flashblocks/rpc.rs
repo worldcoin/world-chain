@@ -12,36 +12,33 @@ use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use rollup_boost::{ed25519_dalek::VerifyingKey, Authorization};
-use world_chain_builder_flashblocks::{primitives::FlashblocksState, rpc::engine::OpEngineApiExt};
+use world_chain_builder_flashblocks::rpc::engine::OpEngineApiExt;
 
 /// Builder for basic [`OpEngineApiExt`] implementation.
-pub struct WorldChainEngineApiBuilder<EV> {
+pub struct FlashblocksEngineApiBuilder<EV> {
     /// The engine validator builder.
     pub engine_validator_builder: EV,
     /// The flashblocks handler.
     pub flashblocks_handle: Option<FlashblocksHandle>,
-    /// The flashblocks state.
-    pub flashblocks_state: Option<FlashblocksState>,
     /// A watch channel notifier to the jobs generator.
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     /// Verifying key for authorizations.
-    pub verifying_key: VerifyingKey,
+    pub authorizer_vk: VerifyingKey,
 }
 
-impl<EV: Default> Default for WorldChainEngineApiBuilder<EV> {
+impl<EV: Default> Default for FlashblocksEngineApiBuilder<EV> {
     fn default() -> Self {
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
         Self {
             engine_validator_builder: Default::default(),
             flashblocks_handle: None,
-            flashblocks_state: None,
             to_jobs_generator,
-            verifying_key: VerifyingKey::from_bytes(&[0u8; 32]).expect("valid key"),
+            authorizer_vk: VerifyingKey::from_bytes(&[0u8; 32]).expect("valid key"),
         }
     }
 }
 
-impl<N, EV> EngineApiBuilder<N> for WorldChainEngineApiBuilder<EV>
+impl<N, EV> EngineApiBuilder<N> for FlashblocksEngineApiBuilder<EV>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -66,14 +63,9 @@ where
     ) -> eyre::eyre::Result<Self::EngineApi> {
         let Self {
             engine_validator_builder,
-            flashblocks_handle,
-            flashblocks_state,
             to_jobs_generator,
             ..
         } = self;
-
-        let flashblocks_handle = flashblocks_handle.expect("Flashblocks handle is required");
-        let flashblocks_state = flashblocks_state.expect("Flashblocks state is required");
 
         let engine_validator = engine_validator_builder.build(ctx).await?;
 
@@ -100,13 +92,7 @@ where
         );
 
         let op_engine_api = OpEngineApi::new(inner);
-        let op_engine_api_ext = OpEngineApiExt::new(
-            op_engine_api,
-            flashblocks_state,
-            ctx.node.task_executor(),
-            flashblocks_handle.flashblock_stream(),
-            to_jobs_generator,
-        );
+        let op_engine_api_ext = OpEngineApiExt::new(op_engine_api, to_jobs_generator);
 
         Ok(op_engine_api_ext)
     }

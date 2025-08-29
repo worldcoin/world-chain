@@ -1,14 +1,28 @@
+use alloy_eips::eip2718::WithEncoded;
+use alloy_rpc_types_engine::PayloadId;
+use flashblocks_p2p::protocol::error::FlashblocksP2PError;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use futures::StreamExt as _;
+use reth_node_builder::BuilderContext;
+use reth_payload_util::BestPayloadTransactions;
+use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
+use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
-use alloy_eips::{Encodable2718, Typed2718};
+use alloy_eips::eip4895::Withdrawals;
+use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
-use op_alloy_consensus::OpDepositReceipt;
+use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
+use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
+use reth::payload::EthPayloadBuilderAttributes;
+use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
+use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
     StateChangeSource, SystemCaller,
@@ -26,18 +40,29 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
+use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
-use reth_optimism_primitives::{DepositReceipt, OpReceipt, OpTransactionSigned};
+use reth_optimism_node::txpool::OpPooledTx;
+use reth_optimism_node::{
+    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpRethReceiptBuilder,
+};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::{BlockExecutionResult, StateProvider};
+use reth_provider::{
+    BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
+
+use crate::primitives::{Flashblock, Flashblocks};
+use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
@@ -554,5 +579,231 @@ where
 
     fn into_executor(self) -> Self::Executor {
         self.inner.into_executor()
+    }
+}
+
+/// The current state of all known pre confirmations received over the P2P layer
+/// or generated from the payload building job of this node.
+///
+/// The state is flushed when FCU is received with a parent hash that matches the block hash
+/// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
+/// in which case the pre confirmations were not included as part of the canonical chain.
+#[derive(Debug, Clone)]
+pub struct FlashblocksStateExecutor {
+    inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
+    p2p_handle: FlashblocksHandle,
+    da_config: OpDAConfig,
+}
+
+impl Default for FlashblocksStateExecutor {
+    fn default() -> Self {
+        unimplemented!("FlashblocksStateExecutor::new must be used instead")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FlashblocksStateExecutorInner {
+    flashblocks: Option<Flashblocks>,
+    latest_payload: Option<(OpBuiltPayload, u64)>,
+}
+
+impl FlashblocksStateExecutor {
+    /// Creates a new instance of [`FlashblocksStateExecutor`].
+    ///
+    /// This function spawn a task that handles updates. It should only be called once.
+    pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
+        let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
+            flashblocks: None,
+            latest_payload: None,
+        }));
+
+        Self {
+            inner,
+            p2p_handle,
+            da_config,
+        }
+    }
+
+    /// Launches the executor to listen for new flashblocks and build payloads.
+    pub fn launch<Node, P, Tx>(
+        &self,
+        ctx: &BuilderContext<Node>,
+        payload_builder_ctx_builder: P,
+        evm_config: OpEvmConfig,
+    ) where
+        Tx: OpPooledTx,
+        Node: FullNodeTypes,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>
+            + StateProviderFactory
+            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
+        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Tx> + 'static,
+    {
+        let mut stream = self.p2p_handle.flashblock_stream();
+        let this = self.clone();
+        let provider = ctx.provider().clone();
+        let chain_spec = ctx.chain_spec().clone();
+        ctx.task_executor()
+            .spawn_critical("flashblocks executor", async move {
+                while let Some(flashblock) = stream.next().await {
+                    let FlashblocksStateExecutorInner {
+                        ref mut flashblocks,
+                        ref mut latest_payload,
+                        ..
+                    } = *this.inner.write();
+
+                    let flashblock = Flashblock { flashblock };
+                    let (flashblocks, _new_payload) = match flashblocks {
+                        Some(ref mut f) => {
+                            if let Some(latest_payload) = latest_payload {
+                                if latest_payload.0.id() == flashblock.flashblock.payload_id
+                                    && latest_payload.1 >= flashblock.flashblock.index
+                                {
+                                    // Already processed this flashblock
+                                    provider.in_memory_state().set_pending_block(
+                                        latest_payload.0.executed_block().unwrap(),
+                                    );
+                                    continue;
+                                }
+                            }
+
+                            let new_payload = f.push(flashblock.clone()).unwrap();
+                            (f, new_payload)
+                        }
+                        None => {
+                            *flashblocks =
+                                Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                            (flashblocks.as_mut().unwrap(), true)
+                        }
+                    };
+
+                    let flashblock = flashblocks.last();
+
+                    let cancel = CancelOnDrop::default();
+                    let base = flashblocks.base();
+
+                    let transactions = flashblock
+                        .diff
+                        .transactions
+                        .iter()
+                        .map(|b| {
+                            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
+                            eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
+                        })
+                        .collect::<eyre::Result<Vec<_>>>()
+                        .unwrap();
+
+                    let eth_attrs = EthPayloadBuilderAttributes {
+                        id: PayloadId(flashblocks.payload_id().to_owned()),
+                        parent: base.parent_hash,
+                        timestamp: base.timestamp,
+                        suggested_fee_recipient: base.fee_recipient,
+                        prev_randao: base.prev_randao,
+                        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
+                        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+                    };
+
+                    let eip1559 = encode_holocene_extra_data(
+                        Default::default(),
+                        chain_spec.base_fee_params_at_timestamp(base.timestamp),
+                    )
+                    .unwrap();
+
+                    let attributes = OpPayloadBuilderAttributes {
+                        payload_attributes: eth_attrs,
+                        no_tx_pool: false,
+                        transactions: transactions.clone(),
+                        gas_limit: None,
+                        eip_1559_params: Some(eip1559[0..8].try_into().unwrap()),
+                    };
+                    let state_provider = provider.state_by_block_hash(base.parent_hash).unwrap();
+                    let database_provider = provider.database_provider_ro().unwrap();
+                    let sealed_header = database_provider
+                        .sealed_header_by_hash(base.parent_hash)
+                        .unwrap()
+                        .unwrap();
+
+                    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+
+                    let builder_ctx = payload_builder_ctx_builder.build(
+                        evm_config.clone(),
+                        this.da_config.clone(),
+                        chain_spec.clone(),
+                        config,
+                        &cancel,
+                        latest_payload.as_ref().map(|p| p.0.clone()),
+                    );
+
+                    builder_ctx.parent();
+
+                    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+
+                    let outcome = FlashblockBuilder::new(best)
+                        .build(
+                            state_provider,
+                            &builder_ctx,
+                            latest_payload.as_ref().map(|p| p.0.clone()),
+                        )
+                        .unwrap();
+
+                    let payload = match outcome {
+                        BuildOutcomeKind::Better { payload } => payload,
+                        BuildOutcomeKind::Freeze(payload) => payload,
+                        _ => continue,
+                    };
+                    *latest_payload = Some((payload.clone(), flashblock.index));
+
+                    // The default engine api implementation should reset the in memory pending
+                    // state on new_payload.
+                    provider
+                        .in_memory_state()
+                        .set_pending_block(payload.executed_block().unwrap());
+                }
+            });
+    }
+
+    pub fn publish_built_payload(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        built_payload: OpBuiltPayload,
+    ) -> Result<(), FlashblocksP2PError> {
+        let flashblock = authorized_payload.msg().clone();
+
+        self.p2p_handle.publish_new(authorized_payload.clone())?;
+
+        let FlashblocksStateExecutorInner {
+            ref mut flashblocks,
+            ref mut latest_payload,
+            ..
+        } = *self.inner.write();
+
+        let index = flashblock.index;
+        let flashblock = Flashblock { flashblock };
+        let (_flashblocks, _new_payload) = match flashblocks {
+            Some(ref mut f) => {
+                let new_payload = f.push(flashblock.clone()).unwrap();
+                (f, new_payload)
+            }
+            None => {
+                *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                (flashblocks.as_mut().unwrap(), true)
+            }
+        };
+
+        *latest_payload = Some((built_payload, index));
+
+        Ok(())
+    }
+
+    /// Returns a reference to the latest flashblock.
+    pub fn last(&self) -> Option<Flashblock> {
+        self.inner.read().flashblocks.as_ref().map(|f| Flashblock {
+            flashblock: f.last().clone(),
+        })
+    }
+
+    /// Returns a reference to the latest flashblock.
+    pub fn flashblocks(&self) -> Option<Flashblocks> {
+        self.inner.read().flashblocks.clone()
     }
 }

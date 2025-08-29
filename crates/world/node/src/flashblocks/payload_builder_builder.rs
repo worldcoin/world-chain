@@ -9,12 +9,16 @@ use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_provider::{
+    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
+};
 use reth_transaction_pool::BlobStore;
+use world_chain_builder_flashblocks::builder::executor::FlashblocksStateExecutor;
 use world_chain_builder_flashblocks::builder::FlashblocksPayloadBuilder;
 use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
+use world_chain_provider::InMemoryState;
 
 use crate::context::FlashblocksContext;
 use crate::node::WorldChainNode;
@@ -43,6 +47,8 @@ pub struct FlashblocksPayloadBuilderBuilder<Txs = ()> {
     /// Sets the private key of the builder
     /// used for signing the stampBlock transaction
     pub builder_private_key: String,
+
+    pub flashblocks_state: FlashblocksStateExecutor,
 }
 
 impl FlashblocksPayloadBuilderBuilder {
@@ -55,6 +61,7 @@ impl FlashblocksPayloadBuilderBuilder {
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: String,
+        flashblocks_state: FlashblocksStateExecutor,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -64,6 +71,7 @@ impl FlashblocksPayloadBuilderBuilder {
             best_transactions: (),
             builder_private_key,
             da_config: OpDAConfig::default(),
+            flashblocks_state,
         }
     }
 
@@ -88,6 +96,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             pbh_signature_aggregator,
             builder_private_key,
             best_transactions: _,
+            flashblocks_state,
         } = self;
 
         FlashblocksPayloadBuilderBuilder {
@@ -98,6 +107,7 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             pbh_signature_aggregator,
             builder_private_key,
             best_transactions: best,
+            flashblocks_state,
         }
     }
 
@@ -122,29 +132,43 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>
+            + StateProviderFactory
+            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         S: BlobStore + Clone,
         Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
     {
+        let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
+            client: ctx.provider().clone(),
+            pool: pool.clone(),
+            verified_blockspace_capacity: self.verified_blockspace_capacity,
+            pbh_entry_point: self.pbh_entry_point,
+            pbh_signature_aggregator: self.pbh_signature_aggregator,
+            builder_private_key: self
+                .builder_private_key
+                .parse()
+                .context("Failed to parse builder private key")?,
+        };
+
+        self.flashblocks_state
+            .launch::<_, _, WorldChainPooledTransaction>(
+                ctx,
+                ctx_builder.clone(),
+                evm_config.clone(),
+            );
+
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
-            pool: pool.clone(),
+            pool,
             client: ctx.provider().clone(),
             // TODO: Allow overriding
             config: OpBuilderConfig {
                 da_config: self.da_config,
             },
             best_transactions: self.best_transactions.clone(),
-            ctx_builder: WorldChainPayloadBuilderCtxBuilder {
-                client: ctx.provider().clone(),
-                pool,
-                verified_blockspace_capacity: self.verified_blockspace_capacity,
-                pbh_entry_point: self.pbh_entry_point,
-                pbh_signature_aggregator: self.pbh_signature_aggregator,
-                builder_private_key: self
-                    .builder_private_key
-                    .parse()
-                    .context("Failed to parse builder private key")?,
-            },
+            ctx_builder,
         };
 
         Ok(payload_builder)
@@ -156,8 +180,11 @@ impl<Node, S, Txs>
     for FlashblocksPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    <Node as FullNodeTypes>::Provider:
-        StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
+    <Node as FullNodeTypes>::Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        + Clone
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+    Node::Provider: InMemoryState<Primitives = OpPrimitives>,
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
 {

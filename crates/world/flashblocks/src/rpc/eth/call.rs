@@ -1,34 +1,14 @@
-// use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
-use reth_evm::TxEnvFor;
-use reth_optimism_rpc::OpEthApiError;
-use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call, EthCall},
-    FromEvmError, RpcConvert, RpcNodeCore,
-};
+use reth_rpc_eth_api::helpers::{estimate::EstimateCall, Call, EthCall};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, TxEnv = TxEnvFor<N::Evm>>,
-{
-}
+impl<T> EthCall for FlashblocksEthApi<T> where T: EthCall + Clone {}
 
-impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, TxEnv = TxEnvFor<N::Evm>>,
-{
-}
+impl<T> EstimateCall for FlashblocksEthApi<T> where T: EstimateCall + Clone {}
 
-impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
+impl<T> Call for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, TxEnv = TxEnvFor<N::Evm>>,
+    T: Call + Clone,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

@@ -4,24 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-semaphore-rs = { workspace = true, features = ["depth_30"]}
-world-chain-builder-pbh = { workspace = true }
+semaphore-rs.workspace = true
+world-chain-builder-pbh.workspace = true
 
 # Alloy
-alloy-consensus = { workspace = true }
-alloy-network = { workspace = true }
-alloy-primitives = { workspace = true }
-alloy-rlp = { workspace = true }
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # 3rd party
-bytes = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
-eyre = { workspace = true }
-hex = { workspace = true }
-reqwest = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-dotenvy = { workspace = true }
-chrono = { workspace = true }
-rand = { workspace = true }
+bytes.workspace = true
+clap.workspace = true
+eyre.workspace = true
+hex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+dotenvy.workspace = true
+chrono.workspace = true
+rand.workspace = true

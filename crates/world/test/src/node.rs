@@ -1,3 +1,8 @@
+use crate::{
+    utils::{pbh_bundle, pbh_multicall, signer, user_op},
+    PBH_DEV_ENTRYPOINT,
+};
+use crate::{DEV_WORLD_ID, PBH_DEV_SIGNATURE_AGGREGATOR};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
@@ -5,15 +10,11 @@ use alloy_primitives::{
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
 use futures::future::join_all;
-use reth::chainspec::{ChainInfo, MAINNET};
-use reth::transaction_pool::{
-    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
-};
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
     ForkChoiceSubscriptions,
 };
+use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -31,6 +32,10 @@ use reth_provider::{
     StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_transaction_pool::{
+    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
+};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -44,11 +49,6 @@ use std::{
 };
 use tokio::sync::{broadcast, watch};
 use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-use world_chain_builder_test_utils::{
-    utils::{pbh_bundle, pbh_multicall, signer, user_op},
-    PBH_DEV_ENTRYPOINT,
-};
-use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_SIGNATURE_AGGREGATOR};
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
@@ -61,8 +61,8 @@ use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
 use rollup_boost::ed25519_dalek::SigningKey;
 
-use crate::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
-use crate::node::WorldChainNodeConfig;
+use world_chain_builder_node::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
+use world_chain_builder_node::node::WorldChainNodeConfig;
 
 pub fn test_config() -> WorldChainNodeConfig {
     let builder = BuilderArgs {

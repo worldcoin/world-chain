@@ -26,8 +26,9 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 use crate::{
+    builder::executor::FlashblocksStateExecutor,
     payload::job::WorldChainPayloadJob,
-    primitives::{BlockMetaData, Flashblock, FlashblocksState},
+    primitives::{BlockMetaData, Flashblock},
 };
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
@@ -49,7 +50,7 @@ pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: FlashblocksState,
+    flashblocks_state: FlashblocksStateExecutor,
     /// The signing key for the builder
     builder_sk: SigningKey,
 }
@@ -65,7 +66,7 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        flashblocks_state: FlashblocksState,
+        flashblocks_state: FlashblocksStateExecutor,
         builder_sk: SigningKey,
     ) -> Self {
         Self {
@@ -203,6 +204,7 @@ where
             builder: self.builder.clone(),
             authorization,
             p2p_handler: self.p2p_handler.clone(),
+            flashblocks_state: self.flashblocks_state.clone(),
             pre_built_payload: maybe_pre_state,
             block_index: 0,
             builder_signing_key: self.builder_sk.clone(),
@@ -249,10 +251,10 @@ where
         attributes: &<Builder as PayloadBuilder>::Attributes,
     ) -> Result<Option<Builder::BuiltPayload>, PayloadBuilderError> {
         // check for any pending pre state received over p2p
-        let state = self.flashblocks_state.flashblocks();
+        let flashblocks = self.flashblocks_state.flashblocks();
 
-        if !state.0.is_empty() {
-            let block = Flashblock::reduce(state);
+        if let Some(flashblocks) = flashblocks {
+            let block = Flashblock::reduce(flashblocks);
             if let Some(flashblock) = block {
                 if *flashblock.payload_id() == attributes.payload_id().0 {
                     // If we have a pre-confirmed state, we can use it to build the payload

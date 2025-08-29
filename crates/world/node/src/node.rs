@@ -42,7 +42,6 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BlobStore, TransactionPool};
-use reth_trie_db::MerklePatriciaTrie;
 
 use tracing::{debug, info};
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
@@ -244,7 +243,6 @@ where
 impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainNode<T> {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
 }
@@ -317,13 +315,13 @@ where
             )
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                let client = validator.client().clone();
+                let op_tx_validator = OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator =
-                    WorldChainRootValidator::new(validator.client().clone(), world_id)
-                        .expect("failed to initialize root validator");
+                let root_validator = WorldChainRootValidator::new(client, world_id)
+                    .expect("failed to initialize root validator");
 
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
