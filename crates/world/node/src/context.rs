@@ -18,7 +18,7 @@ use reth_node_builder::{
     rpc::BasicEngineValidatorBuilder,
     NodeAdapter, NodeComponentsBuilder,
 };
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
     OpExecutorBuilder, OpNetworkBuilder,
@@ -26,7 +26,7 @@ use reth_optimism_node::{
 use reth_optimism_rpc::OpEthApiBuilder;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization, ExecutionPayloadBaseV1,
+    Authorization,
 };
 
 use world_chain_builder_flashblocks::{
