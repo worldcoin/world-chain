@@ -299,7 +299,6 @@ where
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
     FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
-    // OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<
         N,
         EthApi = OpEthApi<
