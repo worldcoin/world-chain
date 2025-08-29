@@ -1,10 +1,6 @@
-use std::future::Future;
-
-use reth::rpc::compat::RpcReceipt;
 use reth_optimism_rpc::OpEthApiError;
 use reth_provider::StateProviderFactory;
 use reth_rpc_eth_api::{helpers::LoadReceipt, RpcConvert, RpcNodeCore};
-use world_chain_provider::InMemoryState;
 
 use crate::rpc::eth::FlashblocksEthApi;
 

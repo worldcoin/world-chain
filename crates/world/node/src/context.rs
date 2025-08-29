@@ -15,7 +15,7 @@ use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::Flashbl
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
-    rpc::BasicEngineValidatorBuilder,
+    rpc::{BasicEngineValidatorBuilder, RpcAddOns},
     NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
@@ -212,10 +212,37 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        todo!()
-        // self.add_ons_builder()
-        //     .build::<_, _, FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>, _>()
-        //     .with_engine_api(self.engine_api_builder())
+        let engine_api_builder = FlashblocksEngineApiBuilder {
+            engine_validator_builder: Default::default(),
+            flashblocks_handle: Some(self.components_context.flashblocks_handle.clone()),
+            to_jobs_generator: self.components_context.to_jobs_generator.clone(),
+            authorizer_vk: self.components_context.authorizer_vk,
+        };
+        let op_eth_api_builder =
+            OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
+
+        let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(
+            op_eth_api_builder,
+            self.components_context.flashblocks_state.clone(),
+        );
+
+        let rpc_add_ons = RpcAddOns::new(
+            flashblocks_eth_api_builder,
+            Default::default(),
+            engine_api_builder,
+            Default::default(),
+            Default::default(),
+        );
+
+        OpAddOns::new(
+            rpc_add_ons,
+            self.config.da_config.clone(),
+            self.config.args.rollup.sequencer.clone(),
+            Default::default(),
+            Default::default(),
+            false,
+            1_000_000,
+        )
     }
 
     fn ext_context(&self) -> Self::ExtContext {
