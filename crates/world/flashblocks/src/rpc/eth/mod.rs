@@ -13,21 +13,18 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_rpc::{
-    eth::{
-        receipt::OpReceiptConverter, transaction::OpTxInfoMapper, EthApiNodeBackend, OpRpcConvert,
-    },
-    OpEthApi, OpEthApiBuilder, OpEthApiError, SequencerClient,
+    eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper, OpRpcConvert},
+    OpEthApi, OpEthApiBuilder,
 };
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, SignableTxRequest,
+    EthApiTypes, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{ProviderHeader, ProviderTx};
+use reth_storage_api::ProviderHeader;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,

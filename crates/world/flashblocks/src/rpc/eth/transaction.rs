@@ -2,11 +2,7 @@
 
 use crate::rpc::eth::FlashblocksEthApi;
 use alloy_primitives::{Bytes, B256};
-use reth_optimism_rpc::{OpEthApiError, SequencerClient};
-use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    RpcConvert, RpcNodeCore,
-};
+use reth_rpc_eth_api::helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction};
 
 impl<T> EthTransactions for FlashblocksEthApi<T>
 where

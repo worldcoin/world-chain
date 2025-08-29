@@ -1,6 +1,4 @@
-use reth_optimism_rpc::OpEthApiError;
-use reth_provider::StateProviderFactory;
-use reth_rpc_eth_api::{helpers::LoadReceipt, RpcConvert, RpcNodeCore};
+use reth_rpc_eth_api::helpers::LoadReceipt;
 
 use crate::rpc::eth::FlashblocksEthApi;
 
