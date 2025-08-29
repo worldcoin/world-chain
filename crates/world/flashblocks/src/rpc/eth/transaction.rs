@@ -8,10 +8,9 @@ use reth_rpc_eth_api::{
     RpcConvert, RpcNodeCore,
 };
 
-impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
+impl<T> EthTransactions for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    T: EthTransactions + Clone,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
@@ -25,20 +24,4 @@ where
     }
 }
 
-impl<N, Rpc> LoadTransaction for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
-{
-}
-
-impl<N, Rpc> FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
-{
-    /// Returns the [`SequencerClient`] if one is set.
-    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.inner.raw_tx_forwarder()
-    }
-}
+impl<T> LoadTransaction for FlashblocksEthApi<T> where T: LoadTransaction + Clone {}

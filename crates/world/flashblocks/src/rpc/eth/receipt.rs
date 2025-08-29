@@ -4,10 +4,9 @@ use reth_rpc_eth_api::{helpers::LoadReceipt, RpcConvert, RpcNodeCore};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>
+impl<T> LoadReceipt for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore<Provider: StateProviderFactory>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    T: LoadReceipt + Clone,
 {
     // TODO:
     // fn build_transaction_receipt(

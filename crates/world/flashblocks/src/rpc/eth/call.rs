@@ -7,42 +7,21 @@ use reth_rpc_eth_api::{
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
+impl<T> EthCall for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<
-        Primitives = N::Primitives,
-        Error = OpEthApiError,
-        TxEnv = TxEnvFor<N::Evm>,
-        Spec = SpecFor<N::Evm>,
-    >,
+    T: EthCall + Clone,
 {
 }
 
-impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
+impl<T> EstimateCall for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<
-        Primitives = N::Primitives,
-        Error = OpEthApiError,
-        TxEnv = TxEnvFor<N::Evm>,
-        Spec = SpecFor<N::Evm>,
-    >,
+    T: EstimateCall + Clone,
 {
 }
 
-impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
+impl<T> Call for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<
-        Primitives = N::Primitives,
-        Error = OpEthApiError,
-        TxEnv = TxEnvFor<N::Evm>,
-        Spec = SpecFor<N::Evm>,
-    >,
+    T: Call + Clone,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
