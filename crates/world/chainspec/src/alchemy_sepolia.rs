@@ -1,5 +1,3 @@
-use std::sync::{Arc, LazyLock};
-
 use alloy_chains::Chain;
 use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{b256, U256};
@@ -11,6 +9,7 @@ use reth::{
     primitives::SealedHeader,
 };
 use reth_optimism_chainspec::{make_op_genesis_header, OpChainSpec};
+use std::sync::{Arc, LazyLock};
 
 pub const CHAIN_ID: u64 = 69420;
 

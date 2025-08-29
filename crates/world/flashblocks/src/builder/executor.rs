@@ -705,7 +705,7 @@ impl FlashblocksStateExecutor {
 
                     let eip1559 = encode_holocene_extra_data(
                         Default::default(),
-                        chain_spec.base_fee_params_at_block(base.block_number),
+                        chain_spec.base_fee_params_at_timestamp(base.timestamp),
                     )
                     .unwrap();
 

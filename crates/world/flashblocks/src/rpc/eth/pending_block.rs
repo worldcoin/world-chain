@@ -41,4 +41,8 @@ where
     > {
         self.inner.local_pending_block().await
     }
+
+    fn pending_block_kind(&self) -> reth_rpc_eth_types::builder::config::PendingBlockKind {
+        self.inner.pending_block_kind()
+    }
 }
