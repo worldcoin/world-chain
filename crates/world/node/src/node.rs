@@ -123,8 +123,8 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
         > + RethRpcAddOns<
             NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
             EthApi: EthApiTypes,
-            // > + EngineValidatorAddOn<
-            //     NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        > + EngineValidatorAddOn<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         >;
 
     /// Any peripheral context or extensions required by the node.

@@ -3,7 +3,7 @@
 use crate::{
     args::WorldChainArgs,
     flashblocks::{
-        payload_builder_builder::FlashblocksPayloadBuilderBuilder,
+        add_ons::FlashblocksAddOns, payload_builder_builder::FlashblocksPayloadBuilderBuilder,
         rpc::FlashblocksEngineApiBuilder, service_builder::FlashblocksPayloadServiceBuilder,
     },
     node::{
@@ -12,7 +12,6 @@ use crate::{
     },
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
-use reth::rpc::compat::RpcTypes;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
@@ -21,8 +20,8 @@ use reth_node_builder::{
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpAddOnsBuilder, OpConsensusBuilder, OpEngineApiBuilder,
-    OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
+    OpExecutorBuilder, OpNetworkBuilder,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 use rollup_boost::{
@@ -140,10 +139,9 @@ where
 
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
 
-    type AddOns = OpAddOns<
+    type AddOns = FlashblocksAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         FlashblocksEthApiBuilder,
-        // OpEthApiBuilder,
         OpEngineValidatorBuilder,
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
@@ -225,45 +223,6 @@ where
     }
 }
 
-impl FlashblocksContext {
-    fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
-        let Self {
-            config:
-                WorldChainNodeConfig {
-                    args:
-                        WorldChainArgs {
-                            rollup: rollup_args,
-                            ..
-                        },
-                    da_config,
-                },
-            components_context: _,
-        } = self;
-
-        OpAddOnsBuilder::default()
-            .with_sequencer(rollup_args.sequencer.clone())
-            .with_sequencer_headers(rollup_args.sequencer_headers.clone())
-            .with_da_config(da_config.clone())
-            .with_enable_tx_conditional(rollup_args.enable_tx_conditional)
-            .with_min_suggested_priority_fee(rollup_args.min_suggested_priority_fee)
-            .with_historical_rpc(rollup_args.historical_rpc.clone())
-    }
-
-    /// Returns the [`WorldChainEngineApiBuilder`] for the World Chain node.
-    fn engine_api_builder(&self) -> FlashblocksEngineApiBuilder<OpEngineValidatorBuilder> {
-        let Self {
-            components_context, ..
-        } = self;
-
-        FlashblocksEngineApiBuilder {
-            engine_validator_builder: OpEngineValidatorBuilder::default(),
-            flashblocks_handle: Some(components_context.flashblocks_handle.clone()),
-            // flashblocks_state: Some(components_context.flashblocks_state.clone()),
-            to_jobs_generator: components_context.to_jobs_generator.clone(),
-            authorizer_vk: components_context.authorizer_vk,
-        }
-    }
-}
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
