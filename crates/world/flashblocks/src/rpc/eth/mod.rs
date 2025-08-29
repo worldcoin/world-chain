@@ -32,7 +32,6 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use rollup_boost::ExecutionPayloadBaseV1;
 
 use crate::builder::executor::FlashblocksStateExecutor;
 
@@ -292,11 +291,7 @@ impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
 impl<N, NetworkT> EthApiBuilder<N> for FlashblocksEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
-        Evm: ConfigureEvm<
-            NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>
-                                 + From<ExecutionPayloadBaseV1>
-                                 + Unpin,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>> + Unpin>,
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,

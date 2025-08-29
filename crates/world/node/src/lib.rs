@@ -1,6 +1,5 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-pub mod add_ons;
 pub mod args;
 pub mod context;
 pub mod flashblocks;

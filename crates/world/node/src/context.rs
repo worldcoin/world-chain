@@ -3,7 +3,7 @@
 use crate::{
     args::WorldChainArgs,
     flashblocks::{
-        add_ons::FlashblocksAddOns, payload_builder_builder::FlashblocksPayloadBuilderBuilder,
+        payload_builder_builder::FlashblocksPayloadBuilderBuilder,
         rpc::FlashblocksEngineApiBuilder, service_builder::FlashblocksPayloadServiceBuilder,
     },
     node::{
@@ -18,7 +18,7 @@ use reth_node_builder::{
     rpc::BasicEngineValidatorBuilder,
     NodeAdapter, NodeComponentsBuilder,
 };
-use reth_optimism_evm::OpEvmConfig;
+use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_node::{
     args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
     OpExecutorBuilder, OpNetworkBuilder,
@@ -26,7 +26,7 @@ use reth_optimism_node::{
 use reth_optimism_rpc::OpEthApiBuilder;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
+    Authorization, ExecutionPayloadBaseV1,
 };
 
 use world_chain_builder_flashblocks::{
@@ -139,7 +139,7 @@ where
 
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
 
-    type AddOns = FlashblocksAddOns<
+    type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         FlashblocksEthApiBuilder,
         OpEngineValidatorBuilder,

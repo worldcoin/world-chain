@@ -1,4 +1,3 @@
-pub mod add_ons;
 pub mod components;
 pub mod payload_builder_builder;
 pub mod rpc;
