@@ -63,7 +63,7 @@ where
         pool_transaction.inner = pool_transaction.inner.with_conditional(options.clone());
 
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
+        let outcome = self
             .pool()
             .add_transaction(TransactionOrigin::Local, pool_transaction)
             .await
@@ -72,10 +72,10 @@ where
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!( target: "rpc::eth",  "forwarding raw conditional transaction to");
             let _ = client.forward_raw_transaction_conditional(&tx, options).await.inspect_err(|err| {
-                        tracing::debug!(target: "rpc::eth", %err, hash=?*hash, "failed to forward raw conditional transaction");
+                        tracing::debug!(target: "rpc::eth", %err, hash=?*outcome.hash, "failed to forward raw conditional transaction");
                     });
         }
-        Ok(hash)
+        Ok(outcome.hash)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
@@ -84,7 +84,7 @@ where
             OpPooledTransaction::from_pooled(recovered).into();
 
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
+        let outcome = self
             .pool()
             .add_transaction(TransactionOrigin::Local, pool_transaction)
             .await
@@ -93,10 +93,10 @@ where
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to sequencer");
             let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
-                        tracing::debug!(target: "rpc::eth", %err, hash=?*hash, "failed to forward raw transaction");
+                        tracing::debug!(target: "rpc::eth", %err, hash=?*outcome.hash, "failed to forward raw transaction");
                     });
         }
-        Ok(hash)
+        Ok(outcome.hash)
     }
 }
 

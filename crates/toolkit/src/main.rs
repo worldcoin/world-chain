@@ -78,7 +78,7 @@ async fn main() -> eyre::Result<()> {
 
             let encoded_hex = hex::encode(concatenated_bytes);
 
-            println!("{}", encoded_hex);
+            println!("{encoded_hex}");
         }
     }
 

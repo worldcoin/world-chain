@@ -48,6 +48,7 @@ use world_chain_builder_test_utils::{
     utils::{pbh_bundle, pbh_multicall, signer, user_op},
     PBH_DEV_ENTRYPOINT,
 };
+use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_SIGNATURE_AGGREGATOR};
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
@@ -55,6 +56,38 @@ use world_chain_builder_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
+
+use rand::Rng as _;
+use reth_optimism_node::OpDAConfig;
+use rollup_boost::ed25519_dalek::SigningKey;
+
+use crate::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
+use crate::node::WorldChainNodeConfig;
+
+pub fn test_config() -> WorldChainNodeConfig {
+    let builder = BuilderArgs {
+        verified_blockspace_capacity: 70,
+        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+        signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+        world_id: DEV_WORLD_ID,
+        private_key: signer(6).to_bytes().to_string(),
+    };
+
+    let flashblocks = FlashblocksArgs {
+        enabled: true,
+        authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+        builder_sk: SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>()),
+    };
+
+    WorldChainNodeConfig {
+        args: WorldChainArgs {
+            rollup: Default::default(),
+            builder,
+            flashblocks: Some(flashblocks),
+        },
+        da_config: OpDAConfig::default(),
+    }
+}
 
 pub const DEV_CHAIN_ID: u64 = 2151908;
 
@@ -84,6 +117,7 @@ pub async fn raw_pbh_bundle_bytes(
         Some(Bytes::from(encoded)),
         tx_nonce,
         PBH_DEV_ENTRYPOINT,
+        210_000,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();
@@ -113,18 +147,25 @@ pub async fn raw_pbh_multicall_bytes(
         Some(Bytes::from(encoded)),
         tx_nonce,
         PBH_DEV_ENTRYPOINT,
+        210_000,
     );
     let envelope = TransactionTestContext::sign_tx(signer(acc), tx).await;
     let raw_tx = envelope.encoded_2718();
     raw_tx.into()
 }
 
-pub fn tx(chain_id: u64, data: Option<Bytes>, nonce: u64, to: Address) -> TransactionRequest {
+pub fn tx(
+    chain_id: u64,
+    data: Option<Bytes>,
+    nonce: u64,
+    to: Address,
+    gas: u64,
+) -> TransactionRequest {
     TransactionRequest {
         nonce: Some(nonce),
         value: Some(U256::from(100)),
         to: Some(TxKind::Call(to)),
-        gas: Some(210000),
+        gas: Some(gas),
         max_fee_per_gas: Some(20e10 as u128),
         max_priority_fee_per_gas: Some(20e10 as u128),
         chain_id: Some(chain_id),
@@ -204,7 +245,9 @@ impl BlockReader for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 

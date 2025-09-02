@@ -14,6 +14,7 @@ workspace = true
 # world-chain
 world-chain-builder-pool.workspace = true
 world-chain-builder-rpc.workspace = true
+world-chain-builder-flashblocks.workspace = true
 
 # reth
 reth.workspace = true
@@ -24,12 +25,12 @@ reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
+reth-optimism-forks.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 reth-payload-util.workspace = true
-reth-optimism-forks.workspace = true
 
 # revm
 revm.workspace = true
@@ -43,7 +44,6 @@ alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 op-alloy-rpc-types.workspace = true
 alloy-rlp.workspace = true
-op-revm.workspace = true
 
 # misc
 eyre.workspace = true
