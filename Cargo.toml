@@ -18,7 +18,6 @@ members = [
     "crates/world/pbh",
     "crates/world/pool",
     "crates/world/test-utils",
-    "crates/world/chainspec",
     "crates/tests/sepolia",
     "crates/tests/devnet",
 ]
@@ -39,7 +38,6 @@ world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
-world-chain-builder-chainspec = { path = "crates/world/chainspec" }
 world-chain-builder-test-utils = { path = "crates/world/test-utils" }
 world-chain-builder-flashblocks = { path = "crates/world/flashblocks" }
 
