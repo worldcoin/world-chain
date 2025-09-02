@@ -1,7 +1,6 @@
 use clap::Parser;
 use reth_node_builder::NodeHandle;
-use reth_optimism_cli::chainspec::OpChainSpecParser;
-use reth_optimism_cli::Cli;
+use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::OpDAConfig;
 use reth_tracing::tracing::info;
 use world_chain_builder_node::args::NodeContextType;
