@@ -59,7 +59,7 @@ pub mod traits;
 /// Flashblocks Paylod builder
 ///
 /// A payload builder
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: OpEvmConfig,
@@ -73,26 +73,6 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub best_transactions: Txs,
     /// Context builder for the payload.
     pub ctx_builder: CtxBuilder,
-}
-
-impl<Pool, Client, CtxBuilder, Txs> Clone
-    for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
-where
-    Pool: Clone,
-    Client: Clone,
-    Txs: Clone,
-    CtxBuilder: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            evm_config: self.evm_config.clone(),
-            pool: self.pool.clone(),
-            client: self.client.clone(),
-            config: self.config.clone(),
-            best_transactions: self.best_transactions.clone(),
-            ctx_builder: self.ctx_builder.clone(),
-        }
-    }
 }
 
 impl<Pool, Client, CtxBuilder, Txs> FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
