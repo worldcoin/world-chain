@@ -348,7 +348,7 @@ pub mod tests {
         let body = BlockBody::<OpTransactionSigned>::default();
         let block = SealedBlock::seal_slow(Block { header, body });
 
-        // Propogate the block to the root validator
+        // Propagate the block to the root validator
         validator.on_new_head_block(&block);
 
         let ordering = WorldChainOrdering::default();
