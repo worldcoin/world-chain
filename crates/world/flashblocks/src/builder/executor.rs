@@ -8,6 +8,7 @@ use reth_payload_util::BestPayloadTransactions;
 use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
+use tracing::trace;
 use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
@@ -659,6 +660,10 @@ impl FlashblocksStateExecutor {
                                 if latest_payload.0.id() == flashblock.flashblock.payload_id
                                     && latest_payload.1 >= flashblock.flashblock.index
                                 {
+                                    let executed_block = latest_payload.0.executed_block().unwrap();
+                                    let hash = executed_block.block.recovered_block.hash_slow();
+                                    trace!(target: "state_executor", hash = %hash, "setting pending block");
+
                                     // Already processed this flashblock
                                     provider.in_memory_state().set_pending_block(
                                         latest_payload.0.executed_block().unwrap(),

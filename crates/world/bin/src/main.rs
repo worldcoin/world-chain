@@ -6,6 +6,7 @@ use reth_tracing::tracing::info;
 use world_chain_builder_node::args::NodeContextType;
 use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
 use world_chain_builder_node::node::WorldChainNodeConfig;
+use world_chain_builder_node::FlashblocksEthApiExtServer;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -78,6 +79,9 @@ fn main() {
                             let eth_api_ext =
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+
+                            let eth_api = ctx.registry.eth_api().clone();
+                            ctx.modules.replace_configured(eth_api.into_rpc())?;
                             Ok(())
                         })
                         .launch()

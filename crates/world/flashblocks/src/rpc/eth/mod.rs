@@ -2,6 +2,7 @@
 
 pub mod receipt;
 pub mod transaction;
+pub mod core;
 
 mod block;
 mod call;
