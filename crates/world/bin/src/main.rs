@@ -1,9 +1,8 @@
 use clap::Parser;
 use reth_node_builder::NodeHandle;
-use reth_optimism_cli::Cli;
+use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::OpDAConfig;
 use reth_tracing::tracing::info;
-use world_chain_builder_chainspec::spec::WorldChainChainSpecParser;
 use world_chain_builder_node::args::NodeContextType;
 use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
 use world_chain_builder_node::node::WorldChainNodeConfig;
@@ -33,7 +32,7 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<WorldChainChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
+        Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
             let node_config = WorldChainNodeConfig {
                 args: args.clone(),

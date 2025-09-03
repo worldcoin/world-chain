@@ -14,7 +14,6 @@ workspace = true
 # world-chain
 world-chain-builder-node.workspace = true
 world-chain-builder-rpc.workspace = true
-world-chain-builder-chainspec.workspace = true
 
 rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
