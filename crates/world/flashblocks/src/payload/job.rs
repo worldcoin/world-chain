@@ -44,7 +44,7 @@ use crate::{
 /// is marked as frozen: [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional
 /// payloads will be built and this future will wait to be resolved: [`PayloadJob::resolve`] or
 /// terminated if the deadline is reached.
-pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
+pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// The configuration for how the payload will be created.
     pub(crate) config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
@@ -86,7 +86,7 @@ pub struct WorldChainPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) builder_signing_key: SigningKey,
 }
 
-impl<Tasks, Builder> WorldChainPayloadJob<Tasks, Builder>
+impl<Tasks, Builder> FlashblocksPayloadJob<Tasks, Builder>
 where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<
@@ -169,7 +169,7 @@ where
     }
 }
 
-impl<Tasks, Builder> Future for WorldChainPayloadJob<Tasks, Builder>
+impl<Tasks, Builder> Future for FlashblocksPayloadJob<Tasks, Builder>
 where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<
@@ -293,7 +293,7 @@ where
     }
 }
 
-impl<Tasks, Builder> PayloadJob for WorldChainPayloadJob<Tasks, Builder>
+impl<Tasks, Builder> PayloadJob for FlashblocksPayloadJob<Tasks, Builder>
 where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<

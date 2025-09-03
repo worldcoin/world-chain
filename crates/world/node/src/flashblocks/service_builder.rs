@@ -10,7 +10,7 @@ use reth_transaction_pool::TransactionPool;
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor,
-    payload::generator::{FlashblocksJobGeneratorConfig, WorldChainPayloadJobGenerator},
+    payload::generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
 };
 
 use crate::{context::FlashblocksContext, node::WorldChainNode};
@@ -66,7 +66,7 @@ where
             .interval(conf.interval)
             .deadline(conf.deadline);
 
-        let payload_generator = WorldChainPayloadJobGenerator::with_builder(
+        let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
             ctx.task_executor().clone(),
             payload_job_config,
