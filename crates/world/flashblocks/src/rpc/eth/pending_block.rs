@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use reth_primitives::RecoveredBlock;
-use reth_rpc_eth_api::helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking};
+use reth_rpc_eth_api::helpers::{
+    pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking,
+};
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{ProviderBlock, ProviderReceipt};
 
