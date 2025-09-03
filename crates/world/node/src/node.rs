@@ -464,47 +464,6 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
             builder_private_key,
         }
     }
-
-    /// A helper method to initialize [`WorldChainPayloadBuilder`] with the
-    /// given EVM config.
-    pub fn build<Node, S>(
-        &self,
-        evm_config: OpEvmConfig,
-        ctx: &BuilderContext<Node>,
-        pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<WorldChainPayloadBuilder<Node::Provider, S, Txs>>
-    where
-        Node: FullNodeTypes<
-            Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
-            Types: NodeTypes<
-                Primitives = OpPrimitives,
-                Payload: PayloadTypes<
-                    BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
-                    PayloadAttributes = OpPayloadAttributes,
-                    PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
-                >,
-            >,
-        >,
-        S: BlobStore + Clone,
-        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-    {
-        let payload_builder = WorldChainPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
-            evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
-            },
-            self.compute_pending_block,
-            self.verified_blockspace_capacity,
-            self.pbh_entry_point,
-            self.pbh_signature_aggregator,
-            self.builder_private_key.clone(),
-        )
-        .with_transactions(self.best_transactions.clone());
-
-        Ok(payload_builder)
-    }
 }
 
 impl<Node, S, Txs>
@@ -534,6 +493,19 @@ where
         pool: WorldChainTransactionPool<Node::Provider, S>,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
+        Ok(WorldChainPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
+            evm_config,
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+            },
+            self.compute_pending_block,
+            self.verified_blockspace_capacity,
+            self.pbh_entry_point,
+            self.pbh_signature_aggregator,
+            self.builder_private_key.clone(),
+        )
+        .with_transactions(self.best_transactions.clone()))
     }
 }
