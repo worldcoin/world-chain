@@ -288,7 +288,7 @@ where
     }
 }
 
-/// Settings for the [`FlashblocksJobGeneratorConfig`]
+/// Settings for the [`WorldChainPayloadJobGenerator`]
 #[derive(Debug, Clone)]
 pub struct FlashblocksJobGeneratorConfig {
     /// The interval at which the job should build a new payload after the last.
