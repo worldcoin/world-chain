@@ -3,3 +3,4 @@ description: |-
   This is a Kurtosis package for deploying the World Chain Builder in an Optimism Rollup
 replace:
   github.com/ethpandaops/optimism-package: github.com/0xOsiris/optimism-package@ee1b8a656ec8cdad31bf6360af0a32d0f52bf453
+  github.com/ethpandaops/ethereum-package: github.com/ethpandaops/ethereum-package@0e1548a638fde573fa77840441c4a2cf149ef3d6
