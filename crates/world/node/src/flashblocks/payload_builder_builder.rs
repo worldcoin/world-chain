@@ -1,9 +1,8 @@
 use alloy_primitives::Address;
 use eyre::eyre::Context;
 use reth::builder::components::PayloadBuilderBuilder;
-use reth::builder::{BuilderContext, FullNodeTypes, NodeTypes};
+use reth::builder::{BuilderContext, FullNodeTypes};
 use reth::chainspec::EthChainSpec;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
@@ -110,36 +109,37 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
             flashblocks_state,
         }
     }
+}
 
-    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
-    /// given EVM config.
-    #[allow(clippy::type_complexity)]
-    pub fn build<Node, S>(
+impl<Node, S, Txs>
+    PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>, OpEvmConfig>
+    for FlashblocksPayloadBuilderBuilder<Txs>
+where
+    Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
+    <Node as FullNodeTypes>::Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        + Clone
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+    Node::Provider: InMemoryState<Primitives = OpPrimitives>,
+    S: BlobStore + Clone,
+    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
+{
+    type PayloadBuilder = FlashblocksPayloadBuilder<
+        WorldChainTransactionPool<Node::Provider, S>,
+        Node::Provider,
+        WorldChainPayloadBuilderCtxBuilder<
+            Node::Provider,
+            WorldChainTransactionPool<Node::Provider, S>,
+        >,
+        Txs,
+    >;
+
+    async fn build_payload_builder(
         self,
-        evm_config: OpEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<
-        FlashblocksPayloadBuilder<
-            WorldChainTransactionPool<Node::Provider, S>,
-            Node::Provider,
-            WorldChainPayloadBuilderCtxBuilder<
-                Node::Provider,
-                WorldChainTransactionPool<Node::Provider, S>,
-            >,
-            Txs,
-        >,
-    >
-    where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-
-        Node::Provider: InMemoryState<Primitives = OpPrimitives>
-            + StateProviderFactory
-            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
-        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        S: BlobStore + Clone,
-        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-    {
+        evm_config: OpEvmConfig,
+    ) -> eyre::Result<Self::PayloadBuilder> {
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
             client: ctx.provider().clone(),
             pool: pool.clone(),
@@ -172,38 +172,5 @@ impl<Txs: OpPayloadTransactions<WorldChainPooledTransaction>>
         };
 
         Ok(payload_builder)
-    }
-}
-
-impl<Node, S, Txs>
-    PayloadBuilderBuilder<Node, WorldChainTransactionPool<Node::Provider, S>, OpEvmConfig>
-    for FlashblocksPayloadBuilderBuilder<Txs>
-where
-    Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    <Node as FullNodeTypes>::Provider: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
-        + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
-    Node::Provider: InMemoryState<Primitives = OpPrimitives>,
-    S: BlobStore + Clone,
-    Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-{
-    type PayloadBuilder = FlashblocksPayloadBuilder<
-        WorldChainTransactionPool<Node::Provider, S>,
-        Node::Provider,
-        WorldChainPayloadBuilderCtxBuilder<
-            Node::Provider,
-            WorldChainTransactionPool<Node::Provider, S>,
-        >,
-        Txs,
-    >;
-
-    async fn build_payload_builder(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: WorldChainTransactionPool<Node::Provider, S>,
-        evm_config: OpEvmConfig,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
     }
 }
