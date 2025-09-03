@@ -1,9 +1,9 @@
 use crate::{
+    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
     builder::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
-    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
 use alloy_consensus::Transaction;
@@ -16,15 +16,15 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    revm::{database::StateProviderDatabase, State},
+    revm::{State, database::StateProviderDatabase},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
+    ConfigureEvm, Database,
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
-    ConfigureEvm,
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
@@ -33,10 +33,10 @@ use tracing::error;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+    OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
 };
 use reth_optimism_payload_builder::{
-    builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
+    OpAttributes, builder::ExecutionInfo, config::OpBuilderConfig,
 };
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -44,7 +44,9 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_provider::{
+    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+};
 
 use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -100,7 +102,7 @@ where
     {
         let BuildArguments {
             config,
-            cached_reads,
+            mut cached_reads,
             cancel,
             best_payload,
         } = args;
@@ -117,11 +119,17 @@ where
         let builder = FlashblockBuilder::new(best);
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
 
+        let db = StateProviderDatabase::new(&state_provider);
         if ctx.attributes().no_tx_pool {
-            builder.build(&state_provider, &ctx, best_payload.clone())
+            builder.build(db, &state_provider, &ctx, best_payload.clone())
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(&state_provider, &ctx, best_payload)
+            builder.build(
+                cached_reads.as_db_mut(db),
+                &state_provider,
+                &ctx,
+                best_payload,
+            )
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -218,6 +226,7 @@ where
     /// Builds the payload on top of the state.
     pub fn build<Ctx>(
         self,
+        db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
         best_payload: Option<OpBuiltPayload>,
@@ -226,10 +235,10 @@ where
         Txs: PayloadTransactions,
         Txs::Transaction: OpPooledTx,
         Ctx: PayloadBuilderCtx<
-            Evm = OpEvmConfig,
-            Transaction = Txs::Transaction,
-            ChainSpec = OpChainSpec,
-        >,
+                Evm = OpEvmConfig,
+                Transaction = Txs::Transaction,
+                ChainSpec = OpChainSpec,
+            >,
     {
         let Self { best } = self;
         let span = span!(
@@ -242,7 +251,7 @@ where
 
         debug!(target: "payload_builder", "building new payload");
 
-        let state = StateProviderDatabase::new(&state_provider);
+        // let state = StateProviderDatabase::new(&state_provider);
 
         // 1. Prepare the db
         let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
@@ -295,7 +304,7 @@ where
         let bundle_is_empty = bundle.is_empty();
 
         let mut state = State::builder()
-            .with_database(state)
+            .with_database(db)
             .with_bundle_prestate(bundle)
             .with_bundle_update()
             .build();
@@ -439,10 +448,10 @@ where
     where
         Tx: PoolTransaction + OpPooledTx,
         N: NodePrimitives<
-            Block = alloy_consensus::Block<OpTransactionSigned>,
-            BlockHeader = alloy_consensus::Header,
-            Receipt = OpReceipt,
-        >,
+                Block = alloy_consensus::Block<OpTransactionSigned>,
+                BlockHeader = alloy_consensus::Header,
+                Receipt = OpReceipt,
+            >,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,

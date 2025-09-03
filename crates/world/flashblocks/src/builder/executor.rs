@@ -3,6 +3,7 @@ use alloy_rpc_types_engine::PayloadId;
 use flashblocks_p2p::protocol::error::FlashblocksP2PError;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use futures::StreamExt as _;
+use reth::revm::database::StateProviderDatabase;
 use reth_node_builder::BuilderContext;
 use reth_payload_util::BestPayloadTransactions;
 use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
@@ -15,13 +16,13 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
-use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
+use alloy_primitives::{Address, B256, Bytes, address, b256, hex};
+use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
-use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::State;
+use reth::revm::cancelled::CancelOnDrop;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
@@ -36,8 +37,8 @@ use reth_evm::op_revm::transaction::deposit::DEPOSIT_TRANSACTION_TYPE;
 use reth_evm::op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::state_change::{balance_increment_state, post_block_balance_increments};
 use reth_evm::{
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
+    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
 };
 use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
@@ -49,17 +50,17 @@ use reth_optimism_node::{
     OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
+use reth_primitives::{SealedHeader, transaction::SignedTransaction};
 use reth_provider::{
     BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
     StateProviderFactory,
 };
+use revm::DatabaseCommit;
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
-use revm::DatabaseCommit;
 
 use crate::primitives::{Flashblock, Flashblocks};
 use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
@@ -72,7 +73,9 @@ const CREATE_2_DEPLOYER_CODEHASH: B256 =
     b256!("0xb0550b5b431e30d38000efb7107aaa0ade03d48a7198a140edda9d27134468b2");
 
 /// The raw bytecode of the create2 deployer contract.
-const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!("6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033");
+const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!(
+    "6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033"
+);
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks.
 #[derive(Debug)]
@@ -100,9 +103,9 @@ impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-    >,
+            DB = &'db mut State<DB>,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks + Clone,
 {
@@ -146,9 +149,9 @@ impl<'db, DB, E, R, Spec> BlockExecutor for FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-    >,
+            DB = &'db mut State<DB>,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -458,10 +461,10 @@ impl FlashblocksBlockAssembler {
     /// Builds a block for `input` without any bounds on header `H`.
     pub fn assemble_block<
         F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = OpBlockExecutionCtx,
-            Transaction: SignedTransaction,
-            Receipt: Receipt + DepositReceipt,
-        >,
+                ExecutionCtx<'a> = OpBlockExecutionCtx,
+                Transaction: SignedTransaction,
+                Receipt: Receipt + DepositReceipt,
+            >,
         H,
     >(
         &self,
@@ -482,10 +485,10 @@ impl Clone for FlashblocksBlockAssembler {
 impl<F> BlockAssembler<F> for FlashblocksBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
 {
     type Block = Block<F::Transaction>;
 
@@ -533,17 +536,17 @@ impl<'a, DB, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-    >,
+            DB = &'a mut State<DB>,
+            Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+        >,
 {
     type Primitives = N;
     type Executor = FlashblocksBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
@@ -738,9 +741,11 @@ impl FlashblocksStateExecutor {
 
                     let best = |_| BestPayloadTransactions::new(vec![].into_iter());
 
+                    let db = StateProviderDatabase::new(&state_provider);
                     let outcome = FlashblockBuilder::new(best)
                         .build(
-                            state_provider,
+                            db,
+                            &state_provider,
                             &builder_ctx,
                             latest_payload.as_ref().map(|p| p.0.clone()),
                         )
