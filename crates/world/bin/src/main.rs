@@ -2,11 +2,11 @@ use clap::Parser;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::OpDAConfig;
+use reth_rpc_eth_api::core::EthApiServer;
 use reth_tracing::tracing::info;
 use world_chain_builder_node::args::NodeContextType;
 use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
 use world_chain_builder_node::node::WorldChainNodeConfig;
-use world_chain_builder_node::FlashblocksEthApiExtServer;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -80,7 +80,7 @@ fn main() {
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
 
-                            let eth_api = ctx.registry.eth_api().clone();
+                            let eth_api = ctx.registry.eth_api().clone(); // Can I clone here?
                             ctx.modules.replace_configured(eth_api.into_rpc())?;
                             Ok(())
                         })

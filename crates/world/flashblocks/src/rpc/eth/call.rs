@@ -2,13 +2,27 @@ use reth_rpc_eth_api::helpers::{estimate::EstimateCall, Call, EthCall};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<T> EthCall for FlashblocksEthApi<T> where T: EthCall + Clone {}
-
-impl<T> EstimateCall for FlashblocksEthApi<T> where T: EstimateCall + Clone {}
-
-impl<T> Call for FlashblocksEthApi<T>
+impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
 where
-    T: Call + Clone,
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: EthCall + Clone,
+{
+}
+
+impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
+where
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: EstimateCall + Clone,
+{
+}
+
+impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
+where
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: Call + Clone,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

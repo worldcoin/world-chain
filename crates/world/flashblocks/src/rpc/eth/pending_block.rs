@@ -3,21 +3,28 @@
 use std::sync::Arc;
 
 use reth_primitives::RecoveredBlock;
-use reth_rpc_eth_api::helpers::{
-    pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking,
+use reth_rpc_eth_api::{
+    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
+    RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{ProviderBlock, ProviderReceipt};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<T> LoadPendingBlock for FlashblocksEthApi<T>
+impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
 where
-    T: LoadPendingBlock + Clone,
-    T: SpawnBlocking,
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: LoadPendingBlock + Clone,
+    crate::rpc::eth::OpEthApi<N, Rpc>: SpawnBlocking,
 {
     #[inline]
-    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<T::Primitives>>> {
+    fn pending_block(
+        &self,
+    ) -> &tokio::sync::Mutex<
+        Option<PendingBlock<<crate::rpc::eth::OpEthApi<N, Rpc> as RpcNodeCore>::Primitives>>,
+    > {
         self.inner.pending_block()
     }
 

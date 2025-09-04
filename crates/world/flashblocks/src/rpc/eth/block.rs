@@ -4,6 +4,18 @@ use reth_rpc_eth_api::helpers::{EthBlocks, LoadBlock};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<T> EthBlocks for FlashblocksEthApi<T> where T: EthBlocks + Clone {}
+impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
+where
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: EthBlocks + Clone,
+{
+}
 
-impl<T> LoadBlock for FlashblocksEthApi<T> where T: LoadBlock + Clone {}
+impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
+where
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: LoadBlock + Clone,
+{
+}
