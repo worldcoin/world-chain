@@ -293,6 +293,7 @@ where
 #[cfg(test)]
 pub mod tests {
     use alloy_consensus::{Block, Header};
+    use alloy_primitives::address;
     use alloy_primitives::Address;
     use alloy_sol_types::SolCall;
     use reth::transaction_pool::blobstore::InMemoryBlobStore;
@@ -301,18 +302,61 @@ pub mod tests {
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_builder_pbh::date_marker::DateMarker;
     use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
-    use world_chain_builder_test_utils::utils::{
+    use world_chain_test::utils::{
         account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE,
     };
-    use world_chain_builder_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
+    use world_chain_test::PBH_DEV_ENTRYPOINT;
 
-    use crate::mock::{ExtendedAccount, MockEthProvider};
+    /// Devnet World ID for testing
+    const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
+
     use crate::ordering::WorldChainOrdering;
     use crate::root::LATEST_ROOT_SLOT;
-    use crate::test_utils::world_chain_validator;
     use crate::tx::WorldChainPooledTransaction;
+    use world_chain_test::mock::{ExtendedAccount, MockEthProvider};
 
     use super::WorldChainTransactionValidator;
+
+    /// Test constants
+    const PBH_DEV_SIGNATURE_AGGREGATOR: Address =
+        address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9");
+
+    /// Create a World Chain validator for testing
+    fn world_chain_validator(
+    ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+        use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
+        use crate::root::WorldChainRootValidator;
+        use reth_optimism_node::txpool::OpTransactionValidator;
+        use reth_transaction_pool::blobstore::InMemoryBlobStore;
+        use reth_transaction_pool::validate::EthTransactionValidatorBuilder;
+        use revm_primitives::U256;
+
+        let client = MockEthProvider::default();
+
+        let validator = EthTransactionValidatorBuilder::new(client.clone())
+            .no_shanghai()
+            .no_cancun()
+            .build(InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator).require_l1_data_gas_fee(false);
+        let root_validator = WorldChainRootValidator::new(client, DEV_WORLD_ID).unwrap();
+        validator.client().add_account(
+            PBH_DEV_ENTRYPOINT,
+            ExtendedAccount::new(0, alloy_primitives::U256::ZERO).extend_storage(vec![
+                (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000)),
+                (
+                    PBH_NONCE_LIMIT_SLOT.into(),
+                    ((MAX_U16 - U256::from(1)) << U256::from(160)),
+                ),
+            ]),
+        );
+        WorldChainTransactionValidator::new(
+            validator,
+            root_validator,
+            PBH_DEV_ENTRYPOINT,
+            PBH_DEV_SIGNATURE_AGGREGATOR,
+        )
+        .expect("failed to create world chain validator")
+    }
 
     async fn setup() -> Pool<
         WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>,
@@ -325,7 +369,7 @@ pub mod tests {
         for acc in 0..10 {
             let account_address = account(acc);
 
-            validator.inner.client().add_account(
+            validator.inner().client().add_account(
                 account_address,
                 ExtendedAccount::new(0, alloy_primitives::U256::MAX),
             );
@@ -335,7 +379,7 @@ pub mod tests {
         let root = TREE.root();
 
         // Insert a world id root into the OpWorldId Account
-        validator.inner.client().add_account(
+        validator.inner().client().add_account(
             DEV_WORLD_ID,
             ExtendedAccount::new(0, alloy_primitives::U256::ZERO)
                 .extend_storage(vec![(LATEST_ROOT_SLOT.into(), root)]),

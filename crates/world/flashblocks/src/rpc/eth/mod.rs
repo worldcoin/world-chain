@@ -10,26 +10,27 @@ mod pending_block;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, HeaderTy};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_rpc::{
-    eth::{EthApiNodeBackend, OpRpcConvert},
-    OpEthApi, OpEthApiBuilder, OpEthApiError, SequencerClient,
+    eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper, OpRpcConvert},
+    OpEthApi, OpEthApiBuilder,
 };
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
         EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
-    SignableTxRequest,
+    EthApiTypes, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{ProviderHeader, ProviderTx};
+use reth_storage_api::ProviderHeader;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
+
+use crate::builder::executor::FlashblocksStateExecutor;
 
 /// Flashblocks `Eth` API implementation.
 ///
@@ -40,64 +41,45 @@ use reth_tasks::{
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
-    /// Gateway to node's core components.
-    inner: OpEthApi<N, Rpc>,
+#[derive(Clone)]
+pub struct FlashblocksEthApi<T>
+where
+    T: Clone,
+{
+    inner: T,
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> Clone for FlashblocksEthApi<N, Rpc> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<N: RpcNodeCore, Rpc: RpcConvert> FlashblocksEthApi<N, Rpc> {
-    /// Creates a new `OpEthApi`.
-    pub fn new(inner: OpEthApi<N, Rpc>) -> Self {
+impl<T> FlashblocksEthApi<T>
+where
+    T: Clone,
+{
+    pub fn new(inner: T) -> Self {
         Self { inner }
     }
-
-    /// Returns a reference to the [`EthApiNodeBackend`].
-    pub fn eth_api(&self) -> &EthApiNodeBackend<N, Rpc> {
-        self.inner.eth_api()
-    }
-    /// Returns the configured sequencer client, if any.
-    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
-        self.inner.sequencer_client()
-    }
-
-    // /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
-    // pub const fn builder() -> FlashblocksEthApiBuilder<Rpc> {
-    //     FlashblocksEthApiBuilder::new()
-    // }
 }
 
-impl<N, Rpc> EthApiTypes for FlashblocksEthApi<N, Rpc>
+impl<T> EthApiTypes for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: EthApiTypes,
 {
-    type Error = OpEthApiError;
-    type NetworkTypes = Rpc::Network;
-    type RpcConvert = Rpc;
+    type Error = T::Error;
+    type NetworkTypes = T::NetworkTypes;
+    type RpcConvert = T::RpcConvert;
 
     fn tx_resp_builder(&self) -> &Self::RpcConvert {
         self.inner.tx_resp_builder()
     }
 }
 
-impl<N, Rpc> RpcNodeCore for FlashblocksEthApi<N, Rpc>
+impl<T> RpcNodeCore for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: RpcNodeCore,
 {
-    type Primitives = N::Primitives;
-    type Provider = N::Provider;
-    type Pool = N::Pool;
-    type Evm = N::Evm;
-    type Network = N::Network;
+    type Primitives = T::Primitives;
+    type Provider = T::Provider;
+    type Pool = T::Pool;
+    type Evm = T::Evm;
+    type Network = T::Network;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
@@ -120,24 +102,22 @@ where
     }
 }
 
-impl<N, Rpc> RpcNodeCoreExt for FlashblocksEthApi<N, Rpc>
+impl<T> RpcNodeCoreExt for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: RpcNodeCoreExt,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache<N::Primitives> {
+    fn cache(&self) -> &EthStateCache<T::Primitives> {
         self.inner.cache()
     }
 }
 
-impl<N, Rpc> EthApiSpec for FlashblocksEthApi<N, Rpc>
+impl<T> EthApiSpec for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: EthApiSpec,
 {
-    type Transaction = ProviderTx<Self::Provider>;
-    type Rpc = Rpc::Network;
+    type Transaction = T::Transaction;
+    type Rpc = T::Rpc;
 
     #[inline]
     fn starting_block(&self) -> U256 {
@@ -150,10 +130,9 @@ where
     }
 }
 
-impl<N, Rpc> SpawnBlocking for FlashblocksEthApi<N, Rpc>
+impl<T> SpawnBlocking for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: SpawnBlocking,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -171,11 +150,9 @@ where
     }
 }
 
-impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
+impl<T> LoadFee for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    T: LoadFee,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
@@ -183,7 +160,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<T::Provider>> {
         self.inner.fee_history_cache()
     }
 
@@ -192,17 +169,11 @@ where
     }
 }
 
-impl<N, Rpc> LoadState for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
-{
-}
+impl<T> LoadState for FlashblocksEthApi<T> where T: LoadState + Clone + SpawnBlocking {}
 
-impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
+impl<T> EthState for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: EthState + Clone,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -210,67 +181,86 @@ where
     }
 }
 
-impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
-{
-}
+impl<T> EthFees for FlashblocksEthApi<T> where T: EthFees + Clone {}
 
-impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
-{
-}
+impl<T> Trace for FlashblocksEthApi<T> where T: Trace + Clone + SpawnBlocking {}
 
-impl<N, Rpc> AddDevSigners for FlashblocksEthApi<N, Rpc>
+impl<T> AddDevSigners for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<
-        Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
-    >,
+    T: AddDevSigners + Clone,
 {
     fn with_dev_accounts(&self) {
         self.inner.with_dev_accounts()
     }
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> std::fmt::Debug for FlashblocksEthApi<N, Rpc> {
+impl<T> std::fmt::Debug for FlashblocksEthApi<T>
+where
+    T: Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlashblocksEthApi").finish_non_exhaustive()
     }
 }
 
 /// Builds [`OpEthApi`] for Optimism.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
+    state_executor: FlashblocksStateExecutor,
+}
+
+impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
+    fn default() -> Self {
+        Self {
+            inner: OpEthApiBuilder::default(),
+            state_executor: FlashblocksStateExecutor::default(),
+        }
+    }
 }
 
 impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
-    pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
-        Self { inner }
+    pub const fn new(
+        inner: OpEthApiBuilder<NetworkT>,
+        state_executor: FlashblocksStateExecutor,
+    ) -> Self {
+        Self {
+            inner,
+            state_executor,
+        }
     }
 }
 
 impl<N, NetworkT> EthApiBuilder<N> for FlashblocksEthApiBuilder<NetworkT>
 where
-    N: FullNodeComponents<Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>>,
-    NetworkT: RpcTypes + Default,
+    N: FullNodeComponents<
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>> + Unpin>,
+    >,
+    NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
-    FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
-        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+    FlashblocksEthApi<OpEthApi<N, OpRpcConvert<N, NetworkT>>>:
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<
+        N,
+        EthApi = OpEthApi<
+            N,
+            RpcConverter<
+                NetworkT,
+                <N as FullNodeComponents>::Evm,
+                OpReceiptConverter<<N as FullNodeTypes>::Provider>,
+                (),
+                OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
+            >,
+        >,
+    >,
 {
-    type EthApi = FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>;
+    type EthApi = FlashblocksEthApi<OpEthApi<N, OpRpcConvert<N, NetworkT>>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let inner = self.inner.build_eth_api(ctx).await;
-        Ok(FlashblocksEthApi::new(inner?))
+        let inner = self.inner.build_eth_api(ctx).await?;
+        Ok(FlashblocksEthApi::new(inner))
     }
 }

@@ -6,8 +6,8 @@ use reth_provider::providers::BlockchainProvider;
 use world_chain_builder_node::{
     context::{BasicContext, FlashblocksContext},
     node::WorldChainNode,
-    test_utils::test_config,
 };
+use world_chain_test::node::test_config;
 
 #[test]
 fn test_basic_flashblocks_setup() {

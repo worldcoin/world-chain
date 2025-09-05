@@ -2,25 +2,22 @@
 
 use std::sync::Arc;
 
-use reth_optimism_rpc::OpEthApiError;
 use reth_primitives::RecoveredBlock;
-use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
-    FromEvmError, RpcConvert, RpcNodeCore,
+use reth_rpc_eth_api::helpers::{
+    pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{ProviderBlock, ProviderReceipt};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
+impl<T> LoadPendingBlock for FlashblocksEthApi<T>
 where
-    N: RpcNodeCore,
-    OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    T: LoadPendingBlock + Clone,
+    T: SpawnBlocking,
 {
     #[inline]
-    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<N::Primitives>>> {
+    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<T::Primitives>>> {
         self.inner.pending_block()
     }
 
@@ -40,5 +37,9 @@ where
         Self::Error,
     > {
         self.inner.local_pending_block().await
+    }
+
+    fn pending_block_kind(&self) -> reth_rpc_eth_types::builder::config::PendingBlockKind {
+        self.inner.pending_block_kind()
     }
 }

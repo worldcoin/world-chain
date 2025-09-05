@@ -387,7 +387,7 @@ where
 {
     type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
 
-    fn build<Txs>(
+    fn build(
         &self,
         evm_config: OpEvmConfig,
         da_config: OpDAConfig,

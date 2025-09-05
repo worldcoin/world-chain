@@ -42,7 +42,6 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BlobStore, TransactionPool};
-use reth_trie_db::MerklePatriciaTrie;
 
 use tracing::{debug, info};
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
@@ -244,7 +243,6 @@ where
 impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainNode<T> {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
 }
@@ -317,13 +315,13 @@ where
             )
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                let client = validator.client().clone();
+                let op_tx_validator = OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator =
-                    WorldChainRootValidator::new(validator.client().clone(), world_id)
-                        .expect("failed to initialize root validator");
+                let root_validator = WorldChainRootValidator::new(client, world_id)
+                    .expect("failed to initialize root validator");
 
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
@@ -466,47 +464,6 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
             builder_private_key,
         }
     }
-
-    /// A helper method to initialize [`WorldChainPayloadBuilder`] with the
-    /// given EVM config.
-    pub fn build<Node, S>(
-        &self,
-        evm_config: OpEvmConfig,
-        ctx: &BuilderContext<Node>,
-        pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<WorldChainPayloadBuilder<Node::Provider, S, Txs>>
-    where
-        Node: FullNodeTypes<
-            Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
-            Types: NodeTypes<
-                Primitives = OpPrimitives,
-                Payload: PayloadTypes<
-                    BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
-                    PayloadAttributes = OpPayloadAttributes,
-                    PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
-                >,
-            >,
-        >,
-        S: BlobStore + Clone,
-        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-    {
-        let payload_builder = WorldChainPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
-            evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
-            },
-            self.compute_pending_block,
-            self.verified_blockspace_capacity,
-            self.pbh_entry_point,
-            self.pbh_signature_aggregator,
-            self.builder_private_key.clone(),
-        )
-        .with_transactions(self.best_transactions.clone());
-
-        Ok(payload_builder)
-    }
 }
 
 impl<Node, S, Txs>
@@ -536,6 +493,19 @@ where
         pool: WorldChainTransactionPool<Node::Provider, S>,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
+        Ok(WorldChainPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
+            evm_config,
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+            },
+            self.compute_pending_block,
+            self.verified_blockspace_capacity,
+            self.pbh_entry_point,
+            self.pbh_signature_aggregator,
+            self.builder_private_key.clone(),
+        )
+        .with_transactions(self.best_transactions.clone()))
     }
 }

@@ -26,12 +26,13 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 use crate::{
-    payload::job::WorldChainPayloadJob,
-    primitives::{BlockMetaData, Flashblock, FlashblocksState},
+    builder::executor::FlashblocksStateExecutor,
+    payload::job::FlashblocksPayloadJob,
+    primitives::{BlockMetaData, Flashblock},
 };
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
-pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
+pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// The task executor to spawn payload building tasks on.
@@ -49,12 +50,12 @@ pub struct WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: FlashblocksState,
+    flashblocks_state: FlashblocksStateExecutor,
     /// The signing key for the builder
     builder_sk: SigningKey,
 }
 
-impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, Tasks, Builder> {
+impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// Creates a new [`WorldChainPayloadJobGenerator`] with the given config and custom
     /// [`PayloadBuilder`]
     #[allow(clippy::too_many_arguments)]
@@ -65,7 +66,7 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        flashblocks_state: FlashblocksState,
+        flashblocks_state: FlashblocksStateExecutor,
         builder_sk: SigningKey,
     ) -> Self {
         Self {
@@ -122,7 +123,7 @@ impl<Client, Tasks: TaskSpawner, Builder> WorldChainPayloadJobGenerator<Client, 
 }
 
 impl<Client, Tasks, Builder> PayloadJobGenerator
-    for WorldChainPayloadJobGenerator<Client, Tasks, Builder>
+    for FlashblocksPayloadJobGenerator<Client, Tasks, Builder>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
@@ -139,7 +140,7 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = WorldChainPayloadJob<Tasks, Builder>;
+    type Job = FlashblocksPayloadJob<Tasks, Builder>;
 
     fn new_payload_job(
         &self,
@@ -189,7 +190,7 @@ where
         // Notify the P2P handler to start publishing for this authorization
         self.p2p_handler.start_publishing(authorization);
 
-        let mut job = WorldChainPayloadJob {
+        let mut job = FlashblocksPayloadJob {
             config,
             executor: self.executor.clone(),
             deadline,
@@ -203,6 +204,7 @@ where
             builder: self.builder.clone(),
             authorization,
             p2p_handler: self.p2p_handler.clone(),
+            flashblocks_state: self.flashblocks_state.clone(),
             pre_built_payload: maybe_pre_state,
             block_index: 0,
             builder_signing_key: self.builder_sk.clone(),
@@ -240,7 +242,7 @@ where
     }
 }
 
-impl<Builder, Client, Tasks> WorldChainPayloadJobGenerator<Client, Tasks, Builder>
+impl<Builder, Client, Tasks> FlashblocksPayloadJobGenerator<Client, Tasks, Builder>
 where
     Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload>,
 {
@@ -249,10 +251,10 @@ where
         attributes: &<Builder as PayloadBuilder>::Attributes,
     ) -> Result<Option<Builder::BuiltPayload>, PayloadBuilderError> {
         // check for any pending pre state received over p2p
-        let state = self.flashblocks_state.flashblocks();
+        let flashblocks = self.flashblocks_state.flashblocks();
 
-        if !state.0.is_empty() {
-            let block = Flashblock::reduce(state);
+        if let Some(flashblocks) = flashblocks {
+            let block = Flashblock::reduce(flashblocks);
             if let Some(flashblock) = block {
                 if *flashblock.payload_id() == attributes.payload_id().0 {
                     // If we have a pre-confirmed state, we can use it to build the payload

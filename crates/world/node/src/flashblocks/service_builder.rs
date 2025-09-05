@@ -9,8 +9,8 @@ use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use world_chain_builder_flashblocks::{
-    payload::generator::{FlashblocksJobGeneratorConfig, WorldChainPayloadJobGenerator},
-    primitives::FlashblocksState,
+    builder::executor::FlashblocksStateExecutor,
+    payload::generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
 };
 
 use crate::{context::FlashblocksContext, node::WorldChainNode};
@@ -20,7 +20,7 @@ use crate::{context::FlashblocksContext, node::WorldChainNode};
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: FlashblocksHandle,
-    flashblocks_state: FlashblocksState,
+    flashblocks_state: FlashblocksStateExecutor,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
     builder_sk: SigningKey,
 }
@@ -30,7 +30,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     pub const fn new(
         pb: PB,
         p2p_handler: FlashblocksHandle,
-        flashblocks_state: FlashblocksState,
+        flashblocks_state: FlashblocksStateExecutor,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         builder_sk: SigningKey,
     ) -> Self {
@@ -66,7 +66,7 @@ where
             .interval(conf.interval)
             .deadline(conf.deadline);
 
-        let payload_generator = WorldChainPayloadJobGenerator::with_builder(
+        let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
             ctx.task_executor().clone(),
             payload_job_config,

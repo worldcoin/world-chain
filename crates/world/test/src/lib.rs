@@ -39,4 +39,7 @@ pub const PBH_DEV_ENTRYPOINT: Address = address!("9fE46736679d2D9a65F0992F2272dE
 pub const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
 pub mod bindings;
+pub mod mock;
+pub mod node;
+pub mod pool;
 pub mod utils;

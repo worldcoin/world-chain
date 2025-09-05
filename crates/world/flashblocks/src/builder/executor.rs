@@ -1,14 +1,29 @@
+use alloy_eips::eip2718::WithEncoded;
+use alloy_rpc_types_engine::PayloadId;
+use flashblocks_p2p::protocol::error::FlashblocksP2PError;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use futures::StreamExt as _;
+use reth::revm::database::StateProviderDatabase;
+use reth_node_builder::BuilderContext;
+use reth_payload_util::BestPayloadTransactions;
+use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
+use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
-use alloy_eips::{Encodable2718, Typed2718};
+use alloy_eips::eip4895::Withdrawals;
+use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
-use op_alloy_consensus::OpDepositReceipt;
+use alloy_primitives::{Address, B256, Bytes, address, b256, hex};
+use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, encode_holocene_extra_data};
+use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
+use reth::payload::EthPayloadBuilderAttributes;
 use reth::revm::State;
+use reth::revm::cancelled::CancelOnDrop;
+use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
     StateChangeSource, SystemCaller,
@@ -22,22 +37,33 @@ use reth_evm::op_revm::transaction::deposit::DEPOSIT_TRANSACTION_TYPE;
 use reth_evm::op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::state_change::{balance_increment_state, post_block_balance_increments};
 use reth_evm::{
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
+    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
 };
 use reth_evm::{Evm, EvmFactory};
+use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
-use reth_optimism_primitives::{DepositReceipt, OpReceipt, OpTransactionSigned};
-use reth_primitives::{transaction::SignedTransaction, SealedHeader};
+use reth_optimism_node::txpool::OpPooledTx;
+use reth_optimism_node::{
+    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpRethReceiptBuilder,
+};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::{BlockExecutionResult, StateProvider};
+use reth_primitives::{SealedHeader, transaction::SignedTransaction};
+use reth_provider::{
+    BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
+use revm::DatabaseCommit;
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
-use revm::DatabaseCommit;
+
+use crate::primitives::{Flashblock, Flashblocks};
+use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
@@ -47,7 +73,9 @@ const CREATE_2_DEPLOYER_CODEHASH: B256 =
     b256!("0xb0550b5b431e30d38000efb7107aaa0ade03d48a7198a140edda9d27134468b2");
 
 /// The raw bytecode of the create2 deployer contract.
-const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!("6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033");
+const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!(
+    "6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033"
+);
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks.
 #[derive(Debug)]
@@ -75,9 +103,9 @@ impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-    >,
+            DB = &'db mut State<DB>,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks + Clone,
 {
@@ -121,9 +149,9 @@ impl<'db, DB, E, R, Spec> BlockExecutor for FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-    >,
+            DB = &'db mut State<DB>,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -433,10 +461,10 @@ impl FlashblocksBlockAssembler {
     /// Builds a block for `input` without any bounds on header `H`.
     pub fn assemble_block<
         F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = OpBlockExecutionCtx,
-            Transaction: SignedTransaction,
-            Receipt: Receipt + DepositReceipt,
-        >,
+                ExecutionCtx<'a> = OpBlockExecutionCtx,
+                Transaction: SignedTransaction,
+                Receipt: Receipt + DepositReceipt,
+            >,
         H,
     >(
         &self,
@@ -457,10 +485,10 @@ impl Clone for FlashblocksBlockAssembler {
 impl<F> BlockAssembler<F> for FlashblocksBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
 {
     type Block = Block<F::Transaction>;
 
@@ -508,17 +536,17 @@ impl<'a, DB, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-    >,
+            DB = &'a mut State<DB>,
+            Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+        >,
 {
     type Primitives = N;
     type Executor = FlashblocksBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
@@ -554,5 +582,233 @@ where
 
     fn into_executor(self) -> Self::Executor {
         self.inner.into_executor()
+    }
+}
+
+/// The current state of all known pre confirmations received over the P2P layer
+/// or generated from the payload building job of this node.
+///
+/// The state is flushed when FCU is received with a parent hash that matches the block hash
+/// of the latest pre confirmation _or_ when an FCU is received that does not match the latest pre confirmation,
+/// in which case the pre confirmations were not included as part of the canonical chain.
+#[derive(Debug, Clone)]
+pub struct FlashblocksStateExecutor {
+    inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
+    p2p_handle: FlashblocksHandle,
+    da_config: OpDAConfig,
+}
+
+impl Default for FlashblocksStateExecutor {
+    fn default() -> Self {
+        unimplemented!("FlashblocksStateExecutor::new must be used instead")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FlashblocksStateExecutorInner {
+    flashblocks: Option<Flashblocks>,
+    latest_payload: Option<(OpBuiltPayload, u64)>,
+}
+
+impl FlashblocksStateExecutor {
+    /// Creates a new instance of [`FlashblocksStateExecutor`].
+    ///
+    /// This function spawn a task that handles updates. It should only be called once.
+    pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
+        let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
+            flashblocks: None,
+            latest_payload: None,
+        }));
+
+        Self {
+            inner,
+            p2p_handle,
+            da_config,
+        }
+    }
+
+    /// Launches the executor to listen for new flashblocks and build payloads.
+    pub fn launch<Node, P, Tx>(
+        &self,
+        ctx: &BuilderContext<Node>,
+        payload_builder_ctx_builder: P,
+        evm_config: OpEvmConfig,
+    ) where
+        Tx: OpPooledTx,
+        Node: FullNodeTypes,
+        Node::Provider: InMemoryState<Primitives = OpPrimitives>
+            + StateProviderFactory
+            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
+        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Tx> + 'static,
+    {
+        let mut stream = self.p2p_handle.flashblock_stream();
+        let this = self.clone();
+        let provider = ctx.provider().clone();
+        let chain_spec = ctx.chain_spec().clone();
+        ctx.task_executor()
+            .spawn_critical("flashblocks executor", async move {
+                while let Some(flashblock) = stream.next().await {
+                    let FlashblocksStateExecutorInner {
+                        ref mut flashblocks,
+                        ref mut latest_payload,
+                        ..
+                    } = *this.inner.write();
+
+                    let flashblock = Flashblock { flashblock };
+                    let (flashblocks, _new_payload) = match flashblocks {
+                        Some(ref mut f) => {
+                            if let Some(latest_payload) = latest_payload {
+                                if latest_payload.0.id() == flashblock.flashblock.payload_id
+                                    && latest_payload.1 >= flashblock.flashblock.index
+                                {
+                                    // Already processed this flashblock
+                                    provider.in_memory_state().set_pending_block(
+                                        latest_payload.0.executed_block().unwrap(),
+                                    );
+                                    continue;
+                                }
+                            }
+
+                            let new_payload = f.push(flashblock.clone()).unwrap();
+                            (f, new_payload)
+                        }
+                        None => {
+                            *flashblocks =
+                                Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                            (flashblocks.as_mut().unwrap(), true)
+                        }
+                    };
+
+                    let flashblock = flashblocks.last();
+
+                    let cancel = CancelOnDrop::default();
+                    let base = flashblocks.base();
+
+                    let transactions = flashblock
+                        .diff
+                        .transactions
+                        .iter()
+                        .map(|b| {
+                            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
+                            eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
+                        })
+                        .collect::<eyre::Result<Vec<_>>>()
+                        .unwrap();
+
+                    let eth_attrs = EthPayloadBuilderAttributes {
+                        id: PayloadId(flashblocks.payload_id().to_owned()),
+                        parent: base.parent_hash,
+                        timestamp: base.timestamp,
+                        suggested_fee_recipient: base.fee_recipient,
+                        prev_randao: base.prev_randao,
+                        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
+                        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+                    };
+
+                    let eip1559 = encode_holocene_extra_data(
+                        Default::default(),
+                        chain_spec.base_fee_params_at_timestamp(base.timestamp),
+                    )
+                    .unwrap();
+
+                    let attributes = OpPayloadBuilderAttributes {
+                        payload_attributes: eth_attrs,
+                        no_tx_pool: false,
+                        transactions: transactions.clone(),
+                        gas_limit: None,
+                        eip_1559_params: Some(eip1559[0..8].try_into().unwrap()),
+                    };
+                    let state_provider = provider.state_by_block_hash(base.parent_hash).unwrap();
+                    let database_provider = provider.database_provider_ro().unwrap();
+                    let sealed_header = database_provider
+                        .sealed_header_by_hash(base.parent_hash)
+                        .unwrap()
+                        .unwrap();
+
+                    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+
+                    let builder_ctx = payload_builder_ctx_builder.build(
+                        evm_config.clone(),
+                        this.da_config.clone(),
+                        chain_spec.clone(),
+                        config,
+                        &cancel,
+                        latest_payload.as_ref().map(|p| p.0.clone()),
+                    );
+
+                    builder_ctx.parent();
+
+                    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+
+                    let db = StateProviderDatabase::new(&state_provider);
+                    let outcome = FlashblockBuilder::new(best)
+                        .build(
+                            db,
+                            &state_provider,
+                            &builder_ctx,
+                            latest_payload.as_ref().map(|p| p.0.clone()),
+                        )
+                        .unwrap();
+
+                    let payload = match outcome {
+                        BuildOutcomeKind::Better { payload } => payload,
+                        BuildOutcomeKind::Freeze(payload) => payload,
+                        _ => continue,
+                    };
+                    *latest_payload = Some((payload.clone(), flashblock.index));
+
+                    // The default engine api implementation should reset the in memory pending
+                    // state on new_payload.
+                    provider
+                        .in_memory_state()
+                        .set_pending_block(payload.executed_block().unwrap());
+                }
+            });
+    }
+
+    pub fn publish_built_payload(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        built_payload: OpBuiltPayload,
+    ) -> Result<(), FlashblocksP2PError> {
+        let flashblock = authorized_payload.msg().clone();
+
+        self.p2p_handle.publish_new(authorized_payload.clone())?;
+
+        let FlashblocksStateExecutorInner {
+            ref mut flashblocks,
+            ref mut latest_payload,
+            ..
+        } = *self.inner.write();
+
+        let index = flashblock.index;
+        let flashblock = Flashblock { flashblock };
+        let (_flashblocks, _new_payload) = match flashblocks {
+            Some(ref mut f) => {
+                let new_payload = f.push(flashblock.clone()).unwrap();
+                (f, new_payload)
+            }
+            None => {
+                *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
+                (flashblocks.as_mut().unwrap(), true)
+            }
+        };
+
+        *latest_payload = Some((built_payload, index));
+
+        Ok(())
+    }
+
+    /// Returns a reference to the latest flashblock.
+    pub fn last(&self) -> Option<Flashblock> {
+        self.inner.read().flashblocks.as_ref().map(|f| Flashblock {
+            flashblock: f.last().clone(),
+        })
+    }
+
+    /// Returns a reference to the latest flashblock.
+    pub fn flashblocks(&self) -> Option<Flashblocks> {
+        self.inner.read().flashblocks.clone()
     }
 }
