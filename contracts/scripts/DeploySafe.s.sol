@@ -18,16 +18,12 @@ contract DeploySafe is Script {
     SafeProxyFactory public factory;
     SafeModuleSetup public moduleSetup;
 
-    address public constant ENTRY_POINT =
-        0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant PBH_SIGNATURE_AGGREGATOR =
-        0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
+    address public constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant PBH_SIGNATURE_AGGREGATOR = 0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     function run() public {
-        console.log(
-            "Deploying: Safe, and PBHSafe4337Module"
-        );
+        console.log("Deploying: Safe, and PBHSafe4337Module");
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
@@ -50,11 +46,7 @@ contract DeploySafe is Script {
 
         address owner = vm.addr(privateKey);
         console.log("Safe Owner", owner);
-        Mock4337Module module = new Mock4337Module(
-            ENTRY_POINT,
-            PBH_SIGNATURE_AGGREGATOR,
-            PBH_NONCE_KEY
-        );
+        Mock4337Module module = new Mock4337Module(ENTRY_POINT, PBH_SIGNATURE_AGGREGATOR, PBH_NONCE_KEY);
 
         console.log("PBH4337Module Deployed at: ", address(module));
         // Prepare module initialization
@@ -62,10 +54,7 @@ contract DeploySafe is Script {
         modules[0] = address(module);
 
         // Encode the moduleSetup.enableModules call
-        bytes memory moduleSetupCall = abi.encodeCall(
-            SafeModuleSetup.enableModules,
-            (modules)
-        );
+        bytes memory moduleSetupCall = abi.encodeCall(SafeModuleSetup.enableModules, (modules));
 
         // Create owners array with single owner
         address[] memory owners = new address[](1);
@@ -98,8 +87,6 @@ contract DeploySafe is Script {
         require(safe.isOwner(owner), "Owner not added to Safe");
         console.log("Safe Proxy Deployed at: ", address(safe));
 
-        IEntryPoint(ENTRY_POINT).depositTo{value: 1 ether}(
-            address(safe)
-        );
+        IEntryPoint(ENTRY_POINT).depositTo{value: 1 ether}(address(safe));
     }
 }
