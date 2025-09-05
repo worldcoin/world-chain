@@ -27,8 +27,17 @@ pub struct WorldChainArgs {
 /// Parameters for pbh builder configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
-#[group(requires = "enabled")]
+#[group(requires = "builder.enabled")]
 pub struct BuilderArgs {
+    /// Whether block building is enabled
+    #[arg(
+        long = "builder.enabled",
+        id = "builder.enabled",
+        env,
+        help = "Enable block building",
+        required = false
+    )]
+    pub enabled: bool,
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
     /// verified transactions to fill the capacity, the remaining blockspace will be filled with
     /// unverified transactions.
@@ -38,32 +47,46 @@ pub struct BuilderArgs {
 
     /// Sets the ERC-4337 EntryPoint Proxy contract address
     /// This contract is used to validate 4337 PBH bundles
-    #[arg(long = "builder.pbh_entrypoint")]
+    #[arg(
+        long = "builder.pbh_entrypoint",
+        default_value = "0x0000000000000000000000000000000000000000"
+    )]
     pub pbh_entrypoint: Address,
 
     /// Sets the WorldID contract address.
     /// This contract is used to provide the latest merkle root on chain.
-    #[arg(long = "builder.world_id")]
+    #[arg(
+        long = "builder.world_id",
+        default_value = "0x0000000000000000000000000000000000000000"
+    )]
     pub world_id: Address,
 
     /// Sets the ERC0-7766 Signature Aggregator contract address
     /// This contract signifies that a given bundle should receive priority inclusion if it passes validation
-    #[arg(long = "builder.signature_aggregator")]
+    #[arg(
+        long = "builder.signature_aggregator",
+        default_value = "0x0000000000000000000000000000000000000000"
+    )]
     pub signature_aggregator: Address,
 
     /// Sets the private key of the builder
-    #[arg(long = "builder.private_key", env = "BUILDER_PRIVATE_KEY")]
+    #[arg(
+        long = "builder.private_key",
+        env = "BUILDER_PRIVATE_KEY",
+        default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    )]
     pub private_key: String,
 }
 
 /// Flashblocks configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Flashblocks")]
-#[group(requires = "enabled")]
+#[group(requires = "flashblocks.enabled")]
 pub struct FlashblocksArgs {
     /// Whether flashblocks are enabled for this builder
     #[arg(
         long = "flashblocks.enabled",
+        id = "flashblocks.enabled",
         env,
         help = "Enable flashblocks for this builder",
         required = false
@@ -78,7 +101,9 @@ pub struct FlashblocksArgs {
     )]
     pub authorizor_vk: Option<VerifyingKey>,
 
-    #[arg(long = "flashblocks.builder_sk", 
+    // TODO: Make this optional
+    #[arg(
+        long = "flashblocks.builder_sk", 
         env = "FLASHBLOCKS_BUILDER_SK", 
         value_parser = parse_sk,
         required = false,
@@ -103,32 +128,64 @@ impl From<WorldChainNodeConfig> for NodeContextType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Args, Parser};
-    use rollup_boost::ed25519_dalek::SigningKey;
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
-    #[derive(Parser)]
-    struct CommandParser<T: Args> {
+    #[derive(Debug, Parser)]
+    struct CommandParser {
         #[command(flatten)]
-        args: T,
+        pub builder: Option<BuilderArgs>,
+
+        #[command(flatten)]
+        pub flashblocks: Option<FlashblocksArgs>,
     }
 
     #[test]
-    fn parse_args() {
+    fn flashblocks_only() {
         let expected_args = FlashblocksArgs {
+            enabled: true,
             authorizor_vk: None,
             builder_sk: SigningKey::from_bytes(&[0; 32]),
-            enabled: true,
         };
 
-        let args = CommandParser::<FlashblocksArgs>::parse_from([
+        let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
-        ])
-        .args;
+        ]);
 
-        assert_eq!(args, expected_args);
+        assert_eq!(args.flashblocks.unwrap(), expected_args);
+        assert!(args.builder.is_none())
+    }
+
+    #[test]
+    fn builder_only() {
+        let args = CommandParser::parse_from(["bin", "--builder.enabled"]);
+
+        assert!(args.flashblocks.is_none());
+        assert!(args.builder.is_some())
+    }
+
+    #[test]
+    fn neither() {
+        let args = CommandParser::parse_from(["bin"]);
+
+        assert!(args.flashblocks.is_none());
+        assert!(args.builder.is_none())
+    }
+
+    #[test]
+    fn both() {
+        let args = CommandParser::parse_from([
+            "bin",
+            "--builder.enabled",
+            "--flashblocks.enabled",
+            "--flashblocks.builder_sk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        ]);
+
+        assert!(args.flashblocks.is_some());
+        assert!(args.builder.is_some())
     }
 }

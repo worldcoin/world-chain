@@ -66,6 +66,7 @@ use world_chain_builder_node::node::WorldChainNodeConfig;
 
 pub fn test_config() -> WorldChainNodeConfig {
     let builder = BuilderArgs {
+        enabled: true,
         verified_blockspace_capacity: 70,
         pbh_entrypoint: PBH_DEV_ENTRYPOINT,
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
