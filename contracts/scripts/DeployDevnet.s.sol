@@ -28,18 +28,14 @@ contract DeployDevnet is Script {
     SafeProxyFactory public factory;
     SafeModuleSetup public moduleSetup;
 
-    address public constant ENTRY_POINT =
-        0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant WORLD_ID =
-        0x5FbDB2315678afecb367f032d93F642f64180aa3;
-    address public constant BUILDER =
-        0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    address public constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant WORLD_ID = 0x5FbDB2315678afecb367f032d93F642f64180aa3;
+    address public constant BUILDER = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
     /// @dev The root of the Test tree.
-    uint256 constant INITIAL_ROOT =
-        0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
+    uint256 constant INITIAL_ROOT = 0x5276AD6D825269EB0B67A2E1589123DED27C8B8EABFA898FF7E878AD61071AD;
     uint256 public constant MAX_PBH_GAS_LIMIT = 30000000;
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
-    
+
     address[] public authorizedBuilders = [BUILDER];
 
     function run() public {
@@ -61,29 +57,15 @@ contract DeployDevnet is Script {
         console.log("PBHEntryPointImplV1 Deployed at: ", pbhEntryPointImpl);
         bytes memory initCallData = abi.encodeCall(
             PBHEntryPointImplV1.initialize,
-            (
-                IWorldID(WORLD_ID),
-                IEntryPoint(ENTRY_POINT),
-                255,
-                MAX_PBH_GAS_LIMIT,
-                authorizedBuilders,
-                msg.sender
-            )
+            (IWorldID(WORLD_ID), IEntryPoint(ENTRY_POINT), 255, MAX_PBH_GAS_LIMIT, authorizedBuilders, msg.sender)
         );
-        pbhEntryPoint = address(
-            new ERC1967Proxy(pbhEntryPointImpl, initCallData)
-        );
+        pbhEntryPoint = address(new ERC1967Proxy(pbhEntryPointImpl, initCallData));
         console.log("ERC1967Proxy Deployed at: ", pbhEntryPoint);
     }
 
     function deployPBHSignatureAggregator() public {
-        pbhSignatureAggregator = address(
-            new PBHSignatureAggregator(pbhEntryPoint, WORLD_ID)
-        );
-        console.log(
-            "PBHSignatureAggregator Deployed at: ",
-            pbhSignatureAggregator
-        );
+        pbhSignatureAggregator = address(new PBHSignatureAggregator(pbhEntryPoint, WORLD_ID));
+        console.log("PBHSignatureAggregator Deployed at: ", pbhSignatureAggregator);
     }
 
     function deploySafeAndModules() public {
@@ -94,14 +76,7 @@ contract DeployDevnet is Script {
         uint256 ownerKey4 = vm.envUint("SAFE_OWNER_4");
         uint256 ownerKey5 = vm.envUint("SAFE_OWNER_5");
 
-        uint256[6] memory signers = [
-            ownerKey0,
-            ownerKey1,
-            ownerKey2,
-            ownerKey3,
-            ownerKey4,
-            ownerKey5
-        ];
+        uint256[6] memory signers = [ownerKey0, ownerKey1, ownerKey2, ownerKey3, ownerKey4, ownerKey5];
 
         // Deploy SafeModuleSetup
         moduleSetup = new SafeModuleSetup();
@@ -120,11 +95,7 @@ contract DeployDevnet is Script {
             address owner = vm.addr(ownerKey);
             console.log("Owner Key", ownerKey);
             console.log("Owner", owner);
-            Mock4337Module module = new Mock4337Module(
-                ENTRY_POINT,
-                pbhSignatureAggregator,
-                PBH_NONCE_KEY
-            );
+            Mock4337Module module = new Mock4337Module(ENTRY_POINT, pbhSignatureAggregator, PBH_NONCE_KEY);
 
             console.log("PBH4337Module Deployed at: ", address(module));
             // Prepare module initialization
@@ -132,10 +103,7 @@ contract DeployDevnet is Script {
             modules[0] = address(module);
 
             // Encode the moduleSetup.enableModules call
-            bytes memory moduleSetupCall = abi.encodeCall(
-                SafeModuleSetup.enableModules,
-                (modules)
-            );
+            bytes memory moduleSetupCall = abi.encodeCall(SafeModuleSetup.enableModules, (modules));
 
             // Create owners array with single owner
             address[] memory owners = new address[](1);
@@ -172,12 +140,9 @@ contract DeployDevnet is Script {
     }
 
     function updateWorldID() public {
-        bytes memory data = abi.encodeWithSelector(
-            bytes4(keccak256("receiveRoot(uint256)")),
-            INITIAL_ROOT
-        );
+        bytes memory data = abi.encodeWithSelector(bytes4(keccak256("receiveRoot(uint256)")), INITIAL_ROOT);
 
-        (bool success, ) = WORLD_ID.call(data);
+        (bool success,) = WORLD_ID.call(data);
         require(success, "Failed to update WorldID root");
     }
 }
