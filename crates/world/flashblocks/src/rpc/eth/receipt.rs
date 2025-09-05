@@ -1,10 +1,13 @@
-use reth_rpc_eth_api::helpers::LoadReceipt;
+use reth_optimism_rpc::OpEthApi;
+use reth_rpc_eth_api::{helpers::LoadReceipt, RpcConvert, RpcNodeCore};
 
 use crate::rpc::eth::FlashblocksEthApi;
 
-impl<T> LoadReceipt for FlashblocksEthApi<T>
+impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>
 where
-    T: LoadReceipt + Clone,
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+    OpEthApi<N, Rpc>: LoadReceipt + Clone,
 {
     // TODO:
     // fn build_transaction_receipt(

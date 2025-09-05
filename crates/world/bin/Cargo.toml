@@ -48,7 +48,7 @@ reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
-
+reth-rpc-eth-api.workspace = true
 # revm 
 revm.workspace = true
 

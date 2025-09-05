@@ -2,11 +2,17 @@
 
 use crate::rpc::eth::FlashblocksEthApi;
 use alloy_primitives::{Bytes, B256};
-use reth_rpc_eth_api::helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction};
+use reth_optimism_rpc::OpEthApi;
+use reth_rpc_eth_api::{
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    RpcConvert, RpcNodeCore,
+};
 
-impl<T> EthTransactions for FlashblocksEthApi<T>
+impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
-    T: EthTransactions + Clone,
+    N: reth_rpc_eth_api::RpcNodeCore,
+    Rpc: reth_rpc_eth_api::RpcConvert,
+    crate::rpc::eth::OpEthApi<N, Rpc>: EthTransactions + Clone,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
@@ -20,4 +26,10 @@ where
     }
 }
 
-impl<T> LoadTransaction for FlashblocksEthApi<T> where T: LoadTransaction + Clone {}
+impl<N, Rpc> LoadTransaction for FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+    OpEthApi<N, Rpc>: LoadTransaction + Clone,
+{
+}

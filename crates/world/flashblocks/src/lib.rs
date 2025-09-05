@@ -11,3 +11,5 @@ pub use builder::{
     traits::context::PayloadBuilderCtx, traits::context_builder::PayloadBuilderCtxBuilder,
     FlashblockBuilder, FlashblocksPayloadBuilder,
 };
+
+pub use rpc::eth::core::FlashblocksEthApiExtServer;

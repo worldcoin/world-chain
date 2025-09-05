@@ -6,3 +6,4 @@ pub mod flashblocks;
 pub mod node;
 
 pub use world_chain_builder_flashblocks::primitives::*;
+pub use world_chain_builder_flashblocks::rpc::eth::core::FlashblocksEthApiExtServer;
