@@ -3,8 +3,6 @@ use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
 use futures::StreamExt;
 use parking_lot::Mutex;
-use rand::rand_core::block;
-use rand::rand_core::le;
 use reth::chainspec::EthChainSpec;
 use reth::primitives::RecoveredBlock;
 use reth_e2e_test_utils::testsuite::actions::Action;
@@ -17,7 +15,6 @@ use revm_primitives::fixed_bytes;
 use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::info;
 use world_chain_test::utils::account;
 
@@ -419,7 +416,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;
 
-    let receipts = rx.recv().await.expect("should receive receipts");
+    let _receipts = rx.recv().await.expect("should receive receipts");
 
     // TODO: Assertions once EthApi is fixed
     Ok(())

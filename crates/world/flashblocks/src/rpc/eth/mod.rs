@@ -31,8 +31,6 @@ use reth_tasks::{
     TaskSpawner,
 };
 
-use crate::builder::executor::FlashblocksStateExecutor;
-
 /// Flashblocks `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -241,28 +239,20 @@ where
 #[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
-    state_executor: FlashblocksStateExecutor,
 }
 
 impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
     fn default() -> Self {
         Self {
             inner: OpEthApiBuilder::default(),
-            state_executor: FlashblocksStateExecutor::default(),
         }
     }
 }
 
 impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
-    pub const fn new(
-        inner: OpEthApiBuilder<NetworkT>,
-        state_executor: FlashblocksStateExecutor,
-    ) -> Self {
-        Self {
-            inner,
-            state_executor,
-        }
+    pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
+        Self { inner }
     }
 }
 
