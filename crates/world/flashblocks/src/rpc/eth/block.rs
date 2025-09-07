@@ -1,6 +1,7 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_eips::BlockId;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
 use reth_primitives::RecoveredBlock;
 use reth_provider::{BlockIdReader, BlockReader};
@@ -10,22 +11,25 @@ use reth_rpc_eth_api::{
     RpcConvert, RpcNodeCore,
 };
 use std::{future::Future, sync::Arc};
+use world_chain_provider::InMemoryState;
 
 use crate::rpc::eth::FlashblocksEthApi;
 
 impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: EthBlocks + Clone,
+    OpEthApi<N, Rpc>:
+        EthBlocks + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + Clone,
 {
 }
 
 impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: LoadBlock + Clone,
+    OpEthApi<N, Rpc>:
+        LoadBlock + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + Clone,
 {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]

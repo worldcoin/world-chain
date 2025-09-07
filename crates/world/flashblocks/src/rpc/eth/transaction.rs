@@ -1,18 +1,35 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::rpc::eth::FlashblocksEthApi;
-use alloy_primitives::{Bytes, B256};
+use alloy_consensus::BlockHeader;
+use alloy_consensus::Sealable;
+use alloy_primitives::{Bytes, TxHash, B256};
+use reth_node_api::BlockBody;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
+use reth_primitives::transaction::SignedTransaction;
+use reth_primitives::TransactionMeta;
+use reth_provider::ReceiptProvider;
+use reth_provider::TransactionsProvider;
+use reth_provider::{ProviderReceipt, ProviderTx};
+use reth_rpc_eth_api::helpers::LoadPendingBlock;
+use reth_rpc_eth_api::FromEthApiError;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
     RpcConvert, RpcNodeCore,
 };
+use std::future::Future;
+use tracing::info;
+use world_chain_provider::InMemoryState;
 
 impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
-    N: reth_rpc_eth_api::RpcNodeCore,
-    Rpc: reth_rpc_eth_api::RpcConvert,
-    crate::rpc::eth::OpEthApi<N, Rpc>: EthTransactions + Clone,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    Rpc: RpcConvert,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>
+        + LoadPendingBlock
+        + EthTransactions
+        + Clone,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
@@ -23,6 +40,81 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         self.inner.send_raw_transaction(tx).await
+    }
+    // <OpEthApi<N, Rpc> as EthApiTypes>::Error: From<<<<<OpEthApi<N, Rpc> as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Error<ProviderError>>
+    /// Helper method that loads a transaction and its receipt.
+    #[expect(clippy::complexity)]
+    fn load_transaction_and_receipt(
+        &self,
+        hash: TxHash,
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                ProviderTx<Self::Provider>,
+                TransactionMeta,
+                ProviderReceipt<Self::Provider>,
+            )>,
+            Self::Error,
+        >,
+    > + Send
+    where
+        Self: 'static,
+    {
+        self.spawn_blocking_io_fut(async move |this| {
+            info!("Loading tx and receipt for hash: {hash:?}");
+            let pending_block = this.pending_block().lock().await;
+            if let Some(pending_block) = pending_block.clone() {
+                info!("Looking for tx in pending block");
+                let recovered = pending_block.executed_block.recovered_block;
+                if let Some(pos) = recovered
+                    .clone()
+                    .body()
+                    .transactions_iter()
+                    .position(|t| *t.tx_hash() == hash)
+                {
+                    let receipt = &pending_block.receipts[pos];
+                    let tx = recovered
+                        .clone()
+                        .body()
+                        .transactions_iter()
+                        .nth(pos)
+                        .expect("position is valid; qed")
+                        .clone();
+
+                    let meta = TransactionMeta {
+                        tx_hash: *tx.tx_hash(),
+                        block_hash: recovered.hash_slow(),
+                        block_number: recovered.number(),
+                        index: pos as u64,
+                        base_fee: recovered.base_fee_per_gas(),
+                        timestamp: recovered.header().timestamp(),
+                        ..Default::default()
+                    };
+
+                    return Ok(Some((tx, meta, receipt.clone())));
+                }
+            }
+
+            let provider = this.provider();
+
+            let (tx, meta) = match provider
+                .transaction_by_hash_with_meta(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
+
+            let receipt = match provider
+                .receipt_by_hash(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
+
+            Ok(Some((tx, meta, receipt)))
+        })
     }
 }
 

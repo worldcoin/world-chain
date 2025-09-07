@@ -347,6 +347,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_api_receipt() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
     let (_, nodes, _tasks, mut env) =
         setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
 
@@ -411,13 +412,13 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     // 200ms backoff should be enough time to fetch the pending receipt
     let transaction_receipt =
-        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 200, tx);
+        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 300, tx);
 
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;
 
     let _receipts = rx.recv().await.expect("should receive receipts");
-
+    info!("Receipts: {:?}", _receipts);
     // TODO: Assertions once EthApi is fixed
     Ok(())
 }

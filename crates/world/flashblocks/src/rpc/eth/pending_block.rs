@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_rpc::OpEthApi;
 use reth_primitives::RecoveredBlock;
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
@@ -9,22 +11,24 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{ProviderBlock, ProviderReceipt};
+use world_chain_provider::InMemoryState;
 
 use crate::rpc::eth::FlashblocksEthApi;
 
 impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    crate::rpc::eth::OpEthApi<N, Rpc>: LoadPendingBlock + Clone,
-    crate::rpc::eth::OpEthApi<N, Rpc>: SpawnBlocking,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>
+        + LoadPendingBlock
+        + Clone
+        + SpawnBlocking,
 {
     #[inline]
     fn pending_block(
         &self,
-    ) -> &tokio::sync::Mutex<
-        Option<PendingBlock<<crate::rpc::eth::OpEthApi<N, Rpc> as RpcNodeCore>::Primitives>>,
-    > {
+    ) -> &tokio::sync::Mutex<Option<PendingBlock<<OpEthApi<N, Rpc> as RpcNodeCore>::Primitives>>>
+    {
         self.inner.pending_block()
     }
 

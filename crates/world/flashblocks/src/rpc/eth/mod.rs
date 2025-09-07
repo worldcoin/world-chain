@@ -1,6 +1,5 @@
 //! OP-Reth `eth_` endpoint implementation.
 
-pub mod core;
 pub mod receipt;
 pub mod transaction;
 
@@ -13,6 +12,7 @@ use op_alloy_network::Optimism;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper, OpRpcConvert},
     OpEthApi, OpEthApiBuilder,
@@ -20,7 +20,7 @@ use reth_optimism_rpc::{
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadState, SpawnBlocking, Trace,
+        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
@@ -30,6 +30,7 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
+use world_chain_provider::InMemoryState;
 
 /// Flashblocks `Eth` API implementation.
 ///
@@ -159,8 +160,8 @@ where
 
 impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
-    OpEthApi<N, Rpc>: LoadFee,
-    N: RpcNodeCore,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + LoadFee,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -180,16 +181,23 @@ where
     }
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert> LoadState for FlashblocksEthApi<N, Rpc> where
-    OpEthApi<N, Rpc>: LoadState + Clone + SpawnBlocking
+impl<N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>, Rpc: RpcConvert> LoadState
+    for FlashblocksEthApi<N, Rpc>
+where
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>
+        + LoadPendingBlock
+        + LoadState
+        + Clone
+        + SpawnBlocking,
 {
 }
 
 impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: EthState + Clone,
+    OpEthApi<N, Rpc>:
+        RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + EthState + Clone,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -199,17 +207,21 @@ where
 
 impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: EthFees + Clone,
+    OpEthApi<N, Rpc>:
+        RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + EthFees + Clone,
 {
 }
 
 impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: Trace + Clone + SpawnBlocking,
+    OpEthApi<N, Rpc>: Trace
+        + Clone
+        + SpawnBlocking
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
 {
 }
 

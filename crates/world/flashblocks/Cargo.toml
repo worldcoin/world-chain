@@ -44,7 +44,6 @@ alloy-eips.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types-engine.workspace = true
-op-alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
 
@@ -62,7 +61,6 @@ metrics-derive.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 jsonrpsee-core.workspace = true
-jsonrpsee-types.workspace = true
 jsonrpsee.workspace = true
 futures.workspace = true
 serde.workspace = true

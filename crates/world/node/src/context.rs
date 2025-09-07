@@ -23,6 +23,7 @@ use reth_optimism_node::{
     args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
     OpExecutorBuilder, OpNetworkBuilder,
 };
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
@@ -124,8 +125,12 @@ pub struct FlashblocksContext {
     components_context: FlashblocksComponentsContext,
 }
 
-impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<FlashblocksContext>>>
-    WorldChainNodeContext<N> for FlashblocksContext
+impl<
+        N: FullNodeTypes<
+            Provider: InMemoryState<Primitives = OpPrimitives>,
+            Types = WorldChainNode<FlashblocksContext>,
+        >,
+    > WorldChainNodeContext<N> for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder>: PayloadServiceBuilder<
         N,
