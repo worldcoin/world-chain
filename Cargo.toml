@@ -158,8 +158,8 @@ metrics = "0.24.0"
 metrics-derive = "0.1"
 
 # 3rd party
-rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "58feb62" }
-flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "58feb62" }
+rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "40774a2" }
+flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "40774a2" }
 
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"

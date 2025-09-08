@@ -279,7 +279,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .authorizor_vk
             .unwrap_or(flashblocks.builder_sk.verifying_key());
         let builder_sk = flashblocks.builder_sk.clone();
-        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
+        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, Some(builder_sk.clone()));
 
         let flashblocks_state =
             FlashblocksStateExecutor::new(flashblocks_handle.clone(), value.da_config.clone());
