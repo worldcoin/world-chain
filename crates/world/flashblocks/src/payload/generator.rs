@@ -21,7 +21,7 @@ use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
+use rollup_boost::Authorization;
 use tokio::runtime::Handle;
 use tracing::debug;
 
@@ -51,8 +51,6 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
     flashblocks_state: FlashblocksStateExecutor,
-    /// The signing key for the builder
-    builder_sk: SigningKey,
 }
 
 impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
@@ -67,7 +65,6 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         flashblocks_state: FlashblocksStateExecutor,
-        builder_sk: SigningKey,
     ) -> Self {
         Self {
             client,
@@ -78,7 +75,6 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
             pre_cached: None,
             p2p_handler,
             authorizations: auth_rx,
-            builder_sk,
         }
     }
 
@@ -188,7 +184,9 @@ where
         });
 
         // Notify the P2P handler to start publishing for this authorization
-        self.p2p_handler.start_publishing(authorization);
+        self.p2p_handler
+            .start_publishing(authorization)
+            .map_err(|e| PayloadBuilderError::other(e))?;
 
         let mut job = FlashblocksPayloadJob {
             config,
@@ -207,7 +205,6 @@ where
             flashblocks_state: self.flashblocks_state.clone(),
             pre_built_payload: maybe_pre_state,
             block_index: 0,
-            builder_signing_key: self.builder_sk.clone(),
         };
 
         // start the first job right away

@@ -1,11 +1,10 @@
 use clap::Parser;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
-use reth_optimism_node::OpDAConfig;
 use reth_tracing::tracing::info;
 use world_chain_builder_node::args::NodeContextType;
+use world_chain_builder_node::config::WorldChainNodeConfig;
 use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
-use world_chain_builder_node::node::WorldChainNodeConfig;
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
 use world_chain_builder_rpc::EthApiExtServer;
 use world_chain_builder_rpc::SequencerClient;
@@ -34,17 +33,14 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
-            let node_config = WorldChainNodeConfig {
-                args: args.clone(),
-                da_config: OpDAConfig::default(),
-            };
+            let config: WorldChainNodeConfig = args.try_into()?;
 
-            let node_context = node_config.clone().into();
+            let node_context = config.clone().into();
 
             match node_context {
                 NodeContextType::Basic => {
                     info!(target: "reth::cli", "Starting in Basic mode");
-                    let node = WorldChainNode::<BasicContext>::new(node_config.clone());
+                    let node = WorldChainNode::<BasicContext>::new(config.clone());
                     let NodeHandle {
                         node_exit_future,
                         node: _node,
@@ -53,7 +49,8 @@ fn main() {
                         .extend_rpc_modules(move |ctx| {
                             let provider = ctx.provider().clone();
                             let pool = ctx.pool().clone();
-                            let sequencer_client = args.rollup.sequencer.map(SequencerClient::new);
+                            let sequencer_client =
+                                config.args.rollup.sequencer.map(SequencerClient::new);
                             let eth_api_ext =
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
@@ -65,7 +62,7 @@ fn main() {
                 }
                 NodeContextType::Flashblocks => {
                     info!(target: "reth::cli", "Starting in Flashblocks mode");
-                    let node = WorldChainNode::<FlashblocksContext>::new(node_config);
+                    let node = WorldChainNode::<FlashblocksContext>::new(config.clone());
                     let NodeHandle {
                         node_exit_future,
                         node: _node,
@@ -74,7 +71,8 @@ fn main() {
                         .extend_rpc_modules(move |ctx| {
                             let provider = ctx.provider().clone();
                             let pool = ctx.pool().clone();
-                            let sequencer_client = args.rollup.sequencer.map(SequencerClient::new);
+                            let sequencer_client =
+                                config.args.rollup.sequencer.map(SequencerClient::new);
                             let eth_api_ext =
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;

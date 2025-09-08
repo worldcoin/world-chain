@@ -2,13 +2,14 @@
 
 use crate::{
     args::WorldChainArgs,
+    config::WorldChainNodeConfig,
     flashblocks::{
         payload_builder_builder::FlashblocksPayloadBuilderBuilder,
         rpc::FlashblocksEngineApiBuilder, service_builder::FlashblocksPayloadServiceBuilder,
     },
     node::{
-        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeConfig,
-        WorldChainNodeContext, WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
+        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
+        WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
     },
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
@@ -24,10 +25,7 @@ use reth_optimism_node::{
     OpExecutorBuilder, OpNetworkBuilder,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    Authorization,
-};
+use rollup_boost::{ed25519_dalek::VerifyingKey, Authorization};
 
 use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor, rpc::eth::FlashblocksEthApiBuilder,
@@ -155,9 +153,7 @@ where
                 WorldChainNodeConfig {
                     args:
                         WorldChainArgs {
-                            rollup,
-                            builder,
-                            flashblocks,
+                            rollup, builder, ..
                         },
                     da_config,
                 },
@@ -181,8 +177,6 @@ where
             components_context.flashblocks_handle.clone(),
         );
 
-        let flashblocks = flashblocks.unwrap();
-
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(WorldChainPoolBuilder::new(
@@ -204,7 +198,6 @@ where
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
-                flashblocks.builder_sk.clone(),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
@@ -256,7 +249,6 @@ pub struct FlashblocksComponentsContext {
     pub flashblocks_state: FlashblocksStateExecutor,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
-    pub builder_sk: SigningKey,
 }
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
@@ -275,11 +267,15 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .flashblocks
             .expect("Flashblocks args must be present");
 
-        let authorizer_vk = flashblocks
-            .authorizor_vk
-            .unwrap_or(flashblocks.builder_sk.verifying_key());
+        let authorizer_vk = flashblocks.authorizor_vk.unwrap_or(
+            flashblocks
+                .builder_sk
+                .as_ref()
+                .expect("flashblocks builder_sk required")
+                .verifying_key(),
+        );
         let builder_sk = flashblocks.builder_sk.clone();
-        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, Some(builder_sk.clone()));
+        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
         let flashblocks_state =
             FlashblocksStateExecutor::new(flashblocks_handle.clone(), value.da_config.clone());
@@ -290,7 +286,6 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
-            builder_sk,
         }
     }
 }

@@ -43,6 +43,7 @@ use reth_provider::{
 
 use reth_transaction_pool::{BlobStore, TransactionPool};
 
+use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
 use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
 use world_chain_builder_pool::ordering::WorldChainOrdering;
@@ -50,21 +51,6 @@ use world_chain_builder_pool::root::WorldChainRootValidator;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_builder_pool::validator::WorldChainTransactionValidator;
 use world_chain_builder_pool::WorldChainTransactionPool;
-
-use crate::args::WorldChainArgs;
-
-#[derive(Debug, Clone)]
-pub struct WorldChainNodeConfig {
-    /// World Chain Specific CLI arguements
-    pub args: WorldChainArgs,
-    /// Data availability configuration for the OP builder.
-    ///
-    /// Used to throttle the size of the data availability payloads (configured by the batcher via
-    /// the `miner_` api).
-    ///
-    /// By default no throttling is applied.
-    pub da_config: OpDAConfig,
-}
 
 /// Context trait for World Chain node implementations.
 ///

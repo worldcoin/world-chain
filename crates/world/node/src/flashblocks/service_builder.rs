@@ -22,7 +22,6 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     p2p_handler: FlashblocksHandle,
     flashblocks_state: FlashblocksStateExecutor,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-    builder_sk: SigningKey,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -32,14 +31,12 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         p2p_handler: FlashblocksHandle,
         flashblocks_state: FlashblocksStateExecutor,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        builder_sk: SigningKey,
     ) -> Self {
         Self {
             pb,
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
-            builder_sk,
         }
     }
 }
@@ -74,7 +71,6 @@ where
             self.p2p_handler,
             self.authorizations_rx.clone(),
             self.flashblocks_state,
-            self.builder_sk,
         );
 
         let (payload_service, payload_service_handle) =

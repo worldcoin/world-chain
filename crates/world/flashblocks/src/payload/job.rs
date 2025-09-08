@@ -21,9 +21,7 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use rollup_boost::{
-    ed25519_dalek::SigningKey, Authorization, AuthorizedPayload, FlashblocksPayloadV1,
-};
+use rollup_boost::{Authorization, AuthorizedPayload, FlashblocksPayloadV1};
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 
@@ -82,8 +80,6 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) pre_built_payload: Option<Builder::BuiltPayload>,
     /// Block index
     pub(crate) block_index: u64,
-    /// The builder signing key
-    pub(crate) builder_signing_key: SigningKey,
 }
 
 impl<Tasks, Builder> FlashblocksPayloadJob<Tasks, Builder>
@@ -152,7 +148,7 @@ where
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
         trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
-        let authorized_payload = self.authorization_for(flashblock.into_flashblock());
+        let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
 
         self.flashblocks_state
             .publish_built_payload(authorized_payload, payload.to_owned())
@@ -164,8 +160,12 @@ where
     pub(crate) fn authorization_for(
         &self,
         payload: FlashblocksPayloadV1,
-    ) -> AuthorizedPayload<FlashblocksPayloadV1> {
-        AuthorizedPayload::new(&self.builder_signing_key, self.authorization, payload)
+    ) -> Result<AuthorizedPayload<FlashblocksPayloadV1>, FlashblocksP2PError> {
+        Ok(AuthorizedPayload::new(
+            self.p2p_handler.builder_sk()?,
+            self.authorization,
+            payload,
+        ))
     }
 }
 

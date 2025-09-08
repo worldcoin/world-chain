@@ -6,7 +6,7 @@ use rollup_boost::{
     parse_sk, parse_vk,
 };
 
-use crate::node::WorldChainNodeConfig;
+use crate::config::WorldChainNodeConfig;
 
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct WorldChainArgs {
@@ -22,6 +22,19 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+}
+
+impl TryFrom<WorldChainArgs> for WorldChainNodeConfig {
+    type Error = eyre::Report;
+
+    fn try_from(args: WorldChainArgs) -> Result<Self, Self::Error> {
+        // Perform arg validation here for things clap can't do.
+
+        Ok(WorldChainNodeConfig {
+            args,
+            da_config: Default::default(),
+        })
+    }
 }
 
 /// Parameters for pbh builder configuration
@@ -108,7 +121,7 @@ pub struct FlashblocksArgs {
         value_parser = parse_sk,
         required = false,
     )]
-    pub builder_sk: SigningKey,
+    pub builder_sk: Option<SigningKey>,
 }
 
 pub enum NodeContextType {

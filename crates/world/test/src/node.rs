@@ -61,8 +61,10 @@ use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
 use rollup_boost::ed25519_dalek::SigningKey;
 
-use world_chain_builder_node::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
-use world_chain_builder_node::node::WorldChainNodeConfig;
+use world_chain_builder_node::{
+    args::{BuilderArgs, FlashblocksArgs, WorldChainArgs},
+    config::WorldChainNodeConfig,
+};
 
 pub fn test_config() -> WorldChainNodeConfig {
     let builder = BuilderArgs {
@@ -77,7 +79,7 @@ pub fn test_config() -> WorldChainNodeConfig {
     let flashblocks = FlashblocksArgs {
         enabled: true,
         authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
-        builder_sk: SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>()),
+        builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
     };
 
     WorldChainNodeConfig {
