@@ -158,7 +158,7 @@ mod tests {
         let expected_args = FlashblocksArgs {
             enabled: true,
             authorizor_vk: None,
-            builder_sk: SigningKey::from_bytes(&[0; 32]),
+            builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
         };
 
         let args = CommandParser::parse_from([

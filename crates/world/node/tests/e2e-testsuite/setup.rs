@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 use tracing::span;
-use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
+use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeContext};
 use world_chain_test::node::test_config;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
@@ -112,7 +112,7 @@ where
         let _enter = span.enter();
         let config = test_config();
 
-        let node = WorldChainNode::<T>::new(args.try_into()?);
+        let node = WorldChainNode::<T>::new(config.args.clone().try_into()?);
 
         let ext_context = node.ext_context();
 
