@@ -2,7 +2,7 @@
 
 use alloy_eips::BlockId;
 use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::OpEthApi;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::RecoveredBlock;
 use reth_provider::{BlockIdReader, BlockReader};
 use reth_rpc_eth_api::{helpers::LoadPendingBlock, FromEthApiError, RpcNodeCoreExt};
@@ -10,6 +10,7 @@ use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock},
     RpcConvert, RpcNodeCore,
 };
+use reth_rpc_eth_api::{EthApiTypes, FromEvmError};
 use std::{future::Future, sync::Arc};
 use world_chain_provider::InMemoryState;
 
@@ -17,19 +18,25 @@ use crate::rpc::eth::FlashblocksEthApi;
 
 impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>:
-        EthBlocks + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + Clone,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: EthBlocks
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + Clone,
 {
 }
 
 impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>:
-        LoadBlock + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + Clone,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: LoadBlock
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + Clone,
 {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]

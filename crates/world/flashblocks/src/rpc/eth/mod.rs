@@ -15,14 +15,15 @@ use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper, OpRpcConvert},
-    OpEthApi, OpEthApiBuilder,
+    OpEthApi, OpEthApiBuilder, OpEthApiError,
 };
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
         EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
+    RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;
@@ -160,9 +161,12 @@ where
 
 impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + LoadFee,
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + LoadFee,
+    OpEthApiError: FromEvmError<N::Evm>,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
@@ -181,11 +185,15 @@ where
     }
 }
 
-impl<N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>, Rpc: RpcConvert> LoadState
-    for FlashblocksEthApi<N, Rpc>
+impl<
+        N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+        Rpc: RpcConvert,
+    > LoadState for FlashblocksEthApi<N, Rpc>
 where
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
         + LoadPendingBlock
+        + EthApiTypes<Error = OpEthApiError>
         + LoadState
         + Clone
         + SpawnBlocking,
@@ -194,10 +202,13 @@ where
 
 impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>:
-        RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + EthState + Clone,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + EthState
+        + Clone,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -207,21 +218,26 @@ where
 
 impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>:
-        RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>> + EthFees + Clone,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + EthFees
+        + Clone,
 {
 }
 
 impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
+    OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: Trace
-        + Clone
         + SpawnBlocking
-        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + Clone,
 {
 }
 

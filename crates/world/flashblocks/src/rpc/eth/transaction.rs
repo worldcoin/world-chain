@@ -2,32 +2,36 @@
 
 use crate::rpc::eth::FlashblocksEthApi;
 use alloy_consensus::BlockHeader;
-use alloy_consensus::Sealable;
 use alloy_primitives::{Bytes, TxHash, B256};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
-use reth_primitives::transaction::SignedTransaction;
+use reth_optimism_rpc::OpEthApiError;
 use reth_primitives::TransactionMeta;
 use reth_provider::ReceiptProvider;
 use reth_provider::TransactionsProvider;
 use reth_provider::{ProviderReceipt, ProviderTx};
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
+use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_api::FromEthApiError;
+use reth_rpc_eth_api::FromEvmError;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
     RpcConvert, RpcNodeCore,
 };
+
 use std::future::Future;
 use tracing::info;
 use world_chain_provider::InMemoryState;
 
 impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>>
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
         + LoadPendingBlock
+        + EthApiTypes<Error = OpEthApiError>
         + EthTransactions
         + Clone,
 {
@@ -62,18 +66,18 @@ where
     {
         self.spawn_blocking_io_fut(async move |this| {
             info!("Loading tx and receipt for hash: {hash:?}");
-            let pending_block = this.pending_block().lock().await;
-            if let Some(pending_block) = pending_block.clone() {
+            let pending_block = this.local_pending_block().await?;
+            if let Some((block, receipts)) = pending_block.clone() {
                 info!("Looking for tx in pending block");
-                let recovered = pending_block.executed_block.recovered_block;
-                if let Some(pos) = recovered
+                if let Some(pos) = block
                     .clone()
                     .body()
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)
                 {
-                    let receipt = &pending_block.receipts[pos];
-                    let tx = recovered
+                    info!("Found tx in pending block");
+                    let receipt = &receipts[pos];
+                    let tx = block
                         .clone()
                         .body()
                         .transactions_iter()
@@ -81,13 +85,14 @@ where
                         .expect("position is valid; qed")
                         .clone();
 
+                    info!("Found tx in pending block, preparing meta");
                     let meta = TransactionMeta {
-                        tx_hash: *tx.tx_hash(),
-                        block_hash: recovered.hash_slow(),
-                        block_number: recovered.number(),
+                        tx_hash: tx.tx_hash(),
+                        block_hash: block.hash_slow(),
+                        block_number: block.number(),
                         index: pos as u64,
-                        base_fee: recovered.base_fee_per_gas(),
-                        timestamp: recovered.header().timestamp(),
+                        base_fee: block.base_fee_per_gas(),
+                        timestamp: block.header().timestamp(),
                         ..Default::default()
                     };
 

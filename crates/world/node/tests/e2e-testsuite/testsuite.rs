@@ -1,7 +1,9 @@
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
+use bytes::BytesMut;
 use futures::StreamExt;
+use op_alloy_consensus::TxDeposit;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
 use reth::primitives::RecoveredBlock;
@@ -11,10 +13,11 @@ use reth_node_api::{Block, PayloadAttributes};
 use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
-use revm_primitives::fixed_bytes;
+use revm_primitives::{address, fixed_bytes, hex, TxKind};
 use revm_primitives::{Address, Bytes, B256, U256};
 use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
+use std::vec;
 use tracing::info;
 use world_chain_test::utils::account;
 
@@ -373,7 +376,9 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .unwrap()
         .as_secs();
 
-    let (tx, _) = tokio::sync::mpsc::channel(1);
+    let (sender, _) = tokio::sync::mpsc::channel(1);
+
+    let mut l1_info_tx = create_deposit_tx();
 
     // Compose a Mine Block action with an eth_getTransactionReceipt action
     let attributes = OpPayloadAttributes {
@@ -384,7 +389,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
         },
-        transactions: None,
+        transactions: Some(vec![l1_info_tx.clone()]),
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
@@ -395,6 +400,9 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
             .await;
 
     let raw_tx: Bytes = mock_tx.encoded_2718().into();
+
+    nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
+
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
         vec![raw_tx],
@@ -404,7 +412,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         std::time::Duration::from_millis(2000),
         true,
         false,
-        tx,
+        sender,
     )
     .await;
 
@@ -412,7 +420,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     // 200ms backoff should be enough time to fetch the pending receipt
     let transaction_receipt =
-        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 300, tx);
+        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 230, tx);
 
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;
@@ -586,6 +594,29 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     blocks.pop().expect("should have one block").unwrap();
 
     Ok(())
+}
+
+fn create_deposit_tx() -> Bytes {
+    // Extracted from a Isthmus enabled chain running in builder-playground
+    const ISTHMUS_DATA: &[u8] = &hex!(
+        "098999be00000558000c5fc500000000000000030000000067a9f765000000000000002900000000000000000000000000000000000000000000000000000000006a6d09000000000000000000000000000000000000000000000000000000000000000172fcc8e8886636bdbe96ba0e4baab67ea7e7811633f52b52e8cf7a5123213b6f000000000000000000000000d3f2c5afb2d76f5579f326b0cd7da5f5a4126c3500004e2000000000000001f4"
+    );
+
+    let deposit_tx = TxDeposit {
+        source_hash: B256::default(),
+        from: address!("DeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001"),
+        to: TxKind::Call(address!("4200000000000000000000000000000000000015")),
+        mint: 0,
+        value: U256::default(),
+        gas_limit: 210000,
+        is_system_transaction: true,
+        input: ISTHMUS_DATA.into(),
+    };
+
+    let mut buffer_without_header = BytesMut::new();
+    deposit_tx.encode_2718(&mut buffer_without_header);
+
+    buffer_without_header.to_vec().into()
 }
 
 // TODO: Mock failover scenario test
