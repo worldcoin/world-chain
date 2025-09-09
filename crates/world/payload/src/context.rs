@@ -45,14 +45,13 @@ use world_chain_builder_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider, Pool> {
+pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider> {
     pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
-    pub pool: Pool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,13 +62,12 @@ pub struct WorldChainPayloadBuilderCtxBuilder {
     pub builder_private_key: PrivateKeySigner,
 }
 
-impl<Client, Pool> WorldChainPayloadBuilderCtx<Client, Pool>
+impl<Client> WorldChainPayloadBuilderCtx<Client>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
-    Pool: Send + Sync + TransactionPool,
 {
     /// After computing the execution result and state we can commit changes to the database
     fn commit_changes(
@@ -92,13 +90,12 @@ where
     }
 }
 
-impl<Client, Pool> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client, Pool>
+impl<Client> PayloadBuilderCtx for WorldChainPayloadBuilderCtx<Client>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
-    Pool: Send + Sync + TransactionPool,
 {
     type Evm = OpEvmConfig;
     type ChainSpec = <Client as ChainSpecProvider>::ChainSpec;
@@ -223,14 +220,16 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    fn execute_best_transactions<'a, Txs, DB, Builder>(
+    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
         &self,
+        pool: Pool,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
         mut gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
+        Pool: TransactionPool,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
@@ -365,14 +364,14 @@ where
         }
 
         if !invalid_txs.is_empty() {
-            self.pool.remove_transactions(invalid_txs);
+            pool.remove_transactions(invalid_txs);
         }
 
         Ok(Some(()))
     }
 }
 
-impl<Provider, Pool> PayloadBuilderCtxBuilder<Provider, Pool, OpEvmConfig, OpChainSpec>
+impl<Provider> PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec>
     for WorldChainPayloadBuilderCtxBuilder
 where
     Provider: StateProviderFactory
@@ -381,14 +380,12 @@ where
         + Sync
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + Clone,
-    Pool: Send + Sync + TransactionPool,
 {
-    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Provider, Pool>;
+    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Provider>;
 
     fn build(
         &self,
         provider: Provider,
-        pool: Pool,
         evm_config: OpEvmConfig,
         da_config: OpDAConfig,
         config: PayloadConfig<
@@ -415,7 +412,6 @@ where
         WorldChainPayloadBuilderCtx {
             inner: Arc::new(inner),
             client: provider.clone(),
-            pool: pool.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
@@ -431,8 +427,8 @@ pub const fn dyn_gas_limit(len: u64) -> u64 {
     FIXED_GAS + len * COLD_SSTORE_GAS
 }
 
-pub fn spend_nullifiers_tx<DB, EVM, Client, Pool>(
-    ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
+pub fn spend_nullifiers_tx<DB, EVM, Client>(
+    ctx: &WorldChainPayloadBuilderCtx<Client>,
     evm: &mut EVM,
     nullifier_hashes: HashSet<Field>,
 ) -> eyre::Result<Recovered<OpTransactionSigned>>
@@ -443,7 +439,6 @@ where
         + Sync
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + Clone,
-    Pool: Send + Sync + TransactionPool,
     EVM: Evm<DB = DB>,
     DB: revm::Database,
     <DB as revm::Database>::Error: Send + Sync + 'static,

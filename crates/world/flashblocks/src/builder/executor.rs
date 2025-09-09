@@ -643,12 +643,13 @@ impl FlashblocksStateExecutor {
             + StateProviderFactory
             + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<Node::Provider, Pool, OpEvmConfig, OpChainSpec> + 'static,
+        P: PayloadBuilderCtxBuilder<Node::Provider, OpEvmConfig, OpChainSpec> + 'static,
     {
         let mut stream = self.p2p_handle.flashblock_stream();
         let this = self.clone();
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
+
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
@@ -733,7 +734,6 @@ impl FlashblocksStateExecutor {
 
                     let builder_ctx = payload_builder_ctx_builder.build(
                         provider.clone(),
-                        pool.clone(),
                         evm_config.clone(),
                         this.da_config.clone(),
                         config,
@@ -748,6 +748,7 @@ impl FlashblocksStateExecutor {
                     let db = StateProviderDatabase::new(&state_provider);
                     let outcome = FlashblockBuilder::new(best)
                         .build(
+                            pool.clone(),
                             db,
                             &state_provider,
                             &builder_ctx,

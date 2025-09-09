@@ -33,7 +33,7 @@ use tracing::error;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+    txpool::OpPooledTx, OpDAConfig, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_payload_builder::{
     builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
@@ -84,7 +84,6 @@ where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     CtxBuilder: PayloadBuilderCtxBuilder<
         Client,
-        Pool,
         OpEvmConfig,
         OpChainSpec,
         PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
@@ -115,7 +114,6 @@ where
 
         let ctx = self.ctx_builder.build(
             self.client.clone(),
-            self.pool.clone(),
             self.evm_config.clone(),
             self.config.da_config.clone(),
             config,
@@ -128,10 +126,17 @@ where
 
         let db = StateProviderDatabase::new(&state_provider);
         if ctx.attributes().no_tx_pool {
-            builder.build(db, &state_provider, &ctx, best_payload.clone())
+            builder.build(
+                self.pool.clone(),
+                db,
+                &state_provider,
+                &ctx,
+                best_payload.clone(),
+            )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
             builder.build(
+                self.pool.clone(),
                 cached_reads.as_db_mut(db),
                 &state_provider,
                 &ctx,
@@ -150,7 +155,6 @@ where
     Txs: OpPayloadTransactions<Pool::Transaction>,
     CtxBuilder: PayloadBuilderCtxBuilder<
         Client,
-        Pool,
         OpEvmConfig,
         OpChainSpec,
         PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
@@ -237,14 +241,16 @@ where
     Txs: PayloadTransactions,
 {
     /// Builds the payload on top of the state.
-    pub fn build<Ctx>(
+    pub fn build<Ctx, Pool>(
         self,
+        pool: Pool,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
         best_payload: Option<OpBuiltPayload>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
+        Pool: TransactionPool,
         Txs: PayloadTransactions,
         Txs::Transaction: OpPooledTx,
         Ctx: PayloadBuilderCtx<
@@ -387,7 +393,13 @@ where
                 .with_prev(transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>());
 
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txns.guard(), gas_limit)?
+                .execute_best_transactions(
+                    pool,
+                    &mut info,
+                    &mut builder,
+                    best_txns.guard(),
+                    gas_limit,
+                )?
                 .is_none()
             {
                 warn!(target: "payload_builder", "payload build cancelled");

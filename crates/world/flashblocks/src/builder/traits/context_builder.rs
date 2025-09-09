@@ -5,6 +5,7 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_primitives::NodePrimitives;
+use reth_transaction_pool::TransactionPool;
 
 use crate::builder::traits::context::PayloadBuilderCtx;
 
@@ -53,8 +54,8 @@ use crate::builder::traits::context::PayloadBuilderCtx;
 ///     // ...
 /// };
 /// ```
-pub trait PayloadBuilderCtxBuilder<Provider, Pool, EvmConfig: ConfigureEvm, ChainSpec>:
-    Clone + Send + Sync
+pub trait PayloadBuilderCtxBuilder<Provider, EvmConfig: ConfigureEvm, ChainSpec>:
+    Unpin + Clone + Send + Sync
 {
     /// The concrete payload builder context type produced by this builder.
     ///
@@ -87,7 +88,6 @@ pub trait PayloadBuilderCtxBuilder<Provider, Pool, EvmConfig: ConfigureEvm, Chai
     fn build(
         &self,
         provider: Provider,
-        pool: Pool,
         evm: EvmConfig,
         da_config: OpDAConfig,
         config: PayloadConfig<

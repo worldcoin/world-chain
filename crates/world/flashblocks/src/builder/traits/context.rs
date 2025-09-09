@@ -14,7 +14,7 @@ use reth_optimism_payload_builder::builder::ExecutionInfo;
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::BlockEnv;
 
 /// Context trait for building payloads with flashblock support.
@@ -126,14 +126,16 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// Processes user transactions from the mempool until `gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
-    fn execute_best_transactions<'a, Txs, DB, Builder>(
+    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
         &self,
+        pool: Pool,
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         best_txs: Txs,
         gas_limit: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
+        Pool: TransactionPool,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
