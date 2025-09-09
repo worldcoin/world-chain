@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use op_alloy_consensus::OpTxEnvelope;
 use reth::revm::cancelled::CancelOnDrop;
 use reth_basic_payload_builder::PayloadConfig;
@@ -55,7 +53,7 @@ use crate::builder::traits::context::PayloadBuilderCtx;
 ///     // ...
 /// };
 /// ```
-pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transaction>:
+pub trait PayloadBuilderCtxBuilder<Provider, Pool, EvmConfig: ConfigureEvm, ChainSpec>:
     Clone + Send + Sync
 {
     /// The concrete payload builder context type produced by this builder.
@@ -65,7 +63,7 @@ pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transacti
     type PayloadBuilderCtx: PayloadBuilderCtx<
         Evm = EvmConfig,
         ChainSpec = ChainSpec,
-        Transaction = Transaction,
+        // Transaction = Pool::Transaction,
     >;
 
     /// Constructs a new payload builder context with the given configuration.
@@ -88,9 +86,10 @@ pub trait PayloadBuilderCtxBuilder<EvmConfig: ConfigureEvm, ChainSpec, Transacti
     /// A configured [`PayloadBuilderCtx`] ready for use in payload building.
     fn build(
         &self,
+        provider: Provider,
+        pool: Pool,
         evm: EvmConfig,
         da_config: OpDAConfig,
-        chain_spec: Arc<ChainSpec>,
         config: PayloadConfig<
             OpPayloadBuilderAttributes<OpTxEnvelope>,
             <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,

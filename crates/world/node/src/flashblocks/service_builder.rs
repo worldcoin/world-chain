@@ -7,7 +7,7 @@ use reth_node_builder::{
 };
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
+use rollup_boost::Authorization;
 use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor,
     payload::generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},

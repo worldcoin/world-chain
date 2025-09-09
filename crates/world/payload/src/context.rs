@@ -56,9 +56,7 @@ pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider, Pool> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WorldChainPayloadBuilderCtxBuilder<Client, Pool> {
-    pub client: Client,
-    pub pool: Pool,
+pub struct WorldChainPayloadBuilderCtxBuilder {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -374,10 +372,10 @@ where
     }
 }
 
-impl<Client, Pool> PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, WorldChainPooledTransaction>
-    for WorldChainPayloadBuilderCtxBuilder<Client, Pool>
+impl<Provider, Pool> PayloadBuilderCtxBuilder<Provider, Pool, OpEvmConfig, OpChainSpec>
+    for WorldChainPayloadBuilderCtxBuilder
 where
-    Client: StateProviderFactory
+    Provider: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Send
         + Sync
@@ -385,13 +383,14 @@ where
         + Clone,
     Pool: Send + Sync + TransactionPool,
 {
-    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Client, Pool>;
+    type PayloadBuilderCtx = WorldChainPayloadBuilderCtx<Provider, Pool>;
 
     fn build(
         &self,
+        provider: Provider,
+        pool: Pool,
         evm_config: OpEvmConfig,
         da_config: OpDAConfig,
-        chain_spec: Arc<OpChainSpec>,
         config: PayloadConfig<
             OpPayloadBuilderAttributes<
                 <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
@@ -407,7 +406,7 @@ where
         let inner = OpPayloadBuilderCtx {
             evm_config,
             da_config,
-            chain_spec,
+            chain_spec: provider.chain_spec(),
             config,
             cancel: cancel.clone(),
             best_payload,
@@ -415,8 +414,8 @@ where
 
         WorldChainPayloadBuilderCtx {
             inner: Arc::new(inner),
-            client: self.client.clone(),
-            pool: self.pool.clone(),
+            client: provider.clone(),
+            pool: pool.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,

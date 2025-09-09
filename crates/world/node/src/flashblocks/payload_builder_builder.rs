@@ -127,10 +127,7 @@ where
     type PayloadBuilder = FlashblocksPayloadBuilder<
         WorldChainTransactionPool<Node::Provider, S>,
         Node::Provider,
-        WorldChainPayloadBuilderCtxBuilder<
-            Node::Provider,
-            WorldChainTransactionPool<Node::Provider, S>,
-        >,
+        WorldChainPayloadBuilderCtxBuilder,
         Txs,
     >;
 
@@ -141,8 +138,6 @@ where
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
-            client: ctx.provider().clone(),
-            pool: pool.clone(),
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
@@ -153,8 +148,9 @@ where
         };
 
         self.flashblocks_state
-            .launch::<_, _, WorldChainPooledTransaction>(
+            .launch::<_, _, _, WorldChainPooledTransaction>(
                 ctx,
+                pool.clone(),
                 ctx_builder.clone(),
                 evm_config.clone(),
             );

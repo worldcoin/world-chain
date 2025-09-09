@@ -6,6 +6,7 @@ use futures::StreamExt as _;
 use reth::revm::database::StateProviderDatabase;
 use reth_node_builder::BuilderContext;
 use reth_payload_util::BestPayloadTransactions;
+use reth_transaction_pool::TransactionPool;
 use rollup_boost::{AuthorizedPayload, FlashblocksPayloadV1};
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -16,13 +17,13 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{Address, B256, Bytes, address, b256, hex};
-use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, encode_holocene_extra_data};
+use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
+use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
-use reth::revm::State;
 use reth::revm::cancelled::CancelOnDrop;
+use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
@@ -37,8 +38,8 @@ use reth_evm::op_revm::transaction::deposit::DEPOSIT_TRANSACTION_TYPE;
 use reth_evm::op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::state_change::{balance_increment_state, post_block_balance_increments};
 use reth_evm::{
-    Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
+    Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
@@ -50,17 +51,17 @@ use reth_optimism_node::{
     OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_primitives::{SealedHeader, transaction::SignedTransaction};
 use reth_provider::{
     BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
     StateProviderFactory,
 };
-use revm::DatabaseCommit;
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
+use revm::DatabaseCommit;
 
 use crate::primitives::{Flashblock, Flashblocks};
 use crate::{FlashblockBuilder, PayloadBuilderCtx as _, PayloadBuilderCtxBuilder};
@@ -103,9 +104,9 @@ impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-            DB = &'db mut State<DB>,
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-        >,
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks + Clone,
 {
@@ -149,9 +150,9 @@ impl<'db, DB, E, R, Spec> BlockExecutor for FlashblocksBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
-            DB = &'db mut State<DB>,
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-        >,
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
 {
@@ -461,10 +462,10 @@ impl FlashblocksBlockAssembler {
     /// Builds a block for `input` without any bounds on header `H`.
     pub fn assemble_block<
         F: for<'a> BlockExecutorFactory<
-                ExecutionCtx<'a> = OpBlockExecutionCtx,
-                Transaction: SignedTransaction,
-                Receipt: Receipt + DepositReceipt,
-            >,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
         H,
     >(
         &self,
@@ -485,10 +486,10 @@ impl Clone for FlashblocksBlockAssembler {
 impl<F> BlockAssembler<F> for FlashblocksBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = OpBlockExecutionCtx,
-            Transaction: SignedTransaction,
-            Receipt: Receipt + DepositReceipt,
-        >,
+        ExecutionCtx<'a> = OpBlockExecutionCtx,
+        Transaction: SignedTransaction,
+        Receipt: Receipt + DepositReceipt,
+    >,
 {
     type Block = Block<F::Transaction>;
 
@@ -536,17 +537,17 @@ impl<'a, DB, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-            Receipt = OpReceipt,
-            SignedTx = OpTransactionSigned,
-            Block = alloy_consensus::Block<OpTransactionSigned>,
-            BlockHeader = alloy_consensus::Header,
-        >,
+        Receipt = OpReceipt,
+        SignedTx = OpTransactionSigned,
+        Block = alloy_consensus::Block<OpTransactionSigned>,
+        BlockHeader = alloy_consensus::Header,
+    >,
     E: Evm<
-            DB = &'a mut State<DB>,
-            Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
-            Spec = OpSpecId,
-            HaltReason = OpHaltReason,
-        >,
+        DB = &'a mut State<DB>,
+        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Spec = OpSpecId,
+        HaltReason = OpHaltReason,
+    >,
 {
     type Primitives = N;
     type Executor = FlashblocksBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
@@ -628,19 +629,21 @@ impl FlashblocksStateExecutor {
     }
 
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node, P, Tx>(
+    pub fn launch<Node, Pool, P, Tx>(
         &self,
         ctx: &BuilderContext<Node>,
+        pool: Pool,
         payload_builder_ctx_builder: P,
         evm_config: OpEvmConfig,
     ) where
         Tx: OpPooledTx,
+        Pool: TransactionPool + 'static,
         Node: FullNodeTypes,
         Node::Provider: InMemoryState<Primitives = OpPrimitives>
             + StateProviderFactory
             + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Tx> + 'static,
+        P: PayloadBuilderCtxBuilder<Node::Provider, Pool, OpEvmConfig, OpChainSpec> + 'static,
     {
         let mut stream = self.p2p_handle.flashblock_stream();
         let this = self.clone();
@@ -729,9 +732,10 @@ impl FlashblocksStateExecutor {
                     let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
 
                     let builder_ctx = payload_builder_ctx_builder.build(
+                        provider.clone(),
+                        pool.clone(),
                         evm_config.clone(),
                         this.da_config.clone(),
-                        chain_spec.clone(),
                         config,
                         &cancel,
                         latest_payload.as_ref().map(|p| p.0.clone()),

@@ -1,9 +1,9 @@
 use crate::{
-    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
     builder::{
         executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
         payload_txns::BestPayloadTxns,
     },
+    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
 };
 
 use alloy_consensus::Transaction;
@@ -16,15 +16,15 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    revm::{State, database::StateProviderDatabase},
+    revm::{database::StateProviderDatabase, State},
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
 use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
-    ConfigureEvm, Database,
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
+    ConfigureEvm, Database,
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
@@ -33,10 +33,10 @@ use tracing::error;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
+    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_payload_builder::{
-    OpAttributes, builder::ExecutionInfo, config::OpBuilderConfig,
+    builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
 };
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -79,10 +79,16 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
 
 impl<Pool, Client, CtxBuilder, Txs> FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    CtxBuilder: PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, Pool::Transaction>,
+    CtxBuilder: PayloadBuilderCtxBuilder<
+        Client,
+        Pool,
+        OpEvmConfig,
+        OpChainSpec,
+        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+    >,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -108,9 +114,10 @@ where
         } = args;
 
         let ctx = self.ctx_builder.build(
+            self.client.clone(),
+            self.pool.clone(),
             self.evm_config.clone(),
             self.config.da_config.clone(),
-            self.client.chain_spec(),
             config,
             &cancel,
             best_payload.clone(),
@@ -140,8 +147,14 @@ impl<Pool, Client, CtxBuilder, Txs> PayloadBuilder
 where
     Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
-    CtxBuilder: PayloadBuilderCtxBuilder<OpEvmConfig, Client::ChainSpec, Pool::Transaction>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
+    CtxBuilder: PayloadBuilderCtxBuilder<
+        Client,
+        Pool,
+        OpEvmConfig,
+        OpChainSpec,
+        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+    >,
 {
     type Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>;
     type BuiltPayload = OpBuiltPayload;
@@ -235,10 +248,10 @@ where
         Txs: PayloadTransactions,
         Txs::Transaction: OpPooledTx,
         Ctx: PayloadBuilderCtx<
-                Evm = OpEvmConfig,
-                Transaction = Txs::Transaction,
-                ChainSpec = OpChainSpec,
-            >,
+            Evm = OpEvmConfig,
+            Transaction = Txs::Transaction,
+            ChainSpec = OpChainSpec,
+        >,
     {
         let Self { best } = self;
         let span = span!(
@@ -448,10 +461,10 @@ where
     where
         Tx: PoolTransaction + OpPooledTx,
         N: NodePrimitives<
-                Block = alloy_consensus::Block<OpTransactionSigned>,
-                BlockHeader = alloy_consensus::Header,
-                Receipt = OpReceipt,
-            >,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+            Receipt = OpReceipt,
+        >,
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
