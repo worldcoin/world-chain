@@ -19,6 +19,7 @@ reth-eth-wire-types.workspace = true
 reth-optimism-primitives.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-transaction-pool.workspace = true
 reth-optimism-forks.workspace = true
 
 alloy-consensus.workspace = true
@@ -40,7 +41,6 @@ serde.workspace = true
 
 [dev-dependencies]
 world-chain-test.workspace = true
-reth-transaction-pool.workspace = true
 test-case.workspace = true
 chrono.workspace = true
 eyre.workspace = true

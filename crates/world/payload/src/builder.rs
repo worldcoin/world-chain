@@ -208,7 +208,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            pool: self.inner.pool.clone(),
         };
 
         let op_ctx = &ctx.inner;
@@ -220,10 +219,15 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if op_ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, ctx)
+            builder.build(self.inner.pool.clone(), state, &state_provider, ctx)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx)
+            builder.build(
+                self.inner.pool.clone(),
+                cached_reads.as_db_mut(state),
+                &state_provider,
+                ctx,
+            )
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -257,7 +261,6 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
-            pool: self.inner.pool.clone(),
         };
 
         let state_provider = self
@@ -268,7 +271,7 @@ where
         let builder: WorldChainBuilder<'_, NoopPayloadTransactions<WorldChainPooledTransaction>> =
             WorldChainBuilder::new(|_| NoopPayloadTransactions::default());
 
-        builder.witness(state_provider, &ctx)
+        builder.witness(self.inner.pool.clone(), state_provider, &ctx)
     }
 }
 
@@ -356,15 +359,16 @@ impl<'a, Txs> WorldChainBuilder<'a, Txs> {
 
 impl<Txs> WorldChainBuilder<'_, Txs> {
     /// Builds the payload on top of the state.
-    pub fn build<Pool, Client>(
+    pub fn build<Client, Pool>(
         self,
+        pool: Pool,
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
-        ctx: WorldChainPayloadBuilderCtx<Client, Pool>,
+        ctx: WorldChainPayloadBuilderCtx<Client>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<OpPrimitives>>, PayloadBuilderError>
     where
+        Pool: TransactionPool,
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
-        Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
             + ChainSpecProvider<ChainSpec: OpHardforks>
@@ -396,7 +400,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
             // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(&mut info, &mut builder, best_txs, gas_limit)?
+                .execute_best_transactions(pool, &mut info, &mut builder, best_txs, gas_limit)?
                 .is_none()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -458,14 +462,15 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
     }
 
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
-    pub fn witness<Pool, Client>(
+    pub fn witness<Client, Pool>(
         self,
+        pool: Pool,
         state_provider: impl StateProvider,
-        ctx: &WorldChainPayloadBuilderCtx<Client, Pool>,
+        ctx: &WorldChainPayloadBuilderCtx<Client>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
+        Pool: TransactionPool,
         Txs: PayloadTransactions<Transaction = WorldChainPooledTransaction>,
-        Pool: TransactionPool<Transaction = WorldChainPooledTransaction>,
         Client: StateProviderFactory
             + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
             + ChainSpecProvider<ChainSpec: OpHardforks>
@@ -487,7 +492,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                     .best_transaction_attributes(builder.evm_mut().block()),
             );
             // TODO: Validate gas limit
-            ctx.execute_best_transactions(&mut info, &mut builder, best_txs, 0)?;
+            ctx.execute_best_transactions(pool, &mut info, &mut builder, best_txs, 0)?;
         }
         builder.into_executor().apply_post_execution_changes()?;
 
