@@ -5,7 +5,6 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_primitives::NodePrimitives;
-use reth_transaction_pool::TransactionPool;
 
 use crate::builder::traits::context::PayloadBuilderCtx;
 

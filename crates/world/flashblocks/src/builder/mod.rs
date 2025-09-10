@@ -33,7 +33,7 @@ use tracing::error;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpDAConfig, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_payload_builder::{
     builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
