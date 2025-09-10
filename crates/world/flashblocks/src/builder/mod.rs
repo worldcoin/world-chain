@@ -270,8 +270,6 @@ where
 
         debug!(target: "payload_builder", "building new payload");
 
-        // let state = StateProviderDatabase::new(&state_provider);
-
         // 1. Prepare the db
         let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
         {
@@ -537,5 +535,3 @@ where
         ))
     }
 }
-
-
