@@ -31,7 +31,7 @@ use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor, rpc::eth::FlashblocksEthApiBuilder,
 };
 use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_builder_pool::{BasicWorldChainPool, WorldChainTransactionPool};
+use world_chain_builder_pool::BasicWorldChainPool;
 use world_chain_provider::InMemoryState;
 
 #[derive(Clone, Debug)]
@@ -127,10 +127,7 @@ impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<Flashblock
     WorldChainNodeContext<N> for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<
-        FlashblocksPayloadBuilderBuilder<
-            WorldChainTransactionPool<N::Provider>,
-            WorldChainPayloadBuilderCtxBuilder,
-        >,
+        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >: PayloadServiceBuilder<
         N,
         BasicWorldChainPool<N>,
@@ -140,10 +137,7 @@ where
     type Net = FlashblocksNetworkBuilder<OpNetworkBuilder>;
     type Evm = OpEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
-        FlashblocksPayloadBuilderBuilder<
-            WorldChainTransactionPool<N::Provider>,
-            WorldChainPayloadBuilderCtxBuilder,
-        >,
+        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;
 
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
@@ -173,7 +167,7 @@ where
 
         let RollupArgs {
             disable_txpool_gossip,
-            compute_pending_block,
+            compute_pending_block: _,
             discovery_v4,
             ..
         } = rollup;
