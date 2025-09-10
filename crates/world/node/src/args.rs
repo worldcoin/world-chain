@@ -78,18 +78,6 @@ impl WorldChainArgs {
             }
         }
 
-        if let Some(flashblocks) = &mut self.flashblocks {
-            match spec.chain.named() {
-                Some(NamedChain::World) => {
-                    if !flashblocks.spoof_authorizer && flashblocks.authorizer_vk.is_none() {
-                        flashblocks.authorizer_vk = Default::default();
-                    }
-                }
-                Some(NamedChain::WorldSepolia) => {}
-                _ => {}
-            }
-        }
-
         Ok(WorldChainNodeConfig {
             args: self,
             da_config: Default::default(),
@@ -99,7 +87,7 @@ impl WorldChainArgs {
 
 /// Parameters for pbh builder configuration
 #[derive(Debug, Clone, PartialEq, clap::Args)]
-#[command(next_help_heading = "PBH")]
+#[command(next_help_heading = "Priority Blockspace for Humans")]
 pub struct PbhArgs {
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
     /// verified transactions to fill the capacity, the remaining blockspace will be filled with
@@ -137,18 +125,16 @@ pub struct PbhArgs {
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 #[command(next_help_heading = "Block Builder")]
 pub struct BuilderArgs {
-    /// Whether block building is enabled
     #[arg(
         long = "builder.enabled",
         id = "builder.enabled",
-        env,
-        help = "Enable block building",
         requires = "private_key",
         required = false
     )]
     pub enabled: bool,
 
-    /// Sets the private key of the builder
+    /// Private key for the builder
+    /// used to update PBH nullifiers.
     #[arg(
         long = "builder.private_key",
         env = "BUILDER_PRIVATE_KEY",
@@ -166,17 +152,16 @@ pub struct BuilderArgs {
 )]
 #[group(requires = "flashblocks.enabled")]
 pub struct FlashblocksArgs {
-    /// Whether flashblocks are enabled for this builder
     #[arg(
         long = "flashblocks.enabled",
         id = "flashblocks.enabled",
-        env,
-        help = "Enable flashblocks for this builder",
         requires = "authorizer",
         required = false
     )]
     pub enabled: bool,
 
+    /// Authorizer verifying key
+    /// used to verify flashblock authenticity.
     #[arg(
         long = "flashblocks.authorizer_vk",
         env = "FLASHBLOCKS_AUTHORIZER_VK", 
@@ -186,6 +171,8 @@ pub struct FlashblocksArgs {
     )]
     pub authorizer_vk: Option<VerifyingKey>,
 
+    /// Flashblocks signing key
+    /// used to sign authorized flashblocks payloads.
     #[arg(
         long = "flashblocks.builder_sk", 
         env = "FLASHBLOCKS_BUILDER_SK", 
@@ -195,6 +182,9 @@ pub struct FlashblocksArgs {
     )]
     pub builder_sk: Option<SigningKey>,
 
+    /// Uses the builder_sk to create spoofed
+    /// flashblocks authorizations.
+    ///
     /// Should only be used for testing
     #[arg(
         long = "flashblocks.spoof_authorizer",
