@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
-use clap::{value_parser, ArgGroup, Parser, Subcommand};
+use clap::{value_parser, ArgGroup};
 use reth::chainspec::NamedChain;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
@@ -277,12 +277,12 @@ mod tests {
 
     #[test]
     fn flashblocks_neither() {
-        let args = CommandParser::try_parse_from(["bin", "--flashblocks.enabled"]).unwrap_err();
+        CommandParser::try_parse_from(["bin", "--flashblocks.enabled"]).unwrap_err();
     }
 
     #[test]
     fn flashblocks_both() {
-        let args = CommandParser::try_parse_from([
+        CommandParser::try_parse_from([
             "bin",
             "--flashblocks.enabled",
             "--flashblocks.spoof_authorizer",
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn flashblocks_sk_without_builder() {
-        let args = CommandParser::try_parse_from([
+        CommandParser::try_parse_from([
             "bin",
             "--flashblocks.enabled",
             "--flashblocks.spoof_authorizer",
