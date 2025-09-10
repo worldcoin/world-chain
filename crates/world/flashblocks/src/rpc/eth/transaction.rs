@@ -68,14 +68,12 @@ where
             info!("Loading tx and receipt for hash: {hash:?}");
             let pending_block = this.local_pending_block().await?;
             if let Some((block, receipts)) = pending_block.clone() {
-                info!("Looking for tx in pending block");
                 if let Some(pos) = block
                     .clone()
                     .body()
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)
                 {
-                    info!("Found tx in pending block");
                     let receipt = &receipts[pos];
                     let tx = block
                         .clone()
@@ -85,7 +83,6 @@ where
                         .expect("position is valid; qed")
                         .clone();
 
-                    info!("Found tx in pending block, preparing meta");
                     let meta = TransactionMeta {
                         tx_hash: tx.tx_hash(),
                         block_hash: block.hash_slow(),
