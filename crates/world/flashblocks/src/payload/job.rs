@@ -140,7 +140,7 @@ where
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
-    ) -> Result<(), FlashblocksP2PError> {
+    ) -> eyre::Result<()> {
         let offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
