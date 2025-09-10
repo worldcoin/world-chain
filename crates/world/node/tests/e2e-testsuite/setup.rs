@@ -112,7 +112,7 @@ where
         let _enter = span.enter();
         let config = test_config();
 
-        let node = WorldChainNode::<T>::new(config.args.clone().try_into()?);
+        let node = WorldChainNode::<T>::new(config.args.clone().into_config(&op_chain_spec)?);
 
         let ext_context = node.ext_context();
 

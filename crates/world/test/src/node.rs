@@ -73,7 +73,7 @@ pub fn test_config() -> WorldChainNodeConfig {
         pbh_entrypoint: PBH_DEV_ENTRYPOINT,
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
-        private_key: signer(6).to_bytes().to_string(),
+        private_key: signer(6),
     };
 
     let flashblocks = FlashblocksArgs {

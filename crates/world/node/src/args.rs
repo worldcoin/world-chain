@@ -1,5 +1,7 @@
 use alloy_primitives::Address;
+use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use rollup_boost::{
     ed25519_dalek::{SigningKey, VerifyingKey},
@@ -8,7 +10,7 @@ use rollup_boost::{
 
 use crate::config::WorldChainNodeConfig;
 
-#[derive(Debug, Clone, Default, clap::Args)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct WorldChainArgs {
     /// op rollup args
     #[command(flatten)]
@@ -24,21 +26,20 @@ pub struct WorldChainArgs {
     pub flashblocks: Option<FlashblocksArgs>,
 }
 
-impl TryFrom<WorldChainArgs> for WorldChainNodeConfig {
-    type Error = eyre::Report;
-
-    fn try_from(args: WorldChainArgs) -> Result<Self, Self::Error> {
+impl WorldChainArgs {
+    pub fn into_config(self, spec: &OpChainSpec) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+        // match spec.chain.named()
 
         Ok(WorldChainNodeConfig {
-            args,
+            args: self,
             da_config: Default::default(),
         })
     }
 }
 
 /// Parameters for pbh builder configuration
-#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, PartialEq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
 #[group(requires = "builder.enabled")]
 pub struct BuilderArgs {
@@ -62,7 +63,7 @@ pub struct BuilderArgs {
     /// This contract is used to validate 4337 PBH bundles
     #[arg(
         long = "builder.pbh_entrypoint",
-        default_value = "0x0000000000000000000000000000000000000000"
+        default_value_t = Default::default(),
     )]
     pub pbh_entrypoint: Address,
 
@@ -70,7 +71,7 @@ pub struct BuilderArgs {
     /// This contract is used to provide the latest merkle root on chain.
     #[arg(
         long = "builder.world_id",
-        default_value = "0x0000000000000000000000000000000000000000"
+        default_value_t = Default::default(),
     )]
     pub world_id: Address,
 
@@ -78,7 +79,7 @@ pub struct BuilderArgs {
     /// This contract signifies that a given bundle should receive priority inclusion if it passes validation
     #[arg(
         long = "builder.signature_aggregator",
-        default_value = "0x0000000000000000000000000000000000000000"
+        default_value_t = Default::default(),
     )]
     pub signature_aggregator: Address,
 
@@ -88,7 +89,7 @@ pub struct BuilderArgs {
         env = "BUILDER_PRIVATE_KEY",
         default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )]
-    pub private_key: String,
+    pub private_key: PrivateKeySigner,
 }
 
 /// Flashblocks configuration

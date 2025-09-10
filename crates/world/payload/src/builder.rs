@@ -73,7 +73,7 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
-        builder_private_key: String,
+        builder_private_key: PrivateKeySigner,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -98,20 +98,17 @@ where
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
-        builder_private_key: String,
+        builder_private_key: PrivateKeySigner,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(pool, client, evm_config, config)
             .set_compute_pending_block(compute_pending_block);
 
-        let private_key = builder_private_key
-            .parse()
-            .expect("invalid builder private key");
         Self {
             inner,
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
-            builder_private_key: private_key,
+            builder_private_key,
         }
     }
 }
