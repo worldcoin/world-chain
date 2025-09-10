@@ -676,8 +676,6 @@ impl FlashblocksStateExecutor {
     ) -> eyre::Result<()> {
         let flashblock = authorized_payload.msg().clone();
 
-        self.p2p_handle.publish_new(authorized_payload.clone())?;
-
         let FlashblocksStateExecutorInner {
             ref mut flashblocks,
             ref mut latest_payload,
@@ -698,6 +696,8 @@ impl FlashblocksStateExecutor {
         };
 
         *latest_payload = Some((built_payload, index));
+
+        self.p2p_handle.publish_new(authorized_payload.clone())?;
 
         Ok(())
     }
