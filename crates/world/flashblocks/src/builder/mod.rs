@@ -123,8 +123,8 @@ where
 
         let builder = FlashblockBuilder::new(best);
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
-
         let db = StateProviderDatabase::new(&state_provider);
+
         if ctx.attributes().no_tx_pool {
             builder.build(
                 self.pool.clone(),
@@ -537,3 +537,5 @@ where
         ))
     }
 }
+
+

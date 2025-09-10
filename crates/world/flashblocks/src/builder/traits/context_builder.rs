@@ -60,11 +60,7 @@ pub trait PayloadBuilderCtxBuilder<Provider, EvmConfig: ConfigureEvm, ChainSpec>
     ///
     /// This context will be used throughout the payload building process to
     /// access configuration, execute transactions, and manage block state.
-    type PayloadBuilderCtx: PayloadBuilderCtx<
-        Evm = EvmConfig,
-        ChainSpec = ChainSpec,
-        // Transaction = Pool::Transaction,
-    >;
+    type PayloadBuilderCtx: PayloadBuilderCtx<Evm = EvmConfig, ChainSpec = ChainSpec>;
 
     /// Constructs a new payload builder context with the given configuration.
     ///
