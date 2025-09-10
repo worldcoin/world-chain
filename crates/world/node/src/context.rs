@@ -69,9 +69,13 @@ where
 
     fn components(&self) -> Self::ComponentsBuilder {
         let Self(WorldChainNodeConfig {
-            args: WorldChainArgs {
-                rollup, builder, ..
-            },
+            args:
+                WorldChainArgs {
+                    rollup,
+                    builder,
+                    pbh,
+                    ..
+                },
             da_config,
         }) = self.clone();
 
@@ -85,17 +89,17 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(WorldChainPoolBuilder::new(
-                builder.pbh_entrypoint,
-                builder.signature_aggregator,
-                builder.world_id,
+                pbh.entrypoint,
+                pbh.signature_aggregator,
+                pbh.world_id,
             ))
             .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
                 WorldChainPayloadBuilderBuilder::new(
                     compute_pending_block,
-                    builder.verified_blockspace_capacity,
-                    builder.pbh_entrypoint,
-                    builder.signature_aggregator,
+                    pbh.verified_blockspace_capacity,
+                    pbh.entrypoint,
+                    pbh.signature_aggregator,
                     builder.private_key,
                 )
                 .with_da_config(da_config),
@@ -158,7 +162,10 @@ where
                 WorldChainNodeConfig {
                     args:
                         WorldChainArgs {
-                            rollup, builder, ..
+                            rollup,
+                            builder,
+                            pbh,
+                            ..
                         },
                     da_config,
                 },
@@ -183,18 +190,18 @@ where
         );
 
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
-            verified_blockspace_capacity: builder.verified_blockspace_capacity,
-            pbh_entry_point: builder.pbh_entrypoint,
-            pbh_signature_aggregator: builder.signature_aggregator,
+            verified_blockspace_capacity: pbh.verified_blockspace_capacity,
+            pbh_entry_point: pbh.entrypoint,
+            pbh_signature_aggregator: pbh.signature_aggregator,
             builder_private_key: builder.private_key,
         };
 
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(WorldChainPoolBuilder::new(
-                builder.pbh_entrypoint,
-                builder.signature_aggregator,
-                builder.world_id,
+                pbh.entrypoint,
+                pbh.signature_aggregator,
+                pbh.world_id,
             ))
             .executor(OpExecutorBuilder::default())
             .payload(FlashblocksPayloadServiceBuilder::new(
@@ -275,7 +282,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .flashblocks
             .expect("Flashblocks args must be present");
 
-        let authorizer_vk = flashblocks.authorizor_vk.unwrap_or(
+        let authorizer_vk = flashblocks.authorizer_vk.unwrap_or(
             flashblocks
                 .builder_sk
                 .as_ref()

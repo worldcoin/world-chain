@@ -243,7 +243,7 @@ def get_config(
         "--builder.world_id={0}".format(WORLD_ID),
         "--builder.interval={0}".format("200ms"),
         "--builder.deadline={0}".format("6"),
-        "--flashblocks.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
+        "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblocks.builder_sk={0}".format(signing_key),
         "--flashblocks.enabled",
         "--block-interval={0}".format(4294967295),

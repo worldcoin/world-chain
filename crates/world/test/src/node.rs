@@ -62,23 +62,27 @@ use reth_optimism_node::OpDAConfig;
 use rollup_boost::ed25519_dalek::SigningKey;
 
 use world_chain_builder_node::{
-    args::{BuilderArgs, FlashblocksArgs, WorldChainArgs},
+    args::{BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };
 
 pub fn test_config() -> WorldChainNodeConfig {
     let builder = BuilderArgs {
         enabled: true,
+        private_key: signer(6),
+    };
+
+    let pbh = PbhArgs {
         verified_blockspace_capacity: 70,
-        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+        entrypoint: PBH_DEV_ENTRYPOINT,
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
-        private_key: signer(6),
     };
 
     let flashblocks = FlashblocksArgs {
         enabled: true,
-        authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+        spoof_authorizer: false,
+        authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
         builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
     };
 
@@ -86,6 +90,7 @@ pub fn test_config() -> WorldChainNodeConfig {
         args: WorldChainArgs {
             rollup: Default::default(),
             builder,
+            pbh,
             flashblocks: Some(flashblocks),
         },
         da_config: OpDAConfig::default(),
