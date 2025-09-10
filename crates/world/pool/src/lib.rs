@@ -5,7 +5,6 @@ use reth::{
     api::FullNodeTypes,
     transaction_pool::{blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor},
 };
-use reth_transaction_pool::blobstore::InMemoryBlobStore;
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
