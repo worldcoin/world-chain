@@ -1,10 +1,9 @@
-use std::{borrow::Cow, future::Future};
 use alloy_consensus::{transaction::SignerRecoverable, TxReceipt};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth::rpc::compat::RpcReceipt;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpPrimitives};
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 use reth_primitives::TransactionMeta;
 use reth_provider::{ProviderReceipt, ProviderTx};
@@ -15,6 +14,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_api::{transaction::ConvertReceiptInput, RpcNodeCoreExt};
 use reth_rpc_eth_api::{EthApiTypes, FromEthApiError, RpcTypes};
 use reth_rpc_eth_types::EthApiError;
+use std::{borrow::Cow, future::Future};
 use tracing::info;
 
 use crate::rpc::eth::FlashblocksEthApi;
