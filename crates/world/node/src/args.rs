@@ -237,13 +237,18 @@ mod tests {
             enabled: true,
             spoof_authorizer: true,
             authorizer_vk: None,
-            builder_sk: None,
+            builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
         };
 
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
             "--flashblocks.spoof_authorizer",
+            "--flashblocks.builder_sk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "--builder.enabled",
+            "--builder.private_key",
+            "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         ])
         .world;
 
