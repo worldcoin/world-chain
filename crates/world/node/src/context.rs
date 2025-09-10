@@ -186,7 +186,7 @@ where
             verified_blockspace_capacity: builder.verified_blockspace_capacity,
             pbh_entry_point: builder.pbh_entrypoint,
             pbh_signature_aggregator: builder.signature_aggregator,
-            builder_private_key: builder.private_key.parse().unwrap(),
+            builder_private_key: builder.private_key,
         };
 
         ComponentsBuilder::default()

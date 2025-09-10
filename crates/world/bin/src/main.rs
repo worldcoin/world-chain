@@ -33,7 +33,7 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
             info!(target: "reth::cli", "Launching node");
-            let config: WorldChainNodeConfig = args.try_into()?;
+            let config: WorldChainNodeConfig = args.into_config(&builder.config().chain)?;
 
             let node_context = config.clone().into();
 

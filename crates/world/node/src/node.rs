@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use alloy_primitives::Address;
+use alloy_signer_local::PrivateKeySigner;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::{
     ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
@@ -373,7 +374,7 @@ where
 }
 
 /// A basic World Chain payload service builder
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
@@ -395,7 +396,7 @@ pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     pub pbh_signature_aggregator: Address,
 
     /// Sets the private key of the builder
-    pub builder_private_key: String,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl WorldChainPayloadBuilderBuilder {
@@ -406,7 +407,7 @@ impl WorldChainPayloadBuilderBuilder {
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
-        builder_private_key: String,
+        builder_private_key: PrivateKeySigner,
     ) -> Self {
         Self {
             compute_pending_block,
