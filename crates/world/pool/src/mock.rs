@@ -35,16 +35,15 @@ use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
     ChainSpecProvider, ChangeSetReader, DatabaseProvider, DatabaseProviderFactory, EthStorage,
     ExecutionOutcome, HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateCommitmentProvider,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use reth_trie_db::MerklePatriciaTrie;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone)]
@@ -177,14 +176,11 @@ pub struct MockNode;
 impl NodeTypes for MockNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = EthEngineTypes;
 }
 
-impl StateCommitmentProvider for MockEthProvider {
-    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
-}
+// impl StateCommitmentProvider for MockEthProvider {}
 
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
@@ -818,6 +814,10 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
+    }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        todo!()
     }
 }
 

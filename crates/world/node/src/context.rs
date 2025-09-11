@@ -287,7 +287,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .authorizor_vk
             .unwrap_or(flashblocks.builder_sk.verifying_key());
         let builder_sk = flashblocks.builder_sk.clone();
-        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
+        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, Some(builder_sk.clone()));
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
         Self {
