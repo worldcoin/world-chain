@@ -46,7 +46,7 @@ use reth_transaction_pool::{BlobStore, TransactionPool};
 
 use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
-use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
+use world_chain_payload::builder::WorldChainPayloadBuilder;
 use world_chain_pool::ordering::WorldChainOrdering;
 use world_chain_pool::root::WorldChainRootValidator;
 use world_chain_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};

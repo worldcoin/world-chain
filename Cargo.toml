@@ -54,7 +54,7 @@ flashblocks-payload = { path = "crates/flashblocks/payload" }
 # Internal
 world-chain-builder-node = { path = "crates/world/node" }
 world-chain-pbh = { path = "crates/world/pbh" }
-world-chain-builder-payload = { path = "crates/world/payload" }
+world-chain-payload = { path = "crates/world/payload" }
 world-chain-rpc = { path = "crates/world/rpc" }
 world-chain-pool = { path = "crates/world/pool" }
 world-chain-provider = { path = "crates/world/provider" }
