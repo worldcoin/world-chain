@@ -12242,7 +12242,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.20",
- "world-chain-builder-node",
+ "world-chain-node",
  "world-chain-pbh",
  "world-chain-pool",
  "world-chain-test",
@@ -13965,12 +13965,12 @@ dependencies = [
  "serde_json",
  "tikv-jemallocator",
  "tokio",
- "world-chain-builder-node",
+ "world-chain-node",
  "world-chain-rpc",
 ]
 
 [[package]]
-name = "world-chain-builder-node"
+name = "world-chain-node"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
@@ -14029,7 +14029,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
- "world-chain-builder-node",
+ "world-chain-node",
  "world-chain-payload",
  "world-chain-pbh",
  "world-chain-pool",
@@ -14203,7 +14203,7 @@ dependencies = [
  "serde",
  "test-case",
  "tokio",
- "world-chain-builder-node",
+ "world-chain-node",
  "world-chain-pbh",
  "world-chain-pool",
  "world-chain-provider",

@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-node"
+name = "world-chain-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -59,7 +59,7 @@ world-chain-pbh.workspace = true
 world-chain-rpc.workspace = true
 world-chain-pool.workspace = true
 world-chain-test.workspace = true
-world-chain-builder-node.workspace = true
+world-chain-node.workspace = true
 
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true

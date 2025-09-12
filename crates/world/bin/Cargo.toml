@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # world-chain
-world-chain-builder-node.workspace = true
+world-chain-node.workspace = true
 world-chain-rpc.workspace = true
 
 flashblocks-primitives.workspace = true

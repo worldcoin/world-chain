@@ -20,8 +20,8 @@ use tracing::info;
 use world_chain_test::utils::account;
 
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
-use world_chain_builder_node::context::BasicContext;
-use world_chain_builder_node::context::FlashblocksContext;
+use world_chain_node::context::BasicContext;
+use world_chain_node::context::FlashblocksContext;
 use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
 use world_chain_test::utils::signer;
 
