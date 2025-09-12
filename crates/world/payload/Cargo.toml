@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-payload"
+name = "world-chain-payload"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

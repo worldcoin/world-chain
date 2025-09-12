@@ -14030,7 +14030,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "world-chain-builder-node",
- "world-chain-builder-payload",
+ "world-chain-payload",
  "world-chain-pbh",
  "world-chain-pool",
  "world-chain-provider",
@@ -14039,7 +14039,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-builder-payload"
+name = "world-chain-payload"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
