@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 
 reth.workspace = true
 

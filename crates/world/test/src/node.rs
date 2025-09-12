@@ -52,7 +52,7 @@ use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
-use world_chain_builder_pool::{
+use world_chain_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };

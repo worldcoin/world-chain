@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 # Internal
 flashblocks-builder.workspace = true
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 world-chain-rpc.workspace = true
 
 # reth

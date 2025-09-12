@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 world-chain-builder-payload.workspace = true
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 world-chain-provider.workspace = true
 
 flashblocks-p2p.workspace = true
@@ -57,7 +57,7 @@ hex.workspace = true
 [dev-dependencies]
 world-chain-builder-pbh.workspace = true
 world-chain-rpc.workspace = true
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-builder-node.workspace = true
 

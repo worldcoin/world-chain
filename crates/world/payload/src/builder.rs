@@ -36,8 +36,8 @@ use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::WorldChainTransactionPool;
+use world_chain_pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::WorldChainTransactionPool;
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]

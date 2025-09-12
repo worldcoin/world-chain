@@ -12244,7 +12244,7 @@ dependencies = [
  "tracing-subscriber 0.3.20",
  "world-chain-builder-node",
  "world-chain-builder-pbh",
- "world-chain-builder-pool",
+ "world-chain-pool",
  "world-chain-test",
 ]
 
@@ -14032,7 +14032,7 @@ dependencies = [
  "world-chain-builder-node",
  "world-chain-builder-payload",
  "world-chain-builder-pbh",
- "world-chain-builder-pool",
+ "world-chain-pool",
  "world-chain-provider",
  "world-chain-rpc",
  "world-chain-test",
@@ -14073,7 +14073,7 @@ dependencies = [
  "semaphore-rs",
  "tokio",
  "tracing",
- "world-chain-builder-pool",
+ "world-chain-pool",
  "world-chain-rpc",
 ]
 
@@ -14096,7 +14096,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-builder-pool"
+name = "world-chain-pool"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
@@ -14158,7 +14158,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tracing",
- "world-chain-builder-pool",
+ "world-chain-pool",
 ]
 
 [[package]]
@@ -14205,7 +14205,7 @@ dependencies = [
  "tokio",
  "world-chain-builder-node",
  "world-chain-builder-pbh",
- "world-chain-builder-pool",
+ "world-chain-pool",
  "world-chain-provider",
 ]
 

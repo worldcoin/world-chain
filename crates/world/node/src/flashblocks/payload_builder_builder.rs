@@ -16,7 +16,7 @@ use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::tx::WorldChainPooledTransaction;
 use world_chain_provider::InMemoryState;
 
 use crate::context::FlashblocksContext;
