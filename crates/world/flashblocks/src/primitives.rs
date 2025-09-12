@@ -7,6 +7,10 @@ use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{FixedBytes, B256, U256};
 use eyre::eyre::{bail, eyre};
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use flashblocks_primitives::primitives::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
+};
 use op_alloy_consensus::OpBlock;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::Block as _;
@@ -17,10 +21,6 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
-
-use rollup_boost::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
-};
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.

@@ -6,6 +6,10 @@ use std::{
 };
 
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
+use flashblocks_primitives::{
+    p2p::{Authorization, AuthorizedPayload},
+    primitives::FlashblocksPayloadV1,
+};
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -21,7 +25,6 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use rollup_boost::{Authorization, AuthorizedPayload, FlashblocksPayloadV1};
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 

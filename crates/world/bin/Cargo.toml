@@ -15,7 +15,7 @@ workspace = true
 world-chain-builder-node.workspace = true
 world-chain-builder-rpc.workspace = true
 
-rollup-boost.workspace = true
+flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
 # reth

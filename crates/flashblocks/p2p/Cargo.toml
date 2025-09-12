@@ -1,0 +1,37 @@
+[package]
+name = "flashblocks-p2p"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flashblocks-primitives.workspace = true
+
+reth.workspace = true
+reth-optimism-primitives.workspace = true
+reth-ethereum.workspace = true
+reth-eth-wire.workspace = true
+reth-network = { workspace = true }
+reth-node-api = { workspace = true }
+reth-node-builder = { workspace = true }
+reth-provider = { workspace = true }
+reth-transaction-pool = { workspace = true }
+
+ed25519-dalek.workspace = true
+blake3.workspace = true             # fast hashing for payload IDs
+serde.workspace = true
+metrics.workspace = true
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+eyre.workspace = true
+futures = { workspace = true }
+clap.workspace = true
+tracing.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+reth-op.workspace = true

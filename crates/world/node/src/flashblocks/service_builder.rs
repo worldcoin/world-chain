@@ -1,4 +1,5 @@
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -7,7 +8,6 @@ use reth_node_builder::{
 };
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::Authorization;
 use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor,
     payload::generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},

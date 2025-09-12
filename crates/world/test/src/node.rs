@@ -57,9 +57,9 @@ use world_chain_builder_pool::{
     validator::WorldChainTransactionValidator,
 };
 
+use flashblocks_primitives::ed25519_dalek::SigningKey;
 use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
-use rollup_boost::ed25519_dalek::SigningKey;
 
 use world_chain_builder_node::{
     args::{BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs},

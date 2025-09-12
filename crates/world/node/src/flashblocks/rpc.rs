@@ -1,5 +1,7 @@
 use alloy_rpc_types::engine::ClientVersionV1;
+use ed25519_dalek::VerifyingKey;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::p2p::Authorization;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::version::version_metadata;
 use reth::{payload::PayloadStore, version::CLIENT_CODE};
@@ -11,7 +13,6 @@ use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
-use rollup_boost::{ed25519_dalek::VerifyingKey, Authorization};
 use world_chain_builder_flashblocks::rpc::engine::OpEngineApiExt;
 
 /// Builder for basic [`OpEngineApiExt`] implementation.
