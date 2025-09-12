@@ -10,17 +10,17 @@ optimism_package:
         cl_type: op-node
         cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
         el_builder_type: custom
-        el_builder_image: world-chain-builder:latest
+        el_builder_image: world-chain:latest
       - el_type: custom
-        el_image: world-chain-builder:latest
+        el_image: world-chain:latest
         el_builder_type: custom
-        el_builder_image: world-chain-builder:latest
+        el_builder_image: world-chain:latest
         cl_type: op-node
         cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
       - el_type: custom
-        el_image: world-chain-builder:latest
+        el_image: world-chain:latest
         el_builder_type: custom
-        el_builder_image: world-chain-builder:latest
+        el_builder_image: world-chain:latest
         cl_type: op-node
         cl_image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.13.3
       network_params: 

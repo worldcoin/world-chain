@@ -132,7 +132,7 @@ where
     Ok(())
 }
 
-/// Asserts that the chain continues to advance in the case when the world-chain-builder service is MIA.
+/// Asserts that the chain continues to advance in the case when the world-chain service is MIA.
 pub async fn fallback_test<N, P>(sequencer_provider: P) -> Result<()>
 where
     N: Network,
