@@ -30,7 +30,7 @@ use world_chain_test::node::test_config;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
-use world_chain_builder_pool::{
+use world_chain_pool::{
     root::LATEST_ROOT_SLOT,
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
     BasicWorldChainPool,

@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 world-chain-builder-node.workspace = true
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-builder-pbh.workspace = true
 

@@ -31,7 +31,7 @@ use reth_optimism_node::{
 use reth_optimism_rpc::OpEthApiBuilder;
 
 use world_chain_builder_payload::context::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_builder_pool::BasicWorldChainPool;
+use world_chain_pool::BasicWorldChainPool;
 use world_chain_provider::InMemoryState;
 
 #[derive(Clone, Debug)]

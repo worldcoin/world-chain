@@ -19,7 +19,7 @@ use reth::{
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::tx::WorldChainPooledTransaction;
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
 

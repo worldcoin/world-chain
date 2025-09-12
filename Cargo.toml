@@ -56,7 +56,7 @@ world-chain-builder-node = { path = "crates/world/node" }
 world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-rpc = { path = "crates/world/rpc" }
-world-chain-builder-pool = { path = "crates/world/pool" }
+world-chain-pool = { path = "crates/world/pool" }
 world-chain-provider = { path = "crates/world/provider" }
 world-chain-test = { path = "crates/world/test" }
 

@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-pool"
+name = "world-chain-pool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
