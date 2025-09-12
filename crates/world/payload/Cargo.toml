@@ -11,10 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# world-chain
+# Internal
+flashblocks-builder.workspace = true
 world-chain-builder-pool.workspace = true
 world-chain-builder-rpc.workspace = true
-world-chain-builder-flashblocks.workspace = true
 
 # reth
 reth.workspace = true

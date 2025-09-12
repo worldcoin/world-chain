@@ -1,4 +1,5 @@
 pub mod error;
+pub mod flashblocks;
 pub mod p2p;
 pub mod primitives;
 

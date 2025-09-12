@@ -5,7 +5,9 @@ use std::{
     time::Duration,
 };
 
+use flashblocks_builder::executor::FlashblocksStateExecutor;
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
+use flashblocks_primitives::flashblocks::Flashblock;
 use flashblocks_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
@@ -28,10 +30,7 @@ use reth_optimism_primitives::OpPrimitives;
 use tokio::{sync::oneshot, time::Sleep};
 use tracing::{debug, error, info, span, trace};
 
-use crate::{
-    builder::executor::FlashblocksStateExecutor, metrics::PayloadBuilderMetrics,
-    primitives::Flashblock,
-};
+use crate::metrics::PayloadBuilderMetrics;
 
 /// A payload job that continuously spawns new build tasks at regular intervals, each building on top of the previous `best_payload`.
 ///

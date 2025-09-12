@@ -2,7 +2,7 @@
 
 use reth_rpc_eth_api::helpers::{EthBlocks, LoadBlock};
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
 
 impl<T> EthBlocks for FlashblocksEthApi<T> where T: EthBlocks + Clone {}
 

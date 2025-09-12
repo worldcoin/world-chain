@@ -65,8 +65,8 @@ use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
 
-use crate::primitives::{Flashblock, Flashblocks};
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
+use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");

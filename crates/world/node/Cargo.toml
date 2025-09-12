@@ -13,11 +13,13 @@ workspace = true
 [dependencies]
 world-chain-builder-payload.workspace = true
 world-chain-builder-pool.workspace = true
-world-chain-builder-flashblocks.workspace = true
 world-chain-provider.workspace = true
 
 flashblocks-p2p.workspace = true
 flashblocks-primitives.workspace = true
+flashblocks-rpc.workspace = true
+flashblocks-builder.workspace = true
+flashblocks-payload.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true

@@ -4,6 +4,7 @@ use alloy_rpc_types::{Header, Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use eyre::eyre::{eyre, Result};
 use flashblocks_primitives::p2p::Authorization;
+use flashblocks_rpc::engine::FlashblocksEngineApiExtClient;
 use futures::future::BoxFuture;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
@@ -14,7 +15,6 @@ use revm_primitives::{Address, Bytes, B256, U256};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
-use world_chain_builder_flashblocks::rpc::engine::FlashblocksEngineApiExtClient;
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.

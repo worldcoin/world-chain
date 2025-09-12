@@ -9,7 +9,7 @@ use reth_rpc_eth_api::helpers::{
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{ProviderBlock, ProviderReceipt};
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
 
 impl<T> LoadPendingBlock for FlashblocksEthApi<T>
 where

@@ -1,6 +1,7 @@
 use crate::context::WorldChainPayloadBuilderCtx;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
+use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use reth::api::PayloadBuilderError;
 use reth::payload::PayloadBuilderAttributes;
 use reth::revm::database::StateProviderDatabase;
@@ -35,7 +36,6 @@ use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
-use world_chain_builder_flashblocks::PayloadBuilderCtx;
 use world_chain_builder_pool::tx::WorldChainPooledTransaction;
 use world_chain_builder_pool::WorldChainTransactionPool;
 

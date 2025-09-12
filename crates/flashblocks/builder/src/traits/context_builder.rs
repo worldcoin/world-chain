@@ -6,7 +6,7 @@ use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_primitives::NodePrimitives;
 
-use crate::builder::traits::context::PayloadBuilderCtx;
+use crate::traits::context::PayloadBuilderCtx;
 
 /// Builder trait for creating [`PayloadBuilderCtx`] instances with specific configurations.
 ///
