@@ -61,7 +61,7 @@ use flashblocks_primitives::ed25519_dalek::SigningKey;
 use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
 
-use world_chain_builder_node::{
+use world_chain_node::{
     args::{BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };

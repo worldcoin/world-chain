@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 use tracing::span;
-use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeContext};
+use world_chain_node::node::{WorldChainNode, WorldChainNodeContext};
 use world_chain_test::node::test_config;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
