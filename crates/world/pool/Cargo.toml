@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-world-chain-builder-pbh.workspace = true
+world-chain-pbh.workspace = true
 
 reth.workspace = true
 reth-db.workspace = true

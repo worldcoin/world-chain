@@ -55,7 +55,7 @@ ed25519-dalek.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
-world-chain-builder-pbh.workspace = true
+world-chain-pbh.workspace = true
 world-chain-rpc.workspace = true
 world-chain-pool.workspace = true
 world-chain-test.workspace = true

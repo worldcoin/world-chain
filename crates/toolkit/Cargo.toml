@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 semaphore-rs.workspace = true
-world-chain-builder-pbh.workspace = true
+world-chain-pbh.workspace = true
 
 # Alloy
 alloy-consensus.workspace = true

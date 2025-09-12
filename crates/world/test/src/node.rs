@@ -48,7 +48,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{broadcast, watch};
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_pbh::external_nullifier::ExternalNullifier;
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
