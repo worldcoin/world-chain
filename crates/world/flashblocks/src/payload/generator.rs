@@ -17,13 +17,7 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
-use flashblocks_primitives::{
-    p2p::{
-        Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
-        StartPublish, StopPublish,
-    },
-    primitives::FlashblocksPayloadV1,
-};
+use flashblocks_primitives::p2p::Authorization;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
