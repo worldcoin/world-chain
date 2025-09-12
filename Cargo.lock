@@ -13966,7 +13966,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "world-chain-builder-node",
- "world-chain-builder-rpc",
+ "world-chain-rpc",
 ]
 
 [[package]]
@@ -14033,8 +14033,8 @@ dependencies = [
  "world-chain-builder-payload",
  "world-chain-builder-pbh",
  "world-chain-builder-pool",
- "world-chain-builder-rpc",
  "world-chain-provider",
+ "world-chain-rpc",
  "world-chain-test",
 ]
 
@@ -14074,7 +14074,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder-pool",
- "world-chain-builder-rpc",
+ "world-chain-rpc",
 ]
 
 [[package]]
@@ -14132,7 +14132,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-builder-rpc"
+name = "world-chain-provider"
+version = "0.1.0"
+dependencies = [
+ "reth-chain-state",
+ "reth-node-api",
+ "reth-provider",
+]
+
+[[package]]
+name = "world-chain-rpc"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
@@ -14150,15 +14159,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "world-chain-builder-pool",
-]
-
-[[package]]
-name = "world-chain-provider"
-version = "0.1.0"
-dependencies = [
- "reth-chain-state",
- "reth-node-api",
- "reth-provider",
 ]
 
 [[package]]
