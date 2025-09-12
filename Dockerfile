@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
-ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
+ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
@@ -61,9 +61,9 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     /tmp/aws/install && \
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
-ARG WORLD_CHAIN_BUILDER_BIN="world-chain-builder"
+ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 
-ENTRYPOINT ["/usr/local/bin/world-chain-builder"]
+ENTRYPOINT ["/usr/local/bin/world-chain"]

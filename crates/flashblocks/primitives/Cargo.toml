@@ -5,45 +5,28 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tracing.workspace = true
-tracing-subscriber.workspace = true
-clap.workspace = true
-futures.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-metrics.workspace = true
-tokio.workspace = true
 eyre.workspace = true
-url.workspace = true
-sha2.workspace = true
-arbitrary.workspace = true
 
 reth.workspace = true
-reth-optimism-payload-builder.workspace = true
-reth-rpc-layer.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
 reth-chain-state.workspace = true
 reth-primitives.workspace = true
 
-alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-primitives.workspace = true
 alloy-serde.workspace = true
 alloy-rlp.workspace = true
 
 op-alloy-consensus.workspace = true
-op-alloy-rpc-types-engine.workspace = true
-
-tokio-tungstenite.workspace = true
-metrics-derive.workspace = true
-testcontainers.workspace = true
 
 blake3.workspace = true
 ed25519-dalek.workspace = true
 bytes.workspace = true
-hex.workspace = true
