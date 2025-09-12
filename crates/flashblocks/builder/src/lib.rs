@@ -1,9 +1,7 @@
 use crate::{
-    builder::{
-        executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
-        payload_txns::BestPayloadTxns,
-    },
-    PayloadBuilderCtx, PayloadBuilderCtxBuilder,
+    executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
+    payload_txns::BestPayloadTxns,
+    traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 
 use alloy_consensus::Transaction;

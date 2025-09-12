@@ -5,5 +5,3 @@ pub mod config;
 pub mod context;
 pub mod flashblocks;
 pub mod node;
-
-pub use world_chain_builder_flashblocks::primitives::*;

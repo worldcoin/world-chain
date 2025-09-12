@@ -14,12 +14,17 @@ members = [
     "crates/world/*",
     "crates/flashblocks/p2p",
     "crates/flashblocks/primitives",
+    "crates/flashblocks/rpc",
+    "crates/flashblocks/builder",
+    "crates/flashblocks/payload",
 ]
 default-members = [
     "crates/flashblocks/p2p",
     "crates/flashblocks/primitives",
+    "crates/flashblocks/rpc",
+    "crates/flashblocks/builder",
+    "crates/flashblocks/payload",
     "crates/world/bin",
-    "crates/world/flashblocks",
     "crates/world/node",
     "crates/world/payload",
     "crates/world/rpc",
@@ -42,6 +47,9 @@ lto = "fat"
 flashblocks-node = { path = "crates/flashblocks/node" }
 flashblocks-p2p = { path = "crates/flashblocks/p2p" }
 flashblocks-primitives = { path = "crates/flashblocks/primitives" }
+flashblocks-rpc = { path = "crates/flashblocks/rpc" }
+flashblocks-builder = { path = "crates/flashblocks/builder" }
+flashblocks-payload = { path = "crates/flashblocks/payload" }
 
 # Internal
 world-chain-builder-node = { path = "crates/world/node" }
@@ -49,7 +57,6 @@ world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
 world-chain-builder-rpc = { path = "crates/world/rpc" }
 world-chain-builder-pool = { path = "crates/world/pool" }
-world-chain-builder-flashblocks = { path = "crates/world/flashblocks" }
 world-chain-provider = { path = "crates/world/provider" }
 world-chain-test = { path = "crates/world/test" }
 

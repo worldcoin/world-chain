@@ -1,6 +1,6 @@
 use reth_rpc_eth_api::helpers::{estimate::EstimateCall, Call, EthCall};
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
 
 impl<T> EthCall for FlashblocksEthApi<T> where T: EthCall + Clone {}
 

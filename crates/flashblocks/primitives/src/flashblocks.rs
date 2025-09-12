@@ -1,3 +1,5 @@
+use crate::primitives::FlashblocksPayloadV1;
+use crate::primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
@@ -7,10 +9,6 @@ use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{FixedBytes, B256, U256};
 use eyre::eyre::{bail, eyre};
-use flashblocks_primitives::primitives::FlashblocksPayloadV1;
-use flashblocks_primitives::primitives::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
-};
 use op_alloy_consensus::OpBlock;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::Block as _;

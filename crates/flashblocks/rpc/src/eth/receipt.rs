@@ -1,6 +1,6 @@
 use reth_rpc_eth_api::helpers::LoadReceipt;
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
 
 impl<T> LoadReceipt for FlashblocksEthApi<T>
 where

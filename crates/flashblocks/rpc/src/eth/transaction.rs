@@ -1,6 +1,6 @@
 //! Loads and formats OP transaction RPC response.
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
 use alloy_primitives::{Bytes, B256};
 use reth_rpc_eth_api::helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction};
 

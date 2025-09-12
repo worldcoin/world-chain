@@ -4,6 +4,8 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
+use flashblocks_builder::traits::context::PayloadBuilderCtx;
+use flashblocks_builder::traits::context_builder::PayloadBuilderCtxBuilder;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::chainspec::EthChainSpec;
@@ -37,7 +39,6 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tracing::{error, trace};
-use world_chain_builder_flashblocks::{PayloadBuilderCtx, PayloadBuilderCtxBuilder};
 
 use world_chain_builder_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
 use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};

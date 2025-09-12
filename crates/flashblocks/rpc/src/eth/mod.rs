@@ -30,7 +30,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 
-use crate::builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::executor::FlashblocksStateExecutor;
 
 /// Flashblocks `Eth` API implementation.
 ///
@@ -207,14 +207,14 @@ where
 #[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
-    state_executor: FlashblocksStateExecutor,
+    _state_executor: FlashblocksStateExecutor,
 }
 
 impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
     fn default() -> Self {
         Self {
             inner: OpEthApiBuilder::default(),
-            state_executor: FlashblocksStateExecutor::default(),
+            _state_executor: FlashblocksStateExecutor::default(),
         }
     }
 }
@@ -227,7 +227,7 @@ impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     ) -> Self {
         Self {
             inner,
-            state_executor,
+            _state_executor: state_executor,
         }
     }
 }
