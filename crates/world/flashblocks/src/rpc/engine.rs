@@ -4,6 +4,7 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
+use flashblocks_primitives::p2p::Authorization;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
@@ -17,7 +18,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::Authorization;
 use tracing::info;
 
 /// TODO: Extend Engine API with Authorized FCU Methods

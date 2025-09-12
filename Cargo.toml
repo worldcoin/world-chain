@@ -8,8 +8,16 @@ repository = "https://github.com/worldcoin/world-chain/"
 
 [workspace]
 resolver = "3"
-members = ["crates/tests/*", "crates/toolkit", "crates/world/*"]
+members = [
+    "crates/tests/*",
+    "crates/toolkit",
+    "crates/world/*",
+    "crates/flashblocks/p2p",
+    "crates/flashblocks/primitives",
+]
 default-members = [
+    "crates/flashblocks/p2p",
+    "crates/flashblocks/primitives",
     "crates/world/bin",
     "crates/world/flashblocks",
     "crates/world/node",
@@ -30,7 +38,12 @@ lto = "fat"
 [workspace.lints]
 
 [workspace.dependencies]
-# internal
+# Flashblocks
+flashblocks-node = { path = "crates/flashblocks/node" }
+flashblocks-p2p = { path = "crates/flashblocks/p2p" }
+flashblocks-primitives = { path = "crates/flashblocks/primitives" }
+
+# Internal
 world-chain-builder-node = { path = "crates/world/node" }
 world-chain-builder-pbh = { path = "crates/world/pbh" }
 world-chain-builder-payload = { path = "crates/world/payload" }
@@ -61,6 +74,10 @@ reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b863
 reth-prune-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-ethereum = { git = "https://github.com/paradigmxyz/reth", features = [
+    "network",
+], rev = "9b86326" }
+reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
@@ -79,7 +96,9 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326", defa
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-rpc-engine-api = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-network = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-network-api = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-network-peers = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 # reth-optimism
 reth-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-optimism-evm = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
@@ -100,6 +119,7 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" 
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-optimism-storage = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-op = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
 
 # alloy op
 op-alloy-consensus = "0.19.1"
@@ -157,15 +177,13 @@ jsonrpsee-types = "0.26.0"
 metrics = "0.24.0"
 metrics-derive = "0.1"
 
-# 3rd party
-rollup-boost = { git = "https://github.com/flashbots/rollup-boost", rev = "40774a2" }
-flashblocks-p2p = { git = "https://github.com/flashbots/rollup-boost", rev = "40774a2" }
-
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
+tokio-stream = "0.1.17"
 tokio-tungstenite = "0.26.2"
 
 futures = "0.3"
+futures-util = "0.3"
 chrono = "0.4"
 thiserror = "1"
 strum = { version = "0.27", features = ["derive"] }
@@ -198,6 +216,15 @@ async-trait = "0.1.88"
 dashmap = "6.1.0"
 tower = "0.5.0"
 arbitrary = { version = "=1.4.2", features = ["derive"] }
+blake3 = "1.8.2"
+ed25519-dalek = { version = "2", features = ["serde"] }
+sha2 = "0.10.9"
+url = "2.5.7"
+brotli = "8.0.2"
+
+# Test
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["redis"] }
 
 
 # WIP

@@ -16,8 +16,8 @@ world-chain-builder-pool.workspace = true
 world-chain-builder-flashblocks.workspace = true
 world-chain-provider.workspace = true
 
-rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
+flashblocks-primitives.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true
@@ -49,6 +49,8 @@ tokio.workspace = true
 eyre.workspace = true
 clap.workspace = true
 tracing.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 world-chain-builder-pbh.workspace = true

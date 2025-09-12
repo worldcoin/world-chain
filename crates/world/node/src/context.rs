@@ -12,7 +12,9 @@ use crate::{
         WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
     },
 };
+use ed25519_dalek::VerifyingKey;
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
+use flashblocks_primitives::p2p::Authorization;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
@@ -25,7 +27,6 @@ use reth_optimism_node::{
     OpExecutorBuilder, OpNetworkBuilder,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
-use rollup_boost::{ed25519_dalek::VerifyingKey, Authorization};
 
 use world_chain_builder_flashblocks::{
     builder::executor::FlashblocksStateExecutor, rpc::eth::FlashblocksEthApiBuilder,

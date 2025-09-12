@@ -17,11 +17,17 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
+use flashblocks_primitives::{
+    p2p::{
+        Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
+        StartPublish, StopPublish,
+    },
+    primitives::FlashblocksPayloadV1,
+};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use rollup_boost::Authorization;
 use tokio::runtime::Handle;
 use tracing::debug;
 

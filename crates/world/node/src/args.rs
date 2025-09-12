@@ -1,15 +1,12 @@
-use std::str::FromStr;
-
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{value_parser, ArgGroup};
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use hex::FromHex;
 use reth::chainspec::NamedChain;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
-use rollup_boost::{
-    ed25519_dalek::{SigningKey, VerifyingKey},
-    parse_sk, parse_vk,
-};
+use std::str::FromStr;
 use tracing::warn;
 
 use crate::config::WorldChainNodeConfig;
@@ -208,6 +205,16 @@ impl From<WorldChainNodeConfig> for NodeContextType {
             false => Self::Basic,
         }
     }
+}
+
+pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
+    let bytes = <[u8; 32]>::from_hex(s.trim())?;
+    Ok(SigningKey::from_bytes(&bytes))
+}
+
+pub fn parse_vk(s: &str) -> eyre::Result<VerifyingKey> {
+    let bytes = <[u8; 32]>::from_hex(s.trim())?;
+    Ok(VerifyingKey::from_bytes(&bytes)?)
 }
 
 #[cfg(test)]

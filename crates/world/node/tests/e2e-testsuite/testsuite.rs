@@ -1,6 +1,8 @@
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
+use ed25519_dalek::SigningKey;
+use flashblocks_primitives::p2p::Authorization;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
@@ -13,7 +15,6 @@ use reth_optimism_node::OpPayloadAttributes;
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
 use revm_primitives::{Address, Bytes, B256, U256};
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use tracing::info;
 use world_chain_test::utils::account;
