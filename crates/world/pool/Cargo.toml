@@ -19,7 +19,6 @@ reth-eth-wire-types.workspace = true
 reth-optimism-primitives.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-transaction-pool.workspace = true
 reth-optimism-forks.workspace = true
 
 alloy-consensus.workspace = true

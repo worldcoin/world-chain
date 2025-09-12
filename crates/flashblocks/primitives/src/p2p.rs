@@ -194,10 +194,10 @@ impl Decodable for Authorization {
         if !header.list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
-        let mut body = &buf[..header.payload_length as usize];
+        let mut body = &buf[..header.payload_length];
 
         // 1. payload_id
-        let payload_id = alloy_rpc_types_engine::PayloadId(B64::decode(&mut body)?.into());
+        let payload_id = alloy_rpc_types_engine::PayloadId(B64::decode(&mut body)?);
 
         // 2. timestamp
         let timestamp = u64::decode(&mut body)?;
@@ -213,7 +213,7 @@ impl Decodable for Authorization {
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
 
         // advance caller’s slice cursor
-        *buf = &buf[header.payload_length as usize..];
+        *buf = &buf[header.payload_length..];
 
         Ok(Self {
             payload_id,
@@ -413,7 +413,7 @@ impl Decodable for Authorized {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
 
-        let mut body = &buf[..header.payload_length as usize];
+        let mut body = &buf[..header.payload_length];
 
         // 1. payload
         let payload = AuthorizedMsg::decode(&mut body)?;
@@ -425,7 +425,7 @@ impl Decodable for Authorized {
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
 
         // advance caller’s cursor
-        *buf = &buf[header.payload_length as usize..];
+        *buf = &buf[header.payload_length..];
 
         Ok(Self {
             msg: payload,
