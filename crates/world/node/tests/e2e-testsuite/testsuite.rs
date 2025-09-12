@@ -425,7 +425,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;
 
-    let receipts = rx.recv().await.expect("should receive receipts");
+    let _receipts = rx.recv().await.expect("should receive receipts");
 
     // TODO: Assertions once EthApi is fixed
     Ok(())
