@@ -186,7 +186,7 @@ where
         // Notify the P2P handler to start publishing for this authorization
         self.p2p_handler
             .start_publishing(authorization)
-            .map_err(|e| PayloadBuilderError::other(e))?;
+            .map_err(PayloadBuilderError::other)?;
 
         let mut job = FlashblocksPayloadJob {
             config,

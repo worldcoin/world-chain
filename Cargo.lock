@@ -14008,7 +14008,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-transaction-pool",
  "revm-primitives",
  "semaphore-rs",
  "serde",

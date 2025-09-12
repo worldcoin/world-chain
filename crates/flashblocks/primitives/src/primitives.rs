@@ -159,7 +159,7 @@ impl Decodable for FlashblocksPayloadV1 {
         }
 
         // Limit the decoding window to the list payload only.
-        let mut body = &buf[..header.payload_length as usize];
+        let mut body = &buf[..header.payload_length];
 
         let payload_id = B64::decode(&mut body)?.into();
         let index = u64::decode(&mut body)?;
@@ -178,7 +178,7 @@ impl Decodable for FlashblocksPayloadV1 {
         };
 
         // advance the original buffer cursor
-        *buf = &buf[header.payload_length as usize..];
+        *buf = &buf[header.payload_length..];
 
         Ok(Self {
             payload_id,
