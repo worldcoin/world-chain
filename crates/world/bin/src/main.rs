@@ -6,9 +6,9 @@ use world_chain_builder_node::args::NodeContextType;
 use world_chain_builder_node::config::WorldChainNodeConfig;
 use world_chain_builder_node::context::{BasicContext, FlashblocksContext};
 use world_chain_builder_node::{args::WorldChainArgs, node::WorldChainNode};
-use world_chain_builder_rpc::EthApiExtServer;
-use world_chain_builder_rpc::SequencerClient;
-use world_chain_builder_rpc::WorldChainEthApiExt;
+use world_chain_rpc::EthApiExtServer;
+use world_chain_rpc::SequencerClient;
+use world_chain_rpc::WorldChainEthApiExt;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]

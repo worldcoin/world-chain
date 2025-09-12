@@ -35,7 +35,7 @@ use world_chain_builder_pool::{
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
     BasicWorldChainPool,
 };
-use world_chain_builder_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
 

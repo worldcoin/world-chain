@@ -56,7 +56,7 @@ hex.workspace = true
 
 [dev-dependencies]
 world-chain-builder-pbh.workspace = true
-world-chain-builder-rpc.workspace = true
+world-chain-rpc.workspace = true
 world-chain-builder-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-builder-node.workspace = true
