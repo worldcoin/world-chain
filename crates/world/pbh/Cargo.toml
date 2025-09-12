@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-pbh"
+name = "world-chain-pbh"
 version.workspace = true
 edition.workspace = true
 

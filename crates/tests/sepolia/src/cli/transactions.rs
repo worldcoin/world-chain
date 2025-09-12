@@ -25,7 +25,7 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::{debug, error, info};
-use world_chain_builder_pbh::{
+use world_chain_pbh::{
     date_marker::DateMarker,
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::PBHPayload,
@@ -134,7 +134,7 @@ pub async fn bundle_pbh_transactions(
                 root,
                 nullifier_hash,
                 external_nullifier,
-                proof: world_chain_builder_pbh::payload::Proof(semaphore_proof),
+                proof: world_chain_pbh::payload::Proof(semaphore_proof),
             };
 
             let calldata = IPBHEntryPoint::pbhMulticallCall {

@@ -1,6 +1,6 @@
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
-use world_chain_builder_pbh::{
+use world_chain_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::{PBHPayload, Proof},
 };

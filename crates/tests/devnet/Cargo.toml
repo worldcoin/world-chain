@@ -14,7 +14,7 @@ workspace = true
 world-chain-builder-node.workspace = true
 world-chain-pool.workspace = true
 world-chain-test.workspace = true
-world-chain-builder-pbh.workspace = true
+world-chain-pbh.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true

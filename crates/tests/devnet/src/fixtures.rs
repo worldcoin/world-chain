@@ -3,7 +3,7 @@ use alloy_primitives::{Address, Bytes};
 use chrono::Datelike;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use serde::{Deserialize, Serialize};
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_pbh::external_nullifier::ExternalNullifier;
 use world_chain_test::node::{tx, DEV_CHAIN_ID};
 use world_chain_test::{
     bindings::IEntryPoint::PackedUserOperation,
