@@ -17,7 +17,7 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
-use revm_primitives::{hex, U256};
+use revm_primitives::U256;
 use std::{
     collections::BTreeMap,
     ops::Range,
