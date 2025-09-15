@@ -78,8 +78,6 @@ fn main() {
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
 
-                            let eth_api = ctx.registry.eth_api().clone(); // Can I clone here?
-                            ctx.modules.replace_configured(eth_api.into_rpc())?;
                             Ok(())
                         })
                         .launch()
