@@ -11,7 +11,6 @@ use reth_payload_util::BestPayloadTransactions;
 use reth_transaction_pool::TransactionPool;
 use std::borrow::Cow;
 use std::sync::Arc;
-use tracing::trace;
 use tracing::error;
 use world_chain_provider::InMemoryState;
 
@@ -88,7 +87,6 @@ pub struct FlashblocksBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
     spec: Spec,
     /// Receipt builder.
     receipt_builder: R,
-
     /// Context for block execution.
     ctx: OpBlockExecutionCtx,
     /// The EVM used by executor.

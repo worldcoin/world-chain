@@ -3744,21 +3744,25 @@ dependencies = [
 name = "flashblocks-rpc"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives 1.3.1",
  "alloy-rpc-types-engine",
  "color-eyre",
- "flashblocks-builder",
  "flashblocks-primitives",
  "jsonrpsee",
  "jsonrpsee-core",
  "op-alloy-network",
+ "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "reth",
  "reth-chainspec",
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-evm",
+ "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-primitives",
  "reth-provider",
@@ -3769,6 +3773,7 @@ dependencies = [
  "reth-transaction-pool",
  "tokio",
  "tracing",
+ "world-chain-provider",
 ]
 
 [[package]]

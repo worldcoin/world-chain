@@ -17,7 +17,8 @@ use reth_rpc_eth_types::EthApiError;
 use std::{borrow::Cow, future::Future};
 use tracing::info;
 
-use crate::rpc::eth::FlashblocksEthApi;
+use crate::eth::FlashblocksEthApi;
+
 // consider constraining the associated type `<<FlashblocksEthApi<N, Rpc> as RpcNodeCore>::Primitives as NodePrimitives>::Receipt` to `reth_optimism_primitives::OpReceipt`
 
 impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>

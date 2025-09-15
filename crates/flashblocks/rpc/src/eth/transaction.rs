@@ -1,6 +1,5 @@
 //! Loads and formats OP transaction RPC response.
 
-use crate::rpc::eth::FlashblocksEthApi;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, TxHash, B256};
 use reth_node_api::BlockBody;
@@ -23,6 +22,8 @@ use reth_rpc_eth_api::{
 use std::future::Future;
 use tracing::info;
 use world_chain_provider::InMemoryState;
+
+use crate::eth::FlashblocksEthApi;
 
 impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
