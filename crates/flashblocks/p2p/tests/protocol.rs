@@ -1,9 +1,7 @@
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
 use flashblocks_primitives::{
-    p2p::{
-        Authorization, AuthorizedPayload,
-    },
+    p2p::{Authorization, AuthorizedPayload},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use futures::StreamExt as _;

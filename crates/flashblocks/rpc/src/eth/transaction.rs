@@ -18,6 +18,7 @@ use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
     RpcConvert, RpcNodeCore,
 };
+use reth_rpc_eth_types::block::BlockAndReceipts;
 
 use std::future::Future;
 use tracing::info;
@@ -68,7 +69,7 @@ where
         self.spawn_blocking_io_fut(async move |this| {
             info!("Loading tx and receipt for hash: {hash:?}");
             let pending_block = this.local_pending_block().await?;
-            if let Some((block, receipts)) = pending_block.clone() {
+            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
                 if let Some(pos) = block
                     .clone()
                     .body()

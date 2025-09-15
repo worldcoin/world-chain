@@ -11,6 +11,7 @@ use reth_rpc_eth_api::{
     RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_api::{EthApiTypes, FromEvmError};
+use reth_rpc_eth_types::block::BlockAndReceipts;
 use std::{future::Future, sync::Arc};
 use world_chain_provider::InMemoryState;
 
@@ -62,7 +63,7 @@ where
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(block)),
+                    Some(BlockAndReceipts { block, receipts: _ }) => Ok(Some(block)),
                     None => Ok(None),
                 };
             }

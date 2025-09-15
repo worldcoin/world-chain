@@ -549,6 +549,8 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
     let block_hash = nodes[0].node.block_hash(0);
 
+    let builder_sk = ext_context.flashblocks_handle.builder_sk().unwrap().clone();
+
     let authorization_generator = move |attrs: OpPayloadAttributes| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
 
@@ -558,7 +560,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
             payload_id,
             attrs.timestamp(),
             &authorizer_sk,
-            ext_context.builder_sk.verifying_key(),
+            builder_sk.verifying_key(),
         )
     };
 

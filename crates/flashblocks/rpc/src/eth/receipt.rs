@@ -1,6 +1,7 @@
 use alloy_consensus::{transaction::SignerRecoverable, TxReceipt};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth::rpc::compat::RpcReceipt;
+use reth::rpc::server_types::eth::block::BlockAndReceipts;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpPrimitives;
@@ -56,7 +57,7 @@ where
             } else {
                 // try the pending block
                 let pending_block = self.local_pending_block().await?;
-                if let Some((block, receipts)) = pending_block {
+                if let Some(BlockAndReceipts { block, receipts }) = pending_block {
                     info!(block_hash = ?block.hash_slow(), ?hash, "checking pending block");
                     if block.hash_slow() == hash {
                         info!(block_hash = ?block.hash_slow(), ?hash, "found pending block");
