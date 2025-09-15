@@ -21,7 +21,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
 use std::future::Future;
-use tracing::info;
 use world_chain_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
@@ -66,7 +65,6 @@ where
         Self: 'static,
     {
         self.spawn_blocking_io_fut(async move |this| {
-            info!("Loading tx and receipt for hash: {hash:?}");
             let pending_block = this.local_pending_block().await?;
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
                 if let Some(pos) = block

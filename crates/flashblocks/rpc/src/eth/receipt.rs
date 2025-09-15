@@ -43,7 +43,6 @@ where
         receipt: ProviderReceipt<Self::Provider>,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let hash = meta.block_hash;
-        let mut is_pending = false;
 
         // get all receipts for the block
         let all_receipts = if let Ok(Some(receipts)) = self.cache().get_receipts(hash).await {
@@ -53,7 +52,6 @@ where
             let pending_block = self.local_pending_block().await?;
             if let Some(BlockAndReceipts { block, receipts }) = pending_block {
                 if block.hash_slow() == hash {
-                    is_pending = true;
                     Some((receipts, Some(block)))
                 } else {
                     None
@@ -87,33 +85,32 @@ where
             meta,
         };
 
-        if !is_pending {
-            Ok(self
+        match block {
+            None => Ok(self
                 .tx_resp_builder()
                 .convert_receipts(vec![input])?
                 .pop()
-                .unwrap())
-        } else {
-            let block = block.expect("block is Some if is_pending is true");
+                .unwrap()),
+            Some(block) => {
+                let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
+                    Ok(l1_block_info) => l1_block_info,
+                    Err(err) => Err(err)?,
+                };
 
-            let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
-                Ok(l1_block_info) => l1_block_info,
-                Err(err) => Err(err)?,
-            };
+                // We must clear this cache as different L2 transactions can have different
+                // L1 costs. A potential improvement here is to only clear the cache if the
+                // new transaction input has changed, since otherwise the L1 cost wouldn't.
+                l1_block_info.clear_tx_l1_cost();
 
-            // We must clear this cache as different L2 transactions can have different
-            // L1 costs. A potential improvement here is to only clear the cache if the
-            // new transaction input has changed, since otherwise the L1 cost wouldn't.
-            l1_block_info.clear_tx_l1_cost();
+                let res = Ok(OpReceiptBuilder::new(
+                    &self.provider().chain_spec(),
+                    input,
+                    &mut l1_block_info,
+                )?
+                .build());
 
-            let res = Ok(OpReceiptBuilder::new(
-                &self.provider().chain_spec(),
-                input,
-                &mut l1_block_info,
-            )?
-            .build());
-
-            res
+                res
+            }
         }
     }
 }
