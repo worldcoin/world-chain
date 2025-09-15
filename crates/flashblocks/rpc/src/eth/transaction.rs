@@ -47,9 +47,8 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         self.inner.send_raw_transaction(tx).await
     }
-    // <OpEthApi<N, Rpc> as EthApiTypes>::Error: From<<<<<OpEthApi<N, Rpc> as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Error<ProviderError>>
+
     /// Helper method that loads a transaction and its receipt.
-    #[expect(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
