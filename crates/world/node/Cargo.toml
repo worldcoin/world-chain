@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-node"
+name = "world-chain-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,13 +11,15 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-payload.workspace = true
-world-chain-builder-pool.workspace = true
-world-chain-builder-flashblocks.workspace = true
+world-chain-payload.workspace = true
+world-chain-pool.workspace = true
 world-chain-provider.workspace = true
 
-rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
+flashblocks-primitives.workspace = true
+flashblocks-rpc.workspace = true
+flashblocks-builder.workspace = true
+flashblocks-payload.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true
@@ -40,6 +42,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types.workspace = true
 alloy-consensus.workspace = true
+alloy-signer-local.workspace = true
 
 op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
@@ -48,13 +51,15 @@ tokio.workspace = true
 eyre.workspace = true
 clap.workspace = true
 tracing.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
-world-chain-builder-pbh.workspace = true
-world-chain-builder-rpc.workspace = true
-world-chain-builder-pool.workspace = true
+world-chain-pbh.workspace = true
+world-chain-rpc.workspace = true
+world-chain-pool.workspace = true
 world-chain-test.workspace = true
-world-chain-builder-node.workspace = true
+world-chain-node.workspace = true
 
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
@@ -68,7 +73,6 @@ reth-network-api.workspace = true
 
 alloy-genesis.workspace = true
 alloy-network.workspace = true
-alloy-signer-local.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-pool"
+name = "world-chain-pool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-world-chain-builder-pbh.workspace = true
+world-chain-pbh.workspace = true
 
 reth.workspace = true
 reth-db.workspace = true
@@ -39,8 +39,8 @@ rayon.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-world-chain-test.workspace = true
 reth-transaction-pool.workspace = true
+world-chain-test.workspace = true
 test-case.workspace = true
 chrono.workspace = true
 eyre.workspace = true

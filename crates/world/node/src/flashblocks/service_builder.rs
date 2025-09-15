@@ -1,4 +1,9 @@
+use flashblocks_builder::executor::FlashblocksStateExecutor;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_payload::generator::{
+    FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
+};
+use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -7,11 +12,6 @@ use reth_node_builder::{
 };
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
-use world_chain_builder_flashblocks::{
-    builder::executor::FlashblocksStateExecutor,
-    payload::generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
-};
 
 use crate::{context::FlashblocksContext, node::WorldChainNode};
 
@@ -22,7 +22,6 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     p2p_handler: FlashblocksHandle,
     flashblocks_state: FlashblocksStateExecutor,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-    builder_sk: SigningKey,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -32,14 +31,12 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         p2p_handler: FlashblocksHandle,
         flashblocks_state: FlashblocksStateExecutor,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        builder_sk: SigningKey,
     ) -> Self {
         Self {
             pb,
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
-            builder_sk,
         }
     }
 }
@@ -74,7 +71,6 @@ where
             self.p2p_handler,
             self.authorizations_rx.clone(),
             self.flashblocks_state,
-            self.builder_sk,
         );
 
         let (payload_service, payload_service_handle) =

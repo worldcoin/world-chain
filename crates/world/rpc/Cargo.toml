@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-rpc"
+name = "world-chain-rpc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-pool.workspace = true
+world-chain-pool.workspace = true
 
 reth.workspace = true
 

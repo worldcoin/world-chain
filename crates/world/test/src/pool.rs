@@ -7,9 +7,9 @@ use revm_primitives::U256;
 use world_chain_provider::{CanonicalInMemoryState, InMemoryState};
 
 use crate::mock::{ExtendedAccount, MockEthProvider};
-use world_chain_builder_pool::root::WorldChainRootValidator;
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
-use world_chain_builder_pool::validator::{
+use world_chain_pool::root::WorldChainRootValidator;
+use world_chain_pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::validator::{
     WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
 };
 

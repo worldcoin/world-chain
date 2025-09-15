@@ -1,6 +1,8 @@
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
+use ed25519_dalek::SigningKey;
+use flashblocks_primitives::p2p::Authorization;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
@@ -8,20 +10,20 @@ use reth::primitives::RecoveredBlock;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_api::{Block, PayloadAttributes};
-use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
+use reth_optimism_node::utils::optimism_payload_attributes;
+use reth_optimism_node::OpPayloadAttributes;
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
 use revm_primitives::fixed_bytes;
 use revm_primitives::{Address, Bytes, B256, U256};
-use rollup_boost::{ed25519_dalek::SigningKey, Authorization};
 use std::sync::Arc;
 use std::vec;
 use tracing::info;
 use world_chain_test::utils::account;
 
-use world_chain_builder_node::context::BasicContext;
-use world_chain_builder_node::context::FlashblocksContext;
-use world_chain_builder_node::{Flashblock, Flashblocks};
+use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
+use world_chain_node::context::BasicContext;
+use world_chain_node::context::FlashblocksContext;
 use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
 use world_chain_test::utils::signer;
 
@@ -219,7 +221,11 @@ async fn test_flashblocks() -> eyre::Result<()> {
             payload_id,
             attrs.timestamp(),
             &authorizer_sk,
-            ext_context.builder_sk.verifying_key(),
+            ext_context
+                .flashblocks_handle
+                .builder_sk()
+                .unwrap()
+                .verifying_key(),
         )
     };
 
@@ -365,7 +371,11 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
             payload_id,
             attrs.timestamp(),
             &authorizer_sk,
-            ext_context.builder_sk.verifying_key(),
+            ext_context
+                .flashblocks_handle
+                .builder_sk()
+                .unwrap()
+                .verifying_key(),
         )
     };
 
@@ -447,7 +457,11 @@ async fn test_eth_api_call() -> eyre::Result<()> {
             payload_id,
             attrs.timestamp(),
             &authorizer_sk,
-            ext_context.builder_sk.verifying_key(),
+            ext_context
+                .flashblocks_handle
+                .builder_sk()
+                .unwrap()
+                .verifying_key(),
         )
     };
 

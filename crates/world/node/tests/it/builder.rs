@@ -3,7 +3,7 @@ use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
-use world_chain_builder_node::{
+use world_chain_node::{
     context::{BasicContext, FlashblocksContext},
     node::WorldChainNode,
 };

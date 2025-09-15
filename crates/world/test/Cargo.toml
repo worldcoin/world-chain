@@ -11,12 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-pbh.workspace = true
-world-chain-builder-pool.workspace = true
-world-chain-builder-node.workspace = true
+world-chain-pbh.workspace = true
+world-chain-pool.workspace = true
+world-chain-node.workspace = true
 world-chain-provider.workspace = true
 
-rollup-boost.workspace = true
+flashblocks-primitives.workspace = true
 
 reth.workspace = true
 reth-optimism-node.workspace = true

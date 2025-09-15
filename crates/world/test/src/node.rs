@@ -48,41 +48,49 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{broadcast, watch};
-use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+use world_chain_pbh::external_nullifier::ExternalNullifier;
 
 use alloy_eips::eip2718::Encodable2718;
 use chrono::Datelike;
-use world_chain_builder_pool::{
+use world_chain_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
 
+use flashblocks_primitives::ed25519_dalek::SigningKey;
 use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
-use rollup_boost::ed25519_dalek::SigningKey;
 
-use world_chain_builder_node::args::{BuilderArgs, FlashblocksArgs, WorldChainArgs};
-use world_chain_builder_node::node::WorldChainNodeConfig;
+use world_chain_node::{
+    args::{BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs},
+    config::WorldChainNodeConfig,
+};
 
 pub fn test_config() -> WorldChainNodeConfig {
     let builder = BuilderArgs {
+        enabled: true,
+        private_key: signer(6),
+    };
+
+    let pbh = PbhArgs {
         verified_blockspace_capacity: 70,
-        pbh_entrypoint: PBH_DEV_ENTRYPOINT,
+        entrypoint: PBH_DEV_ENTRYPOINT,
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
-        private_key: signer(6).to_bytes().to_string(),
     };
 
     let flashblocks = FlashblocksArgs {
         enabled: true,
-        authorizor_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
-        builder_sk: SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>()),
+        spoof_authorizer: false,
+        authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+        builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
     };
 
     WorldChainNodeConfig {
         args: WorldChainArgs {
             rollup: Default::default(),
             builder,
+            pbh,
             flashblocks: Some(flashblocks),
         },
         da_config: OpDAConfig::default(),

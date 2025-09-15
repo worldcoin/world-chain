@@ -20,8 +20,8 @@ use semaphore_rs::{hash_to_field, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
 
-use world_chain_builder_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
-use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
+use world_chain_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
+use world_chain_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
 
 use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
 use crate::bindings::IPBHEntryPoint::{self, PBHPayload};

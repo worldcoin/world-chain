@@ -4,7 +4,7 @@ use alloy_rpc_types::erc4337::TransactionConditional;
 use jsonrpsee::{core::async_trait, core::RpcResult, proc_macros::rpc};
 use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use world_chain_builder_pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::tx::WorldChainPooledTransaction;
 
 /// WorldChainEthApi Extension for `sendRawTransactionConditional` and `sendRawTransaction`
 #[derive(Clone, Debug)]

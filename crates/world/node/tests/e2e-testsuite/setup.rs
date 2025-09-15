@@ -25,17 +25,17 @@ use std::{
     time::Duration,
 };
 use tracing::span;
-use world_chain_builder_node::node::{WorldChainNode, WorldChainNodeConfig, WorldChainNodeContext};
+use world_chain_node::node::{WorldChainNode, WorldChainNodeContext};
 use world_chain_test::node::test_config;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
-use world_chain_builder_pool::{
+use world_chain_pool::{
     root::LATEST_ROOT_SLOT,
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
     BasicWorldChainPool,
 };
-use world_chain_builder_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
 
@@ -116,10 +116,7 @@ where
         let _enter = span.enter();
         let config = test_config();
 
-        let node = WorldChainNode::<T>::new(WorldChainNodeConfig {
-            args: config.args.clone(),
-            da_config: Default::default(),
-        });
+        let node = WorldChainNode::<T>::new(config.args.clone().into_config(&op_chain_spec)?);
 
         let ext_context = node.ext_context();
 

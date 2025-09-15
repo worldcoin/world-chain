@@ -24,7 +24,7 @@ use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
-use world_chain_builder_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
+use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -300,8 +300,8 @@ pub mod tests {
     use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
-    use world_chain_builder_pbh::date_marker::DateMarker;
-    use world_chain_builder_pbh::external_nullifier::ExternalNullifier;
+    use world_chain_pbh::date_marker::DateMarker;
+    use world_chain_pbh::external_nullifier::ExternalNullifier;
     use world_chain_test::utils::{
         account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE,
     };
