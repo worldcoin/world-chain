@@ -27,7 +27,6 @@ pub struct WorldChainArgs {
 /// Parameters for pbh builder configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "PBH Builder")]
-#[group(requires = "enabled")]
 pub struct BuilderArgs {
     /// Sets the max blockspace reserved for verified transactions. If there are not enough
     /// verified transactions to fill the capacity, the remaining blockspace will be filled with
@@ -69,7 +68,6 @@ pub struct FlashblocksArgs {
         required = false
     )]
     pub enabled: bool,
-
     #[arg(
         long = "flashblocks.authorizor_vk",
         env = "FLASHBLOCKS_AUTHORIZOR_VK", 
