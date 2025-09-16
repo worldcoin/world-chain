@@ -1,9 +1,9 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 use clap::Parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use flashblocks_node::FlashblocksNodeArgs;
+use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol};
-use flashblocks_rpc::{EthApiOverrideServer, FlashblocksApiExt, FlashblocksOverlay};
+// use flashblocks_rpc::{EthApiOverrideServer, FlashblocksApiExt, FlashblocksOverlay};
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
@@ -11,17 +11,17 @@ use tracing::info;
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(next_help_heading = "Rollup")]
-struct FlashblocksRollupArgs {
+struct FlashblocksNodeArgs {
     #[command(flatten)]
     pub rollup_args: RollupArgs,
 
     #[command(flatten)]
-    pub flashblock_args: Option<FlashblocksNodeArgs>,
+    pub flashblock_args: Option<FlashblocksArgs>,
 }
 
 pub fn main() {
     if let Err(err) =
-        Cli::<OpChainSpecParser, FlashblocksRollupArgs>::parse().run(async move |builder, args| {
+        Cli::<OpChainSpecParser, FlashblocksNodeArgs>::parse().run(async move |builder, args| {
             let rollup_args = args.rollup_args;
             let chain_spec = builder.config().chain.clone();
             let flashblocks_handle = FlashblocksHandle::new(

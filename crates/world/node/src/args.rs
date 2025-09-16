@@ -2,6 +2,7 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{value_parser, ArgGroup};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use flashblocks_cli::FlashblocksArgs;
 use hex::FromHex;
 use reth::chainspec::NamedChain;
 use reth_optimism_chainspec::OpChainSpec;
@@ -139,58 +140,6 @@ pub struct BuilderArgs {
         default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )]
     pub private_key: PrivateKeySigner,
-}
-
-/// Flashblocks configuration
-#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
-#[command(next_help_heading = "Flashblocks",
-    group = ArgGroup::new("authorizer")
-        .multiple(false)
-)]
-#[group(requires = "flashblocks.enabled")]
-pub struct FlashblocksArgs {
-    #[arg(
-        long = "flashblocks.enabled",
-        id = "flashblocks.enabled",
-        requires = "authorizer",
-        required = false
-    )]
-    pub enabled: bool,
-
-    /// Authorizer verifying key
-    /// used to verify flashblock authenticity.
-    #[arg(
-        long = "flashblocks.authorizer_vk",
-        env = "FLASHBLOCKS_AUTHORIZER_VK", 
-        group = "authorizer",
-        value_parser = parse_vk,
-        required = false,
-    )]
-    pub authorizer_vk: Option<VerifyingKey>,
-
-    /// Flashblocks signing key
-    /// used to sign authorized flashblocks payloads.
-    #[arg(
-        long = "flashblocks.builder_sk", 
-        env = "FLASHBLOCKS_BUILDER_SK", 
-        requires = "builder.enabled",
-        required = false,
-        value_parser = parse_sk,
-    )]
-    pub builder_sk: Option<SigningKey>,
-
-    /// Uses the builder_sk to create spoofed
-    /// flashblocks authorizations.
-    ///
-    /// Should only be used for testing
-    #[arg(
-        long = "flashblocks.spoof_authorizer",
-        env = "FLASHBLOCKS_SPOOF_AUTHORIZER",
-        group = "authorizer",
-        requires = "builder_sk",
-        required = false
-    )]
-    pub spoof_authorizer: bool,
 }
 
 pub enum NodeContextType {

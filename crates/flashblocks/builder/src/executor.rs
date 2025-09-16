@@ -1,3 +1,19 @@
+use alloy_eips::eip2718::WithEncoded;
+use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::OptionExt;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::p2p::AuthorizedPayload;
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use flashblocks_provider::InMemoryState;
+use futures::StreamExt as _;
+use reth::revm::database::StateProviderDatabase;
+use reth_node_builder::BuilderContext;
+use reth_payload_util::BestPayloadTransactions;
+use reth_transaction_pool::TransactionPool;
+use std::borrow::Cow;
+use std::sync::Arc;
+use tracing::{error, trace};
+use world_chain_provider::InMemoryState;
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_eips::eip4895::Withdrawals;
@@ -40,7 +56,6 @@ use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_node::{
     OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
     OpRethReceiptBuilder,
@@ -634,14 +649,14 @@ impl FlashblocksStateExecutor {
     }
 
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node, Pool, P, Tx>(
+    pub fn launch<Node, Pool, P>(
         &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
         payload_builder_ctx_builder: P,
         evm_config: OpEvmConfig,
     ) where
-        Tx: OpPooledTx,
+        // Tx: OpPooledTx,
         Pool: TransactionPool + 'static,
         Node: FullNodeTypes,
         Node::Provider: InMemoryState<Primitives = OpPrimitives>
