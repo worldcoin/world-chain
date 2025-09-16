@@ -1,6 +1,5 @@
 use alloy_eips::eip2718::WithEncoded;
 use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::OptionExt;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
@@ -767,11 +766,7 @@ where
                     && latest_payload.1 >= flashblock.flashblock.index
                 {
                     // Already processed this flashblock
-                    provider.in_memory_state().set_pending_block(
-                        latest_payload.0.executed_block().ok_or_eyre(
-                            "`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`",
-                        )?,
-                    );
+                    pending_block.send_replace(latest_payload.0.executed_block());
                     return Ok(());
                 }
             }
