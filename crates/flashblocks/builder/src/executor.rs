@@ -11,7 +11,7 @@ use reth_payload_util::BestPayloadTransactions;
 use reth_transaction_pool::TransactionPool;
 use std::borrow::Cow;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, trace};
 use world_chain_provider::InMemoryState;
 
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
@@ -55,10 +55,7 @@ use reth_optimism_node::{
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
-use reth_provider::{
-    BlockExecutionResult, DatabaseProviderFactory, HeaderProvider, StateProvider,
-    StateProviderFactory,
-};
+use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
@@ -642,7 +639,7 @@ impl FlashblocksStateExecutor {
         Node: FullNodeTypes,
         Node::Provider: InMemoryState<Primitives = OpPrimitives>
             + StateProviderFactory
-            + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
+            + HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         P: PayloadBuilderCtxBuilder<Node::Provider, OpEvmConfig, OpChainSpec> + 'static,
     {
@@ -727,16 +724,20 @@ fn process_flashblock<Provider, Pool, P>(
 where
     Provider: InMemoryState<Primitives = OpPrimitives>
         + StateProviderFactory
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
+        + HeaderProvider<Header = alloy_consensus::Header>
         + Clone,
+
     Pool: TransactionPool + 'static,
     P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
+    trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
+
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
         ref mut latest_payload,
         ..
     } = *state_executor.inner.write();
+
     let flashblock = Flashblock { flashblock };
     let (flashblocks, _new_payload) = match flashblocks {
         Some(ref mut f) => {
@@ -762,6 +763,7 @@ where
             (flashblocks.as_mut().unwrap(), true)
         }
     };
+
     let flashblock = flashblocks.last();
     let cancel = CancelOnDrop::default();
     let base = flashblocks.base();
@@ -785,6 +787,7 @@ where
         withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
     };
+
     let eip1559 = encode_holocene_extra_data(
         Default::default(),
         chain_spec.base_fee_params_at_timestamp(base.timestamp),
@@ -795,43 +798,50 @@ where
         no_tx_pool: false,
         transactions: transactions.clone(),
         gas_limit: None,
-        eip_1559_params: Some(eip1559[0..8].try_into()?),
+        eip_1559_params: Some(eip1559[1..=8].try_into()?),
     };
-    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
-    let database_provider = provider.database_provider_ro()?;
-    let sealed_header = database_provider
-        .sealed_header_by_hash(base.parent_hash)?
-        .ok_or_eyre("missing sealed header")?;
-    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
-    let builder_ctx = payload_builder_ctx_builder.build(
-        provider.clone(),
-        evm_config.clone(),
-        state_executor.da_config.clone(),
-        config,
-        &cancel,
-        latest_payload.as_ref().map(|p| p.0.clone()),
-    );
 
-    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-    let db = StateProviderDatabase::new(&state_provider);
-    let outcome = FlashblockBuilder::new(best).build(
-        pool.clone(),
-        db,
-        &state_provider,
-        &builder_ctx,
-        latest_payload.as_ref().map(|p| p.0.clone()),
-    )?;
-    let payload = match outcome {
-        BuildOutcomeKind::Better { payload } => payload,
-        BuildOutcomeKind::Freeze(payload) => payload,
-        _ => return Ok(()),
-    };
-    *latest_payload = Some((payload.clone(), flashblock.index));
-    provider.in_memory_state().set_pending_block(
-        payload
-            .executed_block()
-            .ok_or_eyre("`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`")?,
-    );
+    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
+    let sealed_header = provider.sealed_header_by_hash(base.parent_hash)?;
+
+    if let Some(sealed_header) = sealed_header {
+        let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+        let builder_ctx = payload_builder_ctx_builder.build(
+            provider.clone(),
+            evm_config.clone(),
+            state_executor.da_config.clone(),
+            config,
+            &cancel,
+            latest_payload.as_ref().map(|p| p.0.clone()),
+        );
+
+        let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+        let db = StateProviderDatabase::new(&state_provider);
+
+        let outcome = FlashblockBuilder::new(best).build(
+            pool.clone(),
+            db,
+            &state_provider,
+            &builder_ctx,
+            latest_payload.as_ref().map(|p| p.0.clone()),
+        )?;
+
+        let payload = match outcome {
+            BuildOutcomeKind::Better { payload } => payload,
+            BuildOutcomeKind::Freeze(payload) => payload,
+            _ => return Ok(()),
+        };
+
+        trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+
+        *latest_payload = Some((payload.clone(), flashblock.index));
+
+        provider.in_memory_state().set_pending_block(
+            payload
+                .executed_block()
+                .ok_or_eyre("`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`")?,
+        );
+    }
 
     // The default engine api implementation should reset the in memory pending
     // state on new_payload.

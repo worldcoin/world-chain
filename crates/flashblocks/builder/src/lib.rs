@@ -295,9 +295,7 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let bundle = execution_result.bundle.clone();
-
-            trace!(target: "payload_builder", bundle = ?bundle, "using best payload");
+            trace!(target: "payload_builder", "using best payload");
 
             (
                 execution_result.bundle.clone(),
