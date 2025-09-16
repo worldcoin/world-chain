@@ -6,10 +6,8 @@ use flashblocks_provider::InMemoryState;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes};
-use reth::chainspec::EthChainSpec;
 use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
@@ -18,8 +16,6 @@ use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
-use crate::FlashblocksFullNodeTypes;
 
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {

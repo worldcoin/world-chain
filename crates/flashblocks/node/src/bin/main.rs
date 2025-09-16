@@ -29,19 +29,15 @@ pub fn main() {
                 Some(SigningKey::from_bytes(&[0u8; 32])),
             );
 
-            let flashblocks_overlay =
-                FlashblocksOverlay::new(flashblocks_handle.clone(), chain_spec);
-            flashblocks_overlay.clone().start()?;
-
             info!(target: "reth::cli", "Launching Flashblocks RPC overlay node");
             let handle = builder
                 .node(OpNode::new(rollup_args))
                 .extend_rpc_modules(move |ctx| {
                     if args.flashblock_args.is_some() {
                         let eth_api = ctx.registry.eth_api().clone();
-                        let api_ext = FlashblocksApiExt::new(eth_api.clone(), flashblocks_overlay);
-
-                        ctx.modules.replace_configured(api_ext.into_rpc())?;
+                        // let api_ext = FlashblocksApiExt::new(eth_api.clone(), flashblocks_overlay);
+                        //
+                        // ctx.modules.replace_configured(api_ext.into_rpc())?;
                     }
                     Ok(())
                 })
