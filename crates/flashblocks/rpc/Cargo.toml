@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 # internal
 flashblocks-primitives.workspace = true
-flashblocks-builder.workspace = true
+world-chain-provider.workspace = true
 
 # reth
 reth.workspace = true
@@ -26,13 +26,19 @@ reth-tasks.workspace = true
 
 # op-reth
 reth-optimism-rpc.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-evm.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+op-alloy-rpc-types.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types-engine.workspace = true
-alloy-rpc-types-engine.workspace = true
 
 # tokio
 tokio.workspace = true

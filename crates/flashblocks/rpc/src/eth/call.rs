@@ -1,14 +1,46 @@
-use reth_rpc_eth_api::helpers::{estimate::EstimateCall, Call, EthCall};
+use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use reth_rpc_eth_api::{
+    helpers::{estimate::EstimateCall, Call, EthCall},
+    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+};
+use world_chain_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
 
-impl<T> EthCall for FlashblocksEthApi<T> where T: EthCall + Clone {}
-
-impl<T> EstimateCall for FlashblocksEthApi<T> where T: EstimateCall + Clone {}
-
-impl<T> Call for FlashblocksEthApi<T>
+impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
 where
-    T: Call + Clone,
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    Rpc: RpcConvert,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: EthCall
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + Clone,
+{
+}
+
+impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    Rpc: RpcConvert,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: EstimateCall
+        + EthApiTypes<Error = OpEthApiError>
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + Clone,
+{
+}
+
+impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    Rpc: RpcConvert,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: Call
+        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + Clone,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

@@ -87,7 +87,6 @@ pub struct FlashblocksBlockExecutor<Evm, R: OpReceiptBuilder, Spec> {
     spec: Spec,
     /// Receipt builder.
     receipt_builder: R,
-
     /// Context for block execution.
     ctx: OpBlockExecutionCtx,
     /// The EVM used by executor.

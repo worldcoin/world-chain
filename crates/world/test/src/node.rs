@@ -583,6 +583,9 @@ impl HashedPostStateProvider for WorldChainNoopProvider {
 }
 
 impl StateProviderFactory for WorldChainNoopProvider {
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(None)
+    }
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }

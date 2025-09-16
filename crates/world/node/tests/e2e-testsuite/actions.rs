@@ -18,7 +18,7 @@ use tracing::debug;
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssertMineBlock<T> {
     /// The node index to mine
     pub node_idx: usize,

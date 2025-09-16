@@ -1,9 +1,7 @@
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
 use flashblocks_primitives::{
-    p2p::{
-        Authorization, AuthorizedPayload,
-    },
+    p2p::{Authorization, AuthorizedPayload},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use futures::StreamExt as _;
@@ -87,7 +85,7 @@ async fn expired_authorization_is_rejected() {
         builder_sk.verifying_key(),
     );
     let payload = payload(payload_id, 0);
-    let signed = AuthorizedPayload::new(&builder_sk, auth_2, payload);
+    let signed = AuthorizedPayload::new(builder_sk, auth_2, payload);
 
     let err = handle.publish_new(signed).unwrap_err();
     assert!(matches!(
@@ -114,7 +112,7 @@ async fn flashblock_stream_is_ordered() {
     // send index 1 first (out-of-order)
     for &idx in &[1u64, 0] {
         let p = payload(payload_id, idx);
-        let signed = AuthorizedPayload::new(&builder_sk, auth, p.clone());
+        let signed = AuthorizedPayload::new(builder_sk, auth, p.clone());
         handle.publish_new(signed).unwrap();
     }
 
@@ -227,7 +225,7 @@ async fn flashblock_stream_buffers_and_live() {
     handle.start_publishing(auth).unwrap();
 
     // publish index 0 before creating the stream
-    let signed0 = AuthorizedPayload::new(&builder_sk, auth, payload(pid, 0));
+    let signed0 = AuthorizedPayload::new(builder_sk, auth, payload(pid, 0));
     handle.publish_new(signed0).unwrap();
 
     // now create the combined stream
@@ -238,7 +236,7 @@ async fn flashblock_stream_buffers_and_live() {
     assert_eq!(first.index, 0);
 
     // publish index 1 after the stream exists
-    let signed1 = AuthorizedPayload::new(&builder_sk, auth, payload(pid, 1));
+    let signed1 = AuthorizedPayload::new(builder_sk, auth, payload(pid, 1));
     handle.publish_new(signed1).unwrap();
 
     // second item should be delivered live

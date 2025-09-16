@@ -76,6 +76,7 @@ fn main() {
                             let eth_api_ext =
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+
                             Ok(())
                         })
                         .launch()

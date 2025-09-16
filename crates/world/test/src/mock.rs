@@ -761,6 +761,10 @@ impl StateProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(None)
+    }
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

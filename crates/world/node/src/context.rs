@@ -28,6 +28,7 @@ use reth_optimism_node::{
     args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
     OpExecutorBuilder, OpNetworkBuilder,
 };
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
@@ -127,8 +128,12 @@ pub struct FlashblocksContext {
     components_context: FlashblocksComponentsContext,
 }
 
-impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<FlashblocksContext>>>
-    WorldChainNodeContext<N> for FlashblocksContext
+impl<
+        N: FullNodeTypes<
+            Provider: InMemoryState<Primitives = OpPrimitives>,
+            Types = WorldChainNode<FlashblocksContext>,
+        >,
+    > WorldChainNodeContext<N> for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
@@ -229,10 +234,7 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(
-            op_eth_api_builder,
-            self.components_context.flashblocks_state.clone(),
-        );
+        let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(op_eth_api_builder);
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,

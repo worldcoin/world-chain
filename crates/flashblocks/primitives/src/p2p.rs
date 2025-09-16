@@ -703,7 +703,7 @@ mod tests {
         let payload = sample_flashblocks_payload();
         let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
 
-        let authorized = Authorized::new(&builder_sk, authorization.clone(), msg);
+        let authorized = Authorized::new(&builder_sk, authorization, msg);
 
         // Encode → decode
         let encoded = encode(&authorized);
