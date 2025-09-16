@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 # internal
-world-chain-provider.workspace = true
+flashblocks-provider.workspace = true
 
 # reth
 reth.workspace = true

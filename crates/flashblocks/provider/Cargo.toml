@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-provider"
+name = "flashblocks-provider"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

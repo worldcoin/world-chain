@@ -9,6 +9,7 @@ use alloy_primitives::{
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
+use flashblocks_cli::FlashblocksArgs;
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
@@ -62,7 +63,7 @@ use rand::Rng as _;
 use reth_optimism_node::OpDAConfig;
 
 use world_chain_node::{
-    args::{BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs},
+    args::{BuilderArgs, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };
 

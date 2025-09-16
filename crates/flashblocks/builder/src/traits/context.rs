@@ -8,9 +8,11 @@ use reth_evm::block::BlockExecutor;
 use reth_evm::op_revm::OpSpecId;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_evm::{Evm, EvmEnv};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::OpPooledTx;
-use reth_optimism_payload_builder::builder::ExecutionInfo;
+use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
+use reth_optimism_node::OpEvmConfig;
+use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
@@ -98,7 +100,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                // Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             > + 'a,
         PayloadBuilderError,
@@ -153,5 +155,114 @@ pub trait PayloadBuilderCtx: Send + Sync {
         self.spec()
             .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
             .then(|| &self.attributes().payload_attributes.withdrawals)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct OpPayloadBuilderCtxBuilder;
+
+impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
+    type Evm = OpEvmConfig;
+    type ChainSpec = OpChainSpec;
+    type Transaction = OpPooledTransaction;
+
+    fn evm_config(&self) -> &Self::Evm {
+        &self.evm_config
+    }
+
+    fn spec(&self) -> &Self::ChainSpec {
+        self.chain_spec.as_ref()
+    }
+
+    fn evm_env(&self) -> reth_evm::EvmEnv<OpSpecId> {
+        self.evm_config.evm_env(self.parent())
+    }
+
+    fn parent(&self) -> &SealedHeader {
+        self.parent()
+    }
+
+    fn attributes(
+        &self,
+    ) -> &OpPayloadBuilderAttributes<TxTy<<Self::Evm as ConfigureEvm>::Primitives>> {
+        self.attributes()
+    }
+
+    fn best_transaction_attributes(
+        &self,
+        block_env: &revm::context::BlockEnv,
+    ) -> BestTransactionsAttributes {
+        self.best_transaction_attributes(block_env)
+    }
+
+    fn payload_id(&self) -> PayloadId {
+        self.payload_id()
+    }
+
+    fn is_better_payload(&self, total_fees: U256) -> bool {
+        self.is_better_payload(total_fees)
+    }
+
+    /// Processes user transactions from the mempool until `gas_limit` is reached.
+    ///
+    /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
+    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
+        &self,
+        _pool: Pool,
+        info: &mut ExecutionInfo,
+        builder: &mut Builder,
+        best_txs: Txs,
+        _gas_limit: u64,
+    ) -> Result<Option<()>, PayloadBuilderError>
+    where
+        Pool: TransactionPool,
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
+        Builder: BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+        Txs: PayloadTransactions<Transaction = Self::Transaction>,
+    {
+        self.execute_best_transactions(info, builder, best_txs)
+    }
+
+    /// Determines if validator withdrawals should be processed in this block.
+    ///
+    /// Checks if the Shanghai hardfork is active at the current timestamp, and
+    /// if so, returns the withdrawals specified by the consensus layer. These
+    /// represent validator stake withdrawals that must be processed automatically.
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.spec()
+            .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
+            .then(|| &self.attributes().payload_attributes.withdrawals)
+    }
+
+    fn block_builder<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+    ) -> Result<
+        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
+        PayloadBuilderError,
+    >
+    where
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
+    {
+        self.block_builder(db)
+    }
+
+    fn execute_sequencer_transactions<'a, DB>(
+        &self,
+        builder: &mut impl BlockBuilder<
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+        >,
+    ) -> Result<ExecutionInfo, PayloadBuilderError>
+    where
+        DB: reth_evm::Database + 'a,
+        DB::Error: Send + Sync + 'static,
+    {
+        self.execute_sequencer_transactions(builder)
     }
 }

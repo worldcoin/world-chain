@@ -6,15 +6,22 @@ license.workspace = true
 
 [dependencies]
 flashblocks-p2p.workspace = true
+flashblocks-rpc.workspace = true
+flashblocks-primitives.workspace = true
+flashblocks-cli.workspace = true
+flashblocks-builder.workspace = true
+flashblocks-payload.workspace = true
+flashblocks-provider.workspace = true
 
+reth.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-cli.workspace = true
-reth-rpc-eth-api.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
+reth-optimism-payload-builder.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
@@ -24,7 +31,10 @@ reth-tasks.workspace = true
 reth-node-core.workspace = true
 reth-db.workspace = true
 reth-tracing.workspace = true
+reth-transaction-pool.workspace = true
 reth-rpc-server-types.workspace = true
+reth-rpc-eth-api.workspace = true
+reth-rpc-engine-api.workspace = true
 
 reth-ethereum.workspace = true
 reth-eth-wire.workspace = true
@@ -45,6 +55,7 @@ alloy-provider.workspace = true
 op-alloy-network.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 tokio.workspace = true
 tokio-tungstenite.workspace = true

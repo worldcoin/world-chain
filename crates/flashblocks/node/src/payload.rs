@@ -2,25 +2,24 @@ use flashblocks_builder::executor::FlashblocksStateExecutor;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use flashblocks_builder::traits::context_builder::PayloadBuilderCtxBuilder;
 use flashblocks_builder::FlashblocksPayloadBuilder;
+use flashblocks_provider::InMemoryState;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::PayloadBuilderBuilder;
 use reth::builder::{BuilderContext, FullNodeTypes};
 use reth::chainspec::EthChainSpec;
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
-use reth_optimism_node::OpEvmConfig;
+use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use world_chain_pool::tx::WorldChainPooledTransaction;
-use world_chain_provider::InMemoryState;
 
-use crate::context::FlashblocksContext;
-use crate::node::WorldChainNode;
+use crate::FlashblocksFullNodeTypes;
 
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
@@ -49,12 +48,19 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
 impl<Node, Pool, CtxBuilder> PayloadBuilderBuilder<Node, Pool, OpEvmConfig>
     for FlashblocksPayloadBuilderBuilder<CtxBuilder>
 where
-    Node: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>,
-    <Node as FullNodeTypes>::Provider: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+    Node: FullNodeTypes,
+    Node::Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
-    Node::Provider: InMemoryState<Primitives = OpPrimitives>,
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
+        + InMemoryState<Primitives = OpPrimitives>,
+    Node::Types: NodeTypes<
+        ChainSpec = OpChainSpec,
+        Payload: PayloadTypes<
+            BuiltPayload = OpBuiltPayload,
+            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+        >,
+    >,
     Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>
         + Unpin
         + 'static,
@@ -73,13 +79,12 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state
-            .launch::<_, _, _, WorldChainPooledTransaction>(
-                ctx,
-                pool.clone(),
-                self.ctx_builder.clone(),
-                evm_config.clone(),
-            );
+        self.flashblocks_state.launch::<_, _, _>(
+            ctx,
+            pool.clone(),
+            self.ctx_builder.clone(),
+            evm_config.clone(),
+        );
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
