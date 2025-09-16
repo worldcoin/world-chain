@@ -62,7 +62,7 @@ where
                 .collect::<Vec<_>>(); // always a single block executed through the state executor
 
             let block_and_receipts = BlockAndReceipts {
-                block: block,
+                block,
                 receipts: receipts.into(),
             };
             return Ok(Some(block_and_receipts));
