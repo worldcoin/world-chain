@@ -234,7 +234,9 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(op_eth_api_builder);
+        let pending_block = self.components_context.flashblocks_state.pending_block();
+        let flashblocks_eth_api_builder =
+            FlashblocksEthApiBuilder::new(op_eth_api_builder, pending_block);
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
@@ -294,10 +296,16 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
-        let flashblocks_state =
-            FlashblocksStateExecutor::new(flashblocks_handle.clone(), value.da_config.clone());
+        let (pending_block, _) = tokio::sync::watch::channel(None);
+
+        let flashblocks_state = FlashblocksStateExecutor::new(
+            flashblocks_handle.clone(),
+            value.da_config.clone(),
+            pending_block,
+        );
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
+
         Self {
             flashblocks_state,
             flashblocks_handle,

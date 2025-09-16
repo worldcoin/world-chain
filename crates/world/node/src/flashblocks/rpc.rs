@@ -78,7 +78,9 @@ where
         };
 
         let mut capabilities = EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied());
-        capabilities.add_capability("flashblocks_forkChoiceUpdatedV3");
+
+        capabilities.add_capability("flashblocks_forkchoiceUpdatedV3");
+
         let inner = EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),

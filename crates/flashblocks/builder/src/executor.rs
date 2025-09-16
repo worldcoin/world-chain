@@ -6,6 +6,7 @@ use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::StreamExt as _;
 use reth::revm::database::StateProviderDatabase;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_builder::BuilderContext;
 use reth_payload_util::BestPayloadTransactions;
 use reth_transaction_pool::TransactionPool;
@@ -595,6 +596,7 @@ pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
     da_config: OpDAConfig,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl Default for FlashblocksStateExecutor {
@@ -613,7 +615,13 @@ impl FlashblocksStateExecutor {
     /// Creates a new instance of [`FlashblocksStateExecutor`].
     ///
     /// This function spawn a task that handles updates. It should only be called once.
-    pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
+    pub fn new(
+        p2p_handle: FlashblocksHandle,
+        da_config: OpDAConfig,
+        pending_block: tokio::sync::watch::Sender<
+            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        >,
+    ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
             flashblocks: None,
             latest_payload: None,
@@ -623,6 +631,7 @@ impl FlashblocksStateExecutor {
             inner,
             p2p_handle,
             da_config,
+            pending_block,
         }
     }
 
@@ -648,6 +657,8 @@ impl FlashblocksStateExecutor {
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
 
+        let pending_block = self.pending_block.clone();
+
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
@@ -659,6 +670,7 @@ impl FlashblocksStateExecutor {
                         &this,
                         &chain_spec,
                         flashblock,
+                        pending_block.clone(),
                     ) {
                         error!("error processing flashblock: {e:?}")
                     }
@@ -710,6 +722,13 @@ impl FlashblocksStateExecutor {
     pub fn flashblocks(&self) -> Option<Flashblocks> {
         self.inner.read().flashblocks.clone()
     }
+
+    /// Returns a receiver for the pending block.
+    pub fn pending_block(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
+        self.pending_block.subscribe()
+    }
 }
 
 fn process_flashblock<Provider, Pool, P>(
@@ -720,6 +739,7 @@ fn process_flashblock<Provider, Pool, P>(
     state_executor: &FlashblocksStateExecutor,
     chain_spec: &OpChainSpec,
     flashblock: FlashblocksPayloadV1,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
     Provider: InMemoryState<Primitives = OpPrimitives>
@@ -836,11 +856,7 @@ where
 
         *latest_payload = Some((payload.clone(), flashblock.index));
 
-        provider.in_memory_state().set_pending_block(
-            payload
-                .executed_block()
-                .ok_or_eyre("`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`")?,
-        );
+        pending_block.send_replace(payload.executed_block());
     }
 
     // The default engine api implementation should reset the in memory pending
