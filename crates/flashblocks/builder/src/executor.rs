@@ -731,6 +731,7 @@ impl FlashblocksStateExecutor {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn process_flashblock<Provider, Pool, P>(
     provider: &Provider,
     pool: &Pool,
