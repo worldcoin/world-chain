@@ -1,10 +1,11 @@
 use crate::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
+use flashblocks_provider::InMemoryState;
+use reth_chain_state::CanonicalInMemoryState;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_primitives::EthPrimitives;
 use reth_transaction_pool::blobstore::InMemoryBlobStore;
 use reth_transaction_pool::validate::EthTransactionValidatorBuilder;
 use revm_primitives::U256;
-use world_chain_provider::{CanonicalInMemoryState, InMemoryState};
 
 use crate::mock::{ExtendedAccount, MockEthProvider};
 use world_chain_pool::root::WorldChainRootValidator;

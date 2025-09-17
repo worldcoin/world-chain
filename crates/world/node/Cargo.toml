@@ -21,6 +21,7 @@ flashblocks-rpc.workspace = true
 flashblocks-builder.workspace = true
 flashblocks-payload.workspace = true
 flashblocks-cli.workspace = true
+flashblocks-node.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true

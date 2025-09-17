@@ -16,8 +16,11 @@ use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx}
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
+use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::BlockEnv;
+
+use crate::traits::context_builder::PayloadBuilderCtxBuilder;
 
 /// Context trait for building payloads with flashblock support.
 ///
@@ -160,6 +163,39 @@ pub trait PayloadBuilderCtx: Send + Sync {
 
 #[derive(Debug, Default, Clone)]
 pub struct OpPayloadBuilderCtxBuilder;
+
+impl<Provider> PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec>
+    for OpPayloadBuilderCtxBuilder
+where
+    Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+{
+    type PayloadBuilderCtx = OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>;
+
+    fn build(
+        &self,
+        provider: Provider,
+        evm: OpEvmConfig,
+        da_config: reth_optimism_node::OpDAConfig,
+        config: reth_basic_payload_builder::PayloadConfig<
+            OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            <<OpEvmConfig as ConfigureEvm>::Primitives as reth_node_api::NodePrimitives>::BlockHeader,
+        >,
+        cancel: &reth::revm::cancelled::CancelOnDrop,
+        best_payload: Option<reth_optimism_node::OpBuiltPayload>,
+    ) -> Self::PayloadBuilderCtx
+    where
+        Self: Sized,
+    {
+        OpPayloadBuilderCtx {
+            evm_config: evm,
+            da_config,
+            chain_spec: provider.chain_spec(),
+            config,
+            cancel: cancel.clone(),
+            best_payload,
+        }
+    }
+}
 
 impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     type Evm = OpEvmConfig;

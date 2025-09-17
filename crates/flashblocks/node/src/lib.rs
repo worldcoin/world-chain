@@ -1,29 +1,38 @@
+use ed25519_dalek::VerifyingKey;
+use flashblocks_builder::{
+    executor::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
+};
 use flashblocks_cli::FlashblocksArgs;
+use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
+use flashblocks_primitives::p2p::Authorization;
 use flashblocks_provider::InMemoryState;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::chainspec::EthChainSpec;
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
-    rpc::BasicEngineValidatorBuilder,
+    components::ComponentsBuilder,
+    rpc::{BasicEngineValidatorBuilder, RpcAddOns},
     Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    args::RollupArgs, node::OpPayloadBuilder, txpool::OpPooledTx, OpAddOns, OpBuiltPayload,
-    OpConsensusBuilder, OpDAConfig, OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder,
-    OpFullNodeTypes, OpNetworkBuilder, OpNodeTypes, OpPayloadBuilderAttributes, OpPoolBuilder,
-    OpStorage,
+    args::RollupArgs, txpool::OpPooledTx, OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpDAConfig,
+    OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder,
+    OpNodeTypes, OpPayloadBuilderAttributes, OpPoolBuilder, OpStorage,
 };
 use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_rpc::OpEthApiBuilder;
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-use crate::engine::FlashblocksEngineApiBuilder;
+use crate::{
+    engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
+    payload_service::FlashblocksPayloadServiceBuilder,
+};
 
 pub mod engine;
 pub mod payload;
@@ -91,7 +100,7 @@ pub trait FlashblocksPool:
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Clone)]
-pub struct FlashblocksNode {
+pub struct FlashblocksNodeBuilder {
     /// Optimism args
     pub rollup: RollupArgs,
 
@@ -107,14 +116,64 @@ pub struct FlashblocksNode {
     pub da_config: OpDAConfig,
 }
 
+impl FlashblocksNodeBuilder {
+    pub fn build(self) -> FlashblocksNode {
+        let authorizer_vk = self.flashblocks.authorizer_vk.unwrap_or(
+            self.flashblocks
+                .builder_sk
+                .as_ref()
+                .expect("flashblocks builder_sk required")
+                .verifying_key(),
+        );
+        let builder_sk = self.flashblocks.builder_sk.clone();
+        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
+
+        let flashblocks_state =
+            FlashblocksStateExecutor::new(flashblocks_handle.clone(), self.da_config.clone());
+
+        let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
+
+        FlashblocksNode {
+            rollup: self.rollup,
+            flashblocks: self.flashblocks,
+            da_config: self.da_config,
+            flashblocks_state,
+            flashblocks_handle,
+            to_jobs_generator,
+            authorizer_vk,
+        }
+    }
+}
+
+/// Type configuration for a regular Optimism node.
+#[derive(Debug, Clone)]
+pub struct FlashblocksNode {
+    /// Optimism args
+    pub rollup: RollupArgs,
+
+    /// Flashblocks Args
+    pub flashblocks: FlashblocksArgs,
+
+    /// Data availability configuration for the OP builder.
+    ///
+    /// Used to throttle the size of the data availability payloads (configured by the batcher via
+    /// the `miner_` api).
+    ///
+    /// By default no throttling is applied.
+    pub da_config: OpDAConfig,
+
+    pub flashblocks_handle: FlashblocksHandle,
+    pub flashblocks_state: FlashblocksStateExecutor,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    pub authorizer_vk: VerifyingKey,
+}
+
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of Optimism specific builders.
 pub type FlashblocksNodeComponentBuilder<Node> = ComponentsBuilder<
     Node,
     OpPoolBuilder,
-    // FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder<OpPayloadBuilderCtxBuilder>>,
-    BasicPayloadServiceBuilder<OpPayloadBuilder>,
-    // FlashblocksNetworkBuilder<OpNetworkBuilder>,
-    OpNetworkBuilder,
+    FlashblocksPayloadServiceBuilder<FlashblocksPayloadBuilderBuilder<OpPayloadBuilderCtxBuilder>>,
+    FlashblocksNetworkBuilder<OpNetworkBuilder>,
     OpExecutorBuilder,
     OpConsensusBuilder,
 >;
@@ -126,6 +185,7 @@ where
     N: FullNodeTypes,
     N::Provider: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
         + InMemoryState<Primitives = OpPrimitives>,
@@ -150,40 +210,73 @@ where
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let RollupArgs {
             disable_txpool_gossip,
-            compute_pending_block,
             discovery_v4,
             ..
         } = self.rollup;
-        // ComponentsBuilder::default()
-        //     .node_types::<N>()
-        //     .pool(
-        //         OpPoolBuilder::default()
-        //             .with_enable_tx_conditional(self.rollup.enable_tx_conditional)
-        //             .with_supervisor(
-        //                 self.rollup.supervisor_http.clone(),
-        //                 self.rollup.supervisor_safety_level,
-        //             ),
-        //     )
-        //     .executor(OpExecutorBuilder::default())
-        //     .payload(BasicPayloadServiceBuilder::new(
-        //         OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
-        //     ))
-        //     .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
-        //     .consensus(OpConsensusBuilder::default());
-        todo!()
+
+        let op_network_builder = OpNetworkBuilder {
+            disable_txpool_gossip,
+            disable_discovery_v4: !discovery_v4,
+        };
+
+        let fb_network_builder =
+            FlashblocksNetworkBuilder::new(op_network_builder, self.flashblocks_handle.clone());
+
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(
+                OpPoolBuilder::default()
+                    .with_enable_tx_conditional(self.rollup.enable_tx_conditional)
+                    .with_supervisor(
+                        self.rollup.supervisor_http.clone(),
+                        self.rollup.supervisor_safety_level,
+                    ),
+            )
+            .executor(OpExecutorBuilder::default())
+            .payload(FlashblocksPayloadServiceBuilder::new(
+                FlashblocksPayloadBuilderBuilder::new(
+                    OpPayloadBuilderCtxBuilder,
+                    self.flashblocks_state.clone(),
+                    self.da_config.clone(),
+                ),
+                self.flashblocks_handle.clone(),
+                self.flashblocks_state.clone(),
+                self.to_jobs_generator.clone().subscribe(),
+            ))
+            .network(fb_network_builder)
+            .consensus(OpConsensusBuilder::default())
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        // let op_add_ons = OpAddOnsBuilder::default()
-        //     .with_sequencer(self.rollup.sequencer.clone())
-        //     .with_sequencer_headers(self.rollup.sequencer_headers.clone())
-        //     .with_da_config(self.da_config.clone())
-        //     .with_enable_tx_conditional(self.rollup.enable_tx_conditional)
-        //     .with_min_suggested_priority_fee(self.rollup.min_suggested_priority_fee)
-        //     .with_historical_rpc(self.rollup.historical_rpc.clone())
-        //     .with_flashblocks(self.rollup.flashblocks_url.clone())
-        //     .build();
-        todo!()
+        let engine_api_builder = FlashblocksEngineApiBuilder {
+            engine_validator_builder: Default::default(),
+            flashblocks_handle: Some(self.flashblocks_handle.clone()),
+            to_jobs_generator: self.to_jobs_generator.clone(),
+            authorizer_vk: self.authorizer_vk,
+        };
+        let op_eth_api_builder =
+            OpEthApiBuilder::default().with_sequencer(self.rollup.sequencer.clone());
+
+        let flashblocks_eth_api_builder =
+            FlashblocksEthApiBuilder::new(op_eth_api_builder, self.flashblocks_state.clone());
+
+        let rpc_add_ons = RpcAddOns::new(
+            flashblocks_eth_api_builder,
+            Default::default(),
+            engine_api_builder,
+            Default::default(),
+            Default::default(),
+        );
+
+        OpAddOns::new(
+            rpc_add_ons,
+            self.da_config.clone(),
+            self.rollup.sequencer.clone(),
+            Default::default(),
+            Default::default(),
+            false,
+            1_000_000,
+        )
     }
 }
 
