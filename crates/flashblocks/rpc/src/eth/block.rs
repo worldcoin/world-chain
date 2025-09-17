@@ -1,6 +1,7 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_eips::BlockId;
+use flashblocks_provider::InMemoryState;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::RecoveredBlock;
@@ -13,7 +14,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_api::{EthApiTypes, FromEvmError};
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use std::sync::Arc;
-use flashblocks_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
 

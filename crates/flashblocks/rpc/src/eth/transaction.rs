@@ -20,8 +20,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
-use std::future::Future;
 use flashblocks_provider::InMemoryState;
+use std::future::Future;
 
 use crate::eth::FlashblocksEthApi;
 

@@ -304,7 +304,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
             let evm_env = this
                 .evm_config
                 .next_evm_env(parent, &attributes)
-                .map_err(|e| PayloadBuilderError::other(e))?;
+                .map_err(PayloadBuilderError::other)?;
 
             let evm = this.evm_config.evm_with_env(db, evm_env);
             let ctx = this.evm_config.context_for_next_block(parent, attributes);
