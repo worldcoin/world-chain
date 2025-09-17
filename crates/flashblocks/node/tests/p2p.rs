@@ -1,15 +1,14 @@
 use alloy_consensus::Receipt;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256, Bytes, TxHash, U256, address, b256};
+use alloy_primitives::{address, b256, Address, Bytes, TxHash, B256, U256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg};
-use flashblocks_rpc::{EthApiOverrideServer, FlashblocksApiExt, FlashblocksOverlay, Metadata};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_eth_wire::BasicNetworkPrimitives;
-use reth_ethereum::network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
+use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
@@ -18,17 +17,13 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_node::{OpNode, args::RollupArgs};
+use reth_optimism_node::{args::RollupArgs, OpNode};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
-use rollup_boost::{
-    Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, ExecutionPayloadBaseV1,
-    ExecutionPayloadFlashblockDeltaV1, FlashblocksP2PMsg, FlashblocksPayloadV1, StartPublish,
-};
 use std::{any::Any, collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
-use tracing::{Dispatch, info};
+use tracing::{info, Dispatch};
 
 type Network = NetworkHandle<
     BasicNetworkPrimitives<

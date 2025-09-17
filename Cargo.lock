@@ -13823,6 +13823,7 @@ dependencies = [
  "ed25519-dalek",
  "flashblocks-builder",
  "flashblocks-cli",
+ "flashblocks-node",
  "flashblocks-p2p",
  "flashblocks-payload",
  "flashblocks-primitives",

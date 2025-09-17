@@ -3,10 +3,6 @@
 use crate::{
     args::WorldChainArgs,
     config::WorldChainNodeConfig,
-    flashblocks::{
-        payload_builder_builder::FlashblocksPayloadBuilderBuilder,
-        rpc::FlashblocksEngineApiBuilder, service_builder::FlashblocksPayloadServiceBuilder,
-    },
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
         WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
@@ -14,8 +10,13 @@ use crate::{
 };
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_node::{
+    engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
+    payload_service::FlashblocksPayloadServiceBuilder,
+};
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::p2p::Authorization;
+use flashblocks_provider::InMemoryState;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -33,7 +34,6 @@ use reth_optimism_rpc::OpEthApiBuilder;
 
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
-use world_chain_provider::InMemoryState;
 
 #[derive(Clone, Debug)]
 pub struct BasicContext(WorldChainNodeConfig);
