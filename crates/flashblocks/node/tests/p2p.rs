@@ -303,7 +303,7 @@ async fn test_double_failover() -> eyre::Result<()> {
         .await?
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
         .await?;
-    assert!(pending_block.is_none());
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
     let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0);
     let authorization_0 = Authorization::new(
@@ -390,7 +390,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
         .await?;
-    assert!(pending_block.is_none());
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
     let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0);
     info!("Sending payload 0, index 0");
@@ -505,7 +505,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let pending_block = provider
         .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
         .await?;
-    assert!(pending_block.is_none());
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
     let payload_id = PayloadId::new([0; 8]);
     let base_payload = base_payload(0, payload_id, 0);
