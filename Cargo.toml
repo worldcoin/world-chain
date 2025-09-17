@@ -89,24 +89,24 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
 reth-ethereum = { git = "https://github.com/paradigmxyz/reth", features = [
     "network",
-], rev = "9b86326" }
-reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+], rev = "5f38ff7" }
+reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", features = [
     "test-utils",
-], rev = "9b86326" }
-reth-engine-local = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326", features = [
+], rev = "5f38ff7" }
+reth-engine-local = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7", features = [
     "op",
 ] }
-reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-payload-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326", default-features = false, features = [
+reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-payload-primitives = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-payload-util = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7", default-features = false, features = [
     "std",
 ] }
 reth-tasks = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }

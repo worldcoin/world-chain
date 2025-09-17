@@ -15,7 +15,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use world_chain_provider::InMemoryState;
+use flashblocks_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
 

@@ -8,6 +8,7 @@ mod call;
 mod pending_block;
 
 use alloy_primitives::U256;
+use flashblocks_provider::InMemoryState;
 use op_alloy_network::Optimism;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_evm::ConfigureEvm;
@@ -32,7 +33,6 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use world_chain_provider::InMemoryState;
 
 /// Flashblocks `Eth` API implementation.
 ///

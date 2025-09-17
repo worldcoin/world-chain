@@ -262,8 +262,7 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.rollup.sequencer.clone());
 
-        let flashblocks_eth_api_builder =
-            FlashblocksEthApiBuilder::new(op_eth_api_builder, self.flashblocks_state.clone());
+        let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(op_eth_api_builder);
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
