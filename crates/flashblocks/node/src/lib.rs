@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
@@ -9,11 +11,14 @@ use flashblocks_provider::InMemoryState;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::chainspec::EthChainSpec;
-use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_node_api::{
+    FullNodeComponents, FullNodeTypes, NodeTypes, PayloadAttributesBuilder, PayloadTypes,
+};
 use reth_node_builder::{
     components::ComponentsBuilder,
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    Node, NodeAdapter, NodeComponentsBuilder,
+    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -277,6 +282,38 @@ where
             false,
             1_000_000,
         )
+    }
+}
+
+impl<N> DebugNode<N> for FlashblocksNode
+where
+    N: FullNodeComponents,
+    N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
+    N: FullNodeTypes,
+    N::Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + HeaderProvider<Header = alloy_consensus::Header>
+        + Clone
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
+        + InMemoryState<Primitives = OpPrimitives>,
+    N::Types: NodeTypes<
+        ChainSpec = OpChainSpec,
+        Payload: PayloadTypes<
+            BuiltPayload = OpBuiltPayload,
+            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+        >,
+    >,
+{
+    type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
+        rpc_block.into_consensus()
+    }
+
+    fn local_payload_attributes_builder(
+        chain_spec: &Self::ChainSpec,
+    ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes> {
+        LocalPayloadAttributesBuilder::new(Arc::new(chain_spec.clone()))
     }
 }
 
