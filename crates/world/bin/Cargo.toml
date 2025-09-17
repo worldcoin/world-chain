@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder"
+name = "world-chain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,10 +12,10 @@ workspace = true
 
 [dependencies]
 # world-chain
-world-chain-builder-node.workspace = true
-world-chain-builder-rpc.workspace = true
+world-chain-node.workspace = true
+world-chain-rpc.workspace = true
 
-rollup-boost.workspace = true
+flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
 # reth
@@ -33,10 +33,10 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
+reth-revm.workspace = true
 reth-trie-db.workspace = true
 reth-rpc-server-types.workspace = true
-reth-tasks = { workspace = true, optional = true }
+reth-tasks.workspace = true
 
 # op-reth
 reth-optimism-cli.workspace = true
@@ -46,9 +46,9 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde"] }
+reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
-
+reth-rpc-eth-api.workspace = true
 # revm 
 revm.workspace = true
 
@@ -70,9 +70,7 @@ tokio.workspace = true
 # rpc
 serde_json.workspace = true
 
-# test-utils dependencies
-reth-e2e-test-utils = { workspace = true, optional = true }
-alloy-genesis = { workspace = true, optional = true }
+# optional
 tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]

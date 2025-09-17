@@ -238,14 +238,15 @@ def get_config(
         "--discovery.port={0}".format(discovery_port),
         "--port={0}".format(discovery_port),
         "--rpc.eth-proof-window=302400",
-        "--builder.pbh_entrypoint={0}".format(PBH_ENTRY_POINT),
-        "--builder.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
-        "--builder.world_id={0}".format(WORLD_ID),
+        "--pbh.entrypoint={0}".format(PBH_ENTRY_POINT),
+        "--pbh.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
+        "--pbh.world_id={0}".format(WORLD_ID),
+        "--builder.enabled",
         "--builder.interval={0}".format("200ms"),
         "--builder.deadline={0}".format("6"),
-        "--flashblocks.authorizor_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
-        "--flashblocks.builder_sk={0}".format(signing_key),
         "--flashblocks.enabled",
+        "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
+        "--flashblocks.builder_sk={0}".format(signing_key),
         "--block-interval={0}".format(4294967295),
     ]
 
@@ -285,7 +286,7 @@ def get_config(
     env_vars = participant.el_builder_extra_env_vars
     env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
-    env_vars["RUST_LOG"] = "info,payload_builder=trace,engine::persistence=trace"
+    env_vars["RUST_LOG"] = "info,payload_builder=trace,engine::persistence=trace,flashblocks::state_executor=trace"
     env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,

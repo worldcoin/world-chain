@@ -1,0 +1,41 @@
+[package]
+name = "flashblocks-payload"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+
+[dependencies]
+# internal
+flashblocks-primitives.workspace = true
+flashblocks-builder.workspace = true
+flashblocks-p2p.workspace = true
+
+# reth
+reth.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-provider.workspace = true
+reth-primitives.workspace = true
+
+# op-reth
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
+
+# tokio
+tokio.workspace = true
+
+# metrics
+metrics.workspace = true
+metrics-derive.workspace = true
+
+# misc
+tracing.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+eyre.workspace = true

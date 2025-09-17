@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use alloy_primitives::Address;
+use alloy_signer_local::PrivateKeySigner;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::components::{
     ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
@@ -42,30 +43,15 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BlobStore, TransactionPool};
-use reth_trie_db::MerklePatriciaTrie;
 
+use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
-use world_chain_builder_payload::builder::WorldChainPayloadBuilder;
-use world_chain_builder_pool::ordering::WorldChainOrdering;
-use world_chain_builder_pool::root::WorldChainRootValidator;
-use world_chain_builder_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use world_chain_builder_pool::validator::WorldChainTransactionValidator;
-use world_chain_builder_pool::WorldChainTransactionPool;
-
-use crate::args::WorldChainArgs;
-
-#[derive(Debug, Clone)]
-pub struct WorldChainNodeConfig {
-    /// World Chain Specific CLI arguements
-    pub args: WorldChainArgs,
-    /// Data availability configuration for the OP builder.
-    ///
-    /// Used to throttle the size of the data availability payloads (configured by the batcher via
-    /// the `miner_` api).
-    ///
-    /// By default no throttling is applied.
-    pub da_config: OpDAConfig,
-}
+use world_chain_payload::builder::WorldChainPayloadBuilder;
+use world_chain_pool::ordering::WorldChainOrdering;
+use world_chain_pool::root::WorldChainRootValidator;
+use world_chain_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_pool::validator::WorldChainTransactionValidator;
+use world_chain_pool::WorldChainTransactionPool;
 
 /// Context trait for World Chain node implementations.
 ///
@@ -244,7 +230,6 @@ where
 impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainNode<T> {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
     type Payload = OpEngineTypes;
 }
@@ -317,13 +302,13 @@ where
             )
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
-                let op_tx_validator = OpTransactionValidator::new(validator.clone())
+                let client = validator.client().clone();
+                let op_tx_validator = OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode the L1
                     // block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator =
-                    WorldChainRootValidator::new(validator.client().clone(), world_id)
-                        .expect("failed to initialize root validator");
+                let root_validator = WorldChainRootValidator::new(client, world_id)
+                    .expect("failed to initialize root validator");
 
                 WorldChainTransactionValidator::new(
                     op_tx_validator,
@@ -389,7 +374,7 @@ where
 }
 
 /// A basic World Chain payload service builder
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
@@ -411,7 +396,7 @@ pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     pub pbh_signature_aggregator: Address,
 
     /// Sets the private key of the builder
-    pub builder_private_key: String,
+    pub builder_private_key: PrivateKeySigner,
 }
 
 impl WorldChainPayloadBuilderBuilder {
@@ -422,7 +407,7 @@ impl WorldChainPayloadBuilderBuilder {
         verified_blockspace_capacity: u8,
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
-        builder_private_key: String,
+        builder_private_key: PrivateKeySigner,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -466,47 +451,6 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
             builder_private_key,
         }
     }
-
-    /// A helper method to initialize [`WorldChainPayloadBuilder`] with the
-    /// given EVM config.
-    pub fn build<Node, S>(
-        &self,
-        evm_config: OpEvmConfig,
-        ctx: &BuilderContext<Node>,
-        pool: WorldChainTransactionPool<Node::Provider, S>,
-    ) -> eyre::Result<WorldChainPayloadBuilder<Node::Provider, S, Txs>>
-    where
-        Node: FullNodeTypes<
-            Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
-            Types: NodeTypes<
-                Primitives = OpPrimitives,
-                Payload: PayloadTypes<
-                    BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
-                    PayloadAttributes = OpPayloadAttributes,
-                    PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
-                >,
-            >,
-        >,
-        S: BlobStore + Clone,
-        Txs: OpPayloadTransactions<WorldChainPooledTransaction>,
-    {
-        let payload_builder = WorldChainPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
-            evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
-            },
-            self.compute_pending_block,
-            self.verified_blockspace_capacity,
-            self.pbh_entry_point,
-            self.pbh_signature_aggregator,
-            self.builder_private_key.clone(),
-        )
-        .with_transactions(self.best_transactions.clone());
-
-        Ok(payload_builder)
-    }
 }
 
 impl<Node, S, Txs>
@@ -536,6 +480,19 @@ where
         pool: WorldChainTransactionPool<Node::Provider, S>,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
+        Ok(WorldChainPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
+            evm_config,
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+            },
+            self.compute_pending_block,
+            self.verified_blockspace_capacity,
+            self.pbh_entry_point,
+            self.pbh_signature_aggregator,
+            self.builder_private_key.clone(),
+        )
+        .with_transactions(self.best_transactions.clone()))
     }
 }

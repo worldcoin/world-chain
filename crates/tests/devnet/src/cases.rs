@@ -19,11 +19,11 @@ use tokio::time::interval;
 use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
-use world_chain_builder_test_utils::bindings::IEntryPoint::PackedUserOperation;
-use world_chain_builder_test_utils::utils::RpcUserOperationByHash;
-use world_chain_builder_test_utils::utils::RpcUserOperationV0_7;
-use world_chain_builder_test_utils::DEVNET_ENTRYPOINT;
-use world_chain_builder_test_utils::PBH_DEV_SIGNATURE_AGGREGATOR;
+use world_chain_test::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_test::utils::RpcUserOperationByHash;
+use world_chain_test::utils::RpcUserOperationV0_7;
+use world_chain_test::DEVNET_ENTRYPOINT;
+use world_chain_test::PBH_DEV_SIGNATURE_AGGREGATOR;
 
 use crate::run_command;
 
@@ -132,7 +132,7 @@ where
     Ok(())
 }
 
-/// Asserts that the chain continues to advance in the case when the world-chain-builder service is MIA.
+/// Asserts that the chain continues to advance in the case when the world-chain service is MIA.
 pub async fn fallback_test<N, P>(sequencer_provider: P) -> Result<()>
 where
     N: Network,

@@ -50,6 +50,9 @@ def run(plan, args={}):
         name="jwtsecret",
     )
 
+    # Stop the builder op-node service
+    plan.stop_service("op-cl-builder-2151908-1-op-node-custom-op-kurtosis")
+
     # Extract HTTP RPC url of the builder
     builder_srv = plan.get_service("op-el-builder-2151908-1-custom-op-node-op-kurtosis")
     builder_rpc_port = builder_srv.ports["rpc"].number

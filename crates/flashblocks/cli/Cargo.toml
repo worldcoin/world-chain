@@ -1,0 +1,11 @@
+[package]
+name = "flashblocks-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ed25519-dalek.workspace = true
+clap.workspace = true
+eyre.workspace = true
+hex.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-builder-node"
+name = "world-chain-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,64 +11,51 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-world-chain-builder-payload.workspace = true
-world-chain-builder-pool.workspace = true
-world-chain-builder-test-utils = { workspace = true, optional = true }
-world-chain-builder-pbh = { workspace = true, optional = true }
-world-chain-builder-flashblocks.workspace = true
+world-chain-payload.workspace = true
+world-chain-pool.workspace = true
+flashblocks-provider.workspace = true
 
-rollup-boost.workspace = true
 flashblocks-p2p.workspace = true
+flashblocks-primitives.workspace = true
+flashblocks-rpc.workspace = true
+flashblocks-builder.workspace = true
+flashblocks-cli.workspace = true
+flashblocks-node.workspace = true
 
 reth.workspace = true
-reth-chain-state = { workspace = true, optional = true }
-reth-db = { workspace = true, optional = true }
 reth-node-builder.workspace = true
 reth-evm.workspace = true
 reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
-reth-primitives-traits = { workspace = true, optional = true  }
-reth-primitives.workspace = true
+reth-optimism-node.workspace = true
 reth-optimism-forks.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-provider.workspace = true
-reth-prune-types = { workspace = true, optional = true }
-reth-trie = { workspace = true, optional = true }
-reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
-reth-e2e-test-utils = { workspace = true, optional = true }
 reth-node-api.workspace = true
 
-alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
-alloy-rpc-types.workspace = true
-alloy-sol-types = { workspace = true, optional = true }
+alloy-signer-local.workspace = true
 
-op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 
-revm-primitives = { workspace = true, optional = true }
-
-tokio = { workspace = true }
+tokio.workspace = true
 eyre.workspace = true
-futures = { workspace = true, optional = true }
 clap.workspace = true
-chrono = { workspace = true, optional = true }
 tracing.workspace = true
-rand = { workspace = true, optional = true}
+ed25519-dalek.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
-world-chain-builder-pbh.workspace = true
-world-chain-builder-rpc.workspace = true
-world-chain-builder-pool = { workspace = true, features = ["test"] }
-world-chain-builder-test-utils.workspace = true
-world-chain-builder-node = { workspace = true, features = ["test"] }
+world-chain-pbh.workspace = true
+world-chain-rpc.workspace = true
+world-chain-pool.workspace = true
+world-chain-test.workspace = true
+world-chain-node.workspace = true
 
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
@@ -79,46 +66,25 @@ reth-basic-payload-builder.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-network-api.workspace = true
+alloy-rpc-types.workspace = true
 
 alloy-genesis.workspace = true
 alloy-network.workspace = true
-alloy-signer-local.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
+op-alloy-rpc-types-engine.workspace = true
+
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 
+futures.workspace = true
 criterion.workspace = true
-semaphore-rs = { workspace = true, features = ["depth_30"] }
-serde_json.workspace = true
+semaphore-rs.workspace = true
 chrono.workspace = true
-tower.workspace = true
 jsonrpsee.workspace = true
 parking_lot.workspace = true
-serde.workspace = true
+serde_json.workspace = true
 rand.workspace = true
-
-[features]
-default = []
-test = [
-    "world-chain-builder-test-utils",
-    "world-chain-builder-pbh",
-    "dep:reth-e2e-test-utils",
-    "dep:reth-chain-state",
-    "dep:reth-primitives-traits",
-    "dep:reth-prune-types",
-    "dep:reth-trie",
-    "dep:reth-db",
-    "dep:alloy-sol-types",
-    "dep:alloy-eips",
-    "dep:revm-primitives",
-    "dep:futures",
-    "dep:rand",
-    "dep:chrono",
-]
-
-[[test]]
-name = "e2e-testsuite"
-path = "tests/e2e-testsuite/main.rs"
+bytes.workspace = true

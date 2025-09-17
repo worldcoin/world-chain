@@ -11,7 +11,7 @@ deploy-devnet: build
   @just ./devnet/devnet-up
 
 build:
-  docker buildx build -t world-chain-builder:latest .
+  docker buildx build -t world-chain:latest .
 
 deploy-contracts:
   @just ./contracts/deploy-contracts
