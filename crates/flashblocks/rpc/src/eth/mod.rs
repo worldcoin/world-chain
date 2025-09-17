@@ -170,11 +170,10 @@ where
 
 impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<  Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
-        + EthApiTypes<Error = OpEthApiError>
-        + LoadFee,
+    OpEthApi<N, Rpc>:
+        RpcNodeCore<Primitives = OpPrimitives> + EthApiTypes<Error = OpEthApiError> + LoadFee,
     OpEthApiError: FromEvmError<N::Evm>,
 {
     #[inline]
@@ -194,13 +193,11 @@ where
     }
 }
 
-impl<
-        N: RpcNodeCore<  Primitives = OpPrimitives>,
-        Rpc: RpcConvert,
-    > LoadState for FlashblocksEthApi<N, Rpc>
+impl<N: RpcNodeCore<Primitives = OpPrimitives>, Rpc: RpcConvert> LoadState
+    for FlashblocksEthApi<N, Rpc>
 where
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + LoadPendingBlock
         + EthApiTypes<Error = OpEthApiError>
         + LoadState
@@ -211,10 +208,10 @@ where
 
 impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<  Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + EthState
         + Clone,
@@ -227,10 +224,10 @@ where
 
 impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<  Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + EthFees
         + Clone,
@@ -239,12 +236,12 @@ where
 
 impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<  Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: Trace
         + SpawnBlocking
-        + RpcNodeCore<  Primitives = OpPrimitives>
+        + RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + Clone,
 {
