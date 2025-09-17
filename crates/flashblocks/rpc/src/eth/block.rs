@@ -46,15 +46,6 @@ where
     ) -> Result<Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>, Self::Error>
     {
         if block_id.is_pending() {
-            // Pending block can be fetched directly without need for caching
-            if let Some(pending_block) = self
-                .provider()
-                .pending_block()
-                .map_err(Self::Error::from_eth_err)?
-            {
-                return Ok(Some(Arc::new(pending_block)));
-            }
-
             // If no pending block from provider, try to get local pending block
             return match self.local_pending_block().await? {
                 Some(BlockAndReceipts { block, receipts: _ }) => Ok(Some(block)),
@@ -71,15 +62,12 @@ where
             None => return Ok(None),
         };
 
-        let pending_block = self
-            .provider()
-            .pending_block()
-            .map_err(Self::Error::from_eth_err)?;
+        let pending_block = self.local_pending_block().await?;
 
-        if let Some(pending_block) = pending_block {
+        if let Some(BlockAndReceipts { block, receipts: _ }) = pending_block {
             // If the requested block hash matches the pending block, return it
-            if pending_block.hash() == block_hash {
-                return Ok(Some(Arc::new(pending_block)));
+            if block.hash() == block_hash {
+                return Ok(Some(block));
             }
         }
 

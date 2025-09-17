@@ -47,14 +47,22 @@ where
     async fn local_pending_block(
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
-        let pending_block = self
-            .provider()
-            .in_memory_state()
-            .pending_block_and_receipts();
+        // check the pending block from the executor
+        let pending_block = self.pending_block.borrow().clone();
 
-        if let Some((block, receipts)) = pending_block {
+        if let Some(pending_block) = pending_block {
+            let block = pending_block.block.recovered_block;
+            let receipts = pending_block
+                .block
+                .execution_output
+                .receipts
+                .clone()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(); // always a single block executed through the state executor
+
             let block_and_receipts = BlockAndReceipts {
-                block: block.into(),
+                block,
                 receipts: receipts.into(),
             };
             return Ok(Some(block_and_receipts));

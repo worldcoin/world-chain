@@ -9,6 +9,7 @@ mod pending_block;
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
@@ -45,6 +46,7 @@ use world_chain_provider::InMemoryState;
 #[derive(Clone)]
 pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     inner: OpEthApi<N, Rpc>,
+    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
@@ -52,8 +54,16 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert,
 {
-    pub fn new(inner: OpEthApi<N, Rpc>) -> Self {
-        Self { inner }
+    pub fn new(
+        inner: OpEthApi<N, Rpc>,
+        pending_block: tokio::sync::watch::Receiver<
+            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        >,
+    ) -> Self {
+        Self {
+            inner,
+            pending_block,
+        }
     }
 }
 
@@ -267,20 +277,31 @@ where
 #[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
+    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
     fn default() -> Self {
+        let (_, pending_block) = tokio::sync::watch::channel(None);
         Self {
             inner: OpEthApiBuilder::default(),
+            pending_block,
         }
     }
 }
 
 impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
-    pub const fn new(inner: OpEthApiBuilder<NetworkT>) -> Self {
-        Self { inner }
+    pub const fn new(
+        inner: OpEthApiBuilder<NetworkT>,
+        pending_block: tokio::sync::watch::Receiver<
+            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        >,
+    ) -> Self {
+        Self {
+            inner,
+            pending_block,
+        }
     }
 }
 
@@ -330,6 +351,7 @@ where
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let inner = self.inner.build_eth_api(ctx).await?;
-        Ok(FlashblocksEthApi::new(inner))
+        let pending_block = self.pending_block;
+        Ok(FlashblocksEthApi::new(inner, pending_block))
     }
 }

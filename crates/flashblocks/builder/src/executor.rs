@@ -1,32 +1,24 @@
-use alloy_eips::eip2718::WithEncoded;
-use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::OptionExt;
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::p2p::AuthorizedPayload;
-use flashblocks_primitives::primitives::FlashblocksPayloadV1;
-use futures::StreamExt as _;
-use reth::revm::database::StateProviderDatabase;
-use reth_node_builder::BuilderContext;
-use reth_payload_util::BestPayloadTransactions;
-use reth_transaction_pool::TransactionPool;
-use std::borrow::Cow;
-use std::sync::Arc;
-use tracing::{error, trace};
-use world_chain_provider::InMemoryState;
-
 use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
+use alloy_rpc_types_engine::PayloadId;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::p2p::AuthorizedPayload;
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use futures::StreamExt as _;
 use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
 use reth::revm::cancelled::CancelOnDrop;
+use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_evm::block::{
     BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
     StateChangeSource, SystemCaller,
@@ -45,6 +37,7 @@ use reth_evm::{
 };
 use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
+use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpPooledTx;
@@ -53,14 +46,20 @@ use reth_optimism_node::{
     OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_payload_util::BestPayloadTransactions;
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered};
 use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
+use reth_transaction_pool::TransactionPool;
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
+use std::borrow::Cow;
+use std::sync::Arc;
+use tracing::{error, trace};
+use world_chain_provider::InMemoryState;
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -595,6 +594,7 @@ pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
     da_config: OpDAConfig,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl Default for FlashblocksStateExecutor {
@@ -613,7 +613,13 @@ impl FlashblocksStateExecutor {
     /// Creates a new instance of [`FlashblocksStateExecutor`].
     ///
     /// This function spawn a task that handles updates. It should only be called once.
-    pub fn new(p2p_handle: FlashblocksHandle, da_config: OpDAConfig) -> Self {
+    pub fn new(
+        p2p_handle: FlashblocksHandle,
+        da_config: OpDAConfig,
+        pending_block: tokio::sync::watch::Sender<
+            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        >,
+    ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
             flashblocks: None,
             latest_payload: None,
@@ -623,6 +629,7 @@ impl FlashblocksStateExecutor {
             inner,
             p2p_handle,
             da_config,
+            pending_block,
         }
     }
 
@@ -648,6 +655,8 @@ impl FlashblocksStateExecutor {
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
 
+        let pending_block = self.pending_block.clone();
+
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
@@ -659,6 +668,7 @@ impl FlashblocksStateExecutor {
                         &this,
                         &chain_spec,
                         flashblock,
+                        pending_block.clone(),
                     ) {
                         error!("error processing flashblock: {e:?}")
                     }
@@ -710,8 +720,16 @@ impl FlashblocksStateExecutor {
     pub fn flashblocks(&self) -> Option<Flashblocks> {
         self.inner.read().flashblocks.clone()
     }
+
+    /// Returns a receiver for the pending block.
+    pub fn pending_block(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
+        self.pending_block.subscribe()
+    }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn process_flashblock<Provider, Pool, P>(
     provider: &Provider,
     pool: &Pool,
@@ -720,6 +738,7 @@ fn process_flashblock<Provider, Pool, P>(
     state_executor: &FlashblocksStateExecutor,
     chain_spec: &OpChainSpec,
     flashblock: FlashblocksPayloadV1,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
     Provider: InMemoryState<Primitives = OpPrimitives>
@@ -746,11 +765,7 @@ where
                     && latest_payload.1 >= flashblock.flashblock.index
                 {
                     // Already processed this flashblock
-                    provider.in_memory_state().set_pending_block(
-                        latest_payload.0.executed_block().ok_or_eyre(
-                            "`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`",
-                        )?,
-                    );
+                    pending_block.send_replace(latest_payload.0.executed_block());
                     return Ok(());
                 }
             }
@@ -802,7 +817,12 @@ where
     };
 
     let state_provider = provider.state_by_block_hash(base.parent_hash)?;
-    let sealed_header = provider.sealed_header_by_hash(base.parent_hash)?;
+
+    // The header either exists in the in memory state (has not been persisted to disk) or exists within
+    // the database. First check the in memory state, then fall back to the database.
+    // TODO: Figure out a way to see if there is a writer on the DB and avoid crashing the node by reading
+    // the header from disk if
+    let sealed_header = provider.in_memory_state().header_by_hash(base.parent_hash);
 
     if let Some(sealed_header) = sealed_header {
         let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
@@ -836,11 +856,9 @@ where
 
         *latest_payload = Some((payload.clone(), flashblock.index));
 
-        provider.in_memory_state().set_pending_block(
-            payload
-                .executed_block()
-                .ok_or_eyre("`latest_payload` doesn't contain `ExecutedBlockWithTrieUpdates`")?,
-        );
+        pending_block.send_replace(payload.executed_block());
+    } else {
+        error!(target: "flashblocks::state_executor", hash = %base.parent_hash, "parent header not found in memory or database");
     }
 
     // The default engine api implementation should reset the in memory pending
