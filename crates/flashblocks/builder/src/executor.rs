@@ -820,8 +820,8 @@ where
 
     // The header either exists in the in memory state (has not been persisted to disk) or exists within
     // the database. First check the in memory state, then fall back to the database.
-    // TODO: Figure out a way to see if there is a writer on the DB and avoid crashing the node by reading 
-    // the header from disk if 
+    // TODO: Figure out a way to see if there is a writer on the DB and avoid crashing the node by reading
+    // the header from disk if
     let sealed_header = provider.in_memory_state().header_by_hash(base.parent_hash);
 
     if let Some(sealed_header) = sealed_header {
