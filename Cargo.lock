@@ -3622,7 +3622,6 @@ dependencies = [
  "color-eyre",
  "flashblocks-p2p",
  "flashblocks-primitives",
- "flashblocks-provider",
  "futures",
  "jsonrpsee",
  "jsonrpsee-core",
@@ -3696,7 +3695,6 @@ dependencies = [
  "flashblocks-p2p",
  "flashblocks-payload",
  "flashblocks-primitives",
- "flashblocks-provider",
  "flashblocks-rpc",
  "futures-util",
  "hex",
@@ -3823,15 +3821,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flashblocks-provider"
-version = "0.1.0"
-dependencies = [
- "reth-chain-state",
- "reth-node-api",
- "reth-provider",
-]
-
-[[package]]
 name = "flashblocks-rpc"
 version = "0.1.0"
 dependencies = [
@@ -3841,7 +3830,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "color-eyre",
  "flashblocks-primitives",
- "flashblocks-provider",
  "jsonrpsee",
  "jsonrpsee-core",
  "op-alloy-network",
@@ -13830,7 +13818,6 @@ dependencies = [
  "flashblocks-node",
  "flashblocks-p2p",
  "flashblocks-primitives",
- "flashblocks-provider",
  "flashblocks-rpc",
  "futures",
  "hex",
@@ -14007,7 +13994,6 @@ dependencies = [
  "chrono",
  "flashblocks-cli",
  "flashblocks-primitives",
- "flashblocks-provider",
  "futures",
  "op-alloy-consensus",
  "parking_lot",

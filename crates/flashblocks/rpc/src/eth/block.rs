@@ -1,7 +1,6 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_eips::BlockId;
-use flashblocks_provider::InMemoryState;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::RecoveredBlock;
@@ -19,11 +18,11 @@ use crate::eth::FlashblocksEthApi;
 
 impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: EthBlocks
-        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + Clone,
 {
@@ -31,11 +30,11 @@ where
 
 impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: LoadBlock
-        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + Clone,
 {
