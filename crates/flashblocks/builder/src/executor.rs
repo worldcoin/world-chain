@@ -656,7 +656,6 @@ impl FlashblocksStateExecutor {
         payload_builder_ctx_builder: P,
         evm_config: OpEvmConfig,
     ) where
-        // Tx: OpPooledTx,
         Pool: TransactionPool + 'static,
         Node: FullNodeTypes,
         Node::Provider: InMemoryState<Primitives = OpPrimitives>
