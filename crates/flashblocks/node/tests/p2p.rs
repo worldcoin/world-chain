@@ -17,7 +17,6 @@ use flashblocks_primitives::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-use reth_e2e_test_utils::{node::NodeTestContext, NodeHelperType};
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
@@ -28,13 +27,12 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{any::Any, collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
 use tracing::{info, Dispatch};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -57,7 +55,7 @@ pub struct NodeContext {
     pub local_node_record: NodeRecord,
     http_api_addr: SocketAddr,
     _node_exit_future: NodeExitFuture,
-    _node: NodeHelperType<FlashblocksNode>,
+    _node: Box<dyn Any + Sync + Send>,
     network_handle: Network,
 }
 
@@ -155,19 +153,12 @@ async fn setup_node(
     let network_handle = node.network.clone();
     let local_node_record = network_handle.local_node_record();
 
-    let node_context = NodeTestContext::new(node, optimism_payload_attributes).await?;
-    let genesis = node_context.inner.chain_spec().sealed_genesis_header();
-
-    node_context
-        .update_forkchoice(genesis.hash(), genesis.hash())
-        .await?;
-
     Ok(NodeContext {
         p2p_handle,
         local_node_record,
         http_api_addr,
         _node_exit_future: node_exit_future,
-        _node: node_context,
+        _node: Box::new(node),
         network_handle,
     })
 }
@@ -285,7 +276,6 @@ async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
 }
 
 #[tokio::test]
-#[ignore = "flaky"]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -578,7 +568,6 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "flaky"]
 async fn test_peer_reputation() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 

@@ -808,7 +808,7 @@ where
 
     let attributes = OpPayloadBuilderAttributes {
         payload_attributes: eth_attrs,
-        no_tx_pool: false,
+        no_tx_pool: true,
         transactions: transactions.clone(),
         gas_limit: None,
         eip_1559_params: Some(eip1559[1..=8].try_into()?),
