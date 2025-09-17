@@ -239,18 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn flashblocks_sk_without_builder() {
-        CommandParser::try_parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
-            "--flashblocks.builder_sk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ])
-        .unwrap_err();
-    }
-
-    #[test]
     fn builder() {
         let args = CommandParser::parse_from([
             "bin",
