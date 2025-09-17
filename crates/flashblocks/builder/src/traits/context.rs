@@ -14,6 +14,7 @@ use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
 use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
+use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
 use reth_provider::ChainSpecProvider;
@@ -103,7 +104,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                // Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             > + 'a,
         PayloadBuilderError,
@@ -278,14 +279,38 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<
-        impl BlockBuilder<Primitives = <Self::Evm as ConfigureEvm>::Primitives> + 'a,
+        impl BlockBuilder<
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            > + 'a,
         PayloadBuilderError,
     >
     where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
     {
-        self.block_builder(db)
+        {
+            // Requires a manual implementation here because upstream
+            // opaque types don't have sufficient functionality
+            let this = &self;
+            let parent = this.parent();
+            let attributes = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx::build_next_env(
+                this.attributes(),
+                this.parent(),
+                this.chain_spec.as_ref(),
+            )
+            .map_err(PayloadBuilderError::other)?;
+
+            let evm_env = this
+                .evm_config
+                .next_evm_env(parent, &attributes)
+                .map_err(|e| PayloadBuilderError::other(e))?;
+
+            let evm = this.evm_config.evm_with_env(db, evm_env);
+            let ctx = this.evm_config.context_for_next_block(parent, attributes);
+
+            Ok(this.evm_config.create_block_builder(evm, parent, ctx))
+        }
     }
 
     fn execute_sequencer_transactions<'a, DB>(
