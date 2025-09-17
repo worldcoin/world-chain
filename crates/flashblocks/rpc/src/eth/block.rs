@@ -62,15 +62,12 @@ where
             None => return Ok(None),
         };
 
-        let pending_block = self
-            .provider()
-            .pending_block()
-            .map_err(Self::Error::from_eth_err)?;
+        let pending_block = self.local_pending_block().await?;
 
-        if let Some(pending_block) = pending_block {
+        if let Some(BlockAndReceipts { block, receipts: _ }) = pending_block {
             // If the requested block hash matches the pending block, return it
-            if pending_block.hash() == block_hash {
-                return Ok(Some(Arc::new(pending_block)));
+            if block.hash() == block_hash {
+                return Ok(Some(block));
             }
         }
 

@@ -540,6 +540,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
@@ -598,7 +599,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let pending_hash =
         fixed_bytes!("f8e1bed42c0ef37d2452900e0fcdd638b857136651c91dd2f6492ceb56b44923");
 
-    let eth_block_by_hash = crate::actions::EthGetBlockByHash::new(pending_hash, vec![0], 300, tx);
+    let eth_block_by_hash = crate::actions::EthGetBlockByHash::new(pending_hash, vec![0], 350, tx);
     let mut action = crate::actions::EthApiAction::new(mine_block, eth_block_by_hash);
 
     action.execute(&mut env).await?;
