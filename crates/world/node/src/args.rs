@@ -1,6 +1,6 @@
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
-use clap::{value_parser, ArgGroup};
+use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use flashblocks_cli::FlashblocksArgs;
 use hex::FromHex;
