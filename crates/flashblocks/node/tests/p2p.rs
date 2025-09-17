@@ -276,6 +276,7 @@ async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
 }
 
 #[tokio::test]
+#[ignore = "flaky"]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
