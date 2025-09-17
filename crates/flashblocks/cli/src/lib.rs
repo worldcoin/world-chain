@@ -34,7 +34,6 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.builder_sk", 
         env = "FLASHBLOCKS_BUILDER_SK", 
-        requires = "builder.enabled",
         required = false,
         value_parser = parse_sk,
     )]
@@ -90,9 +89,6 @@ mod tests {
             "--flashblocks.spoof_authorizer",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
-            "--builder.enabled",
-            "--builder.private_key",
-            "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         ]);
 
         assert_eq!(args.flashblocks.unwrap(), flashblocks);
@@ -129,18 +125,6 @@ mod tests {
             "--flashblocks.enabled",
             "--flashblocks.spoof_authorizer",
             "--flashblocks.authorizer_vk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ])
-        .unwrap_err();
-    }
-
-    #[test]
-    fn flashblocks_sk_without_builder() {
-        CommandParser::try_parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
-            "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();

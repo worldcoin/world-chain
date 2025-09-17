@@ -19,7 +19,6 @@ flashblocks-p2p.workspace = true
 flashblocks-primitives.workspace = true
 flashblocks-rpc.workspace = true
 flashblocks-builder.workspace = true
-flashblocks-payload.workspace = true
 flashblocks-cli.workspace = true
 flashblocks-node.workspace = true
 
@@ -33,20 +32,15 @@ reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
 reth-optimism-forks.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
-alloy-rpc-types.workspace = true
-alloy-consensus.workspace = true
 alloy-signer-local.workspace = true
 
-op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 
 tokio.workspace = true
@@ -72,12 +66,15 @@ reth-basic-payload-builder.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-network-api.workspace = true
+alloy-rpc-types.workspace = true
 
 alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+
+op-alloy-rpc-types-engine.workspace = true
 
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true
