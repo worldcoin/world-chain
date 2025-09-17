@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
-use flashblocks_node::FlashblocksNodeBuilder;
+use flashblocks_node::{FlashblocksNode, FlashblocksNodeBuilder};
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg};
 use flashblocks_primitives::{
     p2p::{
@@ -17,6 +17,7 @@ use flashblocks_primitives::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+use reth_e2e_test_utils::{node::NodeTestContext, NodeHelperType};
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
@@ -27,13 +28,13 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_node::OpNode;
+use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
 use serde::{Deserialize, Serialize};
-use std::{any::Any, collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
 use tracing::{info, Dispatch};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -56,7 +57,7 @@ pub struct NodeContext {
     pub local_node_record: NodeRecord,
     http_api_addr: SocketAddr,
     _node_exit_future: NodeExitFuture,
-    _node: Box<dyn Any + Sync + Send>,
+    _node: NodeHelperType<FlashblocksNode>,
     network_handle: Network,
 }
 
@@ -127,7 +128,7 @@ async fn setup_node(
         node_exit_future,
     } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
-        .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
+        .with_types_and_provider::<FlashblocksNode, BlockchainProvider<_>>()
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons())
         .launch()
@@ -154,23 +155,35 @@ async fn setup_node(
     let network_handle = node.network.clone();
     let local_node_record = network_handle.local_node_record();
 
+    let node_context = NodeTestContext::new(node, optimism_payload_attributes).await?;
+    let genesis = node_context.inner.chain_spec().sealed_genesis_header();
+
+    node_context
+        .update_forkchoice(genesis.hash(), genesis.hash())
+        .await?;
+
     Ok(NodeContext {
         p2p_handle,
         local_node_record,
         http_api_addr,
         _node_exit_future: node_exit_future,
-        _node: Box::new(node),
+        _node: node_context,
         network_handle,
     })
 }
 
-fn base_payload(block_number: u64, payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
+fn base_payload(
+    block_number: u64,
+    payload_id: PayloadId,
+    index: u64,
+    hash: B256,
+) -> FlashblocksPayloadV1 {
     FlashblocksPayloadV1 {
         payload_id,
         index,
         base: Some(ExecutionPayloadBaseV1 {
             parent_beacon_block_root: B256::default(),
-            parent_hash: B256::default(),
+            parent_hash: hash,
             fee_recipient: Address::ZERO,
             prev_randao: B256::default(),
             block_number,
@@ -305,7 +318,7 @@ async fn test_double_failover() -> eyre::Result<()> {
         .await?;
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0);
+    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     let authorization_0 = Authorization::new(
         payload_0.payload_id,
         0,
@@ -392,7 +405,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?;
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0);
+    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     info!("Sending payload 0, index 0");
     let authorization = Authorization::new(
         payload_0.payload_id,
@@ -445,7 +458,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     assert_eq!(block.transactions.hashes().len(), 2);
 
     // Send a new block, this time from node 1
-    let payload_2 = base_payload(1, PayloadId::new([1; 8]), 0);
+    let payload_2 = base_payload(1, PayloadId::new([1; 8]), 0, latest_block.hash());
     info!("Sending payload 1, index 0");
     let authorization_1 = Authorization::new(
         payload_2.payload_id,
@@ -508,7 +521,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
     let payload_id = PayloadId::new([0; 8]);
-    let base_payload = base_payload(0, payload_id, 0);
+    let base_payload = base_payload(0, payload_id, 0, latest_block.hash());
     let authorization = Authorization::new(
         base_payload.payload_id,
         0,
@@ -580,8 +593,14 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     });
 
     let invalid_authorizer = SigningKey::from_bytes(&[99; 32]);
+    let latest_block = nodes[0]
+        .provider()
+        .await?
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0);
+    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     info!("Sending bad authorization");
     let authorization = Authorization::new(
         payload_0.payload_id,

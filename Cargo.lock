@@ -3709,6 +3709,7 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "reth",
  "reth-db",
+ "reth-e2e-test-utils",
  "reth-engine-local",
  "reth-eth-wire",
  "reth-ethereum",

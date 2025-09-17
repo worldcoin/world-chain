@@ -73,3 +73,6 @@ hex.workspace = true
 jsonrpsee.workspace = true
 futures-util.workspace = true
 brotli.workspace = true
+
+[dev-dependencies]
+reth-e2e-test-utils.workspace = true
