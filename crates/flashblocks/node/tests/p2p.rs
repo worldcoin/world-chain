@@ -32,8 +32,16 @@ use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
+use serde::{Deserialize, Serialize};
 use std::{any::Any, collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
 use tracing::{info, Dispatch};
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct Metadata {
+    pub receipts: HashMap<String, OpReceipt>,
+    pub new_account_balances: HashMap<String, String>, // Address -> Balance (hex)
+    pub block_number: u64,
+}
 
 type Network = NetworkHandle<
     BasicNetworkPrimitives<
