@@ -8,7 +8,6 @@ mod call;
 mod pending_block;
 
 use alloy_primitives::U256;
-use flashblocks_provider::InMemoryState;
 use op_alloy_network::Optimism;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_evm::ConfigureEvm;
@@ -171,9 +170,9 @@ where
 
 impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<  Primitives = OpPrimitives>,
     Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + LoadFee,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -196,12 +195,12 @@ where
 }
 
 impl<
-        N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+        N: RpcNodeCore<  Primitives = OpPrimitives>,
         Rpc: RpcConvert,
     > LoadState for FlashblocksEthApi<N, Rpc>
 where
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
         + LoadPendingBlock
         + EthApiTypes<Error = OpEthApiError>
         + LoadState
@@ -212,10 +211,10 @@ where
 
 impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<  Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + EthState
         + Clone,
@@ -228,10 +227,10 @@ where
 
 impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<  Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<  Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + EthFees
         + Clone,
@@ -240,12 +239,12 @@ where
 
 impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<  Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: Trace
         + SpawnBlocking
-        + RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+        + RpcNodeCore<  Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + Clone,
 {

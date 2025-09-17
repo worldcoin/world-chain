@@ -7,9 +7,6 @@ license.workspace = true
 
 
 [dependencies]
-# internal
-flashblocks-provider.workspace = true
-
 # reth
 reth.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -69,3 +66,4 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
+

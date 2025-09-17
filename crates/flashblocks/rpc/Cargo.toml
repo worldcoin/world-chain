@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 # internal
 flashblocks-primitives.workspace = true
-flashblocks-provider.workspace = true
 
 # reth
 reth.workspace = true

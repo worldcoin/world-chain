@@ -1,7 +1,6 @@
 //! Loads OP pending block for a RPC response.
 
 use alloy_eips::BlockNumberOrTag;
-use flashblocks_provider::InMemoryState;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApi;
 use reth_optimism_rpc::OpEthApiError;
@@ -21,10 +20,10 @@ use crate::eth::FlashblocksEthApi;
 
 impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + LoadPendingBlock
         + Clone
         + SpawnBlocking

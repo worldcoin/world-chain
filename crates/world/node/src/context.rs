@@ -16,7 +16,6 @@ use flashblocks_node::{
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::p2p::Authorization;
-use flashblocks_provider::InMemoryState;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -29,7 +28,6 @@ use reth_optimism_node::{
     args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
     OpExecutorBuilder, OpNetworkBuilder,
 };
-use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
@@ -44,8 +42,8 @@ impl From<WorldChainNodeConfig> for BasicContext {
     }
 }
 
-impl<N: FullNodeTypes<Provider: InMemoryState, Types = WorldChainNode<BasicContext>>>
-    WorldChainNodeContext<N> for BasicContext
+impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeContext<N>
+    for BasicContext
 where
     BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
         N,
@@ -128,12 +126,8 @@ pub struct FlashblocksContext {
     components_context: FlashblocksComponentsContext,
 }
 
-impl<
-        N: FullNodeTypes<
-            Provider: InMemoryState<Primitives = OpPrimitives>,
-            Types = WorldChainNode<FlashblocksContext>,
-        >,
-    > WorldChainNodeContext<N> for FlashblocksContext
+impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
+    for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
