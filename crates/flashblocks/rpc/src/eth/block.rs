@@ -13,7 +13,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_api::{EthApiTypes, FromEvmError};
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use std::sync::Arc;
-use world_chain_provider::InMemoryState;
+use flashblocks_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
 

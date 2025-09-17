@@ -49,7 +49,8 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + InMemoryState<Primitives = OpPrimitives>,
+        + InMemoryState<Primitives = OpPrimitives>
+        + HeaderProvider<Header = alloy_consensus::Header>,
     Node::Types: NodeTypes<
         ChainSpec = OpChainSpec,
         Payload: PayloadTypes<

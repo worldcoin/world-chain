@@ -4,7 +4,7 @@ use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall},
     EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use world_chain_provider::InMemoryState;
+use flashblocks_provider::InMemoryState;
 
 use crate::eth::FlashblocksEthApi;
 
