@@ -5,7 +5,17 @@ use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
+use eyre::eyre::eyre;
+use flashblocks_cli::FlashblocksArgs;
+use flashblocks_node::FlashblocksNodeBuilder;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg};
+use flashblocks_primitives::{
+    p2p::{
+        Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
+        StartPublish,
+    },
+    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
@@ -17,7 +27,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_node::{args::RollupArgs, OpNode};
+use reth_optimism_node::OpNode;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
@@ -90,10 +100,19 @@ async fn setup_node(
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
         .with_unused_ports();
 
-    let node = OpNode::new(RollupArgs::default());
+    let node = FlashblocksNodeBuilder {
+        rollup: Default::default(),
+        flashblocks: FlashblocksArgs {
+            enabled: true,
+            authorizer_vk: Some(authorizer_sk.verifying_key()),
+            builder_sk: Some(builder_sk.clone()),
+            spoof_authorizer: false,
+        },
+        da_config: Default::default(),
+    }
+    .build();
 
-    let p2p_handle = FlashblocksHandle::new(authorizer_sk.verifying_key(), Some(builder_sk));
-    let p2p_handle_clone = p2p_handle.clone();
+    let p2p_handle = node.flashblocks_handle.clone();
 
     let NodeHandle {
         node,
@@ -103,19 +122,6 @@ async fn setup_node(
         .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons())
-        .extend_rpc_modules(move |ctx| {
-            // We are not going to use the websocket connection to send payloads so we use
-            // a dummy url.
-            let flashblocks_overlay = FlashblocksOverlay::new(p2p_handle_clone, chain_spec);
-            flashblocks_overlay.clone().start()?;
-
-            let eth_api = ctx.registry.eth_api().clone();
-            let api_ext = FlashblocksApiExt::new(eth_api.clone(), flashblocks_overlay.clone());
-
-            ctx.modules.replace_configured(api_ext.into_rpc())?;
-
-            Ok(())
-        })
         .launch()
         .await?;
 
@@ -135,7 +141,7 @@ async fn setup_node(
     let http_api_addr = node
         .rpc_server_handle()
         .http_local_addr()
-        .ok_or_else(|| eyre::eyre!("Failed to get http api address"))?;
+        .ok_or_else(|| eyre!("Failed to get http api address"))?;
 
     let network_handle = node.network.clone();
     let local_node_record = network_handle.local_node_record();

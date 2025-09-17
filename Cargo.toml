@@ -89,14 +89,16 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
 reth-chain-state = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
 reth-ethereum = { git = "https://github.com/paradigmxyz/reth", features = [
     "network",
-], rev = "5f38ff7" }
-reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-node-builder = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }
-reth-engine-local = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7", features = [
+], rev = "9b86326" }
+reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-eth-wire-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-stages-types = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-trie-db = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326" }
+reth-node-builder = { git = "https://github.com/paradigmxyz/reth", features = [
+    "test-utils",
+], rev = "9b86326" }
+reth-engine-local = { git = "https://github.com/paradigmxyz/reth", rev = "9b86326", features = [
     "op",
 ] }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", rev = "5f38ff7" }

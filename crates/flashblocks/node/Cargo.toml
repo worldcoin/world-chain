@@ -38,6 +38,7 @@ reth-rpc-engine-api.workspace = true
 
 reth-ethereum.workspace = true
 reth-eth-wire.workspace = true
+reth-engine-local.workspace = true
 reth-network.workspace = true
 reth-network-peers.workspace = true
 ed25519-dalek.workspace = true
