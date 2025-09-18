@@ -1,5 +1,6 @@
 use crate::protocol::{connection::FlashblocksConnection, error::FlashblocksP2PError};
 use alloy_rlp::BytesMut;
+use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use flashblocks_primitives::{
     p2p::{
@@ -525,6 +526,7 @@ impl FlashblocksP2PCtx {
         if flashblock.is_none() {
             // We haven't seen this index yet
             // Add the flashblock to our cache
+
             *flashblock = Some(payload.clone());
             tracing::trace!(
                 target: "flashblocks::p2p",
@@ -536,7 +538,6 @@ impl FlashblocksP2PCtx {
             let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
             let bytes = p2p_msg.encode();
             let len = bytes.len();
-            metrics::histogram!("flashblock_size").record(len as f64);
 
             if len > MAX_FRAME {
                 tracing::error!(
@@ -555,6 +556,19 @@ impl FlashblocksP2PCtx {
                     "FlashblocksP2PMsg almost too large",
                 );
             }
+
+            if let Some(flashblock_timestamp) = payload.metadata.flashblock_timestamp {
+                let latency = Utc::now()
+                    .timestamp_nanos_opt()
+                    .expect("time went backwards")
+                    - flashblock_timestamp;
+                metrics::histogram!("flashblocks_latency")
+                    .record(latency as f64 / (1_000_000_000.0));
+            }
+            metrics::histogram!("flashblocks_size").record(len as f64);
+            metrics::histogram!("flashblocks_gas_used").record(payload.diff.gas_used as f64);
+            metrics::histogram!("flashblocks_tx_count")
+                .record(payload.diff.transactions.len() as f64);
 
             let peer_msg =
                 PeerMsg::FlashblocksPayloadV1((payload.payload_id, payload.index as usize, bytes));

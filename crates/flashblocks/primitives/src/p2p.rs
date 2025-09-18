@@ -590,7 +590,10 @@ impl Decodable for AuthorizedMsg {
 
 #[cfg(test)]
 mod tests {
-    use crate::primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1};
+    use crate::{
+        flashblocks::FlashblockMetadata,
+        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
+    };
 
     use super::*;
     use alloy_primitives::{Address, Bloom, B256, U256};
@@ -652,7 +655,7 @@ mod tests {
             payload_id: PayloadId::default(),
             index: 42,
             diff: sample_diff(),
-            metadata: serde_json::json!({ "ok": true }),
+            metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
         }
     }

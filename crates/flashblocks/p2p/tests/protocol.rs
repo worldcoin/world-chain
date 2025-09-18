@@ -1,6 +1,7 @@
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
 use flashblocks_primitives::{
+    flashblocks::FlashblockMetadata,
     p2p::{Authorization, AuthorizedPayload},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
@@ -26,7 +27,7 @@ fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayload
             ..Default::default()
         }),
         diff: ExecutionPayloadFlashblockDeltaV1::default(),
-        metadata: serde_json::Value::Null,
+        metadata: FlashblockMetadata::default(),
     }
 }
 
