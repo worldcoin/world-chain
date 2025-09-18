@@ -94,9 +94,15 @@ impl PayloadBuilderMetrics {
     }
 
     /// Record pre-confirmation size metrics (bytes, gas, transaction count)
-    pub(crate) fn record_preconfirmation_metrics(&self, size_bytes: u64, gas_used: u64, tx_count: usize) {
+    pub(crate) fn record_preconfirmation_metrics(
+        &self,
+        size_bytes: u64,
+        gas_used: u64,
+        tx_count: usize,
+    ) {
         self.preconfirmation_size_bytes.record(size_bytes as f64);
         self.preconfirmation_gas_used.record(gas_used as f64);
-        self.preconfirmation_transaction_count.record(tx_count as f64);
+        self.preconfirmation_transaction_count
+            .record(tx_count as f64);
     }
 }

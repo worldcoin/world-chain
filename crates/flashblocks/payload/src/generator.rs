@@ -180,9 +180,11 @@ where
 
         let payload_task_guard = PayloadTaskGuard::new(1);
 
-        let maybe_pre_state = self.check_for_pre_state(&config.attributes).inspect_err(|_| {
-            self.metrics.inc_job_creation_errors();
-        })?;
+        let maybe_pre_state = self
+            .check_for_pre_state(&config.attributes)
+            .inspect_err(|_| {
+                self.metrics.inc_job_creation_errors();
+            })?;
 
         let payload_id = config.attributes.payload_id();
         let mut authorization = self.authorizations.clone();

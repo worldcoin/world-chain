@@ -14,9 +14,9 @@ use flashblocks_primitives::{
     primitives::FlashblocksPayloadV1,
 };
 
-use reth::network::types::Encodable2718;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
+use reth::network::types::Encodable2718;
 use reth::{
     api::{PayloadBuilderError, PayloadKind},
     payload::{KeepPayloadJobAlive, PayloadJob},
@@ -154,17 +154,14 @@ where
         trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let flashblock_bytes = bincode::serialize(&flashblock)
-        .map(|data| data.len() as u64)
-        .unwrap_or(0);
+            .map(|data| data.len() as u64)
+            .unwrap_or(0);
 
         let gas_used = flashblock.flashblock.diff.gas_used;
         let tx_count = flashblock.flashblock.diff.transactions.len();
 
-        self.metrics.record_preconfirmation_metrics(
-            flashblock_bytes,
-            gas_used,
-            tx_count
-        );
+        self.metrics
+            .record_preconfirmation_metrics(flashblock_bytes, gas_used, tx_count);
 
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
 
@@ -250,7 +247,7 @@ where
         let fut = pin!(network_handle.await_clearance());
 
         let throttle_start = std::time::Instant::now();
-        
+
         let joined_fut = pin!(futures::future::join(
             fut,
             this.flashblock_deadline.as_mut()
@@ -259,7 +256,8 @@ where
         ready!(joined_fut.poll(cx));
 
         let throttle_duration = throttle_start.elapsed();
-        this.metrics.record_p2p_throttle_duration(throttle_duration.as_millis() as f64);
+        this.metrics
+            .record_p2p_throttle_duration(throttle_duration.as_millis() as f64);
 
         this.flashblock_deadline
             .as_mut()
@@ -280,7 +278,9 @@ where
                         trace!(target: "payload_builder", current_value = %payload.fees(), "building new best payload");
 
                         let block = payload.block();
-                        let payload_bytes: usize = block.body().transactions()
+                        let payload_bytes: usize = block
+                            .body()
+                            .transactions()
                             .map(|tx| tx.encoded_2718().len())
                             .sum();
                         let gas_used = block.header().gas_used;
@@ -289,7 +289,7 @@ where
                         this.metrics.record_payload_metrics(
                             payload_bytes as u64,
                             gas_used,
-                            tx_count
+                            tx_count,
                         );
 
                         // publish the new payload to the p2p network
