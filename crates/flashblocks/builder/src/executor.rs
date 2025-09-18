@@ -48,10 +48,12 @@ use reth_optimism_node::{
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::BestPayloadTransactions;
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
-use reth_primitives::{NodePrimitives, Recovered};
+use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
 use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use revm::context::result::{ExecutionResult, ResultAndState};
+use revm::database::states::bundle_state::BundleRetention;
+use revm::database::states::reverts::Reverts;
 use revm::database::BundleState;
 use revm::primitives::HashMap;
 use revm::state::Bytecode;
@@ -566,7 +568,53 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        self.inner.finish(state)
+        let (evm, result) = self.inner.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
+        // which represent a single atomic state transition. therefore reverts should have length 1
+        let flattened = db.bundle_state.reverts.iter().flatten();
+        db.bundle_state.reverts = Reverts::new(vec![flattened.cloned().collect()]);
+
+        // calculate the state root
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+
+        let (transactions, senders) = self
+            .inner
+            .transactions
+            .into_iter()
+            .map(|tx| tx.into_parts())
+            .unzip();
+
+        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+            '_,
+            '_,
+            FlashblocksBlockExecutorFactory,
+        > {
+            evm_env,
+            execution_ctx: self.inner.ctx,
+            parent: self.inner.parent,
+            transactions,
+            output: &result,
+            bundle_state: &db.bundle_state,
+            state_provider: &state,
+            state_root,
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome {
+            execution_result: result,
+            hashed_state,
+            trie_updates,
+            block,
+        })
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
@@ -743,7 +791,6 @@ where
         + StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone,
-
     Pool: TransactionPool + 'static,
     P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
