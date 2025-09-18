@@ -2,7 +2,6 @@ use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
-use reth_optimism_primitives::OpPrimitives;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::flashblocks::FlashblockMetadata;
@@ -67,7 +66,7 @@ pub struct ExecutionPayloadBaseV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
-pub struct FlashblocksPayloadV1<M = FlashblockMetadata<OpPrimitives>> {
+pub struct FlashblocksPayloadV1<M = FlashblockMetadata> {
     /// The payload id of the flashblock
     pub payload_id: PayloadId,
     /// The index of the flashblock in the block
