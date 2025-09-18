@@ -260,13 +260,13 @@ where
         let Self { best } = self;
         let span = span!(
             tracing::Level::INFO,
-            "flashblock_builder",
+            "flashblocks::flashblock_builder",
             id = %ctx.payload_id(),
         );
 
         let _enter = span.enter();
 
-        debug!(target: "payload_builder", "building new payload");
+        debug!(target: "flashblocks::payload_builder", "building new payload");
 
         // 1. Prepare the db
         let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
@@ -295,7 +295,7 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            trace!(target: "payload_builder", "using best payload");
+            trace!(target: "flashblocks::payload_builder", "using best payload");
 
             (
                 execution_result.bundle.clone(),
@@ -371,7 +371,7 @@ where
                         execution_info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
                     }
                     Err(e) => {
-                        error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
+                        error!(target: "flashblocks::payload_builder", %e, "spend nullifiers transaction failed")
                     }
                 }
             }
@@ -396,7 +396,7 @@ where
                 )?
                 .is_none()
             {
-                warn!(target: "payload_builder", "payload build cancelled");
+                warn!(target: "flashblocks::payload_builder", "payload build cancelled");
                 if let Some(best_payload) = best_payload {
                     // we can return the previous best payload since we didn't include any new txs
                     return Ok(BuildOutcomeKind::Freeze(best_payload));

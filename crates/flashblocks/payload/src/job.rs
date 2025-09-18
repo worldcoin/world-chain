@@ -103,7 +103,7 @@ where
     /// This method creates a new build job using the current `best_payload` as the base,
     /// allowing each successive build to improve upon the previous one.
     pub(crate) fn spawn_build_job(&mut self) {
-        trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
+        trace!(target: "flashblocks::payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
@@ -151,7 +151,7 @@ where
             .map_or(0, |p| p.block().body().transactions().count());
 
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
-        trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
+        trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let flashblock_bytes = bincode::serialize(&flashblock)
             .map(|data| data.len() as u64)
@@ -168,7 +168,7 @@ where
         self.flashblocks_state
             .publish_built_payload(authorized_payload, payload.to_owned())
             .inspect_err(|err| {
-                error!(target: "payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
+                error!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
             })
     }
 
@@ -234,12 +234,12 @@ where
     /// The polling continues until either the deadline is reached or an error occurs, returning
     /// [`Poll::Pending`] for ongoing work or [`Poll::Ready`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _span = span!(target: "payload_builder", tracing::Level::TRACE, "poll").entered();
+        let _span = span!(target: "flashblocks::payload_builder", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
         let this = self.get_mut();
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
-            trace!(target: "payload_builder", "payload building deadline reached");
+            trace!(target: "flashblocks::payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()));
         }
 
@@ -275,7 +275,7 @@ where
                         this.best_payload = PayloadState::Best(payload.clone());
                         this.cached_reads = Some(cached_reads);
 
-                        trace!(target: "payload_builder", current_value = %payload.fees(), "building new best payload");
+                        trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "building new best payload");
 
                         let block = payload.block();
                         let payload_bytes: usize = block
@@ -295,10 +295,10 @@ where
                         // publish the new payload to the p2p network
                         if let Err(err) = this.publish_payload(&payload, &prev.payload().cloned()) {
                             this.metrics.inc_p2p_publishing_errors();
-                            error!(target: "payload_builder", %err, "failed to publish new payload to p2p network");
+                            error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
                         } else {
                             this.metrics.inc_preconfirmations_produced();
-                            trace!(target: "payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
+                            trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
                         }
 
                         // increment the pre-confirmation index
@@ -306,12 +306,12 @@ where
                         this.spawn_build_job();
                     }
                     BuildOutcome::Freeze(payload) => {
-                        trace!(target: "payload_builder", "payload frozen, no further building will occur");
+                        trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
                         this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
-                        trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
+                        trace!(target: "flashblocks::payload_builder", worse_fees = %fees, "skipped payload build of worse block");
                     }
                     BuildOutcome::Cancelled => {
                         unreachable!("the cancel signal never fired")
@@ -319,7 +319,7 @@ where
                 },
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    debug!(target: "payload_builder", %error, "payload build attempt failed");
+                    debug!(target: "flashblocks::payload_builder", %error, "payload build attempt failed");
                     match &error {
                         PayloadBuilderError::EvmExecutionError(_) => {
                             this.metrics.inc_evm_execution_errors();
@@ -376,10 +376,10 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(payload) = self.best_payload.payload() {
-            trace!(target: "payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
+            trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
             Ok(payload.clone())
         } else {
-            info!(target: "payload_builder", id=%self.config.payload_id(), "no best payload available, building empty payload");
+            info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload available, building empty payload");
             // No payload has been built yet, but we need to return something that the CL then
             // can deliver, so we need to return an empty payload.
             //
@@ -409,7 +409,7 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
-            debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
+            debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
@@ -420,10 +420,10 @@ where
 
             match self.builder.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
+                    debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
                 }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing empty payload");
+                    debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing empty payload");
 
                     // if no payload has been built yet
                     // self.metrics.inc_requested_empty_payload();
@@ -439,7 +439,7 @@ where
                     empty_payload = Some(rx);
                 }
                 MissingPayloadBehaviour::RacePayload(job) => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
+                    debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
                     self.executor.spawn_blocking(Box::pin(async move {
