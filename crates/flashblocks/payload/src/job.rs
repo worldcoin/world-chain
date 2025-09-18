@@ -234,7 +234,8 @@ where
     /// The polling continues until either the deadline is reached or an error occurs, returning
     /// [`Poll::Pending`] for ongoing work or [`Poll::Ready`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _span = span!(target: "flashblocks::payload_builder", tracing::Level::TRACE, "poll").entered();
+        let _span =
+            span!(target: "flashblocks::payload_builder", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
         let this = self.get_mut();
         // check if the deadline is reached
