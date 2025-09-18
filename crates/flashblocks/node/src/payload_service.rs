@@ -3,6 +3,7 @@ use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::generator::{
     FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
 };
+use flashblocks_payload::metrics::PayloadBuilderMetrics;
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_provider::InMemoryState;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
@@ -81,6 +82,7 @@ where
             .interval(conf.interval)
             .deadline(conf.deadline);
 
+        let metrics = PayloadBuilderMetrics::default();
         let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
             ctx.task_executor().clone(),
@@ -89,6 +91,7 @@ where
             self.p2p_handler,
             self.authorizations_rx.clone(),
             self.flashblocks_state,
+            metrics,
         );
 
         let (payload_service, payload_service_handle) =

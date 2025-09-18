@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use bincode;
 use flashblocks_builder::executor::FlashblocksStateExecutor;
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::flashblocks::Flashblock;
@@ -12,6 +13,8 @@ use flashblocks_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
 };
+
+use reth::network::types::Encodable2718;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -150,6 +153,19 @@ where
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
         trace!(target: "payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
+        let flashblock_bytes = bincode::serialize(&flashblock)
+        .map(|data| data.len() as u64)
+        .unwrap_or(0);
+
+        let gas_used = flashblock.flashblock.diff.gas_used;
+        let tx_count = flashblock.flashblock.diff.transactions.len();
+
+        self.metrics.record_preconfirmation_metrics(
+            flashblock_bytes,
+            gas_used,
+            tx_count
+        );
+
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
 
         self.flashblocks_state
@@ -233,12 +249,17 @@ where
         let network_handle = this.p2p_handler.clone();
         let fut = pin!(network_handle.await_clearance());
 
+        let throttle_start = std::time::Instant::now();
+        
         let joined_fut = pin!(futures::future::join(
             fut,
             this.flashblock_deadline.as_mut()
         ));
 
         ready!(joined_fut.poll(cx));
+
+        let throttle_duration = throttle_start.elapsed();
+        this.metrics.record_p2p_throttle_duration(throttle_duration.as_millis() as f64);
 
         this.flashblock_deadline
             .as_mut()
@@ -257,10 +278,26 @@ where
                         this.cached_reads = Some(cached_reads);
 
                         trace!(target: "payload_builder", current_value = %payload.fees(), "building new best payload");
+
+                        let block = payload.block();
+                        let payload_bytes: usize = block.body().transactions()
+                            .map(|tx| tx.encoded_2718().len())
+                            .sum();
+                        let gas_used = block.header().gas_used;
+                        let tx_count = block.body().transactions().count();
+
+                        this.metrics.record_payload_metrics(
+                            payload_bytes as u64,
+                            gas_used,
+                            tx_count
+                        );
+
                         // publish the new payload to the p2p network
                         if let Err(err) = this.publish_payload(&payload, &prev.payload().cloned()) {
+                            this.metrics.inc_p2p_publishing_errors();
                             error!(target: "payload_builder", %err, "failed to publish new payload to p2p network");
                         } else {
+                            this.metrics.inc_preconfirmations_produced();
                             trace!(target: "payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
                         }
 
@@ -283,6 +320,33 @@ where
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
                     debug!(target: "payload_builder", %error, "payload build attempt failed");
+                    match &error {
+                        PayloadBuilderError::EvmExecutionError(_) => {
+                            this.metrics.inc_evm_execution_errors();
+                        }
+                        PayloadBuilderError::MissingPayload => {
+                            this.metrics.inc_database_errors();
+                        }
+                        PayloadBuilderError::MissingParentHeader(_) => {
+                            this.metrics.inc_database_errors();
+                        }
+                        PayloadBuilderError::MissingParentBlock(_) => {
+                            this.metrics.inc_database_errors();
+                        }
+                        PayloadBuilderError::Internal(_) => {
+                            // RethError from provider/database operations
+                            this.metrics.inc_database_errors();
+                        }
+                        PayloadBuilderError::ChannelClosed => {
+                            // Communication failure between components
+                            this.metrics.inc_payload_build_errors();
+                        }
+                        PayloadBuilderError::Other(_) => {
+                            // Catch-all for unknown errors
+                            this.metrics.inc_payload_build_errors();
+                        }
+                    }
+
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
