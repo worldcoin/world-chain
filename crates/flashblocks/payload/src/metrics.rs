@@ -11,8 +11,6 @@ pub struct PayloadBuilderMetrics {
     pub(crate) initiated_payload_builds: Counter,
     /// Total number of failed payload build attempts.
     pub(crate) failed_payload_builds: Counter,
-    /// Total number of pre-confirmations produced between Fork Choice Update and GetPayload.
-    pub(crate) preconfirmations_produced: Counter,
     /// Total number of job creation errors.
     pub(crate) job_creation_errors: Counter,
     /// Total number of payload build errors).
@@ -31,12 +29,6 @@ pub struct PayloadBuilderMetrics {
     pub(crate) payload_gas_used: Histogram,
     /// Histogram of payload transaction count.
     pub(crate) payload_transaction_count: Histogram,
-    /// Histogram of pre-confirmation sizes in bytes.
-    pub(crate) preconfirmation_size_bytes: Histogram,
-    /// Histogram of pre-confirmation gas usage.
-    pub(crate) preconfirmation_gas_used: Histogram,
-    /// Histogram of pre-confirmation transaction count.
-    pub(crate) preconfirmation_transaction_count: Histogram,
 }
 
 impl PayloadBuilderMetrics {
@@ -50,10 +42,6 @@ impl PayloadBuilderMetrics {
 
     pub(crate) fn inc_failed_payload_builds(&self) {
         self.failed_payload_builds.increment(1);
-    }
-
-    pub(crate) fn inc_preconfirmations_produced(&self) {
-        self.preconfirmations_produced.increment(1);
     }
 
     /// Increment job creation errors (header fetch/missing, pre-state check failures)
@@ -91,18 +79,5 @@ impl PayloadBuilderMetrics {
         self.payload_size_bytes.record(size_bytes as f64);
         self.payload_gas_used.record(gas_used as f64);
         self.payload_transaction_count.record(tx_count as f64);
-    }
-
-    /// Record pre-confirmation size metrics (bytes, gas, transaction count)
-    pub(crate) fn record_preconfirmation_metrics(
-        &self,
-        size_bytes: u64,
-        gas_used: u64,
-        tx_count: usize,
-    ) {
-        self.preconfirmation_size_bytes.record(size_bytes as f64);
-        self.preconfirmation_gas_used.record(gas_used as f64);
-        self.preconfirmation_transaction_count
-            .record(tx_count as f64);
     }
 }

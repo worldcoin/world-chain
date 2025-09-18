@@ -107,6 +107,9 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                         %flashblock_index,
                                         "Broadcasting `FlashblocksPayloadV1` message to peer"
                                     );
+                                    metrics::counter!("flashblocks_bandwidth_outbound")
+                                        .increment(bytes.len() as u64);
+
                                     return Poll::Ready(Some(bytes));
                                 }
                             }
@@ -190,6 +193,8 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
+                            metrics::counter!("flashblocks_bandwidth_inbound")
+                                .increment(buf.len() as u64);
                             this.handle_flashblocks_payload_v1(authorized.into_unchecked());
                         }
                         AuthorizedMsg::StartPublish(_) => {

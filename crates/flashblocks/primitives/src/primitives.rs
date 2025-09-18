@@ -2,8 +2,10 @@ use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use reth_optimism_primitives::OpPrimitives;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use crate::flashblocks::FlashblockMetadata;
 
 /// Represents the modified portions of an execution payload within a flashblock.
 /// This structure contains only the fields that can be updated during block construction,
@@ -65,7 +67,7 @@ pub struct ExecutionPayloadBaseV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
-pub struct FlashblocksPayloadV1 {
+pub struct FlashblocksPayloadV1<M = FlashblockMetadata<OpPrimitives>> {
     /// The payload id of the flashblock
     pub payload_id: PayloadId,
     /// The index of the flashblock in the block
@@ -73,7 +75,7 @@ pub struct FlashblocksPayloadV1 {
     /// The delta/diff containing modified portions of the execution payload
     pub diff: ExecutionPayloadFlashblockDeltaV1,
     /// Additional metadata associated with the flashblock
-    pub metadata: Value,
+    pub metadata: M,
     /// The base execution payload configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<ExecutionPayloadBaseV1>,
@@ -81,7 +83,10 @@ pub struct FlashblocksPayloadV1 {
 
 /// Manual RLP implementation because `PayloadId` and `serde_json::Value` are
 /// outside of alloy-rlp’s blanket impls.
-impl Encodable for FlashblocksPayloadV1 {
+impl<M> Encodable for FlashblocksPayloadV1<M>
+where
+    M: Serialize,
+{
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         // ---- compute payload length -------------------------------------------------
         let json_bytes = Bytes::from(
@@ -151,7 +156,10 @@ impl Encodable for FlashblocksPayloadV1 {
     }
 }
 
-impl Decodable for FlashblocksPayloadV1 {
+impl<M> Decodable for FlashblocksPayloadV1<M>
+where
+    M: DeserializeOwned,
+{
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         let header = Header::decode(buf)?;
         if !header.list {
@@ -167,7 +175,7 @@ impl Decodable for FlashblocksPayloadV1 {
 
         // metadata – stored as raw JSON bytes
         let meta_bytes = Bytes::decode(&mut body)?;
-        let metadata: Value = serde_json::from_slice(&meta_bytes)
+        let metadata = serde_json::from_slice(&meta_bytes)
             .map_err(|_| alloy_rlp::Error::Custom("bad JSON"))?;
 
         // base (`Option`)
@@ -282,7 +290,7 @@ mod tests {
         corrupted.pop();
 
         let mut slice = corrupted.as_ref();
-        let result = FlashblocksPayloadV1::decode(&mut slice);
+        let result = FlashblocksPayloadV1::<String>::decode(&mut slice);
         assert!(
             result.is_err(),
             "decoder must flag malformed / truncated input"

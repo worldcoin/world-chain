@@ -30,3 +30,4 @@ op-alloy-consensus.workspace = true
 blake3.workspace = true
 ed25519-dalek.workspace = true
 bytes.workspace = true
+chrono.workspace = true

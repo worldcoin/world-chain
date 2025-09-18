@@ -37,6 +37,4 @@ metrics-derive.workspace = true
 # misc
 tracing.workspace = true
 futures.workspace = true
-serde_json.workspace = true
 eyre.workspace = true
-bincode = "1.3"
