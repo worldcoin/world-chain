@@ -188,7 +188,9 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
 
     /// Do _not_ use this method unless all flashblocks have been properly reduced
     fn try_from(value: Flashblock) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
-        let base = value.base().ok_or(eyre!("Flashblock is missing base payload"))?;
+        let base = value
+            .base()
+            .ok_or(eyre!("Flashblock is missing base payload"))?;
         let diff = value.flashblock.diff.clone();
         let header = Header {
             parent_beacon_block_root: None,
