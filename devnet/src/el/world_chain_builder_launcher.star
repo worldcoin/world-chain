@@ -247,7 +247,6 @@ def get_config(
         "--flashblocks.enabled",
         "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblocks.builder_sk={0}".format(signing_key),
-        "--block-interval={0}".format(4294967295),
     ]
 
     observability.expose_metrics_port(ports)
