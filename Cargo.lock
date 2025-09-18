@@ -3811,7 +3811,6 @@ dependencies = [
  "op-alloy-consensus",
  "reth",
  "reth-basic-payload-builder",
- "reth-chain-state",
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives",
