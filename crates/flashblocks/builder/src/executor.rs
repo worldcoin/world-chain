@@ -59,6 +59,7 @@ use revm::primitives::HashMap;
 use revm::state::Bytecode;
 use revm::DatabaseCommit;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 
@@ -576,8 +577,22 @@ where
 
         // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
         // which represent a single atomic state transition. therefore reverts should have length 1
-        let flattened = db.bundle_state.reverts.iter().flatten();
-        db.bundle_state.reverts = Reverts::new(vec![flattened.cloned().collect()]);
+        // we only retain the first occurance of a revert for any given account.
+        let flattened = db
+            .bundle_state
+            .reverts
+            .iter()
+            .flatten()
+            .scan(HashSet::new(), |visited, (acc, revert)| {
+                if visited.insert(acc) {
+                    Some((*acc, revert.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
