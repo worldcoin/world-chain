@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use bincode;
 use flashblocks_builder::executor::FlashblocksStateExecutor;
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::flashblocks::Flashblock;
@@ -153,16 +152,6 @@ where
         let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
-        let flashblock_bytes = bincode::serialize(&flashblock)
-            .map(|data| data.len() as u64)
-            .unwrap_or(0);
-
-        let gas_used = flashblock.flashblock.diff.gas_used;
-        let tx_count = flashblock.flashblock.diff.transactions.len();
-
-        self.metrics
-            .record_preconfirmation_metrics(flashblock_bytes, gas_used, tx_count);
-
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
 
         self.flashblocks_state
@@ -298,7 +287,6 @@ where
                             this.metrics.inc_p2p_publishing_errors();
                             error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
                         } else {
-                            this.metrics.inc_preconfirmations_produced();
                             trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
                         }
 

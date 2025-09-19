@@ -19,7 +19,6 @@ use reth_basic_payload_builder::{
 
 use flashblocks_primitives::p2p::Authorization;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use tokio::runtime::Handle;
@@ -28,7 +27,7 @@ use tracing::debug;
 use crate::job::FlashblocksPayloadJob;
 use crate::metrics::PayloadBuilderMetrics;
 use flashblocks_builder::executor::FlashblocksStateExecutor;
-use flashblocks_primitives::flashblocks::{BlockMetaData, Flashblock};
+use flashblocks_primitives::flashblocks::Flashblock;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
@@ -283,17 +282,12 @@ where
                             )
                         })?;
 
-                    let block_meta = serde_json::from_value::<BlockMetaData<OpPrimitives>>(
-                        flashblock.flashblock().metadata.clone(),
-                    )
-                    .expect("never fails");
-
                     let sealed = block.into_sealed_block();
 
                     let payload = OpBuiltPayload::new(
                         attributes.payload_id(),
                         Arc::new(sealed),
-                        block_meta.fees,
+                        flashblock.flashblock().metadata.fees,
                         None,
                     );
 

@@ -26,6 +26,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

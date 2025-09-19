@@ -1,6 +1,5 @@
-use alloy_consensus::Receipt;
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
@@ -10,6 +9,7 @@ use flashblocks_cli::FlashblocksArgs;
 use flashblocks_node::{FlashblocksNode, FlashblocksNodeBuilder};
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg};
 use flashblocks_primitives::{
+    flashblocks::FlashblockMetadata,
     p2p::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
         StartPublish,
@@ -184,22 +184,9 @@ fn base_payload(
             base_fee_per_gas: U256::ZERO,
         }),
         diff: ExecutionPayloadFlashblockDeltaV1::default(),
-        metadata: serde_json::to_value(Metadata {
-            block_number: 1,
-            receipts: HashMap::default(),
-            new_account_balances: HashMap::default(),
-        })
-        .unwrap(),
+        metadata: FlashblockMetadata::default(),
     }
 }
-
-const TEST_ADDRESS: Address = address!("0x1234567890123456789012345678901234567890");
-const PENDING_BALANCE: u64 = 4600;
-
-const TX1_HASH: TxHash =
-    b256!("0x2be2e6f8b01b03b87ae9f0ebca8bbd420f174bef0fbcc18c7802c5378b78f548");
-const TX2_HASH: TxHash =
-    b256!("0xa6155b295085d3b87a3c86e342fe11c3b22f9952d0d85d9d34d223b7d6a17cd8");
 
 fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
     let tx1 = Bytes::from_str("0x7ef8f8a042a8ae5ec231af3d0f90f68543ec8bca1da4f7edd712d5b51b490688355a6db794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000044d000a118b00000000000000040000000067cb7cb0000000000077dbd4000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014edd27304108914dd6503b19b9eeb9956982ef197febbeeed8a9eac3dbaaabdf000000000000000000000000fc56e7272eebbba5bc6c544e159483c4a38f8ba3").unwrap();
@@ -220,38 +207,7 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
         },
-        metadata: serde_json::to_value(Metadata {
-            block_number: 1,
-            receipts: {
-                let mut receipts = HashMap::default();
-                receipts.insert(
-                    TX1_HASH.to_string(), // transaction hash as string
-                    OpReceipt::Legacy(Receipt {
-                        status: true.into(),
-                        cumulative_gas_used: 21000,
-                        logs: vec![],
-                    }),
-                );
-                receipts.insert(
-                    TX2_HASH.to_string(), // transaction hash as string
-                    OpReceipt::Legacy(Receipt {
-                        status: true.into(),
-                        cumulative_gas_used: 45000,
-                        logs: vec![],
-                    }),
-                );
-                receipts
-            },
-            new_account_balances: {
-                let mut map = HashMap::default();
-                map.insert(
-                    TEST_ADDRESS.to_string(),
-                    format!("0x{:x}", U256::from(PENDING_BALANCE)),
-                );
-                map
-            },
-        })
-        .unwrap(),
+        metadata: FlashblockMetadata::default(),
     }
 }
 

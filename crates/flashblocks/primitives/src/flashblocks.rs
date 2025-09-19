@@ -7,22 +7,21 @@ use alloy_consensus::{
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{FixedBytes, B256, U256};
+use alloy_primitives::{FixedBytes, U256};
+use chrono::Utc;
 use eyre::eyre::{bail, eyre};
-use op_alloy_consensus::OpBlock;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::api::Block as _;
 use reth::api::BlockBody as _;
-use reth::{api::BuiltPayload, payload::PayloadBuilderAttributes};
+use reth::payload::PayloadBuilderAttributes;
 use reth_basic_payload_builder::PayloadConfig;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::{OpPrimitives, OpReceipt};
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.
-#[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
 pub struct Flashblock {
     pub flashblock: FlashblocksPayloadV1,
 }
@@ -68,23 +67,13 @@ impl Flashblock {
             .map(|tx| tx.encoded_2718().into())
             .collect::<Vec<_>>();
 
-        let metadata = BlockMetaData {
+        let metadata = FlashblockMetadata {
             fees,
-            receipts: payload
-                .executed_block()
-                .map(|block| {
-                    block
-                        .execution_output
-                        .receipts
-                        .iter()
-                        .skip(transactions_offset)
-                        .flatten()
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default(),
-            transactions_root: block.transactions_root(),
-            executed: payload.executed_block(),
+            flashblock_timestamp: Some(
+                Utc::now()
+                    .timestamp_nanos_opt()
+                    .expect("time went backwards"),
+            ),
         };
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
@@ -106,24 +95,19 @@ impl Flashblock {
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
                 },
-                metadata: serde_json::to_value(metadata)
-                    .expect("BlockMetaData should always serialize to JSON"),
+                metadata,
             },
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
-pub struct BlockMetaData<N: NodePrimitives<Block = OpBlock, Receipt = OpReceipt>> {
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq)]
+pub struct FlashblockMetadata {
     /// Total fees collected by the proposer for this block.
     pub fees: U256,
-    /// The receipts for the transactions included in this flashblock.
-    pub receipts: Vec<N::Receipt>,
-    /// The transactions root of the block.
-    pub transactions_root: B256,
-    /// The executed block with trie updates, if available.
-    #[serde(skip)]
-    pub executed: Option<ExecutedBlockWithTrieUpdates<N>>,
+    /// The timestamp of when the flashblock was created in ns since the unix epoch
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flashblock_timestamp: Option<i64>,
 }
 
 impl Flashblock {

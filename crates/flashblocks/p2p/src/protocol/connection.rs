@@ -3,6 +3,7 @@ use crate::protocol::handler::{
     MAX_FLASHBLOCK_INDEX,
 };
 use alloy_primitives::bytes::BytesMut;
+use chrono::Utc;
 use flashblocks_primitives::{
     p2p::{
         Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, StartPublish, StopPublish,
@@ -107,6 +108,9 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                         %flashblock_index,
                                         "Broadcasting `FlashblocksPayloadV1` message to peer"
                                     );
+                                    metrics::counter!("flashblocks_bandwidth_outbound")
+                                        .increment(bytes.len() as u64);
+
                                     return Poll::Ready(Some(bytes));
                                 }
                             }
@@ -190,6 +194,8 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
+                            metrics::counter!("flashblocks_bandwidth_inbound")
+                                .increment(buf.len() as u64);
                             this.handle_flashblocks_payload_v1(authorized.into_unchecked());
                         }
                         AuthorizedMsg::StartPublish(_) => {
@@ -313,6 +319,15 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 active_publishers.push((authorization.builder_vk, authorization.timestamp));
             }
         });
+
+        let now = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("time went backwards");
+
+        if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
+            let latency = now - flashblock_timestamp;
+            metrics::histogram!("flashblocks_latency").record(latency as f64 / 1_000_000_000.0);
+        }
 
         self.protocol
             .handle

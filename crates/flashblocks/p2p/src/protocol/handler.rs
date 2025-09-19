@@ -1,5 +1,6 @@
 use crate::protocol::{connection::FlashblocksConnection, error::FlashblocksP2PError};
 use alloy_rlp::BytesMut;
+use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use flashblocks_primitives::{
     p2p::{
@@ -9,6 +10,7 @@ use flashblocks_primitives::{
     primitives::FlashblocksPayloadV1,
 };
 use futures::{stream, Stream, StreamExt};
+use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
@@ -113,6 +115,8 @@ pub struct FlashblocksP2PState {
     pub payload_id: PayloadId,
     /// Timestamp of the most recent flashblocks payload.
     pub payload_timestamp: u64,
+    /// Timestamp at which the most recent flashblock was received in ns since the unix epoch.
+    pub flashblock_timestamp: i64,
     /// The index of the next flashblock to emit over the flashblocks stream.
     /// Used to maintain strict ordering of flashblock delivery.
     pub flashblock_index: usize,
@@ -525,6 +529,7 @@ impl FlashblocksP2PCtx {
         if flashblock.is_none() {
             // We haven't seen this index yet
             // Add the flashblock to our cache
+
             *flashblock = Some(payload.clone());
             tracing::trace!(
                 target: "flashblocks::p2p",
@@ -536,7 +541,6 @@ impl FlashblocksP2PCtx {
             let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
             let bytes = p2p_msg.encode();
             let len = bytes.len();
-            metrics::histogram!("flashblock_size").record(len as f64);
 
             if len > MAX_FRAME {
                 tracing::error!(
@@ -556,10 +560,20 @@ impl FlashblocksP2PCtx {
                 );
             }
 
+            metrics::histogram!("flashblocks_size").record(len as f64);
+            metrics::histogram!("flashblocks_gas_used").record(payload.diff.gas_used as f64);
+            metrics::histogram!("flashblocks_tx_count")
+                .record(payload.diff.transactions.len() as f64);
+
             let peer_msg =
                 PeerMsg::FlashblocksPayloadV1((payload.payload_id, payload.index as usize, bytes));
 
             self.peer_tx.send(peer_msg).ok();
+
+            let now = Utc::now()
+                .timestamp_nanos_opt()
+                .expect("time went backwards");
+
             // Broadcast any flashblocks in the cache that are in order
             while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
                 // Publish the flashblock
@@ -570,7 +584,15 @@ impl FlashblocksP2PCtx {
                     "publishing flashblock"
                 );
                 self.flashblock_tx.send(flashblock_event.clone()).ok();
-                // Update the index
+
+                // Don't measure the interval at the block boundary
+                if state.flashblock_index != 0 {
+                    let interval = now - state.flashblock_timestamp;
+                    histogram!("flashblocks_interval").record(interval as f64 / 1_000_000_000.0);
+                }
+
+                // Update the index and timestamp
+                state.flashblock_timestamp = now;
                 state.flashblock_index += 1;
             }
         }
