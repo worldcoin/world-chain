@@ -260,7 +260,7 @@ where
         let Self { best } = self;
         let span = span!(
             tracing::Level::INFO,
-            "flashblocks::flashblock_builder",
+            "flashblock_builder",
             id = %ctx.payload_id(),
         );
 
