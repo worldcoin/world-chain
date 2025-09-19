@@ -19,7 +19,7 @@ use crate::eth::FlashblocksEthApi;
 impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: EthBlocks
         + RpcNodeCore<Primitives = OpPrimitives>
@@ -31,7 +31,7 @@ where
 impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: LoadBlock
         + RpcNodeCore<Primitives = OpPrimitives>

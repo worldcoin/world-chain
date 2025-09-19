@@ -21,7 +21,7 @@ use crate::eth::FlashblocksEthApi;
 impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + LoadPendingBlock

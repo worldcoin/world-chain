@@ -359,17 +359,18 @@ where
             for tx in unexecuted_txs {
                 match builder.execute_transaction(tx.clone()) {
                     Ok(gas_used) => {
-                        // add gas used by the transaction to cumulative gas used, before creating the
-                        // receipt
                         execution_info.cumulative_gas_used += gas_used;
                         execution_info.cumulative_da_bytes_used += tx.length() as u64;
 
-                        // update add to total fees
-                        let miner_fee = tx
-                            .effective_tip_per_gas(base_fee)
-                            .expect("fee is always valid; execution succeeded");
-                        execution_info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+                        if !tx.is_deposit() {
+                            let miner_fee = tx
+                                .effective_tip_per_gas(base_fee)
+                                .expect("fee is always valid; execution succeeded");
+                            execution_info.total_fees +=
+                                U256::from(miner_fee) * U256::from(gas_used);
+                        }
                     }
+
                     Err(e) => {
                         error!(target: "flashblocks::payload_builder", %e, "spend nullifiers transaction failed")
                     }
