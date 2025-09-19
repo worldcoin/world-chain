@@ -18,9 +18,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use tracing::info;
+use tracing::trace;
 
-/// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
@@ -223,7 +222,8 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
         authorization: Option<Authorization>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        info!(
+        trace!(
+            target: "flashblocks::rpc::engine",
             ?fork_choice_state,
             "Received flashblocks_fork_choice_updated_v3"
         );

@@ -273,7 +273,7 @@ where
             if let Some(flashblock) = block {
                 if *flashblock.payload_id() == attributes.payload_id().0 {
                     // If we have a pre-confirmed state, we can use it to build the payload
-                    debug!(target: "payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
+                    debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
 
                     let block: RecoveredBlock<Block<OpTxEnvelope>> =
                         flashblock.clone().try_into().map_err(|_| {
