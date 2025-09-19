@@ -10,6 +10,7 @@ use flashblocks_primitives::{
     primitives::FlashblocksPayloadV1,
 };
 use futures::{stream, Stream, StreamExt};
+use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
@@ -114,6 +115,8 @@ pub struct FlashblocksP2PState {
     pub payload_id: PayloadId,
     /// Timestamp of the most recent flashblocks payload.
     pub payload_timestamp: u64,
+    /// Timestamp at which the most recent flashblock was received in ns since the unix epoch.
+    pub flashblock_timestamp: i64,
     /// The index of the next flashblock to emit over the flashblocks stream.
     /// Used to maintain strict ordering of flashblock delivery.
     pub flashblock_index: usize,
@@ -557,14 +560,6 @@ impl FlashblocksP2PCtx {
                 );
             }
 
-            if let Some(flashblock_timestamp) = payload.metadata.flashblock_timestamp {
-                let latency = Utc::now()
-                    .timestamp_nanos_opt()
-                    .expect("time went backwards")
-                    - flashblock_timestamp;
-                metrics::histogram!("flashblocks_latency")
-                    .record(latency as f64 / (1_000_000_000.0));
-            }
             metrics::histogram!("flashblocks_size").record(len as f64);
             metrics::histogram!("flashblocks_gas_used").record(payload.diff.gas_used as f64);
             metrics::histogram!("flashblocks_tx_count")
@@ -574,6 +569,11 @@ impl FlashblocksP2PCtx {
                 PeerMsg::FlashblocksPayloadV1((payload.payload_id, payload.index as usize, bytes));
 
             self.peer_tx.send(peer_msg).ok();
+
+            let now = Utc::now()
+                .timestamp_nanos_opt()
+                .expect("time went backwards");
+
             // Broadcast any flashblocks in the cache that are in order
             while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
                 // Publish the flashblock
@@ -584,7 +584,15 @@ impl FlashblocksP2PCtx {
                     "publishing flashblock"
                 );
                 self.flashblock_tx.send(flashblock_event.clone()).ok();
-                // Update the index
+
+                // Don't measure the interval at the block boundary
+                if state.flashblock_index != 0 {
+                    let interval = now - state.flashblock_timestamp;
+                    histogram!("flashblocks_interval").record(interval as f64 / 1_000_000_000.0);
+                }
+
+                // Update the index and timestamp
+                state.flashblock_timestamp = now;
                 state.flashblock_index += 1;
             }
         }
