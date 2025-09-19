@@ -415,7 +415,8 @@ where
                     debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing empty payload");
 
                     // if no payload has been built yet
-                    // self.metrics.inc_requested_empty_payload();
+                    self.metrics.inc_requested_empty_payload();
+
                     // no payload built yet, so we need to return an empty payload
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
