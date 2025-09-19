@@ -20,7 +20,6 @@ use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
 
-/// TODO: Extend Engine API with Authorized FCU Methods
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
