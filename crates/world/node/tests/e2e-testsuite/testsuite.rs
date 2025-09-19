@@ -247,6 +247,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
+        min_base_fee: None,
     };
 
     let _tx = tx.clone();
@@ -503,6 +504,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
+        min_base_fee: None,
     };
 
     let mine_block = crate::actions::AssertMineBlock::new(
@@ -579,6 +581,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
+        min_base_fee: None,
     };
 
     let mine_block = crate::actions::AssertMineBlock::new(

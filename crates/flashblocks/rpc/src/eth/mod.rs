@@ -51,7 +51,7 @@ pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
 {
     pub fn new(
         inner: OpEthApi<N, Rpc>,
@@ -69,7 +69,7 @@ where
 impl<N, Rpc> EthApiTypes for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: EthApiTypes,
 {
     type Error = <OpEthApi<N, Rpc> as EthApiTypes>::Error;
@@ -84,7 +84,7 @@ where
 impl<N, Rpc> RpcNodeCore for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: RpcNodeCore,
 {
     type Primitives = <OpEthApi<N, Rpc> as RpcNodeCore>::Primitives;
@@ -117,7 +117,7 @@ where
 impl<N, Rpc> RpcNodeCoreExt for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: RpcNodeCoreExt,
 {
     #[inline]
@@ -129,7 +129,7 @@ where
 impl<N, Rpc> EthApiSpec for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: EthApiSpec,
 {
     type Transaction = <OpEthApi<N, Rpc> as EthApiSpec>::Transaction;
@@ -149,7 +149,7 @@ where
 impl<N, Rpc> SpawnBlocking for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: SpawnBlocking,
 {
     #[inline]
@@ -171,7 +171,7 @@ where
 impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>:
         RpcNodeCore<Primitives = OpPrimitives> + EthApiTypes<Error = OpEthApiError> + LoadFee,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -193,7 +193,7 @@ where
     }
 }
 
-impl<N: RpcNodeCore<Primitives = OpPrimitives>, Rpc: RpcConvert> LoadState
+impl<N: RpcNodeCore<Primitives = OpPrimitives>, Rpc: RpcConvert + Clone> LoadState
     for FlashblocksEthApi<N, Rpc>
 where
     OpEthApiError: FromEvmError<N::Evm>,
@@ -209,7 +209,7 @@ where
 impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
@@ -225,7 +225,7 @@ where
 impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
@@ -237,7 +237,7 @@ where
 impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: Trace
         + SpawnBlocking
@@ -307,7 +307,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>> + Unpin>,
     >,
     NetworkT: RpcTypes,
-    OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
+    OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT> + Clone,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
     FlashblocksEthApi<

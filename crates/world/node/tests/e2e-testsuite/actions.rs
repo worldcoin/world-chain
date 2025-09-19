@@ -269,6 +269,7 @@ where
                 no_tx_pool: Some(false),
                 eip_1559_params: Some(alloy_primitives::b64!("0000000800000008")),
                 gas_limit: Some(30_000_000),
+                min_base_fee: None,
             };
 
             env.active_node_state_mut()?.payload_attributes.insert(
@@ -345,6 +346,7 @@ where
                 no_tx_pool: Some(false),
                 eip_1559_params: Some(alloy_primitives::b64!("0000000800000008")),
                 gas_limit: Some(30_000_000),
+                min_base_fee: None,
             };
 
             let authorization = (self.authorization_generator)(payload_attributes.clone());

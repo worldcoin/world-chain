@@ -15,14 +15,13 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_api::{transaction::ConvertReceiptInput, RpcNodeCoreExt};
 use reth_rpc_eth_api::{EthApiTypes, FromEthApiError, RpcTypes};
 use reth_rpc_eth_types::EthApiError;
-use std::borrow::Cow;
 
 use crate::eth::FlashblocksEthApi;
 
 impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives, Provider: ChainSpecProvider<ChainSpec: OpHardforks>>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives> + Clone,
     OpEthApi<N, Rpc>: LoadReceipt + Clone,
     Self: LoadPendingBlock
         + EthApiTypes<
@@ -80,7 +79,7 @@ where
         let input = ConvertReceiptInput {
             tx: tx.as_recovered_ref(),
             gas_used: receipt.cumulative_gas_used() - gas_used,
-            receipt: Cow::Owned(receipt),
+            receipt,
             next_log_index,
             meta,
         };

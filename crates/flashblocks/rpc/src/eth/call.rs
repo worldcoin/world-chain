@@ -10,7 +10,7 @@ use crate::eth::FlashblocksEthApi;
 impl<N, Rpc> EthCall for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: EthCall
         + RpcNodeCore<Primitives = OpPrimitives>
@@ -22,7 +22,7 @@ where
 impl<N, Rpc> EstimateCall for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>: EstimateCall
         + EthApiTypes<Error = OpEthApiError>
@@ -34,7 +34,7 @@ where
 impl<N, Rpc> Call for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert + Clone,
     OpEthApiError: FromEvmError<N::Evm>,
     OpEthApi<N, Rpc>:
         Call + RpcNodeCore<Primitives = OpPrimitives> + EthApiTypes<Error = OpEthApiError> + Clone,
