@@ -61,7 +61,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         peer_id: PeerId,
         peer_rx: BroadcastStream<PeerMsg>,
     ) -> Self {
-        gauge!("p2p.flashblocks_peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
+        gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
 
         Self {
             protocol,
@@ -76,7 +76,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
 impl<N> Drop for FlashblocksConnection<N> {
     fn drop(&mut self) {
-        gauge!("p2p.flashblocks_peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
+        gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
 }
 
@@ -108,7 +108,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                         %flashblock_index,
                                         "Broadcasting `FlashblocksPayloadV1` message to peer"
                                     );
-                                    metrics::counter!("flashblocks_bandwidth_outbound")
+                                    metrics::counter!("flashblocks.bandwidth_outbound")
                                         .increment(bytes.len() as u64);
 
                                     return Poll::Ready(Some(bytes));
@@ -165,19 +165,19 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
             match msg {
                 FlashblocksP2PMsg::Authorized(authorized) => {
-                    if Ok(authorized.authorization.builder_vk)
-                        == this.protocol.handle.builder_sk().map(|s| s.verifying_key())
-                    {
-                        tracing::warn!(
-                            target: "flashblocks::p2p",
-                            peer_id = %this.peer_id,
-                            "received our own message from peer",
-                        );
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
-                        continue;
-                    }
+                    // if Ok(authorized.authorization.builder_vk)
+                    //     == this.protocol.handle.builder_sk().map(|s| s.verifying_key())
+                    // {
+                    //     tracing::warn!(
+                    //         target: "flashblocks::p2p",
+                    //         peer_id = %this.peer_id,
+                    //         "received our own message from peer",
+                    //     );
+                    //     this.protocol
+                    //         .network
+                    //         .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    //     continue;
+                    // }
 
                     if let Err(error) = authorized.verify(this.protocol.handle.ctx.authorizer_vk) {
                         tracing::warn!(
@@ -194,7 +194,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
-                            metrics::counter!("flashblocks_bandwidth_inbound")
+                            metrics::counter!("flashblocks.bandwidth_inbound")
                                 .increment(buf.len() as u64);
                             this.handle_flashblocks_payload_v1(authorized.into_unchecked());
                         }
@@ -326,7 +326,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
-            metrics::histogram!("flashblocks_latency").record(latency as f64 / 1_000_000_000.0);
+            metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
         }
 
         self.protocol

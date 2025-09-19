@@ -560,9 +560,9 @@ impl FlashblocksP2PCtx {
                 );
             }
 
-            metrics::histogram!("flashblocks_size").record(len as f64);
-            metrics::histogram!("flashblocks_gas_used").record(payload.diff.gas_used as f64);
-            metrics::histogram!("flashblocks_tx_count")
+            metrics::histogram!("flashblocks.size").record(len as f64);
+            metrics::histogram!("flashblocks.gas_used").record(payload.diff.gas_used as f64);
+            metrics::histogram!("flashblocks.tx_count")
                 .record(payload.diff.transactions.len() as f64);
 
             let peer_msg =
@@ -588,7 +588,7 @@ impl FlashblocksP2PCtx {
                 // Don't measure the interval at the block boundary
                 if state.flashblock_index != 0 {
                     let interval = now - state.flashblock_timestamp;
-                    histogram!("flashblocks_interval").record(interval as f64 / 1_000_000_000.0);
+                    histogram!("flashblocks.interval").record(interval as f64 / 1_000_000_000.0);
                 }
 
                 // Update the index and timestamp
