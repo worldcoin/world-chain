@@ -221,7 +221,6 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
         let transactions_encoded = diff
             .transactions
             .iter()
-            .cloned()
             .map(|t| <OpPrimitives as NodePrimitives>::SignedTx::decode_2718(&mut t.as_ref()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
