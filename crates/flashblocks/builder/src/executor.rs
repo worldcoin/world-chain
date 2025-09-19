@@ -971,11 +971,9 @@ where
         min_base_fee: None,
     };
 
-    // The header either exists in the in memory state (has not been persisted to disk) or exists within
-    // the database. First check the in memory state, then fall back to the database.
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)?
-        .ok_or_eyre("missing sealed header")?;
+        .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
 
     let state_provider = provider.state_by_block_hash(base.parent_hash)?;
 

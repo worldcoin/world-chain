@@ -1,4 +1,5 @@
 use clap::Parser;
+use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_tracing::tracing::info;
@@ -19,7 +20,11 @@ fn main() {
     dotenvy::dotenv().ok();
 
     reth_cli_util::sigsegv_handler::install();
-    eyre::install().unwrap();
+
+    HookBuilder::default()
+        .theme(eyre::config::Theme::new())
+        .install()
+        .expect("failed to install error handler");
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
