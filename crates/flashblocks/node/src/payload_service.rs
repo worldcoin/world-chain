@@ -5,7 +5,6 @@ use flashblocks_payload::generator::{
 };
 use flashblocks_payload::metrics::PayloadBuilderMetrics;
 use flashblocks_primitives::p2p::Authorization;
-use flashblocks_provider::InMemoryState;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
@@ -14,7 +13,6 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
     StateProviderFactory,
@@ -55,8 +53,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + InMemoryState<Primitives = OpPrimitives>,
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     Node::Types: NodeTypes<
         ChainSpec = OpChainSpec,
         Payload: PayloadTypes<

@@ -6,10 +6,10 @@ use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
-use flashblocks_provider::InMemoryState;
 use futures::StreamExt as _;
 use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
 use parking_lot::RwLock;
@@ -705,9 +705,7 @@ impl FlashblocksStateExecutor {
     ) where
         Pool: TransactionPool + 'static,
         Node: FullNodeTypes,
-        Node::Provider: InMemoryState<Primitives = OpPrimitives>
-            + StateProviderFactory
-            + HeaderProvider<Header = alloy_consensus::Header>,
+        Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
         P: PayloadBuilderCtxBuilder<Node::Provider, OpEvmConfig, OpChainSpec> + 'static,
     {
@@ -802,10 +800,8 @@ fn process_flashblock<Provider, Pool, P>(
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
-    Provider: InMemoryState<Primitives = OpPrimitives>
-        + StateProviderFactory
-        + HeaderProvider<Header = alloy_consensus::Header>
-        + Clone,
+    Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone,
+
     Pool: TransactionPool + 'static,
     P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
@@ -876,53 +872,46 @@ where
         eip_1559_params: Some(eip1559[1..=8].try_into()?),
     };
 
-    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
-
     // The header either exists in the in memory state (has not been persisted to disk) or exists within
     // the database. First check the in memory state, then fall back to the database.
-    // TODO: Figure out a way to see if there is a writer on the DB and avoid crashing the node by reading
-    // the header from disk if
-    let sealed_header = provider.in_memory_state().header_by_hash(base.parent_hash);
+    let sealed_header = provider
+        .sealed_header_by_hash(base.parent_hash)?
+        .ok_or_eyre("missing sealed header")?;
 
-    if let Some(sealed_header) = sealed_header {
-        let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
-        let builder_ctx = payload_builder_ctx_builder.build(
-            provider.clone(),
-            evm_config.clone(),
-            state_executor.da_config.clone(),
-            config,
-            &cancel,
-            latest_payload.as_ref().map(|p| p.0.clone()),
-        );
+    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
 
-        let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-        let db = StateProviderDatabase::new(&state_provider);
+    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+    let builder_ctx = payload_builder_ctx_builder.build(
+        provider.clone(),
+        evm_config.clone(),
+        state_executor.da_config.clone(),
+        config,
+        &cancel,
+        latest_payload.as_ref().map(|p| p.0.clone()),
+    );
 
-        let outcome = FlashblockBuilder::new(best).build(
-            pool.clone(),
-            db,
-            &state_provider,
-            &builder_ctx,
-            latest_payload.as_ref().map(|p| p.0.clone()),
-        )?;
+    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+    let db = StateProviderDatabase::new(&state_provider);
 
-        let payload = match outcome {
-            BuildOutcomeKind::Better { payload } => payload,
-            BuildOutcomeKind::Freeze(payload) => payload,
-            _ => return Ok(()),
-        };
+    let outcome = FlashblockBuilder::new(best).build(
+        pool.clone(),
+        db,
+        &state_provider,
+        &builder_ctx,
+        latest_payload.as_ref().map(|p| p.0.clone()),
+    )?;
 
-        trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+    let payload = match outcome {
+        BuildOutcomeKind::Better { payload } => payload,
+        BuildOutcomeKind::Freeze(payload) => payload,
+        _ => return Ok(()),
+    };
 
-        *latest_payload = Some((payload.clone(), flashblock.index));
+    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
 
-        pending_block.send_replace(payload.executed_block());
-    } else {
-        error!(target: "flashblocks::state_executor", hash = %base.parent_hash, "parent header not found in memory or database");
-    }
+    *latest_payload = Some((payload.clone(), flashblock.index));
 
-    // The default engine api implementation should reset the in memory pending
-    // state on new_payload.
+    pending_block.send_replace(payload.executed_block());
 
     Ok(())
 }

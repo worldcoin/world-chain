@@ -19,7 +19,6 @@ members = [
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
-    "crates/flashblocks/provider",
 ]
 default-members = [
     "crates/flashblocks/p2p",
@@ -29,7 +28,6 @@ default-members = [
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
-    "crates/flashblocks/provider",
     "crates/world/bin",
     "crates/world/node",
     "crates/world/payload",
@@ -56,7 +54,6 @@ flashblocks-rpc = { path = "crates/flashblocks/rpc" }
 flashblocks-builder = { path = "crates/flashblocks/builder" }
 flashblocks-payload = { path = "crates/flashblocks/payload" }
 flashblocks-cli = { path = "crates/flashblocks/cli" }
-flashblocks-provider = { path = "crates/flashblocks/provider" }
 
 # Internal
 world-chain-node = { path = "crates/world/node" }

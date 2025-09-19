@@ -11,7 +11,6 @@ flashblocks-primitives.workspace = true
 flashblocks-cli.workspace = true
 flashblocks-builder.workspace = true
 flashblocks-payload.workspace = true
-flashblocks-provider.workspace = true
 
 reth.workspace = true
 reth-optimism-node.workspace = true

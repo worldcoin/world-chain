@@ -20,17 +20,16 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
-use flashblocks_provider::InMemoryState;
 use std::future::Future;
 
 use crate::eth::FlashblocksEthApi;
 
 impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
 where
-    N: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>,
+    N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert,
     OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Provider: InMemoryState<Primitives = OpPrimitives>, Primitives = OpPrimitives>
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + LoadPendingBlock
         + EthApiTypes<Error = OpEthApiError>
         + EthTransactions
