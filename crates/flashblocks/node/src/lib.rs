@@ -7,7 +7,6 @@ use flashblocks_builder::{
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::p2p::Authorization;
-use flashblocks_provider::InMemoryState;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::chainspec::EthChainSpec;
@@ -83,7 +82,6 @@ pub trait FlashblocksProvider:
     + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
     + Clone
     + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-    + InMemoryState<Primitives = OpPrimitives>
 {
 }
 
@@ -92,7 +90,6 @@ impl<T> FlashblocksProvider for T where
         + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + InMemoryState<Primitives = OpPrimitives>
 {
 }
 
@@ -197,8 +194,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + InMemoryState<Primitives = OpPrimitives>,
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
         ChainSpec = OpChainSpec,
         Payload: PayloadTypes<
@@ -301,8 +297,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + InMemoryState<Primitives = OpPrimitives>,
+        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
         ChainSpec = OpChainSpec,
         Payload: PayloadTypes<
