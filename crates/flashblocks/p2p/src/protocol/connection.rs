@@ -20,7 +20,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::trace;
+use tracing::{info, trace};
 
 /// Represents a single P2P connection for the flashblocks protocol.
 ///
@@ -76,6 +76,12 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
 impl<N> Drop for FlashblocksConnection<N> {
     fn drop(&mut self) {
+        info!(
+            target: "flashblocks::p2p",
+            peer_id = %self.peer_id,
+            "dropping flashblocks connection"
+        );
+
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
 }

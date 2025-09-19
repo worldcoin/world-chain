@@ -19,7 +19,7 @@ use reth_network::Peers;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
-use tracing::debug;
+use tracing::{debug, info};
 
 use reth_ethereum::network::{
     api::Direction,
@@ -639,7 +639,8 @@ impl<N: FlashblocksP2PNetworkHandle> ConnectionHandler for FlashblocksP2PProtoco
     ) -> Self::Connection {
         let capability = Self::capability();
 
-        debug!(
+        info!(
+            target: "flashblocks::p2p",
             %peer_id,
             %direction,
             capability = %capability.name,
