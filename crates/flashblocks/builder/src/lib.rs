@@ -314,8 +314,6 @@ where
             .unwrap_or(ctx.parent().gas_limit)
             .saturating_sub(gas_used.unwrap_or(0));
 
-        let bundle_is_empty = bundle.is_empty();
-
         let mut state = State::builder()
             .with_database(db)
             .with_bundle_prestate(bundle)
@@ -328,7 +326,7 @@ where
 
         // Only execute the sequencer transactions on the first payload. The sequencer transactions
         // will already be in the [`BundleState`] at this point if the `bundle` non-empty.
-        let mut info = if bundle_is_empty {
+        let mut info = if best_payload.is_none() {
             // 3. apply pre-execution changes
             builder.apply_pre_execution_changes()?;
 
