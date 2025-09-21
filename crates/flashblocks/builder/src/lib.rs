@@ -325,7 +325,7 @@ where
             Self::block_builder(&mut state, transactions.clone(), receipts, gas_used, ctx)?;
 
         // Only execute the sequencer transactions on the first payload. The sequencer transactions
-        // will already be in the [`BundleState`] at this point if the `bundle` non-empty.
+        // will already be in the [`BundleState`] at this point if the `best_payload` is set.
         let mut info = if best_payload.is_none() {
             // 3. apply pre-execution changes
             builder.apply_pre_execution_changes()?;
