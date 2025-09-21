@@ -6,6 +6,7 @@ use world_chain_node::args::NodeContextType;
 use world_chain_node::config::WorldChainNodeConfig;
 use world_chain_node::context::{BasicContext, FlashblocksContext};
 use world_chain_node::{args::WorldChainArgs, node::WorldChainNode};
+use world_chain_node::{FlashblocksOpApi, OpApiExtServer};
 use world_chain_rpc::EthApiExtServer;
 use world_chain_rpc::SequencerClient;
 use world_chain_rpc::WorldChainEthApiExt;
@@ -77,6 +78,8 @@ fn main() {
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
 
+                            let op_api = FlashblocksOpApi::default();
+                            ctx.modules.replace_configured(op_api.into_rpc())?;
                             Ok(())
                         })
                         .launch()
