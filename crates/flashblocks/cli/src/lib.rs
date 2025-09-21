@@ -51,6 +51,22 @@ pub struct FlashblocksArgs {
         required = false
     )]
     pub spoof_authorizer: bool,
+
+    /// Recommit interval for flashblocks.
+    /// 
+    /// This is the interval at which the payload builder will
+    /// recommit to the transaction pool over the span of individual flashblocks. 
+    /// 
+    /// This value must be strictly than or equal to `--builder.interval`.
+    /// 
+    /// Defaults to `0` (no recommitment).
+    #[arg(
+        long = "flashblocks.recommit_interval",
+        env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
+        default_value = "0",
+        required = false,
+    )]
+    pub recommit_interval: u64,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {

@@ -55,24 +55,12 @@ impl<T> FlashblocksFullNodeTypes for T where
 
 /// Helper trait used for flashblocks reth components
 pub trait FlashblocksNodeTypes:
-    NodeTypes<
-    Payload: PayloadTypes<
-        BuiltPayload = OpBuiltPayload,
-        PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-    >,
-    ChainSpec = OpChainSpec,
->
+    NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec>
 {
 }
 
 impl<T> FlashblocksNodeTypes for T where
-    T: NodeTypes<
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-        >,
-        ChainSpec = OpChainSpec,
-    >
+    T: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec>
 {
 }
 

@@ -174,7 +174,7 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
-        let interval = Box::pin(tokio::time::sleep(self.config.interval));
+        let flashblocks_interval = Box::pin(tokio::time::sleep(self.config.flashblocks_interval));
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(1);
@@ -210,8 +210,8 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            flashblock_deadline: interval,
-            interval: self.config.interval,
+            flashblock_deadline: flashblocks_interval,
+            interval: self.config.flashblocks_interval,
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
@@ -304,21 +304,29 @@ where
 #[derive(Debug, Clone)]
 pub struct FlashblocksJobGeneratorConfig {
     /// The interval at which the job should build a new payload after the last.
-    interval: Duration,
+    flashblocks_interval: Duration,
+    /// The interval at which the job should recommit to the transaction pool within
+    /// the span of individual flashblocks.
+    flashblocks_recommit_interval: Duration,
     /// The deadline for when the payload builder job should resolve.
     ///
     /// By default this is [`SLOT_DURATION`]: 12s
     deadline: Duration,
-    /// Whether to enable Authorization's for payloads.
-    enable_authorization: bool,
 }
 
 // === impl Flashblocks ===
 
 impl FlashblocksJobGeneratorConfig {
     /// Sets the interval at which the job should build a new payload after the last.
-    pub const fn interval(mut self, interval: Duration) -> Self {
-        self.interval = interval;
+    pub const fn flashblock_interval(mut self, interval: Duration) -> Self {
+        self.flashblocks_interval = interval;
+        self
+    }
+
+    /// Sets the interval at which the job should recommit to the transaction pool within
+    /// the span of individual flashblocks.
+    pub const fn flashblock_recommit_interval(mut self, interval: Duration) -> Self {
+        self.flashblocks_recommit_interval = interval;
         self
     }
 
@@ -327,20 +335,14 @@ impl FlashblocksJobGeneratorConfig {
         self.deadline = deadline;
         self
     }
-
-    /// Sets the flag to enable or disable Authorization's for payloads.
-    pub const fn authorization(mut self, enable: bool) -> Self {
-        self.enable_authorization = enable;
-        self
-    }
 }
 
 impl Default for FlashblocksJobGeneratorConfig {
     fn default() -> Self {
         Self {
-            interval: Duration::from_millis(200),
+            flashblocks_interval: Duration::from_millis(200),
+            flashblocks_recommit_interval: Duration::from_secs(12), // disabled by default
             deadline: Duration::from_secs(2),
-            enable_authorization: true,
         }
     }
 }

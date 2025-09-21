@@ -75,7 +75,9 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// The interval at which we should attempt to build new payloads
     pub(crate) flashblock_deadline: Pin<Box<Sleep>>,
     /// The interval timer for spawning new build tasks
-    pub(crate) interval: Duration,
+    pub(crate) flashblock_interval: Duration,
+    /// Intra flashblock recommit interval
+    pub(crate) flashblock_recommit_deadline: Option<Pin<Box<Sleep>>>,
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
     /// The flashblocks state executor
@@ -251,7 +253,7 @@ where
 
         this.flashblock_deadline
             .as_mut()
-            .reset(tokio::time::Instant::now() + this.interval);
+            .reset(tokio::time::Instant::now() + this.flashblock_interval);
 
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
