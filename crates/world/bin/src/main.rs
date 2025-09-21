@@ -77,9 +77,8 @@ fn main() {
                             let eth_api_ext =
                                 WorldChainEthApiExt::new(pool, provider, sequencer_client);
                             ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-
-                            let op_api = FlashblocksOpApi::default();
-                            ctx.modules.replace_configured(op_api.into_rpc())?;
+                            ctx.modules
+                                .replace_configured(FlashblocksOpApi.into_rpc())?;
                             Ok(())
                         })
                         .launch()

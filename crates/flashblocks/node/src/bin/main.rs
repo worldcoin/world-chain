@@ -34,8 +34,8 @@ pub fn main() {
             let handle = builder
                 .node(node)
                 .extend_rpc_modules(move |ctx| {
-                    let op_api = FlashblocksOpApi::default();
-                    ctx.modules.replace_configured(op_api.into_rpc())?;
+                    ctx.modules
+                        .replace_configured(FlashblocksOpApi.into_rpc())?;
                     Ok(())
                 })
                 .launch()
