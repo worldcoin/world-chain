@@ -541,6 +541,25 @@ async fn test_eth_api_call() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let (_, _nodes, _tasks, mut env) =
+        setup::<FlashblocksContext>(1, optimism_payload_attributes).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    let mut action = crate::actions::SupportedCapabilitiesCall::new(tx);
+
+    action.execute(&mut env).await?;
+
+    let call_results = rx.recv().await.expect("should receive call results");
+
+    assert_eq!(call_results, vec!["flashblocksv1".to_string()]);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

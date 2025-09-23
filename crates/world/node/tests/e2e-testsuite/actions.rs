@@ -4,7 +4,7 @@ use alloy_rpc_types::{Header, Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use eyre::eyre::{eyre, Result};
 use flashblocks_primitives::p2p::Authorization;
-use flashblocks_rpc::engine::FlashblocksEngineApiExtClient;
+use flashblocks_rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
 use futures::future::BoxFuture;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
@@ -759,6 +759,34 @@ impl Action<OpEngineTypes> for EthCall {
 
             self.tx
                 .send(results)
+                .await
+                .map_err(|e| eyre!("Failed to send call results via channel: {}", e))?;
+
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct SupportedCapabilitiesCall {
+    pub tx: tokio::sync::mpsc::Sender<Vec<String>>,
+}
+
+impl SupportedCapabilitiesCall {
+    pub fn new(tx: tokio::sync::mpsc::Sender<Vec<String>>) -> Self {
+        Self { tx }
+    }
+}
+
+impl Action<OpEngineTypes> for SupportedCapabilitiesCall {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let result = OpApiExtClient::supported_capabilities(&env.node_clients[0].rpc).await?;
+            self.tx
+                .send(result)
                 .await
                 .map_err(|e| eyre!("Failed to send call results via channel: {}", e))?;
 
