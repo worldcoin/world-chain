@@ -9,16 +9,15 @@ pub struct FlashblocksOpApi;
 
 #[cfg_attr(not(test), rpc(server, namespace = "op"))]
 #[cfg_attr(test, rpc(server, client, namespace = "op"))]
-#[async_trait]
 pub trait OpApiExt {
     /// Method to get supported capabilities
     #[method(name = "supportedCapabilities")]
-    async fn supported_capabilities(&self) -> RpcResult<Vec<String>>;
+    fn supported_capabilities(&self) -> RpcResult<Vec<String>>;
 }
 
 #[async_trait]
 impl OpApiExtServer for FlashblocksOpApi {
-    async fn supported_capabilities(&self) -> RpcResult<Vec<String>> {
+    fn supported_capabilities(&self) -> RpcResult<Vec<String>> {
         Ok(vec![FLASHBLOCKS_CAPABILITY.to_string()])
     }
 }
