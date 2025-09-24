@@ -4,28 +4,25 @@ use alloy_rpc_types::TransactionRequest;
 use ed25519_dalek::SigningKey;
 use flashblocks_primitives::p2p::Authorization;
 use futures::StreamExt;
+use op_alloy_consensus::encode_holocene_extra_data;
 use parking_lot::Mutex;
-use reth::chainspec::EthChainSpec;
-use reth::primitives::RecoveredBlock;
-use reth_e2e_test_utils::testsuite::actions::Action;
-use reth_e2e_test_utils::transaction::TransactionTestContext;
+use reth::{chainspec::EthChainSpec, primitives::RecoveredBlock};
+use reth_e2e_test_utils::{testsuite::actions::Action, transaction::TransactionTestContext};
 use reth_node_api::{Block, PayloadAttributes};
-use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_node::OpPayloadAttributes;
+use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
-use revm_primitives::fixed_bytes;
-use revm_primitives::{Address, Bytes, B256, U256};
-use std::sync::Arc;
-use std::vec;
+use revm_primitives::{fixed_bytes, Address, Bytes, B256, U256};
+use std::{sync::Arc, vec};
 use tracing::info;
 use world_chain_test::utils::account;
 
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
-use world_chain_node::context::BasicContext;
-use world_chain_node::context::FlashblocksContext;
-use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
-use world_chain_test::utils::signer;
+use world_chain_node::context::{BasicContext, FlashblocksContext};
+use world_chain_test::{
+    node::{raw_pbh_bundle_bytes, tx},
+    utils::signer,
+};
 
 use crate::setup::{setup, CHAIN_SPEC};
 
@@ -387,6 +384,14 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
 //     let (sender, _) = tokio::sync::mpsc::channel(1);
 
+//     const TX: [u8; 251] = hex!(
+//             "7ef8f8a0a539eb753df3b13b7e386e147d45822b67cb908c9ddc5618e3dbaa22ed00850b94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e2000000558000c5fc50000000000000000000000006605a89f00000000012a10d90000000000000000000000000000000000000000000000000000000af39ac3270000000000000000000000000000000000000000000000000000000d5ea528d24e582fa68786f080069bdbfe06a43f8e67bfd31b8e4d8a8837ba41da9a82a54a0000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985"
+//         );
+
+//     let tx = OpTransactionSigned::decode_2718(&mut TX.as_slice()).unwrap();
+
+//     info!("{:?}", Bytes::from(tx.encoded_2718()));
+
 //     // Compose a Mine Block action with an eth_getTransactionReceipt action
 //     let attributes = OpPayloadAttributes {
 //         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
@@ -396,23 +401,18 @@ async fn test_flashblocks() -> eyre::Result<()> {
 //             withdrawals: Some(vec![]),
 //             parent_beacon_block_root: Some(B256::ZERO),
 //         },
-//         transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.into()]),
+//         transactions: Some(vec![Bytes::from(TX)]),
 //         no_tx_pool: Some(false),
 //         eip_1559_params: Some(b64!("0000000800000008")),
 //         gas_limit: Some(30_000_000),
+//         min_base_fee: None,
 //     };
 
-//     let mock_tx =
-//         TransactionTestContext::transfer_tx(nodes[0].node.inner.chain_spec().chain_id(), signer(0))
-//             .await;
-
-//     let raw_tx: Bytes = mock_tx.encoded_2718().into();
-
-//     nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
+//     nodes[0].node.rpc.inject_tx(TX.into()).await?;
 
 //     let mine_block = crate::actions::AssertMineBlock::new(
 //         0,
-//         vec![raw_tx],
+//         vec![],
 //         Some(B256::ZERO),
 //         attributes,
 //         authorization_generator,
@@ -565,7 +565,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
 
     let ext_context = nodes[0].ext_context.clone();
 
@@ -588,6 +588,15 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
     let (sender, _) = tokio::sync::mpsc::channel(1);
 
+    let eip1559 = encode_holocene_extra_data(
+        Default::default(),
+        nodes[0]
+            .node
+            .inner
+            .chain_spec()
+            .base_fee_params_at_timestamp(1756929279),
+    )?;
+
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp: 1756929279,
@@ -598,7 +607,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         },
         transactions: Some(vec![]),
         no_tx_pool: Some(false),
-        eip_1559_params: Some(b64!("0000000800000008")),
+        eip_1559_params: Some(eip1559[1..=8].try_into().unwrap()),
         gas_limit: Some(30_000_000),
         min_base_fee: None,
     };
@@ -619,16 +628,24 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
     let pending_hash =
-        fixed_bytes!("f8e1bed42c0ef37d2452900e0fcdd638b857136651c91dd2f6492ceb56b44923");
+        fixed_bytes!("080d3c4547e6f4133dfe28bfd35511e16add1778a8904dd6f65a30c79803c635");
 
-    let eth_block_by_hash = crate::actions::EthGetBlockByHash::new(pending_hash, vec![0], 350, tx);
+    let eth_block_by_hash =
+        crate::actions::EthGetBlockByHash::new(pending_hash, vec![0, 1, 2], 225, tx);
     let mut action = crate::actions::EthApiAction::new(mine_block, eth_block_by_hash);
 
     action.execute(&mut env).await?;
 
     // ensure the pre-confirmed block exists on the path of the pending tag
     let mut blocks = rx.recv().await.expect("should receive block");
-    blocks.pop().expect("should have one block").unwrap();
+    assert_eq!(blocks.len(), 3);
+
+    for block in blocks.drain(..) {
+        assert!(
+            block.is_some_and(|b| b.hash() == pending_hash),
+            "block hash mismatch"
+        );
+    }
 
     Ok(())
 }
