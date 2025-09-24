@@ -62,7 +62,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -1038,6 +1038,7 @@ async fn sealed_header_by_hash_with_timeout(
                 if let Ok(Some(header)) = provider.sealed_header_by_hash(hash) {
                     return Ok(header);
                 } else {
+                    warn!(target: "flashblocks::state_executor", "failed to fetch sealed header {hash:?}, retrying...");
                     tokio::time::sleep(Duration::from_millis(5)).await
                 }
             }
