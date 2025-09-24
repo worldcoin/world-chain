@@ -1013,7 +1013,7 @@ where
         _ => return Ok(()),
     };
 
-    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), block = ?payload.block(), "setting latest payload");
+    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
 
     *latest_payload = Some((payload.clone(), flashblock.index));
 
