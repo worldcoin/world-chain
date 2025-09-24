@@ -3,6 +3,7 @@ use clap::Parser;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_node::FlashblocksNodeBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksP2PProtocol;
+use flashblocks_rpc::op::{FlashblocksOpApi, OpApiExtServer};
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::args::RollupArgs;
@@ -30,7 +31,15 @@ pub fn main() {
             let p2p_handle = node.flashblocks_handle.clone();
 
             info!(target: "reth::cli", "Launching Flashblocks RPC overlay node");
-            let handle = builder.node(node).launch().await?;
+            let handle = builder
+                .node(node)
+                .extend_rpc_modules(move |ctx| {
+                    ctx.modules
+                        .replace_configured(FlashblocksOpApi.into_rpc())?;
+                    Ok(())
+                })
+                .launch()
+                .await?;
 
             let flashblocks_p2p_protocol =
                 FlashblocksP2PProtocol::new(handle.node.network.clone(), p2p_handle);

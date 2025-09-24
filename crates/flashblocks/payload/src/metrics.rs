@@ -1,7 +1,7 @@
 use metrics::{Counter, Histogram};
 use metrics_derive::Metrics;
 
-/// Transaction pool metrics
+/// Payload Building Metrics
 #[derive(Clone, Metrics)]
 #[metrics(scope = "payloads")]
 pub struct PayloadBuilderMetrics {

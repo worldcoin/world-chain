@@ -26,6 +26,7 @@ use std::{
 };
 use tracing::span;
 use world_chain_node::node::{WorldChainNode, WorldChainNodeContext};
+use world_chain_node::{FlashblocksOpApi, OpApiExtServer};
 use world_chain_test::node::test_config;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
@@ -130,6 +131,7 @@ where
                 let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
                 let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
                 ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                ctx.modules.replace_configured(FlashblocksOpApi.into_rpc())?;
                 Ok(())
             })
             .launch_with_fn(|builder| {

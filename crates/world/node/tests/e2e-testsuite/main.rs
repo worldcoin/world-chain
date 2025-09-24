@@ -1,7 +1,6 @@
 mod testsuite;
 
-mod setup;
-
 mod actions;
+mod setup;
 
 const fn main() {}
