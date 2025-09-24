@@ -6,7 +6,7 @@ use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::OptionExt as _;
+use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
@@ -61,6 +61,7 @@ use revm::DatabaseCommit;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
@@ -77,6 +78,9 @@ const CREATE_2_DEPLOYER_CODEHASH: B256 =
 const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!(
     "6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033"
 );
+
+/// Max Timeout to fetch a sealed header from the provider in the [`FlashblocksStateExecutor`].
+const MAX_HEADER_FETCH_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks.
 #[derive(Debug)]
@@ -903,7 +907,7 @@ where
     Pool: TransactionPool + 'static,
     P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
-    trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
+    trace!(target: "flashblocks::state_executor", id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
 
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
@@ -971,11 +975,14 @@ where
         min_base_fee: None,
     };
 
-    // The header either exists in the in memory state (has not been persisted to disk) or exists within
-    // the database. First check the in memory state, then fall back to the database.
-    let sealed_header = provider
-        .sealed_header_by_hash(base.parent_hash)?
-        .ok_or_eyre("missing sealed header")?;
+    // The parent header may not yet exist in the local database if it has not been received
+    // from the consensus engine. We attempt to fetch it until a timeout is reached.
+    let sealed_header = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            sealed_header_by_hash_with_timeout(provider, base.parent_hash, MAX_HEADER_FETCH_TIMEOUT)
+                .await
+        })
+    })?;
 
     let state_provider = provider.state_by_block_hash(base.parent_hash)?;
 
@@ -1006,11 +1013,36 @@ where
         _ => return Ok(()),
     };
 
-    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), block = ?payload.block(), "setting latest payload");
 
     *latest_payload = Some((payload.clone(), flashblock.index));
 
     pending_block.send_replace(payload.executed_block());
 
     Ok(())
+}
+
+/// Attempts to fetch the sealed header until a timeout is reached.
+async fn sealed_header_by_hash_with_timeout(
+    provider: &impl HeaderProvider<Header = alloy_consensus::Header>,
+    hash: B256,
+    timout: Duration,
+) -> eyre::Result<SealedHeader<alloy_consensus::Header>> {
+    let sleep = tokio::time::sleep(timout);
+    tokio::select! {
+        _ = sleep => {
+            Err(eyre!("timed out waiting for sealed header {hash:?}"))
+        },
+        res = async {
+            loop {
+                if let Ok(Some(header)) = provider.sealed_header_by_hash(hash) {
+                    return Ok(header);
+                } else {
+                    tokio::time::sleep(Duration::from_millis(5)).await
+                }
+            }
+        } => {
+            res
+        }
+    }
 }
