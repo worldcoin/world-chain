@@ -19,6 +19,11 @@ struct FlashblocksNodeArgs {
 }
 
 pub fn main() {
+    eyre::config::HookBuilder::default()
+        .theme(eyre::config::Theme::new())
+        .install()
+        .expect("failed to install error handler");
+
     if let Err(err) =
         Cli::<OpChainSpecParser, FlashblocksNodeArgs>::parse().run(async move |builder, args| {
             let node = FlashblocksNodeBuilder {
