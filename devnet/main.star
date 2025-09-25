@@ -71,6 +71,67 @@ def run(plan, args={}):
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
 
+    # Add the builders as trusted peers with one another
+    builder_0_srv = plan.get_service(
+        "op-el-builder-2151908-1-custom-op-node-op-kurtosis"
+    )
+
+    builder_1_srv = plan.get_service("op-el-2151908-2-custom-op-node-op-kurtosis")
+    builder_1_rpc_port = builder_1_srv.ports["rpc"].number
+    builder_1_rpc_url = "http://{0}:{1}".format(
+        builder_1_srv.ip_address, builder_1_rpc_port
+    )
+
+    builder_2_srv = plan.get_service("op-el-2151908-3-custom-op-node-op-kurtosis")
+    builder_2_rpc_port = builder_2_srv.ports["rpc"].number
+    builder_2_rpc_url = "http://{0}:{1}".format(
+        builder_2_srv.ip_address, builder_2_rpc_port
+    )
+
+    extract_enode_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}',
+        port_id="rpc",
+        extract={"enode": ".result.enode"},
+    )
+
+    builder_0_enode = plan.request(
+        service_name="op-el-builder-2151908-1-custom-op-node-op-kurtosis",
+        recipe=extract_enode_recipe,
+        description="Extracting enode from builder 0",
+    )
+
+    add_trusted_peer_0_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":[{0}],"id":1}}'.format(
+            builder_0_enode["extract.enode"],
+        ),
+        port_id="rpc",
+    )
+
+    add_trusted_peer_1_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":[{0}],"id":1}}'.format(
+            builder_0_enode["extract.enode"],
+        ),
+        port_id="rpc",
+    )
+
+    plan.request(
+        service_name="op-el-2151908-2-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_0_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
+    plan.request(
+        service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_1_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
     tx_proxy_http_url = tx_proxy.launch(
         plan,
         service_name="tx-proxy",
