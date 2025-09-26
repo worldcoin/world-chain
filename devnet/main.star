@@ -58,15 +58,6 @@ def run(plan, args={}):
     builder_rpc_port = builder_srv.ports["rpc"].number
     builder_rpc_url = "http://{0}:{1}".format(builder_srv.ip_address, builder_rpc_port)
 
-    # Extract HTTP RPC url of 2 Reth nodes
-    # reth_srv_0 = plan.get_service("op-el-2151908-2-custom-op-node-op-kurtosis")
-    # reth_rpc_port_0 = reth_srv_0.ports["rpc"].number
-    # reth_rpc_url_0 = "http://{0}:{1}".format(reth_srv_0.ip_address, reth_rpc_port_0)
-
-    # reth_srv_1 = plan.get_service("op-el-2151908-3-custom-op-node-op-kurtosis")
-    # reth_rpc_port_1 = reth_srv_1.ports["rpc"].number
-    # reth_rpc_url_1 = "http://{0}:{1}".format(reth_srv_1.ip_address, reth_rpc_port_1)
-
     l2_srv = plan.get_service("op-el-2151908-1-op-geth-op-node-op-kurtosis")
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
@@ -102,21 +93,31 @@ def run(plan, args={}):
         description="Extracting enode from builder 0",
     )
 
+    plan.print(
+        '{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + "{0}".format(builder_0_enode["extract.enode"])
+        + '],"id":1}'
+    )
+    # {"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":["enode://5ecdf52ca295643ecbc1f0a7568c723e92aade2539b268450b00391deee39a7fdf0d9f76d73ef6a604aef58d069eaf432f4736906a107e8f9c37d13d67a3097b@172.16.0.22:30303],"id":1}
     add_trusted_peer_0_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
-        body='{{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":[{0}],"id":1}}'.format(
-            builder_0_enode["extract.enode"],
-        ),
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_0_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
         port_id="rpc",
     )
 
     add_trusted_peer_1_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
-        body='{{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":[{0}],"id":1}}'.format(
-            builder_0_enode["extract.enode"],
-        ),
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_0_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
         port_id="rpc",
     )
 
