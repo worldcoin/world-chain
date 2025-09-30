@@ -93,12 +93,6 @@ def run(plan, args={}):
         description="Extracting enode from builder 0",
     )
 
-    plan.print(
-        '{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
-        + "{0}".format(builder_0_enode["extract.enode"])
-        + '],"id":1}'
-    )
-    # {"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":["enode://5ecdf52ca295643ecbc1f0a7568c723e92aade2539b268450b00391deee39a7fdf0d9f76d73ef6a604aef58d069eaf432f4736906a107e8f9c37d13d67a3097b@172.16.0.22:30303],"id":1}
     add_trusted_peer_0_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -138,8 +132,8 @@ def run(plan, args={}):
         service_name="tx-proxy",
         image="ghcr.io/worldcoin/tx-proxy:sha-9cdbe54",
         builder_rpc_0=builder_rpc_url,
-        builder_rpc_1=builder_rpc_url,  # need to be separate client to prevent validation errors
-        builder_rpc_2=builder_rpc_url,
+        builder_rpc_1=builder_1_rpc_url,  # need to be separate client to prevent validation errors
+        builder_rpc_2=builder_2_rpc_url,
         l2_rpc_0=l2_rpc_url,
         l2_rpc_1=l2_rpc_url,
         l2_rpc_2=l2_rpc_url,
