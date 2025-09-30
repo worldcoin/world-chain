@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
-RUN curl -L https://foundry.paradigm.xyz | bash && /root/.foundry/bin/foundryup --branch v1.3.6
+RUN cargo install --git https://github.com/foundry-rs/foundry --tag v1.3.6 --profile release --locked cast
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=planner /app/recipe.json recipe.json
@@ -67,7 +67,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
-COPY --from=builder /root/.foundry/bin/cast /usr/local/bin/
+COPY --from=builder /usr/local/cargo/bin/cast /usr/local/bin/
 RUN cast --version
 
 EXPOSE 30303 30303/udp 9001 8545 8546
