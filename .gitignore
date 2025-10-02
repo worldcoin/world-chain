@@ -2,3 +2,6 @@ book
 /target
 .env
 .vscode
+
+contracts/sepolia_load_test_*.json
+contracts/sepolia_load_test.json
