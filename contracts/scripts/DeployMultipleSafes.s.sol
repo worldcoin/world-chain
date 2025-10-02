@@ -23,10 +23,8 @@ contract DeployMultipleSafes is Script {
     SafeModuleSetup public moduleSetup;
     Mock4337Module public module;
 
-    address public constant ENTRY_POINT =
-        0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant PBH_SIGNATURE_AGGREGATOR =
-        0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
+    address public constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant PBH_SIGNATURE_AGGREGATOR = 0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     address[] public deployedSafes;
@@ -34,20 +32,16 @@ contract DeployMultipleSafes is Script {
     uint256 public ownerPrivateKey;
 
     function run() public {
-        console.log(
-            "Deploying: Safe Infrastructure and",
-            NUM_SAFES,
-            "Safe Proxies"
-        );
+        console.log("Deploying: Safe Infrastructure and", NUM_SAFES, "Safe Proxies");
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
 
-        // Generate a new private key for the Safe owner (different from deployer)
-        ownerPrivateKey = vm.deriveKey("test test test test test test test test test test test junk", 0);
+        ownerPrivateKey = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, privateKey)));
         owner = vm.addr(ownerPrivateKey);
 
         console.log("Deployer address:", vm.addr(privateKey));
         console.log("Safe Owner address:", owner);
+        console.log("Safe Owner private key:", vm.toString(bytes32(ownerPrivateKey)));
 
         vm.startBroadcast(privateKey);
         deployInfrastructure();
@@ -71,11 +65,7 @@ contract DeployMultipleSafes is Script {
         console.log("SafeProxyFactory Deployed at: ", address(factory));
 
         // Deploy Mock4337Module
-        module = new Mock4337Module(
-            ENTRY_POINT,
-            PBH_SIGNATURE_AGGREGATOR,
-            PBH_NONCE_KEY
-        );
+        module = new Mock4337Module(ENTRY_POINT, PBH_SIGNATURE_AGGREGATOR, PBH_NONCE_KEY);
         console.log("Mock4337Module Deployed at: ", address(module));
     }
 
@@ -87,10 +77,7 @@ contract DeployMultipleSafes is Script {
         modules[0] = address(module);
 
         // Encode the moduleSetup.enableModules call
-        bytes memory moduleSetupCall = abi.encodeCall(
-            SafeModuleSetup.enableModules,
-            (modules)
-        );
+        bytes memory moduleSetupCall = abi.encodeCall(SafeModuleSetup.enableModules, (modules));
 
         // Create owners array with single owner
         address[] memory owners = new address[](1);
@@ -129,9 +116,7 @@ contract DeployMultipleSafes is Script {
             console.log("Safe", i + 1, "Deployed at:", address(safe));
 
             // Deposit stake amount to EntryPoint for this safe
-            IEntryPoint(ENTRY_POINT).depositTo{value: STAKE_AMOUNT}(
-                address(safe)
-            );
+            IEntryPoint(ENTRY_POINT).depositTo{value: STAKE_AMOUNT}(address(safe));
         }
 
         console.log("Successfully deployed", NUM_SAFES, "Safe proxies");
