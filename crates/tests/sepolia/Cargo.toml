@@ -23,6 +23,7 @@ alloy-sol-types.workspace = true
 alloy-eips.workspace = true
 alloy-transport-http.workspace = true
 alloy-rpc-client.workspace = true
+alloy-contract.workspace = true
 
 reth-rpc-layer.workspace = true
 chrono.workspace = true

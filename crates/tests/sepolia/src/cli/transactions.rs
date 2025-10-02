@@ -23,6 +23,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tracing::{debug, error, info};
 use world_chain_pbh::{
@@ -38,17 +39,128 @@ use world_chain_test::utils::{
 };
 use world_chain_test::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
 
+use crate::cli::transactions::LoadTestContract::LoadTestContractInstance;
+use crate::cli::LoadTestArgs;
 use crate::PBH_SIGNATURE_AGGREGATOR;
 
 use super::{identities::SerializableIdentity, BundleArgs, TxType};
 use super::{SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs};
 use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
+sol! {
+    #[sol(rpc, bytecode = "0x6080604052348015600e575f5ffd5b506101238061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e7565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b6103e88110156100e4576001805f8282546100b891906100fe565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f7575f5ffd5b5035919050565b8082018082111561011d57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
+    contract LoadTestContract {
+        mapping(uint256 => bool) public map;
+        uint public nonce;
+
+        function sstore() external {
+            for (uint256 i = 0; i < 100; i++) {
+                nonce += 1;
+                bool value = map[nonce];
+                map[nonce] = !value;
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
     pub pbh_transactions: Vec<Bytes>,
     pub pbh_user_operations: Vec<PackedUserOperation>,
     pub std_transactions: Vec<Bytes>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct LoadTestConfig {
+    pub module: Address,
+    pub safes: Vec<Address>,
+    #[serde(rename = "ownerPrivateKey")]
+    pub owner_private_key: String,
+}
+
+pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
+    let config: LoadTestConfig = serde_json::from_reader(std::fs::File::open(&args.config_path)?)?;
+
+    let signer = config.owner_private_key.parse::<PrivateKeySigner>()?;
+    let wallet = EthereumWallet::new(signer.clone());
+
+    let provider = Arc::new(
+        ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(args.rpc_url.parse().unwrap()),
+    );
+
+    let load_test_contract = Arc::new(LoadTestContract::deploy(provider.clone()).await?);
+    let contract_address = *load_test_contract.address();
+
+    info!(?contract_address, "Deployed LoadTestContract");
+
+    let semaphore = Arc::new(Semaphore::new(args.concurrency));
+
+    let mut joinset = JoinSet::new();
+
+    for safe in config.safes {
+        info!(?safe, "Spawning load test task for safe");
+        let semaphore = semaphore.clone();
+        let provider = provider.clone();
+        let signer = signer.clone();
+        let load_test_contract = load_test_contract.clone();
+        joinset.spawn(async move {
+            let _permit = semaphore.acquire_owned().await;
+            send_user_operations(
+                safe,
+                config.module,
+                signer.clone(),
+                load_test_contract,
+                args.transaction_count,
+                provider.clone(),
+            )
+            .await?;
+
+            Ok::<(), eyre::Report>(())
+        });
+    }
+
+    joinset.join_all().await;
+
+    Ok(())
+}
+
+pub async fn send_user_operations(
+    safe: Address,
+    module: Address,
+    signer: PrivateKeySigner,
+    load_test_contract: Arc<LoadTestContractInstance<Arc<impl Provider>>>,
+    transaction_count: usize,
+    provider: Arc<impl Provider>,
+) -> eyre::Result<()> {
+    let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
+
+    // empty calldata
+    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+        to: *load_test_contract.address(),
+        value: U256::ZERO,
+        data: calldata,
+        operation: 0,
+    })
+    .abi_encode()
+    .into();
+
+    for _ in 0..transaction_count {
+        send_uo_task_inner(
+            provider.clone(),
+            signer.clone(),
+            safe,
+            module,
+            None,
+            None,
+            None,
+            calldata.clone(),
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 pub async fn create_bundle(args: BundleArgs) -> eyre::Result<()> {
@@ -535,9 +647,9 @@ async fn send_uo_task(
         signer,
         safe,
         module,
-        external_nullifier,
-        proof,
-        identity,
+        Some(external_nullifier),
+        Some(proof),
+        Some(identity),
         calldata,
     )
     .await
@@ -552,9 +664,9 @@ async fn send_uo_task_inner(
     signer: PrivateKeySigner,
     safe: Address,
     module: Address,
-    external_nullifier: ExternalNullifier,
-    proof: InclusionProof,
-    identity: Identity,
+    external_nullifier: Option<ExternalNullifier>,
+    proof: Option<InclusionProof>,
+    identity: Option<Identity>,
     calldata: Bytes,
 ) -> eyre::Result<()> {
     let puo: RpcPartialUserOperation = partial_user_op_sepolia()
@@ -565,20 +677,36 @@ async fn send_uo_task_inner(
     let (account_gas_limits, fees, pre_verification_gas) =
         estimate_uo_gas(provider.clone(), &puo).await?;
 
-    let uo: PackedUserOperation = user_op_sepolia()
-        .signer(signer)
-        .safe(safe)
-        .module(module)
-        .external_nullifier(external_nullifier)
-        .inclusion_proof(proof)
-        .identity(identity)
-        .pre_verification_gas(U256::from(
-            pre_verification_gas * U128::from(5) / U128::from(4),
-        ))
-        .account_gas_limits(account_gas_limits)
-        .gas_fees(fees)
-        .calldata(calldata)
-        .call();
+    let uo: PackedUserOperation = if let (Some(external_nullifier), Some(proof), Some(identity)) =
+        (external_nullifier, proof, identity)
+    {
+        user_op_sepolia()
+            .signer(signer)
+            .safe(safe)
+            .module(module)
+            .external_nullifier(external_nullifier)
+            .inclusion_proof(proof)
+            .identity(identity)
+            .pre_verification_gas(U256::from(
+                pre_verification_gas * U128::from(5) / U128::from(4),
+            ))
+            .account_gas_limits(account_gas_limits)
+            .gas_fees(fees)
+            .calldata(calldata)
+            .call()
+    } else {
+        user_op_sepolia()
+            .signer(signer)
+            .safe(safe)
+            .module(module)
+            .pre_verification_gas(U256::from(
+                pre_verification_gas * U128::from(5) / U128::from(4),
+            ))
+            .account_gas_limits(account_gas_limits)
+            .gas_fees(fees)
+            .calldata(calldata)
+            .call()
+    };
 
     let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), PBH_SIGNATURE_AGGREGATOR).into();
 
