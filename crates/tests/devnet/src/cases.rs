@@ -46,7 +46,7 @@ where
             let bundler_provider = bundler_provider.clone();
             let builder_provider = builder_provider.clone();
             async move {
-                let uo: RpcUserOperationV0_7 = (uo.clone(), PBH_DEV_SIGNATURE_AGGREGATOR).into();
+                let uo: RpcUserOperationV0_7 = (uo.clone(), Some(PBH_DEV_SIGNATURE_AGGREGATOR)).into();
                 let hash: B256 = bundler_provider.raw_request(
                     Cow::Borrowed("eth_sendUserOperation"),
                     (uo, DEVNET_ENTRYPOINT),

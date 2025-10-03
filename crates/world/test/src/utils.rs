@@ -484,7 +484,7 @@ impl From<PbhPayload> for PBHPayload {
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
+impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Option<Address>) {
     fn into(self) -> RpcUserOperationV0_7 {
         let (user_op, aggregator) = self;
         RpcUserOperationV0_7 {
@@ -511,7 +511,7 @@ impl Into<RpcUserOperationV0_7> for (PackedUserOperation, Address) {
             paymaster_data: None,
             paymaster_post_op_gas_limit: None,
             paymaster_verification_gas_limit: None,
-            aggregator: Some(aggregator),
+            aggregator,
             eip7702_auth: None,
         }
     }
