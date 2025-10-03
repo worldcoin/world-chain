@@ -2,3 +2,5 @@ book
 /target
 .env
 .vscode
+
+.claude

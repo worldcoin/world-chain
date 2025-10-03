@@ -254,11 +254,13 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
+        let pending_block_rx = self.flashblocks_state.pending_block();
         let engine_api_builder = FlashblocksEngineApiBuilder {
             engine_validator_builder: Default::default(),
             flashblocks_handle: Some(self.flashblocks_handle.clone()),
             to_jobs_generator: self.to_jobs_generator.clone(),
             authorizer_vk: self.authorizer_vk,
+            pending_block_rx,
         };
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.rollup.sequencer.clone());
