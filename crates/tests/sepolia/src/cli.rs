@@ -49,8 +49,6 @@ pub struct LoadTestArgs {
     /// The path to a json holding information pertaining to the Safes, and Module
     #[clap(long, env = "CONFIG_PATH", default_value = "load_test_config.json")]
     pub config_path: String,
-    #[clap(long, env = "CONCURRENCY", default_value_t = 100)]
-    pub concurrency: usize,
     #[clap(long, env = "TRANSACTION_COUNT", default_value_t = 1)]
     pub transaction_count: usize,
 }

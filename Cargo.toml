@@ -235,6 +235,7 @@ ed25519-dalek = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
 url = "2.5.7"
 brotli = "8.0.2"
+once_cell = "1.19"
 
 # Test
 testcontainers = "0.23"

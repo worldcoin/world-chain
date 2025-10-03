@@ -38,3 +38,4 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 eyre.workspace = true
 futures.workspace = true
+once_cell.workspace = true
