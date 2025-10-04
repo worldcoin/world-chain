@@ -51,6 +51,37 @@ pub struct FlashblocksArgs {
         required = false
     )]
     pub spoof_authorizer: bool,
+
+    /// The interval to publish pre-confirmations
+    /// when building a payload in milliseconds.
+    #[arg(
+        long = "flashblocks.interval",
+        env = "FLASHBLOCKS_INTERVAL",
+        requires = "authorizer",
+        default_value_t = 200
+    )]
+    pub interval: u64,
+
+    /// Interval at which the block builder
+    /// should re-commit to the transaction pool when building a payload.
+    ///
+    /// In milliseconds.
+    #[arg(
+        long = "flashblocks.recommit_interval",
+        env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
+        requires = "authorizer",
+        default_value_t = 200
+    )]
+    pub recommit_interval: u64,
+
+    /// The maximum number of concurrent payload build tasks.
+    #[arg(
+        long = "flashblocks.max_payload_tasks",
+        env = "FLASHBLOCKS_MAX_PAYLOAD_TASKS",
+        requires = "authorizer",
+        default_value_t = 50
+    )]
+    pub max_payload_tasks: usize,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -81,6 +112,9 @@ mod tests {
             spoof_authorizer: true,
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            recommit_interval: 200,
+            interval: 200,
+            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([
@@ -89,6 +123,10 @@ mod tests {
             "--flashblocks.spoof_authorizer",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
+            "--flashblocks.interval",
+            "200",
+            "--flashblocks.recommit_interval",
+            "200",
         ]);
 
         assert_eq!(args.flashblocks.unwrap(), flashblocks);
@@ -101,6 +139,9 @@ mod tests {
             spoof_authorizer: false,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
+            recommit_interval: 200,
+            interval: 200,
+            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([
@@ -108,6 +149,10 @@ mod tests {
             "--flashblocks.enabled",
             "--flashblocks.authorizer_vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
+            "--flashblocks.interval",
+            "200",
+            "--flashblocks.recommit_interval",
+            "200",
         ]);
 
         assert_eq!(args.flashblocks.unwrap(), flashblocks);

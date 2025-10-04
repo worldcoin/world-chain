@@ -114,6 +114,9 @@ async fn setup_node(
             authorizer_vk: Some(authorizer_sk.verifying_key()),
             builder_sk: Some(builder_sk.clone()),
             spoof_authorizer: false,
+            interval: 200,
+            recommit_interval: 200,
+            max_payload_tasks: 50,
         },
         da_config: Default::default(),
     }
