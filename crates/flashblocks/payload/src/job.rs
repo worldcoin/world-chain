@@ -314,8 +314,6 @@ where
                     } => {
                         this.best_payload = PayloadState::Best(payload.clone());
                         this.cached_reads = Some(cached_reads);
-
-                        trace!(target: "flashblocks::payload_builder", "getting here");
                     }
                     BuildOutcome::Freeze(payload) => {
                         trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
