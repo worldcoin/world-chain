@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::generator::{
     FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
@@ -26,6 +29,8 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     p2p_handler: FlashblocksHandle,
     flashblocks_state: FlashblocksStateExecutor,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+    interval: Duration,
+    recommitment_interval: Duration,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -35,12 +40,16 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         p2p_handler: FlashblocksHandle,
         flashblocks_state: FlashblocksStateExecutor,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+        interval: Duration,
+        recommitment_interval: Duration,
     ) -> Self {
         Self {
             pb,
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
+            interval,
+            recommitment_interval,
         }
     }
 }
@@ -64,6 +73,7 @@ where
     Pool: TransactionPool,
     EvmConfig: Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,
+    PB::PayloadBuilder: FlashblockPayloadBuilder,
 {
     async fn spawn_payload_builder_service(
         self,
@@ -76,7 +86,8 @@ where
         let conf = ctx.config().builder.clone();
 
         let payload_job_config = FlashblocksJobGeneratorConfig::default()
-            .interval(conf.interval)
+            .interval(self.interval)
+            .recommitment_interval(self.recommitment_interval)
             .deadline(conf.deadline);
 
         let metrics = PayloadBuilderMetrics::default();
