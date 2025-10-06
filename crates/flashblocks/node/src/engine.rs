@@ -28,7 +28,8 @@ pub struct FlashblocksEngineApiBuilder<EV> {
     /// Verifying key for authorizations.
     pub authorizer_vk: VerifyingKey,
     /// Watch channel receiver for pending flashblock.
-    pub pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pub pending_block_rx:
+        tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<EV: Default> Default for FlashblocksEngineApiBuilder<EV> {
@@ -102,7 +103,8 @@ where
         );
 
         let op_engine_api = OpEngineApi::new(inner);
-        let op_engine_api_ext = OpEngineApiExt::new(op_engine_api, to_jobs_generator, pending_block_rx);
+        let op_engine_api_ext =
+            OpEngineApiExt::new(op_engine_api, to_jobs_generator, pending_block_rx);
 
         Ok(op_engine_api_ext)
     }
