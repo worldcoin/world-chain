@@ -82,7 +82,12 @@ is_synced() {
 take_snapshot() {
   stop_main_bin
 
-  S3_URL="s3://$BUCKET/reth.tar.lz4"
+  if [ "$POD_INDEX" = "1" ]; then
+    S3_URL="s3://$BUCKET/full.tar.lz4"
+  else
+    S3_URL="s3://$BUCKET/archive.tar.lz4"
+  fi
+
   SIZE=$(du -sb "$DATA_DIR/reth" | awk '{print $1}')
 
   echo "[INFO] Compressing and uploading to S3…"
