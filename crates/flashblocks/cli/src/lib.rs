@@ -149,10 +149,6 @@ mod tests {
             "--flashblocks.enabled",
             "--flashblocks.authorizer_vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
-            "--flashblocks.interval",
-            "200",
-            "--flashblocks.recommit_interval",
-            "200",
         ]);
 
         assert_eq!(args.flashblocks.unwrap(), flashblocks);
