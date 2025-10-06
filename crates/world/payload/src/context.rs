@@ -6,6 +6,7 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use flashblocks_builder::traits::context_builder::PayloadBuilderCtxBuilder;
+use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth::api::PayloadBuilderError;
 use reth::chainspec::EthChainSpec;
@@ -17,8 +18,8 @@ use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::block::{BlockExecutionError, BlockValidationError};
 use reth_evm::execute::{BlockBuilder, BlockExecutor};
 use reth_evm::op_revm::OpSpecId;
-use reth_evm::Evm;
 use reth_evm::{ConfigureEvm, Database};
+use reth_evm::{Evm, EvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
@@ -112,7 +113,7 @@ where
         self.inner.chain_spec.as_ref()
     }
 
-    fn evm_env(&self) -> reth_evm::EvmEnv<OpSpecId> {
+    fn evm_env(&self) -> Result<EvmEnv<OpSpecId>, EIP1559ParamError> {
         self.inner.evm_config.evm_env(self.parent())
     }
 
@@ -195,7 +196,8 @@ where
         let execution_ctx = self
             .inner
             .evm_config
-            .context_for_next_block(self.inner.parent(), attributes);
+            .context_for_next_block(self.inner.parent(), attributes)
+            .map_err(PayloadBuilderError::other)?;
 
         // Prepare block builder.
         Ok(self
