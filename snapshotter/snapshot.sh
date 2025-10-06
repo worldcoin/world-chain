@@ -82,11 +82,12 @@ is_synced() {
 take_snapshot() {
   stop_main_bin
 
-  if [ "$POD_INDEX" = "1" ]; then
-    S3_URL="s3://$BUCKET/full.tar.lz4"
-  else
-    S3_URL="s3://$BUCKET/archive.tar.lz4"
+  if [[ -z ${FILE_NAME+x} ]]; then
+    echo "Error: MY_VAR not set" >&2
+    exit 1
   fi
+
+  S3_URL="s3://$BUCKET/$FILE_NAME"
 
   SIZE=$(du -sb "$DATA_DIR/reth" | awk '{print $1}')
 
