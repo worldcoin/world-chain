@@ -242,11 +242,13 @@ def get_config(
         "--pbh.signature_aggregator={0}".format(PBH_SIGNATURE_AGGREGATOR),
         "--pbh.world_id={0}".format(WORLD_ID),
         "--builder.enabled",
-        "--builder.interval={0}".format("200ms"),
         "--builder.deadline={0}".format("6"),
         "--flashblocks.enabled",
         "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblocks.builder_sk={0}".format(signing_key),
+        "--flashblocks.interval={0}".format("200"),
+        "--flashblocks.recommit_interval={0}".format("20"),
+        "--flashblocks.max_payload_tasks={0}".format("50"),
     ]
 
     observability.expose_metrics_port(ports)

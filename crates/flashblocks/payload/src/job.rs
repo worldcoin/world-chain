@@ -280,6 +280,7 @@ where
             if let Some(payload) = this.best_payload.payload().cloned() {
                 // record metrics
                 this.record_payload_metrics(&payload);
+
                 trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "committing to best payload");
 
                 // publish the new payload to the p2p network

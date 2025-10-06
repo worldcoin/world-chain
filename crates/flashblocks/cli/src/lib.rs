@@ -57,7 +57,6 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.interval",
         env = "FLASHBLOCKS_INTERVAL",
-        requires = "authorizer",
         default_value_t = 200
     )]
     pub interval: u64,
@@ -69,7 +68,6 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.recommit_interval",
         env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
-        requires = "authorizer",
         default_value_t = 200
     )]
     pub recommit_interval: u64,
@@ -78,7 +76,6 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.max_payload_tasks",
         env = "FLASHBLOCKS_MAX_PAYLOAD_TASKS",
-        requires = "authorizer",
         default_value_t = 50
     )]
     pub max_payload_tasks: usize,
