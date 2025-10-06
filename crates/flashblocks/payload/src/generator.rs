@@ -363,10 +363,10 @@ impl Default for FlashblocksJobGeneratorConfig {
     fn default() -> Self {
         Self {
             interval: Duration::from_millis(200),
-            recommitment_interval: Duration::from_millis(200),
+            recommitment_interval: Duration::from_millis(50),
             deadline: Duration::from_secs(2),
             enable_authorization: true,
-            max_payload_tasks: 50,
+            max_payload_tasks: 4,
         }
     }
 }
