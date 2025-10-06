@@ -30,7 +30,8 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     /// A watch channel notifier to the jobs generator.
     to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     /// Watch channel receiver for pending flashblock.
-    pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block_rx:
+        tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -40,7 +41,9 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
-        pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+        pending_block_rx: tokio::sync::watch::Receiver<
+            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        >,
     ) -> Self {
         Self {
             inner,
@@ -72,7 +75,8 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
             // Compare basic block attributes
             if cached_block.hash() != block_hash
                 || cached_block.parent_hash != parent_hash
-                || cached_block.timestamp != timestamp {
+                || cached_block.timestamp != timestamp
+            {
                 return None;
             }
 
@@ -166,9 +170,17 @@ where
         // Check if we have this payload cached
         if let Some(cached_status) = self.check_cached_payload(
             payload.payload_inner.payload_inner.payload_inner.block_hash,
-            payload.payload_inner.payload_inner.payload_inner.parent_hash,
+            payload
+                .payload_inner
+                .payload_inner
+                .payload_inner
+                .parent_hash,
             payload.payload_inner.payload_inner.payload_inner.timestamp,
-            &payload.payload_inner.payload_inner.payload_inner.transactions,
+            &payload
+                .payload_inner
+                .payload_inner
+                .payload_inner
+                .transactions,
         ) {
             return Ok(cached_status);
         }
