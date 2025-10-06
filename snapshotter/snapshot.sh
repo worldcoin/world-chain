@@ -16,6 +16,11 @@ if [ -z "${EXTERNAL_RPC:-}" ]; then
   exit 1
 fi
 
+if [[ -z ${FILE_NAME:-} ]]; then
+  echo "Error: FILE_NAME not set" >&2
+  exit 1
+fi
+
 AWS_REGION="${AWS_REGION:=eu-central-2}"
 AWS_MAX_CONCURRENT_REQUESTS=32
 export AWS_REGION
@@ -81,11 +86,6 @@ is_synced() {
 
 take_snapshot() {
   stop_main_bin
-
-  if [[ -z ${FILE_NAME+x} ]]; then
-    echo "Error: MY_VAR not set" >&2
-    exit 1
-  fi
 
   S3_URL="s3://$BUCKET/$FILE_NAME"
 
