@@ -508,7 +508,8 @@ where
         // Prepare block execution context.
         let execution_ctx = ctx
             .evm_config()
-            .context_for_next_block(ctx.parent(), attributes);
+            .context_for_next_block(ctx.parent(), attributes)
+            .map_err(PayloadBuilderError::other)?;
 
         let mut executor = FlashblocksBlockExecutor::new(
             evm,

@@ -1,5 +1,6 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
+use op_alloy_consensus::EIP1559ParamError;
 use reth::builder::PayloadBuilderError;
 use reth::payload::PayloadId;
 use reth::revm::State;
@@ -55,7 +56,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
     ///
     /// Sets up block-level context (timestamp, difficulty, gas limit) and applies
     /// Optimism-specific configuration like fee parameters and L1 data availability costs.
-    fn evm_env(&self) -> EvmEnv<OpSpecId>;
+    fn evm_env(&self) -> Result<EvmEnv<OpSpecId>, EIP1559ParamError>;
 
     /// Exposes the chain specification to determine active hardforks and network rules.
     ///
@@ -211,7 +212,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         self.chain_spec.as_ref()
     }
 
-    fn evm_env(&self) -> reth_evm::EvmEnv<OpSpecId> {
+    fn evm_env(&self) -> Result<EvmEnv<OpSpecId>, EIP1559ParamError> {
         self.evm_config.evm_env(self.parent())
     }
 
@@ -307,7 +308,10 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
                 .map_err(PayloadBuilderError::other)?;
 
             let evm = this.evm_config.evm_with_env(db, evm_env);
-            let ctx = this.evm_config.context_for_next_block(parent, attributes);
+            let ctx = this
+                .evm_config
+                .context_for_next_block(parent, attributes)
+                .map_err(PayloadBuilderError::other)?;
 
             Ok(this.evm_config.create_block_builder(evm, parent, ctx))
         }

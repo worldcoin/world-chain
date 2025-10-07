@@ -21,6 +21,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
 use std::future::Future;
+use std::time::Duration;
 
 use crate::eth::FlashblocksEthApi;
 
@@ -44,6 +45,10 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         self.inner.send_raw_transaction(tx).await
+    }
+
+    fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.inner.send_raw_transaction_sync_timeout()
     }
 
     /// Helper method that loads a transaction and its receipt.
