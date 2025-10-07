@@ -94,6 +94,7 @@ impl Flashblock {
                         .unwrap_or_default()
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    ..Default::default() // TODO
                 },
                 metadata,
             },

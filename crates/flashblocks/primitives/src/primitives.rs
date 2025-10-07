@@ -1,3 +1,4 @@
+use alloy_eip7928::AccountChanges;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
@@ -5,6 +6,16 @@ use alloy_rpc_types_eth::Withdrawal;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::flashblocks::FlashblockMetadata;
+
+#[derive(
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
+)]
+pub struct FlashblockBlockAccessList {
+    flash_index: u64,
+    min_tx_index: u64,
+    max_tx_index: u64,
+    accounts: Vec<AccountChanges>,
+}
 
 /// Represents the modified portions of an execution payload within a flashblock.
 /// This structure contains only the fields that can be updated during block construction,
@@ -32,6 +43,10 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals: Vec<Withdrawal>,
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
+    /// The access list of the diff.
+    pub flash_bal: FlashblockBlockAccessList,
+    /// The hash of the access list of the diff.
+    pub flash_bal_hash: B256,
 }
 
 /// Represents the base configuration of an execution payload that remains constant
@@ -200,9 +215,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::keccak256;
     use alloy_rlp::{encode, Decodable};
 
     fn sample_diff() -> ExecutionPayloadFlashblockDeltaV1 {
+        let mut buff = vec![];
+        ExecutionPayloadFlashblockDeltaV1::default().encode(&mut buff);
+
         ExecutionPayloadFlashblockDeltaV1 {
             state_root: B256::from([1u8; 32]),
             receipts_root: B256::from([2u8; 32]),
@@ -212,6 +231,9 @@ mod tests {
             transactions: vec![Bytes::from(vec![0xde, 0xad, 0xbe, 0xef])],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
+            flash_bal: FlashblockBlockAccessList::default(),
+            flash_bal_hash: keccak256(&buff)
+                .into(),
         }
     }
 

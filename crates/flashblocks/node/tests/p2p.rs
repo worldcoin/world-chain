@@ -206,6 +206,7 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
+            ..Default::default()
         },
         metadata: FlashblockMetadata::default(),
     }

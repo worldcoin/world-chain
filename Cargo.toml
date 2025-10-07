@@ -171,6 +171,7 @@ alloy-signer = { version = "1.0.37", default-features = false }
 alloy-signer-local = { version = "1.0.37", default-features = false, features = [
     "mnemonic",
 ] }
+alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", branch = "main" }
 alloy-sol-types = "1.3.0"
 alloy-serde = { version = "1.0.11", default-features = false }
 alloy-hardforks = { version = "0.3.0", default-features = false }
