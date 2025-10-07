@@ -26,12 +26,6 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A watch channel notifier to the jobs generator.
     to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
-<<<<<<< HEAD
-    /// Watch channel receiver for pending flashblock.
-    pending_block_rx:
-        tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
-=======
->>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -41,82 +35,12 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
-<<<<<<< HEAD
-        pending_block_rx: tokio::sync::watch::Receiver<
-            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
-        >,
-=======
->>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
     ) -> Self {
         Self {
             inner,
             to_jobs_generator,
         }
     }
-<<<<<<< HEAD
-
-    /// Checks if the given payload matches the cached pending block.
-    /// Returns a valid PayloadStatus if there's a match, None otherwise.
-    ///
-    /// Compares:
-    /// - Block hash
-    /// - Parent hash
-    /// - Timestamp
-    /// - Transaction list (order and content)
-    fn check_cached_payload(
-        &self,
-        block_hash: B256,
-        parent_hash: B256,
-        timestamp: u64,
-        transactions: &[alloy_primitives::Bytes],
-    ) -> Option<PayloadStatus> {
-        let pending_block = self.pending_block_rx.borrow();
-
-        if let Some(ref executed_block) = *pending_block {
-            let cached_block = &executed_block.block.recovered_block;
-
-            // Compare basic block attributes
-            if cached_block.hash() != block_hash
-                || cached_block.parent_hash != parent_hash
-                || cached_block.timestamp != timestamp
-            {
-                return None;
-            }
-
-            // Compare transaction count first for quick rejection
-            if cached_block.body().transactions().count() != transactions.len() {
-                return None;
-            }
-
-            // Compare each transaction
-            let cached_txs: Vec<_> = cached_block
-                .body()
-                .transactions()
-                .map(|tx| alloy_eips::eip2718::Encodable2718::encoded_2718(tx))
-                .collect();
-
-            for (cached_tx, input_tx) in cached_txs.iter().zip(transactions.iter()) {
-                if &cached_tx[..] != &input_tx[..] {
-                    return None;
-                }
-            }
-
-            debug!(
-                target: "flashblocks::rpc::engine",
-                %block_hash,
-                "Returning cached payload from flashblocks state executor"
-            );
-
-            return Some(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(cached_block.state_root()),
-            ));
-        }
-
-        None
-    }
-=======
->>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
 }
 
 #[async_trait]
@@ -152,27 +76,6 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-<<<<<<< HEAD
-        // Check if we have this payload cached
-        if let Some(cached_status) = self.check_cached_payload(
-            payload.payload_inner.payload_inner.payload_inner.block_hash,
-            payload
-                .payload_inner
-                .payload_inner
-                .payload_inner
-                .parent_hash,
-            payload.payload_inner.payload_inner.payload_inner.timestamp,
-            &payload
-                .payload_inner
-                .payload_inner
-                .payload_inner
-                .transactions,
-        ) {
-            return Ok(cached_status);
-        }
-
-=======
->>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
         Ok(self
             .inner
             .new_payload_v4(
