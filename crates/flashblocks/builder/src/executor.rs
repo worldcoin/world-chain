@@ -37,13 +37,13 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
-    OpRethReceiptBuilder,
+    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEngineTypes, OpEvmConfig,
+    OpPayloadBuilderAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::BestPayloadTransactions;
@@ -61,6 +61,7 @@ use revm::DatabaseCommit;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::{error, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
@@ -767,6 +768,7 @@ impl Default for FlashblocksStateExecutor {
 pub struct FlashblocksStateExecutorInner {
     flashblocks: Option<Flashblocks>,
     latest_payload: Option<(OpBuiltPayload, u64)>,
+    payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
 }
 
 impl FlashblocksStateExecutor {
@@ -783,6 +785,7 @@ impl FlashblocksStateExecutor {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
             flashblocks: None,
             latest_payload: None,
+            payload_events: None,
         }));
 
         Self {
@@ -883,6 +886,19 @@ impl FlashblocksStateExecutor {
         &self,
     ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
         self.pending_block.subscribe()
+    }
+
+    /// Registers a new broadcast channel for built payloads.
+    pub fn register_payload_events(&self, tx: broadcast::Sender<Events<OpEngineTypes>>) {
+        self.inner.write().payload_events = Some(tx);
+    }
+
+    /// Broadcasts a new payload to cache in the in memory tree.
+    pub fn broadcast_payload(&self, event: Events<OpEngineTypes>) -> eyre::Result<()> {
+        if let Some(tx) = &self.inner.read().payload_events {
+            tx.send(event)?;
+        }
+        Ok(())
     }
 }
 
@@ -1009,6 +1025,8 @@ where
     *latest_payload = Some((payload.clone(), flashblock.index));
 
     pending_block.send_replace(payload.executed_block());
+
+    state_executor.broadcast_payload(Events::BuiltPayload(payload.clone()))?;
 
     Ok(())
 }
