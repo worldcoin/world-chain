@@ -1,9 +1,8 @@
-use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use flashblocks_primitives::p2p::Authorization;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
@@ -15,13 +14,11 @@ use reth::{
     api::{EngineApiValidator, EngineTypes},
     rpc::api::IntoEngineApiRpcModule,
 };
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_chainspec::EthereumHardforks;
-use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use tracing::{debug, trace};
+use tracing::trace;
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -29,9 +26,12 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A watch channel notifier to the jobs generator.
     to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+<<<<<<< HEAD
     /// Watch channel receiver for pending flashblock.
     pending_block_rx:
         tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+=======
+>>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -41,16 +41,19 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+<<<<<<< HEAD
         pending_block_rx: tokio::sync::watch::Receiver<
             Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
         >,
+=======
+>>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
     ) -> Self {
         Self {
             inner,
             to_jobs_generator,
-            pending_block_rx,
         }
     }
+<<<<<<< HEAD
 
     /// Checks if the given payload matches the cached pending block.
     /// Returns a valid PayloadStatus if there's a match, None otherwise.
@@ -112,6 +115,8 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
 
         None
     }
+=======
+>>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
 }
 
 #[async_trait]
@@ -125,16 +130,6 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
-        // Check if we have this payload cached
-        if let Some(cached_status) = self.check_cached_payload(
-            payload.execution_payload.block_hash,
-            payload.execution_payload.parent_hash,
-            payload.execution_payload.timestamp,
-            &payload.execution_payload.transactions,
-        ) {
-            return Ok(cached_status);
-        }
-
         Ok(self.inner.new_payload_v2(payload).await?)
     }
 
@@ -144,16 +139,6 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        // Check if we have this payload cached
-        if let Some(cached_status) = self.check_cached_payload(
-            payload.payload_inner.payload_inner.block_hash,
-            payload.payload_inner.payload_inner.parent_hash,
-            payload.payload_inner.payload_inner.timestamp,
-            &payload.payload_inner.payload_inner.transactions,
-        ) {
-            return Ok(cached_status);
-        }
-
         Ok(self
             .inner
             .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root)
@@ -167,6 +152,7 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
+<<<<<<< HEAD
         // Check if we have this payload cached
         if let Some(cached_status) = self.check_cached_payload(
             payload.payload_inner.payload_inner.payload_inner.block_hash,
@@ -185,6 +171,8 @@ where
             return Ok(cached_status);
         }
 
+=======
+>>>>>>> parent of 2bdf79bc (check flashblocks cache before executing in get_payload)
         Ok(self
             .inner
             .new_payload_v4(
