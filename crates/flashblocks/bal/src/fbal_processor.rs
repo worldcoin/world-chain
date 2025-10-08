@@ -106,7 +106,7 @@ impl<P> FlashblockBalStateValidator<P> {
         }
 
         // fetch the state provider for the parent
-
+        // let parent = 
         // self.process_flashblock(fb);
     }
 

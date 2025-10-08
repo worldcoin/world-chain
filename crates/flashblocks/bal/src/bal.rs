@@ -4,8 +4,8 @@
 //! transaction index from the EIP-7928 Block Access List, enabling executionless state updates
 //! and parallel transaction validation.
 
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use ::eyre::eyre::eyre;
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::{eyre, Result};
 use flashblocks_primitives::primitives::FlashblockBlockAccessList;
 use reth::{
@@ -18,20 +18,22 @@ use reth::{
         state::{AccountInfo, Bytecode},
     },
 };
+use reth_trie::HashedPostState;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use tracing::info;
 
 /// Reconstructs pre-state bundles from Block Access Lists.
 ///
 /// This struct can reconstruct the exact state at any transaction index within a block
 /// by applying BAL changes in order, enabling parallel execution and executionless sync.
-pub struct BalPreStateBuilder<'a, SP> {
+pub struct BalReader<'a, SP> {
     /// The block access list containing all state changes
     bal: &'a FlashblockBlockAccessList,
     /// State provider for fetching base state (parent block state)
     state_provider: &'a SP,
 }
 
-impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
+impl<'a, SP: StateProvider> BalReader<'a, SP> {
     /// Creates a new pre-state builder from a BAL and state provider.
     ///
     /// # Arguments
@@ -42,66 +44,6 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
             bal,
             state_provider,
         }
-    }
-
-    /// Builds the pre-state bundle for a specific transaction index.
-    ///
-    /// This reconstructs the exact state as it existed BEFORE executing the transaction
-    /// at the given index. The state includes:
-    /// - Account info (balance, nonce, code) from the parent block
-    /// - Storage values as they existed before the transaction
-    /// - All accounts that will be accessed during execution (from BAL)
-    ///
-    /// # Arguments
-    /// * `tx_index` - The transaction index (0-based) for which to build pre-state
-    ///
-    /// # Returns
-    /// A `BundleState` representing the state before executing transaction `tx_index`
-    pub fn build_pre_state_at(&self, tx_index: u64) -> Result<BundleState> {
-        let mut bundle = BundleState::default();
-
-        // Iterate through all accounts in the BAL
-        for (address, account_access) in &self.bal.accounts {
-            // Get the base account info from parent block
-            let base_info = self
-                .state_provider
-                .basic_account(address)?
-                .unwrap_or_default();
-
-            // Reconstruct the account state as it existed just before tx_index
-            let (original_info, present_info, storage, status) =
-                self.reconstruct_account_at(*address, account_access, tx_index, base_info.into())?;
-
-            let bundle_account = BundleAccount::new(
-                Some(original_info),
-                Some(present_info),
-                storage
-                    .into_iter()
-                    .collect::<alloy_primitives::map::HashMap<U256, StorageSlot>>(),
-                status,
-            );
-
-            bundle.state.insert(*address, bundle_account);
-        }
-
-        Ok(bundle)
-    }
-
-    /// Builds the pre-state bundle for transaction index 0 (before any transactions).
-    ///
-    /// This is the state after pre-execution system contracts (block_access_index = 0)
-    /// but before the first user transaction (block_access_index = 1).
-    pub fn build_initial_state(&self) -> Result<BundleState> {
-        self.build_pre_state_at(1)
-    }
-
-    /// Builds the final state after all transactions.
-    ///
-    /// This is the state after the last transaction has executed, including any
-    /// post-execution system contract calls.
-    pub fn build_final_state(&self) -> Result<BundleState> {
-        let max_index = self.bal.max_tx_index;
-        self.build_pre_state_at(max_index + 1)
     }
 
     /// Reconstructs a single account's state at a specific transaction index.
@@ -313,7 +255,7 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
     /// - Block access indices are in ascending order
     /// - No gaps in transaction indices
     /// - Storage changes are properly ordered
-    pub fn validate(&self) -> Result<()> {
+    pub fn pre_checks(&self) -> Result<()> {
         for (address, account_access) in &self.bal.accounts {
             // Validate balance changes are ordered
             let mut prev_idx = None;
@@ -384,6 +326,18 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
         }
 
         Ok(())
+    }
+
+    pub fn state_root(&self) -> eyre::Result<B256> {
+        let bundle = self.build_final_state()?;
+        let hashed_state = self.state_provider.hashed_post_state(&bundle);
+
+        let (state_root, trie_updates) = self
+            .state_provider
+            .state_root_with_updates(hashed_state.clone())?;
+
+        info!("Computed state root: {:?}", state_root);
+        Ok(state_root)
     }
 }
 

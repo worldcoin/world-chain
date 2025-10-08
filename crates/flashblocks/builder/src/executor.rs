@@ -166,23 +166,6 @@ where
     }
 }
 
-// impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
-// where
-//     DB: Database + 'db,
-//     E: Evm<
-//         DB = &'db mut State<DB>,
-//         Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-//     >,
-//     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
-//     Spec: OpHardforks,
-// {
-//     fn update(&mut self) {
-//         let inspector = &self.evm().inspector().clone();
-//         let changes = inspector.into_changes();
-
-//     }
-// }
-
 /// Ethereum block executor factory.
 #[derive(Debug, Clone)]
 pub struct FlashblocksBlockExecutorFactory {
@@ -821,4 +804,9 @@ where
     pending_block.send_replace(payload.executed_block());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 }
