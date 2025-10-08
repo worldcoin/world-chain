@@ -62,7 +62,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 
-use crate::evm::BalInspector;
+use crate::inspector::BalInspector;
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
@@ -355,6 +355,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
             access_list: FlashblockBlockAccessList {
                 min_tx_index: len,
                 max_tx_index: 0,
+                fbal_accumulator,
                 accounts: vec![],
             },
             transaction_index: len,
@@ -390,13 +391,18 @@ where
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<u64, BlockExecutionError> {
-        let result = {
-            let executor = self.inner.executor_mut();
-            executor.execute_transaction_without_commit(&tx.as_executable())?
-        };
+        let executor = self.inner.executor_mut();
 
-        self.update_access_list(result.state.clone());
+        // Get pre-transaction state for comparison
+        let pre_state = executor.evm().db().inner().journaled_state.state.clone();
 
+        // Execute transaction without committing
+        let result = executor.execute_transaction_without_commit(&tx.as_executable())?;
+
+        // Update access list with post-transaction state
+        self.update_access_list(result.state.clone(), &pre_state);
+
+        // Commit the transaction
         self.inner
             .executor_mut()
             .commit_transaction(result, tx.into_recovered())
@@ -522,11 +528,11 @@ where
     }
 
     /// Updates the access list with the given state changes from the EVM after executing a transaction.
-    pub fn update_access_list(&mut self, state: EvmState) {
+    pub fn update_access_list(&mut self, state: EvmState, pre_state: &EvmState) {
         let inspector = { self.executor_mut().evm_mut().inspector_mut() };
 
         // merge account info changes into the storage changes
-        let changes = inspector.merge_state(state).into_iter();
+        let changes = inspector.merge_state(state, pre_state).into_iter();
 
         // merge with existing changes
         self.access_list.merge_changes(changes);
@@ -537,6 +543,12 @@ where
             .sort_unstable_by_key(|c| c.address);
 
         let new_index = self.transaction_index + 1;
+
+        // clear transaction-specific state for next transaction
+        self.executor_mut()
+            .evm_mut()
+            .inspector_mut()
+            .clear_transaction_state();
 
         // update the inspectors index
         self.executor_mut()

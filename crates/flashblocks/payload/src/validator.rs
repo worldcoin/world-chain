@@ -19,7 +19,6 @@ use reth_provider::{
     BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateProvider,
     StateProviderFactory, StateReader,
 };
-use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct BalEngineValidator<P> {
@@ -76,20 +75,6 @@ where
         payload: <OpEngineTypes as PayloadTypes>::ExecutionData,
         ctx: TreeCtx<'_, OpPrimitives>,
     ) -> ValidationOutcome<OpPrimitives> {
-        todo!()
-        // // Spin up an EVM for each transaction loading any relavant pre-state into the in memory DB as specified by the block access list.
-        // // Run each EVM in parallel on its own distinct database.
-        // // Merge bundles, receipts
-        // // let evm_env = self.evm_config.evm_env(payload.p)
-        // let parent_header = self
-        //     .provider
-        //     .sealed_header_by_hash(payload.parent_hash())
-        //     .expect("parent header exists")
-        //     .expect("parent header exists");
-        // let env = self
-        //     .evm_config
-        //     .evm_env(parent_header.header())
-        //     .expect("evm env");
 
         // // spin up an exe
     }

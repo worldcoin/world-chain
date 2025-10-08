@@ -37,6 +37,7 @@ reth-optimism-evm.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-evm = {workspace = true, features = ["op"]}
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true

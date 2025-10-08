@@ -1,9 +1,9 @@
+use crate::inspector::BalInspector;
 use crate::{
     executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
     payload_txns::BestPayloadTxns,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-use crate::evm::BalInspector;
 use alloy_consensus::Transaction;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
@@ -53,9 +53,9 @@ use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span, trace, warn};
 
 pub mod executor;
+pub mod inspector;
 pub mod payload_txns;
 pub mod traits;
-pub mod evm;
 
 /// Flashblocks Paylod builder
 ///
