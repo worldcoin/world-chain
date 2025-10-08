@@ -5,22 +5,20 @@
 //! and parallel transaction validation.
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use ::eyre::eyre::eyre;
 use eyre::{eyre, Result};
 use flashblocks_primitives::primitives::FlashblockBlockAccessList;
 use reth::{
     providers::{StateProvider, StateProviderFactory},
     revm::{
         db::{
-            states::{
-                bundle_account::{BundleAccount, StorageSlot},
-                reverts::AccountInfoRevert,
-            },
+            states::{bundle_account::BundleAccount, reverts::AccountInfoRevert, StorageSlot},
             AccountStatus, BundleState, PlainAccount,
         },
-        primitives::{Account, AccountInfo, HashMap},
+        state::{AccountInfo, Bytecode},
     },
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Reconstructs pre-state bundles from Block Access Lists.
 ///
@@ -40,7 +38,10 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
     /// * `bal` - The block access list containing all state changes
     /// * `state_provider` - Provider for the parent block state
     pub fn new(bal: &'a FlashblockBlockAccessList, state_provider: &'a SP) -> Self {
-        Self { bal, state_provider }
+        Self {
+            bal,
+            state_provider,
+        }
     }
 
     /// Builds the pre-state bundle for a specific transaction index.
@@ -64,17 +65,19 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
             // Get the base account info from parent block
             let base_info = self
                 .state_provider
-                .basic_account(*address)?
+                .basic_account(address)?
                 .unwrap_or_default();
 
             // Reconstruct the account state as it existed just before tx_index
             let (original_info, present_info, storage, status) =
-                self.reconstruct_account_at(*address, account_access, tx_index, base_info)?;
+                self.reconstruct_account_at(*address, account_access, tx_index, base_info.into())?;
 
             let bundle_account = BundleAccount::new(
                 Some(original_info),
                 Some(present_info),
-                storage,
+                storage
+                    .into_iter()
+                    .collect::<alloy_primitives::map::HashMap<U256, StorageSlot>>(),
                 status,
             );
 
@@ -110,7 +113,12 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
         account_access: &flashblocks_primitives::primitives::AccountAccess,
         tx_index: u64,
         base_info: AccountInfo,
-    ) -> Result<(AccountInfo, AccountInfo, HashMap<U256, StorageSlot>, AccountStatus)> {
+    ) -> Result<(
+        AccountInfo,
+        AccountInfo,
+        HashMap<U256, StorageSlot>,
+        AccountStatus,
+    )> {
         // Start with base state from parent block
         let mut original_info = base_info.clone();
         let mut present_info = base_info.clone();
@@ -138,7 +146,7 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
         for (idx, code) in &account_access.code_changes {
             if (*idx as u64) < tx_index {
                 present_info.code_hash = keccak256(code);
-                present_info.code = Some(code.clone());
+                present_info.code = Some(Bytecode::new_raw(code.clone()));
                 code_applied = true;
             }
         }
@@ -176,7 +184,7 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
             // Get original value from parent block state
             let original_value = self
                 .state_provider
-                .storage(address, slot_u256)?
+                .storage(address, slot_u256.into())?
                 .unwrap_or(U256::ZERO);
 
             // Find the last write before tx_index
@@ -201,7 +209,7 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
             if !storage.contains_key(&slot_u256) {
                 let value = self
                     .state_provider
-                    .storage(address, slot_u256)?
+                    .storage(address, slot_u256.into())?
                     .unwrap_or(U256::ZERO);
 
                 storage.insert(slot_u256, StorageSlot::new(value));
@@ -221,12 +229,22 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
         let mut addresses = HashSet::new();
 
         for (address, account_access) in &self.bal.accounts {
-            let has_changes = account_access.balance_changes.iter().any(|(idx, _)| (*idx as u64) < tx_index)
-                || account_access.nonce_changes.iter().any(|(idx, _)| (*idx as u64) < tx_index)
-                || account_access.code_changes.iter().any(|(idx, _)| (*idx as u64) < tx_index)
-                || account_access.storage_writes.iter().any(|(_, writes)| {
-                    writes.iter().any(|(idx, _)| (*idx as u64) < tx_index)
-                });
+            let has_changes = account_access
+                .balance_changes
+                .iter()
+                .any(|(idx, _)| (*idx as u64) < tx_index)
+                || account_access
+                    .nonce_changes
+                    .iter()
+                    .any(|(idx, _)| (*idx as u64) < tx_index)
+                || account_access
+                    .code_changes
+                    .iter()
+                    .any(|(idx, _)| (*idx as u64) < tx_index)
+                || account_access
+                    .storage_writes
+                    .iter()
+                    .any(|(_, writes)| writes.iter().any(|(idx, _)| (*idx as u64) < tx_index));
 
             if has_changes {
                 addresses.insert(*address);
@@ -247,27 +265,38 @@ impl<'a, SP: StateProvider> BalPreStateBuilder<'a, SP> {
         // Only include accounts that are accessed at exactly tx_index
         for (address, account_access) in &self.bal.accounts {
             // Check if this account is accessed at tx_index
-            let accessed_at_index = account_access.balance_changes.contains_key(&(tx_index as u16))
-                || account_access.nonce_changes.contains_key(&(tx_index as u16))
+            let accessed_at_index = account_access
+                .balance_changes
+                .contains_key(&(tx_index as u16))
+                || account_access
+                    .nonce_changes
+                    .contains_key(&(tx_index as u16))
                 || account_access.code_changes.contains_key(&(tx_index as u16))
-                || account_access.storage_writes.iter().any(|(_, writes)| {
-                    writes.contains_key(&(tx_index as u16))
-                })
+                || account_access
+                    .storage_writes
+                    .iter()
+                    .any(|(_, writes)| writes.contains_key(&(tx_index as u16)))
                 || !account_access.storage_reads.is_empty();
 
             if accessed_at_index {
                 let base_info = self
                     .state_provider
-                    .basic_account(*address)?
+                    .basic_account(address)?
                     .unwrap_or_default();
 
-                let (original_info, present_info, storage, status) =
-                    self.reconstruct_account_at(*address, account_access, tx_index, base_info)?;
+                let (original_info, present_info, storage, status) = self.reconstruct_account_at(
+                    *address,
+                    account_access,
+                    tx_index,
+                    base_info.into(),
+                )?;
 
                 let bundle_account = BundleAccount::new(
                     Some(original_info),
                     Some(present_info),
-                    storage,
+                    storage
+                        .into_iter()
+                        .collect::<alloy_primitives::map::HashMap<U256, StorageSlot>>(),
                     status,
                 );
 

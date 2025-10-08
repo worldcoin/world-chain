@@ -13,7 +13,7 @@ use reth::{
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
 use tokio::sync::broadcast;
-use tokio_stream::stream_ext::StreamExt;
+use futures::stream::StreamExt;
 
 pub struct FlashblockBalProcessor<T: PayloadTypes, St, P> {
     /// Handle to the Flashblocks stream.
@@ -52,11 +52,11 @@ impl<T: PayloadTypes, St, P> FlashblockBalProcessor<T, St, P> {
 
             loop {
                 tokio::select! {
-                    Some(fb) = fb_stream.try_next() => {
-                        self.inner.on_new_flashblock(fb);
+                    Some(fb) = fb_stream.next() => {
+                        // self.inner.on_new_flashblock(fb);
                     }
-                    Some(state) = chain_events.try_next() => {
-                        self.inner.on_new_state(state);
+                    Some(state) = chain_events.next() => {
+                        // self.inner.on_new_state(state);
                     }
 
                 }
@@ -107,7 +107,7 @@ impl<P> FlashblockBalStateValidator<P> {
 
         // fetch the state provider for the parent
 
-        self.process_flashblock(fb);
+        // self.process_flashblock(fb);
     }
 
     fn clear(&mut self) {

@@ -3689,6 +3689,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3878,6 +3879,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

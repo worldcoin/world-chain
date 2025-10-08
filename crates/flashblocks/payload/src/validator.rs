@@ -75,7 +75,7 @@ where
         payload: <OpEngineTypes as PayloadTypes>::ExecutionData,
         ctx: TreeCtx<'_, OpPrimitives>,
     ) -> ValidationOutcome<OpPrimitives> {
-
+        todo!()
         // // spin up an exe
     }
 
@@ -122,7 +122,7 @@ impl ParallelBlockExecutor {
             .expect("valid payload");
 
         for (i, tx) in block.body().transactions_iter().enumerate() {
-            let changes_for_tx = self.access_list.accounts();
+            // let changes_for_tx = self.access_list.accounts();
         }
         // For each transaction in the payload, spawn a new task to execute it in its own EVM instance
         // with the shared env and access list.

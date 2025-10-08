@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use alloy_eip7928::AccountChanges;
+use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange};
 use alloy_primitives::{map::HashSet, Address, Bloom, Bytes, FixedBytes, B256, B64, U256};
-use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
+use alloy_rlp::{
+    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    RlpEncodableWrapper,
+};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::{AccountInfo, Withdrawal};
 use reth::revm::{
@@ -38,12 +41,79 @@ impl AccountAccess {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
 pub struct FlashblockBlockAccessList {
     pub min_tx_index: u64,
     pub max_tx_index: u64,
     pub fbal_accumulator: B256,
     pub accounts: HashMap<Address, AccountAccess>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, RlpEncodable, RlpDecodable)]
+pub struct FlashblockBlockAccessListWire {
+    pub min_tx_index: u64,
+    pub max_tx_index: u64,
+    pub fbal_accumulator: B256,
+    pub accounts: Vec<AccountChanges>,
+}
+
+impl From<FlashblockBlockAccessList> for FlashblockBlockAccessListWire {
+    fn from(fbal: FlashblockBlockAccessList) -> Self {
+        let accounts = fbal.accounts.into_iter().map(|(address, access)| {
+            let storage_changes = access.storage_writes.into_iter().map(|(slot, changes)| {
+                SlotChanges {
+                    slot,
+                    changes: changes.into_iter().map(|(tx_index, new_value)| {
+                        StorageChange {
+                            block_access_index: tx_index as u64,
+                            new_value,
+                        }
+                    }).collect()
+                }
+            }).collect();
+
+            let storage_reads = access.storage_reads.into_iter().collect();
+
+            let balance_changes = access.balance_changes.into_iter().map(|(tx_index, post_balance)| {
+                BalanceChange {
+                    block_access_index: tx_index as u64,
+                    post_balance,
+                }
+            }).collect();
+
+            let nonce_changes = access.nonce_changes.into_iter().map(|(tx_index, new_nonce)| {
+                NonceChange {
+                    block_access_index: tx_index as u64,
+                    new_nonce,
+                }
+            }).collect();
+
+            let code_changes = access.code_changes.into_iter().map(|(tx_index, new_code)| {
+                CodeChange {
+                    block_access_index: tx_index as u64,
+                    new_code,
+                }
+            }).collect();
+
+            AccountChanges {
+                address,
+                storage_changes,
+                storage_reads,
+                balance_changes,
+                nonce_changes,
+                code_changes,
+            }
+        }).collect();
+
+        Self {
+            min_tx_index: fbal.min_tx_index,
+            max_tx_index: fbal.max_tx_index,
+            fbal_accumulator: fbal.fbal_accumulator,
+            accounts
+        }
+    }
 }
 
 impl FlashblockBlockAccessList {
@@ -211,7 +281,9 @@ pub type BlockAccessList = Vec<AccountAccess>;
 /// such as state root, receipts, logs, and new transactions. Other immutable block fields
 /// like parent hash and block number are excluded since they remain constant throughout
 /// the block's construction.
-#[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
+#[derive(
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpDecodable, RlpEncodable,
+)]
 pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The state root of the block.
     pub state_root: B256,
@@ -231,7 +303,7 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
     /// The access list of the diff.
-    pub flash_bal: FlashblockBlockAccessList,
+    pub flash_bal: FlashblockBlockAccessListWire,
     /// The hash of the access list of the diff.
     pub flash_bal_hash: B256,
 }
@@ -418,7 +490,7 @@ mod tests {
             transactions: vec![Bytes::from(vec![0xde, 0xad, 0xbe, 0xef])],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
-            flash_bal: FlashblockBlockAccessList::default(),
+            flash_bal: FlashblockBlockAccessListWire::default(),
             flash_bal_hash: keccak256(&buff).into(),
         }
     }

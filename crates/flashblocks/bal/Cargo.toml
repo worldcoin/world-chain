@@ -32,6 +32,7 @@ alloy-rlp.workspace = true
 
 tokio.workspace = true
 futures.workspace = true
+tokio-stream.workspace = true
 
 [lints]
 workspace = true

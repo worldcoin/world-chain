@@ -44,3 +44,4 @@ metrics-derive.workspace = true
 tracing.workspace = true
 futures.workspace = true
 eyre.workspace = true
+tokio-stream.workspace = true

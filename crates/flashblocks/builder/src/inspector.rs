@@ -12,12 +12,11 @@ use revm::{
         BALANCE, CALL, CALLCODE, CREATE, CREATE2, DELEGATECALL, EXTCODECOPY, EXTCODEHASH,
         EXTCODESIZE, SELFDESTRUCT, SLOAD, SSTORE, STATICCALL,
     },
-    context::{ContextTr, TxContextTr},
-    handler::register::EvmHandler,
+    context::{ContextTr, JournalTr},
     interpreter::{
         interpreter::EthInterpreter,
         interpreter_types::{InputsTr, Jumps},
-        CallInputs, CreateInputs, Interpreter, InterpreterResult,
+        CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter, InterpreterResult,
     },
     state::{Account, EvmState},
     Inspector,
@@ -99,7 +98,13 @@ impl BalInspector {
 
     /// Records a storage write (SSTORE).
     /// The `pre_value` is the value before this SSTORE, and `new_value` is what's being written.
-    fn record_storage_write(&mut self, address: Address, slot: B256, pre_value: U256, new_value: U256) {
+    fn record_storage_write(
+        &mut self,
+        address: Address,
+        slot: B256,
+        pre_value: U256,
+        new_value: U256,
+    ) {
         self.record_address_access(address);
 
         if pre_value == new_value {
@@ -123,33 +128,32 @@ impl BalInspector {
     ///
     /// This should be called after each transaction with the post-execution state.
     /// It compares against pre-state to determine actual changes.
-    pub fn merge_state(&mut self, state: EvmState, pre_state: &EvmState) -> Vec<AccountChanges> {
+    pub fn merge_state(&mut self, state: EvmState) -> Vec<AccountChanges> {
         let mut changes: HashMap<Address, AccountChanges> = HashMap::new();
 
         // First, ensure all accessed addresses are represented
         for &address in &self.accessed_addresses {
-            changes.entry(address).or_insert_with(|| AccountChanges::new(address));
+            changes
+                .entry(address)
+                .or_insert_with(|| AccountChanges::new(address));
         }
 
         // Process all accounts in the post-execution state
         for (address, account_state) in state.iter() {
             self.record_address_access(*address);
 
-            let mut account_changes = changes
+            let account_changes = changes
                 .entry(*address)
                 .or_insert_with(|| AccountChanges::new(*address));
 
             // Get pre-state for comparison
-            let (pre_balance, pre_nonce, pre_code) = pre_state
+            let (pre_balance, pre_nonce, pre_code) = self
+                .pre_state
                 .get(address)
-                .map(|acc| {
-                    (
-                        acc.info.balance,
-                        acc.info.nonce,
-                        acc.info.code.as_ref().map(|c| c.bytecode().clone()),
-                    )
+                .map(|(pre_balance, pre_nonce, pre_code)| {
+                    (pre_balance, pre_nonce, pre_code.as_ref().map(|c| c))
                 })
-                .unwrap_or((U256::ZERO, 0, None));
+                .unwrap_or((&U256::ZERO, &0, None));
 
             let post_balance = account_state.info.balance;
             let post_nonce = account_state.info.nonce;
@@ -160,27 +164,24 @@ impl BalInspector {
                 .map(|c| c.bytecode().clone());
 
             // Record balance change only if it actually changed
-            if post_balance != pre_balance {
-                account_changes.balance_changes.push(BalanceChange::new(
-                    self.index,
-                    post_balance,
-                ));
+            if post_balance != *pre_balance {
+                account_changes
+                    .balance_changes
+                    .push(BalanceChange::new(self.index, post_balance));
             }
 
             // Record nonce change only if it actually changed
-            if post_nonce != pre_nonce {
-                account_changes.nonce_changes.push(NonceChange::new(
-                    self.index,
-                    post_nonce,
-                ));
+            if post_nonce != *pre_nonce {
+                account_changes
+                    .nonce_changes
+                    .push(NonceChange::new(self.index, post_nonce));
             }
 
             // Record code change only if it actually changed
-            if post_code != pre_code {
-                account_changes.code_changes.push(CodeChange::new(
-                    self.index,
-                    post_code.unwrap_or_default(),
-                ));
+            if post_code != pre_code.cloned() {
+                account_changes
+                    .code_changes
+                    .push(CodeChange::new(self.index, post_code.unwrap_or_default()));
             }
 
             // Process storage writes
@@ -258,16 +259,11 @@ impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
                     // Get pre-value from storage
                     let slot_b256 = B256::from(slot);
                     let pre_value = context
-                        .evm()
-                        .inner()
-                        .journaled_state
-                        .state
-                        .get(&contract)
-                        .and_then(|acc| acc.storage.get(&slot.into()))
-                        .map(|s| s.present_value)
-                        .unwrap_or(U256::ZERO);
+                        .journal_mut()
+                        .sload(contract, slot_b256.clone().into())
+                        .unwrap_or_default();
 
-                    self.record_storage_write(contract, slot_b256, pre_value, new_value);
+                    self.record_storage_write(contract, slot_b256, pre_value.data, new_value);
                 }
             }
             BALANCE | EXTCODESIZE | EXTCODECOPY | EXTCODEHASH => {
@@ -282,12 +278,12 @@ impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
     }
 
     /// Called before a CALL-like opcode.
-    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<InterpreterResult> {
+    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         // Record target address access for CALL, CALLCODE, DELEGATECALL, STATICCALL
         self.record_address_access(inputs.target_address);
 
         // If there's value transfer, the caller is also accessed
-        if !inputs.transfer_value().is_zero() {
+        if !inputs.transfer_value().is_none() {
             self.record_address_access(inputs.caller);
         }
 
@@ -295,30 +291,11 @@ impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
     }
 
     /// Called before a CREATE-like opcode.
-    fn create(
-        &mut self,
-        _context: &mut CTX,
-        inputs: &mut CreateInputs,
-    ) -> Option<InterpreterResult> {
+    fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         // Record creator address
         self.record_address_access(inputs.caller);
 
         None
-    }
-
-    /// Called after a CREATE-like opcode.
-    fn create_end(
-        &mut self,
-        _context: &mut CTX,
-        _inputs: &CreateInputs,
-        result: InterpreterResult,
-    ) -> InterpreterResult {
-        // Record created address (even if creation failed)
-        if let Some(address) = result.output.address() {
-            self.record_address_access(*address);
-        }
-
-        result
     }
 
     /// Called when SELFDESTRUCT is executed.

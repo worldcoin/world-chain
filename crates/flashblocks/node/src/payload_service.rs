@@ -93,7 +93,7 @@ where
 
         let (payload_service, payload_service_handle) =
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-        let sender = payload_service.
+        
         ctx.task_executor()
             .spawn_critical("payload builder service", Box::pin(payload_service));
 

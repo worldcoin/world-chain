@@ -51,7 +51,6 @@ alloy-eip7928 = { workspace = true, features = ["rlp", "serde"] }
 flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
-
 # tokio
 tokio.workspace = true
 

@@ -343,7 +343,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
         chain_spec: Arc<OpChainSpec>,
     ) -> Self {
         let len = transactions.len() as u64;
-
+        let fbal_accumulator = B256::ZERO;
         Self {
             inner: BasicBlockBuilder {
                 executor,
@@ -356,7 +356,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
                 min_tx_index: len,
                 max_tx_index: 0,
                 fbal_accumulator,
-                accounts: vec![],
+                accounts: HashMap::default(),
             },
             transaction_index: len,
         }
@@ -393,14 +393,11 @@ where
     ) -> Result<u64, BlockExecutionError> {
         let executor = self.inner.executor_mut();
 
-        // Get pre-transaction state for comparison
-        let pre_state = executor.evm().db().inner().journaled_state.state.clone();
-
         // Execute transaction without committing
         let result = executor.execute_transaction_without_commit(&tx.as_executable())?;
 
         // Update access list with post-transaction state
-        self.update_access_list(result.state.clone(), &pre_state);
+        self.update_access_list(result.state.clone());
 
         // Commit the transaction
         self.inner
@@ -528,19 +525,14 @@ where
     }
 
     /// Updates the access list with the given state changes from the EVM after executing a transaction.
-    pub fn update_access_list(&mut self, state: EvmState, pre_state: &EvmState) {
+    pub fn update_access_list(&mut self, state: EvmState) {
         let inspector = { self.executor_mut().evm_mut().inspector_mut() };
 
         // merge account info changes into the storage changes
-        let changes = inspector.merge_state(state, pre_state).into_iter();
+        let changes = inspector.merge_state(state).into_iter();
 
         // merge with existing changes
         self.access_list.merge_changes(changes);
-
-        // sort keys by address
-        self.access_list
-            .accounts
-            .sort_unstable_by_key(|c| c.address);
 
         let new_index = self.transaction_index + 1;
 
