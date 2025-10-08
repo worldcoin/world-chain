@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange};
+use alloy_eip7928::{
+    AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+};
 use alloy_primitives::{map::HashSet, Address, Bloom, Bytes, FixedBytes, B256, B64, U256};
 use alloy_rlp::{
     Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
@@ -41,9 +43,7 @@ impl AccountAccess {
     }
 }
 
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlashblockBlockAccessList {
     pub min_tx_index: u64,
     pub max_tx_index: u64,
@@ -51,7 +51,9 @@ pub struct FlashblockBlockAccessList {
     pub accounts: HashMap<Address, AccountAccess>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, RlpEncodable, RlpDecodable)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, RlpEncodable, RlpDecodable,
+)]
 pub struct FlashblockBlockAccessListWire {
     pub min_tx_index: u64,
     pub max_tx_index: u64,
@@ -61,57 +63,70 @@ pub struct FlashblockBlockAccessListWire {
 
 impl From<FlashblockBlockAccessList> for FlashblockBlockAccessListWire {
     fn from(fbal: FlashblockBlockAccessList) -> Self {
-        let accounts = fbal.accounts.into_iter().map(|(address, access)| {
-            let storage_changes = access.storage_writes.into_iter().map(|(slot, changes)| {
-                SlotChanges {
-                    slot,
-                    changes: changes.into_iter().map(|(tx_index, new_value)| {
-                        StorageChange {
-                            block_access_index: tx_index as u64,
-                            new_value,
-                        }
-                    }).collect()
+        let accounts = fbal
+            .accounts
+            .into_iter()
+            .map(|(address, access)| {
+                let storage_changes = access
+                    .storage_writes
+                    .into_iter()
+                    .map(|(slot, changes)| SlotChanges {
+                        slot,
+                        changes: changes
+                            .into_iter()
+                            .map(|(tx_index, new_value)| StorageChange {
+                                block_access_index: tx_index as u64,
+                                new_value,
+                            })
+                            .collect(),
+                    })
+                    .collect();
+
+                let storage_reads = access.storage_reads.into_iter().collect();
+
+                let balance_changes = access
+                    .balance_changes
+                    .into_iter()
+                    .map(|(tx_index, post_balance)| BalanceChange {
+                        block_access_index: tx_index as u64,
+                        post_balance,
+                    })
+                    .collect();
+
+                let nonce_changes = access
+                    .nonce_changes
+                    .into_iter()
+                    .map(|(tx_index, new_nonce)| NonceChange {
+                        block_access_index: tx_index as u64,
+                        new_nonce,
+                    })
+                    .collect();
+
+                let code_changes = access
+                    .code_changes
+                    .into_iter()
+                    .map(|(tx_index, new_code)| CodeChange {
+                        block_access_index: tx_index as u64,
+                        new_code,
+                    })
+                    .collect();
+
+                AccountChanges {
+                    address,
+                    storage_changes,
+                    storage_reads,
+                    balance_changes,
+                    nonce_changes,
+                    code_changes,
                 }
-            }).collect();
-
-            let storage_reads = access.storage_reads.into_iter().collect();
-
-            let balance_changes = access.balance_changes.into_iter().map(|(tx_index, post_balance)| {
-                BalanceChange {
-                    block_access_index: tx_index as u64,
-                    post_balance,
-                }
-            }).collect();
-
-            let nonce_changes = access.nonce_changes.into_iter().map(|(tx_index, new_nonce)| {
-                NonceChange {
-                    block_access_index: tx_index as u64,
-                    new_nonce,
-                }
-            }).collect();
-
-            let code_changes = access.code_changes.into_iter().map(|(tx_index, new_code)| {
-                CodeChange {
-                    block_access_index: tx_index as u64,
-                    new_code,
-                }
-            }).collect();
-
-            AccountChanges {
-                address,
-                storage_changes,
-                storage_reads,
-                balance_changes,
-                nonce_changes,
-                code_changes,
-            }
-        }).collect();
+            })
+            .collect();
 
         Self {
             min_tx_index: fbal.min_tx_index,
             max_tx_index: fbal.max_tx_index,
             fbal_accumulator: fbal.fbal_accumulator,
-            accounts
+            accounts,
         }
     }
 }

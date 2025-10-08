@@ -5,6 +5,7 @@ use std::future::Future;
 
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use futures::stream::StreamExt;
 use futures::Stream;
 use reth::{
     api::{Events, PayloadTypes},
@@ -13,7 +14,6 @@ use reth::{
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
 use tokio::sync::broadcast;
-use futures::stream::StreamExt;
 
 pub struct FlashblockBalProcessor<T: PayloadTypes, St, P> {
     /// Handle to the Flashblocks stream.
@@ -117,7 +117,7 @@ impl<P> FlashblockBalStateValidator<P> {
 
     fn validate(&mut self, fb: FlashblocksPayloadV1) {
         // Validate the flashblock against the pending block state using the FBAL
-    }     
+    }
 
     // todo
     fn is_valid_extension(&self, fb: &FlashblocksPayloadV1) -> bool {

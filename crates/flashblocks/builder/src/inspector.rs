@@ -136,7 +136,7 @@ impl BalInspector {
 
     pub fn record_code_change(&mut self, address: Address, code: Bytes) {
         self.record_address_access(address);
-    
+
         self.code_changes.insert(address, code);
     }
 
@@ -256,7 +256,10 @@ impl Default for BalInspector {
     }
 }
 
-impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
+impl<CTX> Inspector<CTX> for BalInspector
+where
+    CTX: ContextTr<Journal: JournalTr>,
+{
     /// Called for each opcode step during EVM execution.
     fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, context: &mut CTX) {
         let op_code = interp.bytecode.opcode();
@@ -314,22 +317,30 @@ impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
         None
     }
 
-    /// Called after a CREATE-like opcode.
     fn create_end(
         &mut self,
         context: &mut CTX,
         inputs: &CreateInputs,
-        result: InterpreterResult,
-    ) -> InterpreterResult {
-        self.record_address_access(inputs.caller);
+        outcome: &mut CreateOutcome,
+    ) {
+        if outcome.result.is_ok() && outcome.address.is_some() {
+            let created_address = outcome.address.unwrap();
+            let code_load = context.journal_mut().code(created_address).unwrap();
+            let bytes = code_load.data;
 
-        if(result.is_ok()) {
-            let code = context.evm().inner().journaled_state.state.get(&result.output.address()).and_then(|acc| acc.info.code.as_ref().map(|c| c.bytecode().clone())).unwrap_or_default();
-            self.record_code_change(result.output.address(), code);
+            self.record_code_change(created_address, bytes);
         }
-
-        result
     }
+
+    //     self.record_address_access(inputs.caller);
+
+    //     // if(result.is_ok()) {
+    //     //     let code = context.evm().inner().journaled_state.state.get(&result.output.address()).and_then(|acc| acc.info.code.as_ref().map(|c| c.bytecode().clone())).unwrap_or_default();
+    //     //     self.record_code_change(result.output.address(), code);
+    //     // }
+
+    //     result
+    // }
 
     /// Called when SELFDESTRUCT is executed.
     fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
