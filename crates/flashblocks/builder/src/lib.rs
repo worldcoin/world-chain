@@ -3,7 +3,7 @@ use crate::{
     payload_txns::BestPayloadTxns,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-
+use crate::evm::BalInspector;
 use alloy_consensus::Transaction;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
@@ -55,6 +55,7 @@ use tracing::{debug, span, trace, warn};
 pub mod executor;
 pub mod payload_txns;
 pub mod traits;
+pub mod evm;
 
 /// Flashblocks Paylod builder
 ///
@@ -461,7 +462,7 @@ where
         cumulative_gas_used: Option<u64>,
         ctx: &'a Ctx,
     ) -> Result<
-        FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+        FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, BalInspector, PrecompilesMap>>,
         PayloadBuilderError,
     >
     where
@@ -503,7 +504,9 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         // Prepare EVM.
-        let evm = ctx.evm_config().evm_with_env(db, evm_env);
+        let evm = ctx
+            .evm_config()
+            .evm_with_env_and_inspector(db, evm_env, BalInspector::new());
 
         // Prepare block execution context.
         let execution_ctx = ctx

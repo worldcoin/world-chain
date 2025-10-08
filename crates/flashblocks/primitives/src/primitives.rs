@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use alloy_eip7928::AccountChanges;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
@@ -11,10 +13,66 @@ use crate::flashblocks::FlashblockMetadata;
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockBlockAccessList {
-    flash_index: u64,
-    min_tx_index: u64,
-    max_tx_index: u64,
-    accounts: Vec<AccountChanges>,
+    pub min_tx_index: u64,
+    pub max_tx_index: u64,
+    pub accounts: Vec<AccountChanges>,
+}
+
+impl FlashblockBlockAccessList {
+    pub fn new(min_tx_index: u64, max_tx_index: u64, accounts: Vec<AccountChanges>) -> Self {
+        Self {
+            min_tx_index,
+            max_tx_index,
+            accounts,
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        self.min_tx_index = self.min_tx_index.min(other.min_tx_index);
+        self.max_tx_index = self.max_tx_index.max(other.max_tx_index);
+    }
+
+    pub fn merge_changes(&mut self, changes: impl IntoIterator<Item = AccountChanges>) {
+        let mut existing = self
+            .accounts
+            .drain(..)
+            .map(|change| (change.address, change))
+            .collect::<HashMap<_, _>>();
+
+        for change in changes {
+            existing
+                .entry(change.address.clone())
+                .and_modify(|existing_change| {
+                    existing_change
+                        .storage_changes
+                        .extend(change.storage_changes.clone());
+                    existing_change
+                        .storage_reads
+                        .extend(change.storage_reads.clone());
+                    existing_change
+                        .balance_changes
+                        .extend(change.balance_changes.clone());
+                    existing_change
+                        .nonce_changes
+                        .extend(change.nonce_changes.clone());
+                    existing_change
+                        .code_changes
+                        .extend(change.code_changes.clone());
+                })
+                .or_insert(change);
+        }
+
+        self.accounts = existing.into_values().collect();
+    }
+
+    pub fn accounts(&self) -> &Vec<AccountChanges> {
+        &self.accounts
+    }
+    /// Maps all transaction indices to a dependent AccountChanges in a prior transaction.
+    pub fn map_dependencies(&self) -> HashMap<usize, Vec<AccountChanges>> {
+        todo!()
+    }
 }
 
 /// Represents the modified portions of an execution payload within a flashblock.
@@ -232,8 +290,7 @@ mod tests {
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
             flash_bal: FlashblockBlockAccessList::default(),
-            flash_bal_hash: keccak256(&buff)
-                .into(),
+            flash_bal_hash: keccak256(&buff).into(),
         }
     }
 

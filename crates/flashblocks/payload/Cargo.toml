@@ -17,6 +17,8 @@ reth.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
+reth-engine-tree.workspace = true
+reth-chain-state.workspace = true
 
 # op-reth
 reth-optimism-node.workspace = true
@@ -25,6 +27,10 @@ reth-optimism-primitives.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-evm.workspace = true
+alloy-eips.workspace = true
+
+op-alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 
 # tokio

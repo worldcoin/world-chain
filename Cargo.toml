@@ -18,7 +18,7 @@ members = [
     "crates/flashblocks/builder",
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
-    "crates/flashblocks/cli",
+    "crates/flashblocks/cli", 
 ]
 default-members = [
     "crates/flashblocks/p2p",
@@ -54,6 +54,7 @@ flashblocks-rpc = { path = "crates/flashblocks/rpc" }
 flashblocks-builder = { path = "crates/flashblocks/builder" }
 flashblocks-payload = { path = "crates/flashblocks/payload" }
 flashblocks-cli = { path = "crates/flashblocks/cli" }
+bal = { path = "crates/flashblocks/bal" }
 
 # Internal
 world-chain-node = { path = "crates/world/node" }
@@ -133,6 +134,7 @@ reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.
 reth-optimism-storage = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 reth-op = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
+reth-engine-tree = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 
 # alloy op
 op-alloy-consensus = {version = "0.20.0", default-features = false }
@@ -143,6 +145,7 @@ alloy-op-hardforks = { version = "0.3.5", default-features = false }
 
 # alloy
 alloy = { version = "1.0.37" }
+alloy-evm = { version = "0.21.1", default-features = false }
 alloy-json-rpc = { version = "1.0.37", default-features = false }
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-provider = { version = "1.0.37", default-features = false }
@@ -181,7 +184,7 @@ revm = { version = "29.0.1", default-features = false }
 revm-state = { version = "7.0.5", default-features = false }
 revm-primitives = { version = "20.0.0", default-features = false }
 op-revm = { version = "10.0.0", default-features = false }
-alloy-op-evm = { version = "0.21.0", default-features = false }
+alloy-op-evm = { version = "0.21.2", default-features = false }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
