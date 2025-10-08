@@ -43,6 +43,14 @@ pub struct BalInspector {
     /// All addresses accessed during execution (even if no state changes).
     accessed_addresses: HashSet<Address>,
 
+    /// Code changes
+    /// Maps: Address -> Code
+    code_changes: HashMap<Address, Bytes>,
+
+    /// Maps: Address -> Balance
+    // Post-execution balance changes
+    balance_changes: HashMap<Address, U256>,
+
     /// Pre-execution state for comparison to detect actual changes.
     /// Maps: Address -> (pre_balance, pre_nonce, pre_code)
     pre_state: HashMap<Address, (U256, u64, Option<Bytes>)>,
@@ -58,6 +66,8 @@ impl BalInspector {
             storage_writes: HashMap::new(),
             storage_reads: HashMap::new(),
             accessed_addresses: HashSet::new(),
+            code_changes: HashMap::new(),
+            balance_changes: HashMap::new(),
             pre_state: HashMap::new(),
             index: 0,
         }
@@ -122,6 +132,12 @@ impl BalInspector {
                 reads.remove(&slot);
             }
         }
+    }
+
+    pub fn record_code_change(&mut self, address: Address, code: Bytes) {
+        self.record_address_access(address);
+    
+        self.code_changes.insert(address, code);
     }
 
     /// Merges post-execution state to generate AccountChanges.
@@ -296,6 +312,23 @@ impl<CTX: ContextTr> Inspector<CTX> for BalInspector {
         self.record_address_access(inputs.caller);
 
         None
+    }
+
+    /// Called after a CREATE-like opcode.
+    fn create_end(
+        &mut self,
+        context: &mut CTX,
+        inputs: &CreateInputs,
+        result: InterpreterResult,
+    ) -> InterpreterResult {
+        self.record_address_access(inputs.caller);
+
+        if(result.is_ok()) {
+            let code = context.evm().inner().journaled_state.state.get(&result.output.address()).and_then(|acc| acc.info.code.as_ref().map(|c| c.bytecode().clone())).unwrap_or_default();
+            self.record_code_change(result.output.address(), code);
+        }
+
+        result
     }
 
     /// Called when SELFDESTRUCT is executed.
