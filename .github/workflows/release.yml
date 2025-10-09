@@ -61,7 +61,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-            images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -84,10 +84,10 @@ jobs:
 
       - name: Export digest
         run: |
-            mkdir -p ${{ runner.temp }}/digests
-            digest="${{ steps.build.outputs.digest }}"
-            touch "${{ runner.temp }}/digests/${digest#sha256:}"
-  
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
@@ -124,10 +124,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-                type=ref,event=branch
-                type=ref,event=tag
-                type=sha
-                type=raw,value=latest
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
@@ -158,32 +158,32 @@ jobs:
             binary: world-chain-builder
     runs-on: ${{ matrix.runner }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
-    - uses: Swatinem/rust-cache@v2  
-    - name: Cargo Build Release
-      run: cargo build --release --bin ${{ matrix.binary }} --target ${{ matrix.target }}
-    
-    - name: Move binary
-      run: |
-            mkdir artifacts
-            mv "target/${{ matrix.target }}/release/${{ matrix.binary }}" ./artifacts
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo Build Release
+        run: cargo build --release --bin ${{ matrix.binary }} --target ${{ matrix.target }}
 
-    - name: Create artifacts
-      run: |
-            cd artifacts
-            tar -czf ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}*
-            mv *tar.gz* ..
-      shell: bash
+      - name: Move binary
+        run: |
+          mkdir artifacts
+          mv "target/${{ matrix.target }}/release/${{ matrix.binary }}" ./artifacts
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
-        path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+      - name: Create artifacts
+        run: |
+          cd artifacts
+          tar -czf ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}*
+          mv *tar.gz* ..
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+          path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
 
   draft-release:
     name: draft release

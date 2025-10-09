@@ -135,7 +135,7 @@ reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2"
 reth-op = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 
 # alloy op
-op-alloy-consensus = {version = "0.20.0", default-features = false }
+op-alloy-consensus = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.20.0", default-features = false }
 op-alloy-network = { version = "0.20.0", default-features = false }
