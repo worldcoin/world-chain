@@ -18,8 +18,7 @@ members = [
     "crates/flashblocks/builder",
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
-    "crates/flashblocks/cli", 
-    "crates/flashblocks/bal", 
+    "crates/flashblocks/cli",
 ]
 default-members = [
     "crates/flashblocks/p2p",
@@ -56,7 +55,6 @@ flashblocks-rpc = { path = "crates/flashblocks/rpc" }
 flashblocks-builder = { path = "crates/flashblocks/builder" }
 flashblocks-payload = { path = "crates/flashblocks/payload" }
 flashblocks-cli = { path = "crates/flashblocks/cli" }
-flashblocks-bal = { path = "crates/flashblocks/bal" }
 
 # Internal
 world-chain-node = { path = "crates/world/node" }
@@ -139,7 +137,7 @@ reth-op = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 reth-engine-tree = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 
 # alloy op
-op-alloy-consensus = {version = "0.20.0", default-features = false }
+op-alloy-consensus = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.20.0", default-features = false }
 op-alloy-network = { version = "0.20.0", default-features = false }

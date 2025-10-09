@@ -111,14 +111,85 @@ impl From<FlashblockBlockAccessList> for FlashblockBlockAccessListWire {
                     })
                     .collect();
 
-                AccountChanges {
-                    address,
-                    storage_changes,
+            AccountChanges {
+                address,
+                storage_changes,
+                storage_reads,
+                balance_changes,
+                nonce_changes,
+                code_changes,
+            }
+        }).collect();
+
+        Self {
+            min_tx_index: fbal.min_tx_index,
+            max_tx_index: fbal.max_tx_index,
+            fbal_accumulator: fbal.fbal_accumulator,
+            accounts,
+        }
+    }
+}
+
+impl From<FlashblockBlockAccessListWire> for FlashblockBlockAccessList {
+    fn from(fbal: FlashblockBlockAccessListWire) -> Self {
+        let accounts = fbal
+            .accounts
+            .into_iter()
+            .map(|change| {
+                let storage_writes = change
+                    .storage_changes
+                    .into_iter()
+                    .map(|slot_change| {
+                        let changes = slot_change
+                            .changes
+                            .into_iter()
+                            .map(|storage_change| {
+                                (
+                                    storage_change.block_access_index as u16,
+                                    storage_change.new_value,
+                                )
+                            })
+                            .collect();
+                        (slot_change.slot, changes)
+                    })
+                    .collect();
+
+                let storage_reads = change.storage_reads.into_iter().collect();
+
+                let balance_changes = change
+                    .balance_changes
+                    .into_iter()
+                    .map(|balance_change| {
+                        (
+                            balance_change.block_access_index as u16,
+                            balance_change.post_balance,
+                        )
+                    })
+                    .collect();
+
+                let nonce_changes = change
+                    .nonce_changes
+                    .into_iter()
+                    .map(|nonce_change| {
+                        (nonce_change.block_access_index as u16, nonce_change.new_nonce)
+                    })
+                    .collect();
+
+                let code_changes = change
+                    .code_changes
+                    .into_iter()
+                    .map(|code_change| {
+                        (code_change.block_access_index as u16, code_change.new_code)
+                    })
+                    .collect();
+
+                (change.address, AccountAccess {
+                    storage_writes,
                     storage_reads,
                     balance_changes,
                     nonce_changes,
                     code_changes,
-                }
+                })
             })
             .collect();
 

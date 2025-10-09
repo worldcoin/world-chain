@@ -62,7 +62,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 
-use crate::inspector::BalInspector;
+use crate::bal::BalInspector;
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
