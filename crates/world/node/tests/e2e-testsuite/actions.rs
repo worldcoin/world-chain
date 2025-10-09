@@ -14,7 +14,7 @@ use reth_optimism_primitives::OpReceipt;
 use revm_primitives::{Address, Bytes, B256, U256};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
@@ -106,7 +106,9 @@ where
             let latest_block = latest_block.ok_or_else(|| eyre!("Latest block not found"))?;
             let parent_hash = latest_block.header.hash_slow();
 
-            debug!("Latest block hash: {parent_hash}");
+            // let parent_hash: B256 = "0x84e280903759b608a846549d4fd62ae2b817f9d023bce0aaf373b8af9bbd15cc".parse()?;
+
+            info!("Latest block hash: {parent_hash}");
 
             // create a simple forkchoice state with the latest block as head
             let fork_choice_state = ForkchoiceState {

@@ -3,10 +3,7 @@ use alloy_evm::EvmEnv;
 use flashblocks_primitives::bal::FlashblockBlockAccessList;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::{
-    api::{
-        Block, BlockBody, InvalidPayloadAttributesError,
-        NewPayloadError, PayloadTypes,
-    },
+    api::{Block, BlockBody, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes},
     builder::rpc::EngineValidator,
     rpc::types::engine::PayloadError,
 };

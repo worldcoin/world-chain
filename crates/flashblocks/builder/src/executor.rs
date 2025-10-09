@@ -21,9 +21,7 @@ use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_evm::block::{
-    BlockExecutorFactory, BlockExecutorFor,
-};
+use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 
 use reth_evm::execute::{
     BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
@@ -394,7 +392,6 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        
         self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
@@ -806,6 +803,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    
-}
+mod tests {}

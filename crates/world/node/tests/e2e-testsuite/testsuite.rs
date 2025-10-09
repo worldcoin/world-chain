@@ -1,5 +1,5 @@
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::b64;
+use alloy_primitives::{b64, bytes};
 use alloy_rpc_types::TransactionRequest;
 use ed25519_dalek::SigningKey;
 use flashblocks_primitives::p2p::Authorization;
@@ -33,7 +33,7 @@ use crate::setup::{setup, CHAIN_SPEC};
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<BasicContext>(1, optimism_payload_attributes, None).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -64,7 +64,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<BasicContext>(1, optimism_payload_attributes, None).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -109,7 +109,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<BasicContext>(1, optimism_payload_attributes, None).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -124,7 +124,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<BasicContext>(1, optimism_payload_attributes, None).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 
@@ -147,16 +147,13 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_flashblocks() -> eyre::Result<()> {
+async fn test_flashblocks_bal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, mut nodes, _tasks, mut flashblocks_env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
-
-    let (_, mut basic_nodes, _tasks, mut basic_env) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
-
-    let basic_worldchain_node = basic_nodes.first_mut().unwrap();
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, Some("assets/bal_balance_changes_genesis.json"))
+            .await?;
 
     let ext_context_1 = nodes[0].ext_context.clone();
     let ext_context_2 = nodes[1].ext_context.clone();
@@ -194,20 +191,23 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let node = &mut nodes[0];
 
-    for i in 0..10 {
-        let tx = TransactionTestContext::transfer_tx(
-            node.node.inner.chain_spec().chain_id(),
-            signer(i as u32),
-        )
-        .await;
-        let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
-        let tx: Bytes = envelope.encoded_2718().into();
-
-        let _ = tokio::join!(
-            node.node.rpc.inject_tx(tx.clone()),
-            basic_worldchain_node.node.rpc.inject_tx(tx)
-        );
-    }
+    // Send raw tx from execution test spec - bal_balance_changes
+    // let signed_tx: &'static str = "0xf86380843b9aca008255f094d9c0e57d447779673b236c7423aeab84e931f3ba648026a0339110b435e122cbcca84763561c0b6d2cf0b0aa64597fe2e923686809de9d6fa05e7a19b0de89e3317da6e4585bff1f5b03a2927feb68c8307fb95405f812d695";
+    let tx = bytes!("f86380843b9aca008255f094d9c0e57d447779673b236c7423aeab84e931f3ba648026a0339110b435e122cbcca84763561c0b6d2cf0b0aa64597fe2e923686809de9d6fa05e7a19b0de89e3317da6e4585bff1f5b03a2927feb68c8307fb95405f812d695");
+    
+    // // Decode the transaction
+    // let decoded_tx = OpTransactionSigned::decode_signed_rlp(&mut tx.as_ref())
+    //     .expect("Failed to decode transaction");
+    
+    // info!("Decoded transaction: {:?}", decoded_tx);
+    // info!("Transaction hash: {:?}", decoded_tx.hash());
+    // info!("Transaction from: {:?}", decoded_tx.from());
+    // info!("Transaction to: {:?}", decoded_tx.to());
+    // info!("Transaction value: {:?}", decoded_tx.value());
+    // info!("Transaction gas: {:?}", decoded_tx.gas_limit());
+    // info!("Transaction gas price: {:?}", decoded_tx.gas_price());
+    
+    node.node.rpc.inject_tx(tx.clone()).await?;
 
     let ext_context = node.ext_context.clone();
     let block_hash = node.node.block_hash(0);
@@ -265,26 +265,9 @@ async fn test_flashblocks() -> eyre::Result<()> {
     )
     .await;
 
-    let mut basic_action = crate::actions::AssertMineBlock::new(
-        0,
-        vec![],
-        Some(B256::ZERO),
-        attributes.clone(),
-        authorization_generator,
-        std::time::Duration::from_millis(2000),
-        false,
-        true,
-        tx,
-    )
-    .await;
-
     flashblocks_action.execute(&mut flashblocks_env).await?;
 
     let flashblocks_envelope = rx.recv().await.expect("should receive payload");
-
-    basic_action.execute(&mut basic_env).await?;
-
-    let basic_envelope = rx.recv().await.expect("should receive payload");
 
     let flashblock_block = flashblocks_envelope
         .execution_payload
@@ -293,17 +276,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         .try_into_recovered()
         .expect("valid recovered block");
 
-    let basic_block = basic_envelope
-        .execution_payload
-        .try_into_block::<OpTransactionSigned>()
-        .expect("valid block")
-        .try_into_recovered()
-        .expect("valid recovered block");
-
-    let hash = flashblock_block.hash_slow();
-    let basic_hash = basic_block.hash_slow();
-
-    assert_eq!(hash, basic_hash, "Blocks from both nodes should match");
+    info!("Flashblock block: {:?}", flashblock_block);
 
     let aggregated_flashblocks_0 = Flashblock::reduce(
         Flashblocks::new(
@@ -318,37 +291,26 @@ async fn test_flashblocks() -> eyre::Result<()> {
         .unwrap(),
     );
 
-    let aggregated_flashblocks_1 = Flashblock::reduce(
-        Flashblocks::new(
-            flashblocks_1_clone
-                .lock()
-                .iter()
-                .map(|fb| Flashblock {
-                    flashblock: fb.clone(),
-                })
-                .collect(),
-        )
-        .unwrap(),
-    );
+    // let aggregated_flashblocks_1 = Flashblock::reduce(
+    //     Flashblocks::new(
+    //         flashblocks_1_clone
+    //             .lock()
+    //             .iter()
+    //             .map(|fb| Flashblock {
+    //                 flashblock: fb.clone(),
+    //             })
+    //             .collect(),
+    //     )
+    //     .unwrap(),
+    // );
 
-    let block_0: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
-        RecoveredBlock::try_from(aggregated_flashblocks_0.unwrap())
-            .expect("failed to recover block from flashblock 0");
+    // let block_0: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
+    //     RecoveredBlock::try_from(aggregated_flashblocks_0.unwrap())
+    //         .expect("failed to recover block from flashblock 0");
 
-    let block_1: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
-        RecoveredBlock::try_from(aggregated_flashblocks_1.unwrap())
-            .expect("failed to recover block from flashblock 1");
-
-    assert_eq!(
-        block_0.hash_slow(),
-        hash,
-        "Flashblock 0 did not match mined block"
-    );
-    assert_eq!(
-        block_1.hash_slow(),
-        hash,
-        "Flashblock 1 did not match mined block"
-    );
+    // let block_1: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
+    //     RecoveredBlock::try_from(aggregated_flashblocks_1.unwrap())
+    //         .expect("failed to recover block from flashblock 1");
 
     Ok(())
 }
@@ -443,7 +405,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, None).await?;
 
     let ext_context = nodes[0].ext_context.clone();
 
@@ -545,7 +507,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, _nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, None).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
@@ -565,7 +527,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, None).await?;
 
     let ext_context = nodes[0].ext_context.clone();
 

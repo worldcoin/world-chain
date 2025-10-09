@@ -110,7 +110,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
             state_provider,
         }
     }
-    
+
     pub fn provider(&self) -> &P {
         self.state_provider
     }

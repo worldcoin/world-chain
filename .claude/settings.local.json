@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Read(//Users/karan.kurbur/.cargo/git/checkouts/reth-e231042ee7db3fb7/9c30bf7/crates/optimism/chainspec/src/**)",
+      "Read(//Users/karan.kurbur/.cargo/git/checkouts/reth-e231042ee7db3fb7/9c30bf7/crates/optimism/node/src/**)"
     ],
     "deny": [],
     "ask": []

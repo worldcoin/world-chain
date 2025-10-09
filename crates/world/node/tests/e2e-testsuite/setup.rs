@@ -1,8 +1,9 @@
 use alloy_genesis::{Genesis, GenesisAccount};
-use eyre::eyre::eyre;
+use eyre::eyre::{eyre, Ok};
 use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
+use reth::chainspec::{Chain, ChainSpecBuilder, NamedChain};
 use reth::network::PeersHandleProvider;
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
@@ -16,15 +17,17 @@ use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
+use reth_primitives::ForkCondition;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
 use revm_primitives::U256;
 use std::{
     collections::BTreeMap,
+    fs,
     ops::Range,
     sync::{Arc, LazyLock},
     time::Duration,
 };
-use tracing::span;
+use tracing::{info, span};
 use world_chain_node::node::{WorldChainNode, WorldChainNodeContext};
 use world_chain_node::{FlashblocksOpApi, OpApiExtServer};
 use world_chain_test::node::test_config;
@@ -61,9 +64,49 @@ type WorldChainNodeTestContext<T> = NodeHelperType<
     BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
 >;
 
+fn create_chain_spec(genesis_str: &str) -> OpChainSpec {
+    let spec: Genesis = serde_json::from_str(genesis_str).expect("genesis should parse");
+    OpChainSpecBuilder::base_mainnet()
+        .genesis(
+            spec.extend_accounts(vec![(
+                DEV_WORLD_ID,
+                GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![(
+                    LATEST_ROOT_SLOT.into(),
+                    tree_root().into(),
+                )]))),
+            )])
+            .extend_accounts(vec![(
+                PBH_DEV_ENTRYPOINT,
+                GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![
+                    (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000).into()),
+                    (
+                        PBH_NONCE_LIMIT_SLOT.into(),
+                        (MAX_U16 << U256::from(160)).into(),
+                    ),
+                ]))),
+            )])
+            .extend_accounts(vec![(
+                account(0),
+                GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
+            )]),
+        )
+        .ecotone_activated()
+        .build()
+}
+
+fn create_chain_spec_from_file(genesis_path: &str) -> eyre::Result<OpChainSpec> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{}/tests/{}", manifest_dir, genesis_path);
+    let genesis_content = fs::read_to_string(&path)?;
+    let genesis: Genesis = serde_json::from_str(&genesis_content)?;   
+    let op_chain_spec = OpChainSpecBuilder::default().chain(Chain::from_named(NamedChain::Mainnet)).genesis(genesis).ecotone_activated().build();
+    Ok(op_chain_spec)
+}
+
 pub async fn setup<T>(
     num_nodes: u8,
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    genesis_file: Option<&str>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -75,7 +118,11 @@ where
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
-    let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
+    let op_chain_spec: Arc<OpChainSpec> = if let Some(genesis_path) = genesis_file {
+        Arc::new(create_chain_spec_from_file(genesis_path)?)
+    } else {
+        Arc::new(CHAIN_SPEC.clone())
+    };
 
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -181,35 +228,7 @@ where
     Ok((0..5, node_contexts, tasks, environment))
 }
 
-pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
-    let spec: Genesis = serde_json::from_str(GENESIS).expect("genesis should parse");
-    OpChainSpecBuilder::base_mainnet()
-        .genesis(
-            spec.extend_accounts(vec![(
-                DEV_WORLD_ID,
-                GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![(
-                    LATEST_ROOT_SLOT.into(),
-                    tree_root().into(),
-                )]))),
-            )])
-            .extend_accounts(vec![(
-                PBH_DEV_ENTRYPOINT,
-                GenesisAccount::default().with_storage(Some(BTreeMap::from_iter(vec![
-                    (PBH_GAS_LIMIT_SLOT.into(), U256::from(15000000).into()),
-                    (
-                        PBH_NONCE_LIMIT_SLOT.into(),
-                        (MAX_U16 << U256::from(160)).into(),
-                    ),
-                ]))),
-            )])
-            .extend_accounts(vec![(
-                account(0),
-                GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
-            )]),
-        )
-        .ecotone_activated()
-        .build()
-});
+pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| create_chain_spec(GENESIS));
 
 /// Consolidated trait bound for WorldChainNode testing context
 pub trait WorldChainTestContextBounds:
