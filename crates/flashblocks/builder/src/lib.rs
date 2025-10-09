@@ -48,7 +48,7 @@ use reth_provider::{
 
 use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
+use revm::{context::ContextTr, database::BundleState};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span, trace, warn};
 

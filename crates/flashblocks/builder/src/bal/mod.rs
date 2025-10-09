@@ -6,25 +6,21 @@
 //!
 //! This implementation follows the go-ethereum BAL specification.
 
-use alloy_eips::eip2718::WithEncoded;
+use alloy_consensus::transaction::SignerRecoverable;
 use alloy_eips::eip7685::Requests;
 use alloy_eips::Decodable2718;
-use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::Encodable;
 use eyre::{eyre::eyre, Result};
-use flashblocks_primitives::ed25519_dalek::ed25519::signature::rand_core::le;
-use flashblocks_primitives::primitives::{FlashblockBlockAccessList, FlashblocksPayloadV1};
-use op_alloy_consensus::{OpTxEnvelope, OpTxReceipt};
+use flashblocks_primitives::bal::FlashblockBlockAccessList;
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::Mutex;
-use rayon::iter::Enumerate;
-use rayon::{prelude::*, result};
-use reth::api::{Block, PayloadBuilderError};
-use reth::chainspec::ChainSpec;
+use rayon::prelude::*;
+use reth::api::{Block as _, PayloadBuilderError};
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
-use reth::rpc::api::eth::helpers::pending_block::{self, BuildPendingEnv};
+use reth::rpc::api::eth::helpers::pending_block::BuildPendingEnv;
 use reth::{
     providers::StateProvider,
     revm::{
@@ -35,34 +31,26 @@ use reth::{
         state::{AccountInfo, Bytecode},
     },
 };
-use reth_evm::block::{BlockExecutionError, StateChangeSource};
+use reth_evm::block::StateChangeSource;
 use reth_evm::execute::{BlockAssemblerInput, BlockExecutor};
 
-use alloy_consensus::{BlockBody, BlockHeader, Header, Sealed};
+use alloy_consensus::{Block, BlockBody, BlockHeader, Header};
 use alloy_eips::eip4895::Withdrawals;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_evm::op_revm::precompiles::OpPrecompiles;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::precompiles::PrecompilesMap;
-use reth_evm::{
-    block::ExecutableTx, execute::ExecutorTx, op_revm::OpSpecId, Evm, FromRecoveredTx,
-    FromTxWithEncoded,
-};
+use reth_evm::{op_revm::OpSpecId, Evm};
 use reth_evm::{ConfigureEvm, EvmEnv, OnStateHook};
-use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpBlockAssembler, OpEvm, OpNextBlockEnvAttributes};
 use reth_optimism_node::{OpEvmConfig, OpRethReceiptBuilder};
-use reth_optimism_primitives::OpReceipt;
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives::{Head, Recovered};
-use reth_provider::{BlockExecutionResult, HeaderProvider, StateProviderFactory};
-use revm::state::{EvmState, EvmStorage};
-use std::f64::consts::E;
-use std::sync::{OnceLock, RwLock};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt};
+use reth_primitives::{Recovered, SealedHeader};
+use reth_provider::{BlockExecutionResult, HeaderProvider};
+use revm::state::EvmState;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tracing::info_span;
 
 mod inspector;
 pub use inspector::BalInspector;
@@ -122,6 +110,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
             state_provider,
         }
     }
+    
     pub fn provider(&self) -> &P {
         self.state_provider
     }
@@ -140,7 +129,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
         res
     }
 
-    pub fn accessed_state(&self) -> HashMap<Address, alloy_primitives::map::HashSet<B256>> {
+    pub fn accessed_state(&self) -> HashMap<Address, HashSet<B256>> {
         let mut res = HashMap::new();
         for (addr, accesses) in &self.bal.accounts {
             if !accesses.storage_reads.is_empty() {
@@ -151,7 +140,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
                 && accesses.code_changes.is_empty()
             {
                 // Account was accessed but had no changes
-                res.insert(*addr, alloy_primitives::map::HashSet::default());
+                res.insert(*addr, HashSet::default());
             }
         }
         res
@@ -285,7 +274,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
             }
         }
 
-        if res.storage_writes.as_ref().map_or(true, |w| w.is_empty()) {
+        if res.storage_writes.as_ref().is_none_or(|w| w.is_empty()) {
             res.storage_writes = None;
         }
 
@@ -303,7 +292,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
             mutations: HashMap::new(),
         };
 
-        for (addr, _) in &self.bal.accounts {
+        for addr in self.bal.accounts.keys() {
             if let Some(account_changes) = self.account_changes_at(*addr, idx) {
                 res.mutations.insert(*addr, account_changes);
             }
@@ -352,7 +341,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
         &self,
         mut all_reads: HashMap<Address, HashSet<B256>>,
     ) -> Result<()> {
-        let num_txs = (self.bal.max_tx_index - self.bal.min_tx_index) as u64;
+        let num_txs = self.bal.max_tx_index - self.bal.min_tx_index;
 
         for (addr, reads) in &mut all_reads {
             // Remove any slots that were written
@@ -849,9 +838,7 @@ impl reth_evm::OnStateHook for PendingBlock {
                                 Some(
                                     s.storage
                                         .iter()
-                                        .map(|(k, v)| {
-                                            (k.clone().into(), B256::from(v.present_value))
-                                        })
+                                        .map(|(k, v)| ((*k).into(), B256::from(v.present_value)))
                                         .collect(),
                                 )
                             };
@@ -871,7 +858,7 @@ impl reth_evm::OnStateHook for PendingBlock {
 
             // Clear next_state_diff after checking
             self.invalidated_state_diffs.remove_entry(&(index as u64));
-            self.payload_tx_validated.insert((index as u64), true);
+            self.payload_tx_validated.insert(index as u64, true);
         }
     }
 }
@@ -935,9 +922,9 @@ where
     ) -> eyre::Result<()> {
         let bal_payload = payload.diff.flash_bal.clone();
 
-        let bal_hash = payload.diff.flash_bal_hash;
-        let mut buff = &[0u8; 32][..];
-        let computed_bal_hash = keccak256(&mut buff);
+        let bal_hash = payload.diff.bal_hash;
+        let buff = &[0u8; 32][..];
+        let computed_bal_hash = keccak256(buff);
         if bal_hash != computed_bal_hash {
             return Err(eyre!(
                 "BAL hash mismatch: expected {:?}, got {:?}",
@@ -946,7 +933,7 @@ where
             ));
         }
 
-        let mut bal: FlashblockBlockAccessList = bal_payload.into();
+        let bal: FlashblockBlockAccessList = bal_payload.into();
 
         // Step 1: Run pre-checks on BAL structure
         self.reader.pre_checks(&bal)?;
@@ -959,18 +946,14 @@ where
                 let tx = OpTxEnvelope::decode_2718(&mut tx_bytes_slice)
                     .map_err(|e| eyre!("Failed to decode transaction: {}", e));
                 tx.map(|t| {
-                    t.try_into_recovered()
+                    t.try_into_recovered_unchecked()
                         .map_err(|e| eyre!("Failed to recover tx: {:?}", e))
                 })
                 .and_then(|r| r)
             })
             .collect::<Result<Vec<Recovered<OpTxEnvelope>>>>()?;
 
-        let mut tx_iter = recovered
-            .into_iter()
-            .enumerate()
-            .map(|(i, tx)| (i, tx))
-            .collect::<Vec<_>>();
+        let tx_iter = recovered.into_iter().enumerate().collect::<Vec<_>>();
 
         let parent_header = self
             .reader()
@@ -1052,7 +1035,6 @@ where
                         .inspect_err(|e| {
                             eprintln!("Error executing transaction at index {}: {:?}", i, e);
                         })
-                        .map(|res| res)
                         .unwrap_or(0);
 
                     executor.set_state_hook(Some(state_hook));
@@ -1140,7 +1122,7 @@ where
             .next_evm_env(header, &attributes)
             .map_err(PayloadBuilderError::other)?;
 
-        let mut evm =
+        let evm =
             self.evm_config
                 .evm_with_env_and_inspector(&mut state, evm_env, BalInspector::new());
 
@@ -1176,14 +1158,7 @@ where
         &self,
         tx_results: Vec<TransactionExecutionResult>,
         state_root_result: B256,
-    ) -> Result<
-        reth_chain_state::ExecutedBlockWithTrieUpdates<reth_optimism_primitives::OpPrimitives>,
-    > {
-        use alloy_consensus::transaction::SignerRecoverable;
-        use alloy_consensus::{Block, BlockBody};
-        use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-        use reth_primitives::{SealedBlock, SealedHeader};
-
+    ) -> Result<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         // Aggregate receipts and compute cumulative gas
         let mut cumulative_gas_used = 0u64;
         let mut receipts = Vec::new();
@@ -1333,7 +1308,7 @@ where
                     .as_ref()
                     .map(|b| &b.execution_outcome().receipts)
                     .unwrap()
-                    .into_iter()
+                    .iter()
                     .flatten()
                     .cloned()
                     .collect(),

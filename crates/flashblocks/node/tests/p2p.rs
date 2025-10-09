@@ -185,6 +185,7 @@ fn base_payload(
         }),
         diff: ExecutionPayloadFlashblockDeltaV1::default(),
         metadata: FlashblockMetadata::default(),
+        bal_accumulator: B256::ZERO,
     }
 }
 
@@ -209,6 +210,7 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             ..Default::default()
         },
         metadata: FlashblockMetadata::default(),
+        bal_accumulator: B256::ZERO,
     }
 }
 

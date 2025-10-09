@@ -1,14 +1,14 @@
 use alloy_eips::eip2718::Decodable2718;
 use alloy_evm::EvmEnv;
-use flashblocks_primitives::primitives::{FlashblockBlockAccessList, FlashblocksPayloadV1};
+use flashblocks_primitives::bal::FlashblockBlockAccessList;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::{
     api::{
-        Block, BlockBody, ConfigureEvm, EngineTypes, InvalidPayloadAttributesError,
+        Block, BlockBody, InvalidPayloadAttributesError,
         NewPayloadError, PayloadTypes,
     },
     builder::rpc::EngineValidator,
-    rpc::types::engine::{ExecutionData, PayloadError},
+    rpc::types::engine::PayloadError,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_engine_tree::tree::payload_validator::{TreeCtx, ValidationOutcome};
@@ -115,7 +115,7 @@ impl ParallelBlockExecutor {
     ) -> eyre::Result<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         let block = payload
             .payload
-            .try_into_block_with(|mut tx| {
+            .try_into_block_with(|tx| {
                 OpTransactionSigned::decode_2718(&mut tx.as_ref())
                     .map_err(|e| PayloadError::Decode(e.into()))
             })

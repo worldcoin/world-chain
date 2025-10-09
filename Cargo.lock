@@ -3879,7 +3879,6 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives",
- "reth-trie",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

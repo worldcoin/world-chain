@@ -658,6 +658,7 @@ mod tests {
             diff: sample_diff(),
             metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
+            bal_accumulator: B256::ZERO,
         }
     }
 

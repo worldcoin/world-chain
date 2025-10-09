@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
 use flashblocks_primitives::{
@@ -28,6 +29,7 @@ fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayload
         }),
         diff: ExecutionPayloadFlashblockDeltaV1::default(),
         metadata: FlashblockMetadata::default(),
+        bal_accumulator: B256::ZERO,
     }
 }
 

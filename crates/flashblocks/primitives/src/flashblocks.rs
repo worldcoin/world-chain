@@ -7,7 +7,7 @@ use alloy_consensus::{
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{FixedBytes, U256};
+use alloy_primitives::{FixedBytes, B256, U256};
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
@@ -94,9 +94,11 @@ impl Flashblock {
                         .unwrap_or_default()
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
-                    ..Default::default() // TODO
+                    bal_hash: B256::ZERO,
+                    flash_bal: Default::default(),
                 },
                 metadata,
+                bal_accumulator: B256::ZERO,
             },
         }
     }

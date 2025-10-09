@@ -6,3 +6,4 @@ pub mod p2p;
 pub mod primitives;
 
 pub use ed25519_dalek;
+pub mod bal;

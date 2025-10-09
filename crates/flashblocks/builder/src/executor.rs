@@ -1,18 +1,18 @@
-use alloy_consensus::{Block, Eip658Value, Header, Transaction, TxReceipt};
-use alloy_eip7928::{AccountChanges, BalanceChange};
+use alloy_consensus::{Block, Transaction, TxReceipt};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_eips::eip4895::Withdrawals;
-use alloy_eips::{Decodable2718, Encodable2718, Typed2718};
+use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::bal::FlashblockBlockAccessList;
 use flashblocks_primitives::p2p::AuthorizedPayload;
-use flashblocks_primitives::primitives::{FlashblockBlockAccessList, FlashblocksPayloadV1};
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::StreamExt as _;
-use op_alloy_consensus::{encode_holocene_extra_data, OpDepositReceipt, OpTxEnvelope};
+use op_alloy_consensus::{encode_holocene_extra_data, OpTxEnvelope};
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
 use reth::payload::EthPayloadBuilderAttributes;
@@ -22,8 +22,7 @@ use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_evm::block::{
-    BlockExecutorFactory, BlockExecutorFor, BlockValidationError, StateChangePostBlockSource,
-    StateChangeSource, SystemCaller,
+    BlockExecutorFactory, BlockExecutorFor,
 };
 
 use reth_evm::execute::{
@@ -36,7 +35,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{Evm, EvmFactory, ToTxEnv};
+use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -395,8 +394,8 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
-        res
+        
+        self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
     fn finish(
@@ -808,5 +807,5 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 }

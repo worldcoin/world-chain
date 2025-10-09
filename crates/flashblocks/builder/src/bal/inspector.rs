@@ -8,17 +8,14 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, Bytes, B256, U256};
 
 use revm::{
-    bytecode::opcode::{
-        BALANCE, CALL, CALLCODE, CREATE, CREATE2, DELEGATECALL, EXTCODECOPY, EXTCODEHASH,
-        EXTCODESIZE, SELFDESTRUCT, SLOAD, SSTORE, STATICCALL,
-    },
+    bytecode::opcode::{BALANCE, EXTCODECOPY, EXTCODEHASH, EXTCODESIZE, SLOAD, SSTORE},
     context::{ContextTr, JournalTr},
     interpreter::{
         interpreter::EthInterpreter,
         interpreter_types::{InputsTr, Jumps},
-        CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter, InterpreterResult,
+        CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter,
     },
-    state::{Account, EvmState},
+    state::EvmState,
     Inspector,
 };
 
@@ -96,13 +93,10 @@ impl BalInspector {
         let written = self
             .storage_writes
             .get(&address)
-            .map_or(false, |writes| writes.contains_key(&slot));
+            .is_some_and(|writes| writes.contains_key(&slot));
 
         if !written {
-            self.storage_reads
-                .entry(address)
-                .or_insert_with(HashSet::new)
-                .insert(slot);
+            self.storage_reads.entry(address).or_default().insert(slot);
         }
     }
 
@@ -124,7 +118,7 @@ impl BalInspector {
             // Actual write: value changed (includes zeroing)
             self.storage_writes
                 .entry(address)
-                .or_insert_with(HashMap::new)
+                .or_default()
                 .insert(slot, (pre_value, new_value));
 
             // Remove from reads if previously recorded
@@ -218,7 +212,7 @@ impl BalInspector {
                     if !self
                         .storage_writes
                         .get(address)
-                        .map_or(false, |w| w.contains_key(&slot))
+                        .is_some_and(|w| w.contains_key(&slot))
                     {
                         account_changes.storage_reads.push(slot);
                     }
@@ -267,7 +261,6 @@ where
 
         match op_code {
             SLOAD => {
-                // Storage read
                 if let Ok(slot) = interp.stack.peek(0) {
                     self.record_storage_read(contract, B256::from(slot));
                 }
@@ -279,7 +272,7 @@ where
                     let slot_b256 = B256::from(slot);
                     let pre_value = context
                         .journal_mut()
-                        .sload(contract, slot_b256.clone().into())
+                        .sload(contract, slot_b256.into())
                         .unwrap_or_default();
 
                     self.record_storage_write(contract, slot_b256, pre_value.data, new_value);
@@ -300,52 +293,38 @@ where
     fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         // Record target address access for CALL, CALLCODE, DELEGATECALL, STATICCALL
         self.record_address_access(inputs.target_address);
-
-        // If there's value transfer, the caller is also accessed
-        if !inputs.transfer_value().is_none() {
+        if inputs.transfer_value().is_some() {
             self.record_address_access(inputs.caller);
         }
 
         None
     }
 
-    /// Called before a CREATE-like opcode.
     fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
-        // Record creator address
         self.record_address_access(inputs.caller);
-
         None
     }
 
     fn create_end(
         &mut self,
         context: &mut CTX,
-        inputs: &CreateInputs,
+        _inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {
         if outcome.result.is_ok() && outcome.address.is_some() {
             let created_address = outcome.address.unwrap();
-            let code_load = context.journal_mut().code(created_address).unwrap();
+            let code_load: revm::interpreter::StateLoad<Bytes> =
+                context.journal_mut().code(created_address).unwrap();
             let bytes = code_load.data;
 
             self.record_code_change(created_address, bytes);
         }
     }
 
-    //     self.record_address_access(inputs.caller);
-
-    //     // if(result.is_ok()) {
-    //     //     let code = context.evm().inner().journaled_state.state.get(&result.output.address()).and_then(|acc| acc.info.code.as_ref().map(|c| c.bytecode().clone())).unwrap_or_default();
-    //     //     self.record_code_change(result.output.address(), code);
-    //     // }
-
-    //     result
-    // }
-
     /// Called when SELFDESTRUCT is executed.
-    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
+    /// Note: Balance changes will be captured in post-execution state comparison.
+    fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         // Record both the self-destructing contract and the beneficiary
-        self.record_address_access(contract);
         self.record_address_access(target);
     }
 }
