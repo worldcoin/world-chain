@@ -7,7 +7,7 @@ use alloy_consensus::{
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{FixedBytes, U256};
+use alloy_primitives::{FixedBytes, B256, U256};
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
@@ -94,8 +94,11 @@ impl Flashblock {
                         .unwrap_or_default()
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    bal_hash: B256::ZERO,
+                    flash_bal: Default::default(),
                 },
                 metadata,
+                bal_accumulator: B256::ZERO,
             },
         }
     }
@@ -175,7 +178,9 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
         let base = value
             .base()
             .ok_or(eyre!("Flashblock is missing base payload"))?;
+
         let diff = value.flashblock.diff.clone();
+
         let header = Header {
             parent_beacon_block_root: None,
             state_root: diff.state_root,

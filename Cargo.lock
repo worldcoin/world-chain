@@ -244,6 +244,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-eip7928"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/eips?branch=main#0deb116d5d7417fcaa7ea36240db7378a9f4a87b"
+dependencies = [
+ "alloy-primitives 1.3.1",
+ "alloy-rlp",
+ "serde",
+]
+
+[[package]]
 name = "alloy-eips"
 version = "1.0.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,19 +280,22 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e536feefca2ba96c75798ac75a31046e8adfcefecdb6653803361045cc65b9"
+checksum = "06a5f67ee74999aa4fe576a83be1996bdf74a30fce3d248bf2007d6fc7dae8aa"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-hardforks",
+ "alloy-op-hardforks",
  "alloy-primitives 1.3.1",
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-sol-types 1.3.1",
  "auto_impl",
  "derive_more 2.0.1",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "revm",
  "thiserror 2.0.16",
@@ -384,9 +397,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19f09c7785a3f2df462e4bb898e8b682b43de488d9d44bf2e5264e0bba44af21"
+checksum = "17aaeb600740c181bf29c9f138f9b228d115ea74fa6d0f0343e1952f1a766968"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3656,7 +3669,9 @@ name = "flashblocks-builder"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
+ "alloy-evm",
  "alloy-op-evm",
  "alloy-primitives 1.3.1",
  "alloy-rlp",
@@ -3674,6 +3689,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "parking_lot",
+ "rayon",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -3697,6 +3713,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie",
  "revm",
  "serde",
  "serde_json",
@@ -3814,6 +3831,8 @@ dependencies = [
 name = "flashblocks-payload"
 version = "0.1.0"
 dependencies = [
+ "alloy-eips",
+ "alloy-evm",
  "alloy-primitives 1.3.1",
  "color-eyre",
  "flashblocks-builder",
@@ -3823,14 +3842,18 @@ dependencies = [
  "metrics",
  "metrics-derive",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "reth",
  "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-engine-tree",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -3839,6 +3862,7 @@ name = "flashblocks-primitives"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives 1.3.1",
  "alloy-rlp",
@@ -14019,6 +14043,7 @@ dependencies = [
  "alloy-primitives 1.3.1",
  "alloy-rpc-types",
  "jsonrpsee",
+ "jsonrpsee-core",
  "jsonrpsee-types",
  "reqwest 0.12.23",
  "reth",

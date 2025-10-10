@@ -24,6 +24,7 @@ reth-rpc-eth-types.workspace = true
 reth-storage-api.workspace = true
 reth-node-builder.workspace = true
 reth-tasks.workspace = true
+reth-trie.workspace = true
 revm.workspace = true
 
 # op-reth
@@ -37,6 +38,7 @@ reth-optimism-evm.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-evm = {workspace = true, features = ["op"]}
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
@@ -46,7 +48,7 @@ op-alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
-
+alloy-eip7928 = { workspace = true, features = ["rlp", "serde"] }
 flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
@@ -66,4 +68,4 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
-
+rayon.workspace = true

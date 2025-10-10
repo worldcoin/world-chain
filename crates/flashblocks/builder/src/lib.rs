@@ -1,9 +1,9 @@
 use crate::{
+    bal::BalInspector,
     executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
     payload_txns::BestPayloadTxns,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-
 use alloy_consensus::Transaction;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
@@ -48,10 +48,11 @@ use reth_provider::{
 
 use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
+use revm::{context::ContextTr, database::BundleState};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span, trace, warn};
 
+pub mod bal;
 pub mod executor;
 pub mod payload_txns;
 pub mod traits;
@@ -461,7 +462,7 @@ where
         cumulative_gas_used: Option<u64>,
         ctx: &'a Ctx,
     ) -> Result<
-        FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+        FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, BalInspector, PrecompilesMap>>,
         PayloadBuilderError,
     >
     where
@@ -503,7 +504,9 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         // Prepare EVM.
-        let evm = ctx.evm_config().evm_with_env(db, evm_env);
+        let evm = ctx
+            .evm_config()
+            .evm_with_env_and_inspector(db, evm_env, BalInspector::new());
 
         // Prepare block execution context.
         let execution_ctx = ctx

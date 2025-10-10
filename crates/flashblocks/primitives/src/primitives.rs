@@ -2,9 +2,10 @@ use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
+use bytes::Buf;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::flashblocks::FlashblockMetadata;
+use crate::{bal::FlashblockBlockAccessListWire, flashblocks::FlashblockMetadata};
 
 /// Represents the modified portions of an execution payload within a flashblock.
 /// This structure contains only the fields that can be updated during block construction,
@@ -12,7 +13,7 @@ use crate::flashblocks::FlashblockMetadata;
 /// like parent hash and block number are excluded since they remain constant throughout
 /// the block's construction.
 #[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpDecodable, RlpEncodable,
 )]
 pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The state root of the block.
@@ -32,6 +33,10 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals: Vec<Withdrawal>,
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
+    /// The access list of the diff.
+    pub flash_bal: FlashblockBlockAccessListWire,
+    /// The hash of the RLP encoding of [`FlashblockBlockAccessListWire`].
+    pub bal_hash: B256,
 }
 
 /// Represents the base configuration of an execution payload that remains constant
@@ -78,6 +83,7 @@ pub struct FlashblocksPayloadV1<M = FlashblockMetadata> {
     /// The base execution payload configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<ExecutionPayloadBaseV1>,
+    pub bal_accumulator: B256,
 }
 
 /// Manual RLP implementation because `PayloadId` and `serde_json::Value` are
@@ -101,6 +107,7 @@ where
             + self.index.length()
             + self.diff.length()
             + json_bytes.length()
+            + self.bal_accumulator.length()
             + base_len;
 
         Header {
@@ -128,6 +135,9 @@ where
             // RLP encoding for empty value
             out.put_u8(0x80);
         }
+
+        // 6. `bal_accumulator`
+        self.bal_accumulator.encode(out);
     }
 
     fn length(&self) -> usize {
@@ -144,6 +154,7 @@ where
             + self.index.length()
             + self.diff.length()
             + json_bytes.length()
+            + self.bal_accumulator.length()
             + base_len;
 
         Header {
@@ -179,10 +190,13 @@ where
 
         // base (`Option`)
         let base = if body.first() == Some(&0x80) {
+            body.advance(1);
             None
         } else {
             Some(ExecutionPayloadBaseV1::decode(&mut body)?)
         };
+
+        let bal_accumulator = B256::decode(&mut body)?;
 
         // advance the original buffer cursor
         *buf = &buf[header.payload_length..];
@@ -193,6 +207,7 @@ where
             diff,
             metadata,
             base,
+            bal_accumulator,
         })
     }
 }
@@ -200,9 +215,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::keccak256;
     use alloy_rlp::{encode, Decodable};
 
     fn sample_diff() -> ExecutionPayloadFlashblockDeltaV1 {
+        let mut buff = vec![];
+        ExecutionPayloadFlashblockDeltaV1::default().encode(&mut buff);
+
         ExecutionPayloadFlashblockDeltaV1 {
             state_root: B256::from([1u8; 32]),
             receipts_root: B256::from([2u8; 32]),
@@ -212,6 +231,8 @@ mod tests {
             transactions: vec![Bytes::from(vec![0xde, 0xad, 0xbe, 0xef])],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
+            flash_bal: FlashblockBlockAccessListWire::default(),
+            bal_hash: keccak256(&buff),
         }
     }
 
@@ -237,6 +258,7 @@ mod tests {
             diff: sample_diff(),
             metadata: serde_json::json!({ "key": "value" }),
             base: None,
+            bal_accumulator: B256::from_slice(&[20_8; 32]),
         };
 
         let encoded = encode(&original);
@@ -263,6 +285,7 @@ mod tests {
             diff: sample_diff(),
             metadata: serde_json::json!({ "foo": 1, "bar": [1, 2, 3] }),
             base: Some(sample_base()),
+            bal_accumulator: B256::ZERO,
         };
 
         let encoded = encode(&original);
@@ -282,6 +305,7 @@ mod tests {
             diff: sample_diff(),
             metadata: serde_json::json!({}),
             base: None,
+            bal_accumulator: B256::ZERO,
         };
 
         // Encode, then truncate the last byte to corrupt the payload.

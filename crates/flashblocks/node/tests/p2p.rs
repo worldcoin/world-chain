@@ -185,6 +185,7 @@ fn base_payload(
         }),
         diff: ExecutionPayloadFlashblockDeltaV1::default(),
         metadata: FlashblockMetadata::default(),
+        bal_accumulator: B256::ZERO,
     }
 }
 
@@ -206,8 +207,10 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
+            ..Default::default()
         },
         metadata: FlashblockMetadata::default(),
+        bal_accumulator: B256::ZERO,
     }
 }
 

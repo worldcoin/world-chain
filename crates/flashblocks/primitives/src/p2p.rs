@@ -591,6 +591,7 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
+        bal::FlashblockBlockAccessListWire,
         flashblocks::FlashblockMetadata,
         primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
     };
@@ -633,6 +634,11 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
+            flash_bal: FlashblockBlockAccessListWire {
+                max_tx_index: 5,
+                ..Default::default()
+            },
+            bal_hash: B256::from([0x44; 32]),
         }
     }
 
@@ -657,6 +663,7 @@ mod tests {
             diff: sample_diff(),
             metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
+            bal_accumulator: B256::ZERO,
         }
     }
 

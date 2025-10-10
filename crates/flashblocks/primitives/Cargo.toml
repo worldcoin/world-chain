@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -23,6 +24,7 @@ alloy-rpc-types-engine.workspace = true
 alloy-primitives.workspace = true
 alloy-serde.workspace = true
 alloy-rlp.workspace = true
+alloy-eip7928 = { workspace = true, features = ["rlp", "serde"] }
 
 op-alloy-consensus.workspace = true
 

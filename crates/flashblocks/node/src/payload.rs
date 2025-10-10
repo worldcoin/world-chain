@@ -11,7 +11,8 @@ use reth_optimism_node::txpool::OpPooledTx;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
 use reth_provider::{
-    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
+    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProofProvider, StateProvider,
+    StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -73,12 +74,8 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state.launch::<_, _, _>(
-            ctx,
-            pool.clone(),
-            self.ctx_builder.clone(),
-            evm_config.clone(),
-        );
+        self.flashblocks_state
+            .launch::<_, _>(ctx, pool.clone(), evm_config.clone());
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
