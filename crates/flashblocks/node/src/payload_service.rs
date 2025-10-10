@@ -88,7 +88,8 @@ where
         let payload_job_config = FlashblocksJobGeneratorConfig::default()
             .interval(self.interval)
             .recommitment_interval(self.recommitment_interval)
-            .deadline(conf.deadline);
+            .deadline(conf.deadline)
+            .max_payload_tasks(conf.max_payload_tasks);
 
         let metrics = PayloadBuilderMetrics::default();
         let payload_generator = FlashblocksPayloadJobGenerator::with_builder(

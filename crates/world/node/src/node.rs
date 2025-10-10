@@ -325,6 +325,7 @@ where
             blob_store,
             pool_config_overrides.apply(ctx.pool_config()),
         );
+        
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 

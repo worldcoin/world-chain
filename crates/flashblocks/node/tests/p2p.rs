@@ -116,7 +116,6 @@ async fn setup_node(
             spoof_authorizer: false,
             interval: 200,
             recommit_interval: 200,
-            max_payload_tasks: 50,
         },
         da_config: Default::default(),
     }

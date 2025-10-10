@@ -73,15 +73,6 @@ pub struct FlashblocksArgs {
         requires = "builder_sk"
     )]
     pub recommit_interval: u64,
-
-    /// The maximum number of concurrent payload build tasks.
-    #[arg(
-        long = "flashblocks.max_payload_tasks",
-        env = "FLASHBLOCKS_MAX_PAYLOAD_TASKS",
-        default_value_t = 50,
-        requires = "builder_sk"
-    )]
-    pub max_payload_tasks: usize,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -114,7 +105,6 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             recommit_interval: 200,
             interval: 200,
-            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([
@@ -141,7 +131,6 @@ mod tests {
             builder_sk: None,
             recommit_interval: 200,
             interval: 200,
-            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([

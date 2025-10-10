@@ -186,7 +186,6 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             interval: 200,
             recommit_interval: 200,
-            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([
@@ -213,7 +212,6 @@ mod tests {
             builder_sk: None,
             interval: 200,
             recommit_interval: 200,
-            max_payload_tasks: 50,
         };
 
         let args = CommandParser::parse_from([

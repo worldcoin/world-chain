@@ -248,7 +248,7 @@ def get_config(
         "--flashblocks.builder_sk={0}".format(signing_key),
         "--flashblocks.interval={0}".format("200"),
         "--flashblocks.recommit_interval={0}".format("20"),
-        "--flashblocks.max_payload_tasks={0}".format("50"),
+        "--builder.max-tasks={0}".format("10")
     ]
 
     observability.expose_metrics_port(ports)

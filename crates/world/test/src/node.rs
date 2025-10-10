@@ -87,7 +87,6 @@ pub fn test_config() -> WorldChainNodeConfig {
         builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
         recommit_interval: 50,
         interval: 200,
-        max_payload_tasks: 50,
     };
 
     WorldChainNodeConfig {
