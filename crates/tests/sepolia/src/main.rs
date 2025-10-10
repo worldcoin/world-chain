@@ -6,6 +6,8 @@ use cli::identities::generate_identities;
 use cli::transactions::{create_bundle, send_aa, send_bundle, send_invalid_pbh, stake_aa};
 use cli::Cli;
 
+use crate::cli::transactions::load_test;
+
 mod cli;
 
 pub const PBH_SIGNATURE_AGGREGATOR: Address = address!("8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489");
@@ -21,6 +23,7 @@ async fn main() -> eyre::Result<()> {
         cli::Commands::SendAA(args) => send_aa(args).await?,
         cli::Commands::StakeAA(args) => stake_aa(args).await?,
         cli::Commands::SendInvalidProofPBH(args) => send_invalid_pbh(args).await?,
+        cli::Commands::LoadTest(args) => load_test(args).await?,
     }
     Ok(())
 }

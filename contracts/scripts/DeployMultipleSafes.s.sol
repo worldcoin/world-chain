@@ -15,7 +15,7 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 
 contract DeployMultipleSafes is Script {
     // Constants for load testing configuration
-    uint256 public constant NUM_SAFES = 1;
+    uint256 public constant NUM_SAFES = 1000;
     uint256 public constant STAKE_AMOUNT = 0.01 ether;
 
     Safe public singleton;
@@ -23,8 +23,10 @@ contract DeployMultipleSafes is Script {
     SafeModuleSetup public moduleSetup;
     Mock4337Module public module;
 
-    address public constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-    address public constant PBH_SIGNATURE_AGGREGATOR = 0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
+    address public constant ENTRY_POINT =
+        0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address public constant PBH_SIGNATURE_AGGREGATOR =
+        0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489;
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     address[] public deployedSafes;
@@ -32,18 +34,22 @@ contract DeployMultipleSafes is Script {
     uint256 public ownerPrivateKey;
 
     function run() public {
-        console.log("Deploying: Safe Infrastructure and", NUM_SAFES, "Safe Proxies");
+        console.log(
+            "Deploying: Safe Infrastructure and",
+            NUM_SAFES,
+            "Safe Proxies"
+        );
 
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-
-        ownerPrivateKey = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, privateKey)));
+        ownerPrivateKey = vm.envUint("PRIVATE_KEY");
         owner = vm.addr(ownerPrivateKey);
 
-        console.log("Deployer address:", vm.addr(privateKey));
         console.log("Safe Owner address:", owner);
-        console.log("Safe Owner private key:", vm.toString(bytes32(ownerPrivateKey)));
+        console.log(
+            "Safe Owner private key:",
+            vm.toString(bytes32(ownerPrivateKey))
+        );
 
-        vm.startBroadcast(privateKey);
+        vm.startBroadcast(ownerPrivateKey);
         deployInfrastructure();
         deployMultipleSafes();
         vm.stopBroadcast();
@@ -65,7 +71,11 @@ contract DeployMultipleSafes is Script {
         console.log("SafeProxyFactory Deployed at: ", address(factory));
 
         // Deploy Mock4337Module
-        module = new Mock4337Module(ENTRY_POINT, PBH_SIGNATURE_AGGREGATOR, PBH_NONCE_KEY);
+        module = new Mock4337Module(
+            ENTRY_POINT,
+            PBH_SIGNATURE_AGGREGATOR,
+            PBH_NONCE_KEY
+        );
         console.log("Mock4337Module Deployed at: ", address(module));
     }
 
@@ -77,7 +87,10 @@ contract DeployMultipleSafes is Script {
         modules[0] = address(module);
 
         // Encode the moduleSetup.enableModules call
-        bytes memory moduleSetupCall = abi.encodeCall(SafeModuleSetup.enableModules, (modules));
+        bytes memory moduleSetupCall = abi.encodeCall(
+            SafeModuleSetup.enableModules,
+            (modules)
+        );
 
         // Create owners array with single owner
         address[] memory owners = new address[](1);
@@ -116,7 +129,9 @@ contract DeployMultipleSafes is Script {
             console.log("Safe", i + 1, "Deployed at:", address(safe));
 
             // Deposit stake amount to EntryPoint for this safe
-            IEntryPoint(ENTRY_POINT).depositTo{value: STAKE_AMOUNT}(address(safe));
+            IEntryPoint(ENTRY_POINT).depositTo{value: STAKE_AMOUNT}(
+                address(safe)
+            );
         }
 
         console.log("Successfully deployed", NUM_SAFES, "Safe proxies");
@@ -128,13 +143,25 @@ contract DeployMultipleSafes is Script {
         // Serialize the data
         vm.serializeAddress(json, "module", address(module));
         vm.serializeAddress(json, "owner", owner);
-        vm.serializeString(json, "ownerPrivateKey", vm.toString(bytes32(ownerPrivateKey)));
+        vm.serializeString(
+            json,
+            "ownerPrivateKey",
+            vm.toString(bytes32(ownerPrivateKey))
+        );
         vm.serializeString(json, "stakeAmount", vm.toString(STAKE_AMOUNT));
-        string memory finalJson = vm.serializeAddress(json, "safes", deployedSafes);
+        string memory finalJson = vm.serializeAddress(
+            json,
+            "safes",
+            deployedSafes
+        );
 
         // Write to file with timestamp to avoid overwriting
         string memory timestamp = vm.toString(block.timestamp);
-        string memory outputPath = string.concat("./sepolia_load_test_", timestamp, ".json");
+        string memory outputPath = string.concat(
+            "./sepolia_load_test_",
+            timestamp,
+            ".json"
+        );
         vm.writeJson(finalJson, outputPath);
 
         console.log("Deployment data written to:", outputPath);
