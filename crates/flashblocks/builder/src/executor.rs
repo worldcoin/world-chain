@@ -4,7 +4,7 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
@@ -46,7 +46,9 @@ use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransa
 use reth_payload_util::BestPayloadTransactions;
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
-use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionResult, ChainSpecProvider, HeaderProvider, StateProvider, StateProviderFactory,
+};
 use reth_transaction_pool::TransactionPool;
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
@@ -59,7 +61,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, trace};
 
-use crate::bal::BalInspector;
+use crate::bal::{BalInspector, BalPayloadValidator, BalReader};
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
@@ -542,7 +544,6 @@ where
 pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
-    da_config: OpDAConfig,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
@@ -577,42 +578,35 @@ impl FlashblocksStateExecutor {
         Self {
             inner,
             p2p_handle,
-            da_config,
             pending_block,
         }
     }
 
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node, Pool, P>(
+    pub fn launch<Node, Pool>(
         &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        payload_builder_ctx_builder: P,
         evm_config: OpEvmConfig,
     ) where
         Pool: TransactionPool + 'static,
         Node: FullNodeTypes,
-        Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+        Node::Provider: HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<Node::Provider, OpEvmConfig, OpChainSpec> + 'static,
     {
         let mut stream = self.p2p_handle.flashblock_stream();
         let this = self.clone();
         let provider = ctx.provider().clone();
-        let chain_spec = ctx.chain_spec().clone();
-
         let pending_block = self.pending_block.clone();
 
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
                     if let Err(e) = process_flashblock(
-                        &provider,
+                        provider.clone(),
                         &pool,
-                        &payload_builder_ctx_builder,
                         &evm_config,
                         &this,
-                        &chain_spec,
                         flashblock,
                         pending_block.clone(),
                     ) {
@@ -676,21 +670,20 @@ impl FlashblocksStateExecutor {
 }
 
 #[expect(clippy::too_many_arguments)]
-fn process_flashblock<Provider, Pool, P>(
-    provider: &Provider,
+fn process_flashblock<Provider, Pool>(
+    provider: Provider,
     pool: &Pool,
-    payload_builder_ctx_builder: &P,
     evm_config: &OpEvmConfig,
     state_executor: &FlashblocksStateExecutor,
-    chain_spec: &OpChainSpec,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
-    Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone,
-
+    Provider: StateProviderFactory
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + HeaderProvider<Header = alloy_consensus::Header>
+        + Clone,
     Pool: TransactionPool + 'static,
-    P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
     trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
 
@@ -723,77 +716,36 @@ where
     };
 
     let flashblock = flashblocks.last();
-    let cancel = CancelOnDrop::default();
     let base = flashblocks.base();
 
-    let transactions = flashblock
-        .diff
-        .transactions
-        .iter()
-        .map(|b| {
-            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
-            eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
-        })
-        .collect::<eyre::Result<Vec<_>>>()?;
+    let flashblocks = flashblocks
+        .flashblocks()
+        .into_iter()
+        .map(|f| f.flashblock().clone());
 
-    let eth_attrs = EthPayloadBuilderAttributes {
-        id: PayloadId(flashblocks.payload_id().to_owned()),
-        parent: base.parent_hash,
-        timestamp: base.timestamp,
-        suggested_fee_recipient: base.fee_recipient,
-        prev_randao: base.prev_randao,
-        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
-        parent_beacon_block_root: Some(base.parent_beacon_block_root),
-    };
+    let fbal = flashblock.diff.flash_bal.clone().into();
+    let provider = provider.clone();
+    let parent_header = provider.sealed_header_by_hash(base.parent_hash).unwrap();
+    let bal_reader = BalReader::new(base.parent_hash, &fbal, &provider);
 
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        chain_spec.base_fee_params_at_timestamp(base.timestamp),
-    )?;
-
-    let attributes = OpPayloadBuilderAttributes {
-        payload_attributes: eth_attrs,
-        no_tx_pool: true,
-        transactions: transactions.clone(),
-        gas_limit: None,
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
-        min_base_fee: None,
-    };
-
-    let sealed_header = provider
-        .sealed_header_by_hash(base.parent_hash)?
-        .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
-
-    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
-
-    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
-    let builder_ctx = payload_builder_ctx_builder.build(
-        provider.clone(),
+    let bal_validator = BalPayloadValidator::new(
+        bal_reader,
         evm_config.clone(),
-        state_executor.da_config.clone(),
-        config,
-        &cancel,
-        latest_payload.as_ref().map(|p| p.0.clone()),
+        provider.chain_spec().clone(),
+        flashblock.clone(),
+        flashblocks.clone().collect(),
+        parent_header.expect("failed to fetch parent"),
     );
 
-    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-    let db = StateProviderDatabase::new(&state_provider);
+    let validated_flashblock = bal_validator.validate_and_execute(flashblocks.collect())?;
+    trace!(target: "flashblocks::state_executor", hash = %base.parent_hash, "setting latest payload");
 
-    let outcome = FlashblockBuilder::new(best).build(
-        pool.clone(),
-        db,
-        &state_provider,
-        &builder_ctx,
-        latest_payload.as_ref().map(|p| p.0.clone()),
-    )?;
-
-    let payload = match outcome {
-        BuildOutcomeKind::Better { payload } => payload,
-        BuildOutcomeKind::Freeze(payload) => payload,
-        _ => return Ok(()),
-    };
-
-    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+    let payload = OpBuiltPayload::new(
+        flashblock.payload_id,
+        Arc::new(validated_flashblock.block.sealed_block().clone()),
+        U256::ZERO,
+        Some(validated_flashblock),
+    );
 
     *latest_payload = Some((payload.clone(), flashblock.index));
 

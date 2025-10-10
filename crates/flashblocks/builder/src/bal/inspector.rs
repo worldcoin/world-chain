@@ -44,10 +44,6 @@ pub struct BalInspector {
     /// Maps: Address -> Code
     code_changes: HashMap<Address, Bytes>,
 
-    /// Maps: Address -> Balance
-    // Post-execution balance changes
-    balance_changes: HashMap<Address, U256>,
-
     /// Pre-execution state for comparison to detect actual changes.
     /// Maps: Address -> (pre_balance, pre_nonce, pre_code)
     pre_state: HashMap<Address, (U256, u64, Option<Bytes>)>,
@@ -64,7 +60,6 @@ impl BalInspector {
             storage_reads: HashMap::new(),
             accessed_addresses: HashSet::new(),
             code_changes: HashMap::new(),
-            balance_changes: HashMap::new(),
             pre_state: HashMap::new(),
             index: 0,
         }
@@ -326,5 +321,21 @@ where
     fn selfdestruct(&mut self, _contract: Address, target: Address, _value: U256) {
         // Record both the self-destructing contract and the beneficiary
         self.record_address_access(target);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use flashblocks_primitives::ed25519_dalek::ed25519::signature::rand_core::le;
+    use reth_evm::eth::EthEvmContext;
+    use revm::{database::InMemoryDB, Context, MainBuilder, MainContext};
+
+    use super::*;
+    pub fn setup_evm() {
+        let db = InMemoryDB::default();
+        let evm = EthEvmContext::mainnet()
+            .with_db(db)
+            .build_mainnet()
+            .with_inspector(BalInspector::new());
     }
 }

@@ -24,6 +24,7 @@ reth-rpc-eth-types.workspace = true
 reth-storage-api.workspace = true
 reth-node-builder.workspace = true
 reth-tasks.workspace = true
+reth-trie.workspace = true
 revm.workspace = true
 
 # op-reth

@@ -2,6 +2,7 @@ use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
+use bytes::Buf;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{bal::FlashblockBlockAccessListWire, flashblocks::FlashblockMetadata};
@@ -82,7 +83,6 @@ pub struct FlashblocksPayloadV1<M = FlashblockMetadata> {
     /// The base execution payload configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<ExecutionPayloadBaseV1>,
-    /// The hash of the associated BAL.
     pub bal_accumulator: B256,
 }
 
@@ -107,6 +107,7 @@ where
             + self.index.length()
             + self.diff.length()
             + json_bytes.length()
+            + self.bal_accumulator.length()
             + base_len;
 
         Header {
@@ -134,6 +135,9 @@ where
             // RLP encoding for empty value
             out.put_u8(0x80);
         }
+
+        // 6. `bal_accumulator`
+        self.bal_accumulator.encode(out);
     }
 
     fn length(&self) -> usize {
@@ -150,6 +154,7 @@ where
             + self.index.length()
             + self.diff.length()
             + json_bytes.length()
+            + self.bal_accumulator.length()
             + base_len;
 
         Header {
@@ -185,6 +190,7 @@ where
 
         // base (`Option`)
         let base = if body.first() == Some(&0x80) {
+            body.advance(1);
             None
         } else {
             Some(ExecutionPayloadBaseV1::decode(&mut body)?)
@@ -252,7 +258,7 @@ mod tests {
             diff: sample_diff(),
             metadata: serde_json::json!({ "key": "value" }),
             base: None,
-            bal_accumulator: B256::ZERO,
+            bal_accumulator: B256::from_slice(&[20_8; 32]),
         };
 
         let encoded = encode(&original);

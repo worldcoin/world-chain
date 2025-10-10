@@ -5,19 +5,18 @@
 //! and parallel transaction validation.
 //!
 //! This implementation follows the go-ethereum BAL specification.
-
 use alloy_consensus::transaction::SignerRecoverable;
-use alloy_eips::eip7685::Requests;
 use alloy_eips::Decodable2718;
-use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_rlp::Encodable;
 use eyre::{eyre::eyre, Result};
 use flashblocks_primitives::bal::FlashblockBlockAccessList;
+use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth::api::{Block as _, PayloadBuilderError};
+use reth::api::PayloadBuilderError;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth::rpc::api::eth::helpers::pending_block::BuildPendingEnv;
@@ -31,22 +30,22 @@ use reth::{
         state::{AccountInfo, Bytecode},
     },
 };
-use reth_evm::block::StateChangeSource;
-use reth_evm::execute::{BlockAssemblerInput, BlockExecutor};
+use reth_evm::execute::BlockExecutor;
+use reth_evm::Evm;
 
-use alloy_consensus::{Block, BlockBody, BlockHeader, Header};
-use alloy_eips::eip4895::Withdrawals;
+use alloy_consensus::{Block, BlockHeader, Header};
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::precompiles::PrecompilesMap;
-use reth_evm::{op_revm::OpSpecId, Evm};
-use reth_evm::{ConfigureEvm, EvmEnv, OnStateHook};
+use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpBlockAssembler, OpEvm, OpNextBlockEnvAttributes};
+use reth_optimism_evm::{OpEvm, OpNextBlockEnvAttributes};
 use reth_optimism_node::{OpEvmConfig, OpRethReceiptBuilder};
-use reth_optimism_primitives::{OpPrimitives, OpReceipt};
-use reth_primitives::{Recovered, SealedHeader};
-use reth_provider::{BlockExecutionResult, HeaderProvider};
-use revm::state::EvmState;
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
+use reth_provider::{ExecutionOutcome, HeaderProvider, StateProviderFactory};
+use reth_trie::TrieInput;
+use std::fmt::format;
+use std::sync::OnceLock;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -55,7 +54,7 @@ use std::{
 mod inspector;
 pub use inspector::BalInspector;
 
-use crate::executor::{FlashblocksBlockExecutor, FlashblocksBlockExecutorFactory};
+use crate::executor::FlashblocksBlockExecutor;
 
 /// Represents state changes for a single account.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -84,35 +83,32 @@ impl AccountState {
     }
 }
 
-/// Represents all state changes at a specific transaction index.
-#[derive(Clone, Debug, Default)]
-pub struct StateDiff {
-    pub mutations: HashMap<Address, AccountState>,
-}
-
 /// BALReader provides methods for reading account state from a block access list.
 /// State values returned from the Reader methods must not be modified.
 ///
 /// This implementation follows the go-ethereum specification for BAL handling.
-pub struct BalReader<'a, P> {
+pub struct BalReader<'a> {
     /// The block access list containing all state changes
     bal: &'a FlashblockBlockAccessList,
     /// State provider for fetching base state (parent block state)
-    state_provider: &'a P,
+    state_provider: Box<dyn StateProvider>,
 }
 
-impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + Send + Sync>
-    BalReader<'a, P>
-{
-    pub fn new(bal: &'a FlashblockBlockAccessList, state_provider: &'a P) -> Self {
+impl<'a> BalReader<'a> {
+    pub fn new(
+        parent_block: B256,
+        bal: &'a FlashblockBlockAccessList,
+        state_provider: &'a impl StateProviderFactory,
+    ) -> Self {
+        let state_provider = state_provider.state_by_block_hash(parent_block).unwrap();
         Self {
             bal,
             state_provider,
         }
     }
 
-    pub fn provider(&self) -> &P {
-        self.state_provider
+    pub fn provider(&self) -> &Box<dyn StateProvider> {
+        &self.state_provider
     }
 
     pub fn modified_accounts(&self) -> Vec<Address> {
@@ -398,7 +394,6 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
     /// Used for mutated objects (similar to Go's initMutatedObjFromDiff).
     fn init_mutated_account_from_diff(
         &self,
-        _addr: Address,
         base_acct: Option<AccountInfo>,
         diff: Option<&AccountState>,
     ) -> Result<AccountInfo> {
@@ -420,7 +415,6 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
                 acct.code_hash = keccak256(code);
                 acct.code = Some(Bytecode::new_raw(code.clone()));
             }
-            // Note: storage is handled separately in bundle state
         }
 
         Ok(acct)
@@ -475,8 +469,6 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
 
         for addr in modified_accts {
             let diff = self.read_account_diff(addr, last_idx);
-
-            // Get base account info
             let base_info = self
                 .state_provider
                 .basic_account(&addr)?
@@ -488,7 +480,7 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
                 });
 
             let present_info =
-                self.init_mutated_account_from_diff(addr, base_info.clone(), diff.as_ref())?;
+                self.init_mutated_account_from_diff(base_info.clone(), diff.as_ref())?;
 
             let storage = self.reconstruct_storage_from_diff(addr, diff.as_ref())?;
 
@@ -554,11 +546,8 @@ impl<'a, P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + S
                     });
 
                 let diff = self.read_account_diff(*address, tx_index);
-                let present_info = self.init_mutated_account_from_diff(
-                    *address,
-                    base_info.clone(),
-                    diff.as_ref(),
-                )?;
+                let present_info =
+                    self.init_mutated_account_from_diff(base_info.clone(), diff.as_ref())?;
 
                 let storage = self.reconstruct_storage_from_diff(*address, diff.as_ref())?;
 
@@ -677,7 +666,7 @@ pub struct TransactionExecutionResult {
     /// Transaction index in the block
     pub index: u64,
     /// The state diff from this transaction (changes made)
-    pub state_diff: StateDiff,
+    pub computed_state_diff: StateDiff,
     /// Gas used by this transaction
     pub gas_used: u64,
     /// The receipt for this transaction
@@ -695,171 +684,163 @@ pub struct StateRootResult {
     pub root_update_time: std::time::Duration,
 }
 
-/// State hook for collecting execution results during parallel transaction execution.
-///
-/// This hook is thread-safe and collects state changes, receipts, and gas usage
-/// for each transaction as it executes.
 #[derive(Debug, Clone, Default)]
-pub struct PendingBlock {
-    /// Next state diff
-    next_state_diff: Option<(u64, StateDiff)>,
+pub enum PendingBlockStatus {
+    #[default]
+    Validating,
+    Valid,
+    Invalid(String),
+}
+
+/// A type used as a collector from multiple tasks for pieces of the fully execution
+///
+/// [`ExecutedBlockWithTrieUpdates`]
+pub struct PendingBlock<'a> {
+    /// Total transactions to be executed.
+    transaction_count: usize,
     /// Pending Root
-    state_root: Arc<Mutex<B256>>,
-    /// Flashblocks Payloads
+    state_root: OnceLock<B256>,
+    /// The aggregate of [`FlashblocksPayloadV1`] associated with the current payload.
     payloads: Vec<FlashblocksPayloadV1>,
-    /// Mapping from current transaction indcex to vality of the payload
-    payload_tx_validated: HashMap<u64, bool>,
-    /// Ubfilled transaction indices
-    unfilled_tx_indices: HashSet<u64>,
     /// Valid state diffs
-    invalidated_state_diffs: HashMap<u64, StateDiff>,
-    /// All transaction indices that have been processed
-    results: Arc<Mutex<Vec<TransactionExecutionResult>>>,
+    validated_state_diffs: Arc<Mutex<Vec<StateDiff>>>,
+    /// Execution outcomes for each transaction
+    outcomes: Arc<Mutex<Vec<TransactionExecutionResult>>>,
+    /// The status of the BAL validation
+    status: Arc<Mutex<PendingBlockStatus>>,
+    /// The BAL reader
+    reader: Arc<BalReader<'a>>,
+    /// Cumulative bundle over the entire block
+    bundle: BundleState,
 }
 
-impl PendingBlock {
-    /// Creates a new collector.
-    pub fn new() -> Self {
+impl<'a> PendingBlock<'a> {
+    pub fn new(
+        transaction_count: usize,
+        payloads: Vec<FlashblocksPayloadV1>,
+        reader: Arc<BalReader<'a>>,
+    ) -> Self {
         Self {
-            results: Arc::new(parking_lot::Mutex::new(Vec::new())),
-            next_state_diff: (0, StateDiff::default()).into(),
-            ..Default::default()
+            payloads,
+            transaction_count,
+            state_root: OnceLock::new(),
+            validated_state_diffs: Arc::new(Mutex::new(Vec::with_capacity(transaction_count))),
+            status: Arc::new(Mutex::new(PendingBlockStatus::Validating)),
+            reader,
+            outcomes: Arc::new(Mutex::new(Vec::with_capacity(transaction_count))),
+            bundle: BundleState::default(), // TODO
         }
     }
 
-    pub fn latest_state(&self) -> Option<(u64, StateDiff)> {
-        self.next_state_diff.clone()
-    }
-
-    pub fn on_state_root(&self) -> impl Fn(StateRootResult) + Send + Sync + Clone + 'static {
+    /// Setter hook for state root task
+    pub fn on_state_root(&self, state_root: StateRootResult) {
         let pending = self.state_root.clone();
-        move |root_result| {
-            *pending.lock() = root_result.state_root;
+        pending.set(state_root.state_root).ok();
+        if self.outcomes.lock().len() == self.transaction_count {
+            // Make sure the state roots are coherent
+            if self.payloads.last().unwrap().diff.state_root == state_root.state_root {
+                self.set_status(PendingBlockStatus::Valid);
+            } else {
+                self.set_status(PendingBlockStatus::Invalid(format!(
+                    "State roots do not match: expected {:?}, got {:?}",
+                    self.payloads.last().unwrap().diff.state_root,
+                    state_root.state_root
+                )));
+            }
         }
     }
 
-    pub fn on_result(&self) -> impl Fn(TransactionExecutionResult) + Send + Sync + Clone + 'static {
-        let results = self.results.clone();
-        move |res| {
-            results.lock().push(res);
-        }
-    }
+    /// Setter hook for transaction execution task(s) results
+    /// Validates the state diff against the BAL and stores if valid
+    ///
+    /// If invalid, sets the status to Invalid with error message
+    pub fn on_result(&self, result: TransactionExecutionResult) {
+        let validated = self.validated_state_diffs.clone();
+        let reader = self.reader.clone();
+        let status = self.status.clone();
+        let results = self.outcomes.clone();
 
-    /// Returns the number of collected results.
-    pub fn len(&self) -> usize {
-        self.results.lock().len()
-    }
+        results.lock().push(result.clone());
 
-    /// Returns true if no results have been collected.
-    pub fn is_empty(&self) -> bool {
-        self.results.lock().is_empty()
-    }
-}
+        let mut validated = validated.lock();
 
-impl<'a> OnStateHook for &'static PendingBlock {
-    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        self.clone().on_state(source, state);
-    }
-}
-
-impl reth_evm::OnStateHook for PendingBlock {
-    // Validate the integrity of the State Diff on the current BAL index
-    // every time we get a state hook from the EVM
-    fn on_state(&mut self, s: StateChangeSource, _state: &EvmState) {
-        // check the evm state matches our next_state_diff
-        if let Some((_, state_diff)) = &self.next_state_diff {
-            for (addr, acct) in &state_diff.mutations {
-                if let Some(evm_acct) = _state.get(addr) {
-                    if let Some(nonce) = acct.nonce {
-                        if evm_acct.info.nonce != nonce {
-                            panic!(
-                                "Nonce mismatch for account {:?}: expected {}, got {}",
-                                addr, nonce, evm_acct.info.nonce
-                            );
-                        }
-                    }
-                    if let Some(balance) = acct.balance {
-                        if evm_acct.info.balance != balance {
-                            panic!(
-                                "Balance mismatch for account {:?}: expected {}, got {}",
-                                addr, balance, evm_acct.info.balance
-                            );
-                        }
-                    }
-                    if let Some(code) = &acct.code {
-                        let code_hash = keccak256(code);
-                        if evm_acct.info.code_hash != code_hash {
-                            panic!(
-                                "Code hash mismatch for account {:?}: expected {:?}, got {:?}",
-                                addr, code_hash, evm_acct.info.code_hash
-                            );
-                        }
-                    }
-                    if let Some(storage_writes) = &acct.storage_writes {
-                        for (slot, value) in storage_writes {
-                            let slot_u256 = U256::from_be_bytes(slot.0);
-                            let expected_value = U256::from_be_bytes(value.0);
-                            let actual_value = _state
-                                .get(addr)
-                                .and_then(|s| s.storage.get(&slot_u256))
-                                .cloned();
-
-                            if actual_value.is_none()
-                                || actual_value.clone().unwrap_or_default().present_value
-                                    != expected_value
-                            {
-                                panic!(
-                                "Storage mismatch for account {:?} slot {:?}: expected {}, got {:?}",
-                                addr, slot, expected_value, actual_value
-                            );
-                            }
-                        }
-                    } else {
-                        panic!("Account {:?} not found in EVM state", addr);
-                    }
+        match reader.validate_state_diff(result.index, &result.computed_state_diff) {
+            Ok(_) => {
+                validated.push(result.computed_state_diff);
+                if validated.len() == self.transaction_count && self.state_root.get().is_some() {
+                    *status.lock() = PendingBlockStatus::Valid;
                 }
             }
-
-            let index = match s {
-                StateChangeSource::Transaction(index) => index,
-                StateChangeSource::PostBlock(_) => self.unfilled_tx_indices.len(),
-                StateChangeSource::PreBlock(_) => 0,
-            };
-
-            self.next_state_diff = Some((
-                index as u64,
-                StateDiff {
-                    mutations: _state
-                        .iter()
-                        .map(|(a, s)| {
-                            let storage_writes = if s.storage.is_empty() {
-                                None
-                            } else {
-                                Some(
-                                    s.storage
-                                        .iter()
-                                        .map(|(k, v)| ((*k).into(), B256::from(v.present_value)))
-                                        .collect(),
-                                )
-                            };
-                            (
-                                *a,
-                                AccountState {
-                                    nonce: Some(s.info.nonce),
-                                    balance: Some(s.info.balance),
-                                    code: s.info.code.as_ref().map(|c| c.bytes().clone()),
-                                    storage_writes,
-                                },
-                            )
-                        })
-                        .collect::<HashMap<Address, AccountState>>(),
-                },
-            ));
-
-            // Clear next_state_diff after checking
-            self.invalidated_state_diffs.remove_entry(&(index as u64));
-            self.payload_tx_validated.insert(index as u64, true);
+            Err(e) => {
+                *status.lock() = PendingBlockStatus::Invalid(e.to_string());
+            }
         }
+    }
+
+    pub fn set_status(&self, status: PendingBlockStatus) {
+        let mut lock = self.status.lock();
+        *lock = status;
+    }
+
+    pub fn is_valid(&self) -> bool {
+        matches!(*self.status.lock(), PendingBlockStatus::Valid)
+    }
+
+    pub fn finish(&self) -> eyre::Result<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
+        let flashblocks = Flashblock::reduce(Flashblocks::new(
+            self.payloads
+                .iter()
+                .map(|p| Flashblock {
+                    flashblock: p.clone(),
+                })
+                .collect(),
+        )?)
+        .ok_or(eyre!("Failed to reduce flashblocks"))?;
+
+        // Ensure the block is valid
+        match &*self.status.lock() {
+            PendingBlockStatus::Valid => {}
+            PendingBlockStatus::Invalid(err) => {
+                return Err(eyre!("Pending block is invalid: {}", err));
+            }
+            PendingBlockStatus::Validating => {
+                return Err(eyre!("Pending block is still validating"));
+            }
+        }
+
+        // Grab the outcomes
+        let mut outcomes = self.outcomes.lock().clone();
+        outcomes.sort_by(|a, b| a.index.cmp(&b.index));
+
+        let receipts: Vec<OpReceipt> = outcomes.iter().flat_map(|o| o.receipt.clone()).collect();
+        let recovered_block: RecoveredBlock<Block<OpTransactionSigned>> =
+            RecoveredBlock::try_from(flashblocks)?;
+
+        if recovered_block.state_root()
+            != *self.state_root.get().ok_or(eyre!("State root not set"))?
+        {
+            return Err(eyre!(
+                "State root mismatch: expected {:?}, got {:?}",
+                recovered_block.state_root(),
+                self.state_root.get().unwrap()
+            ));
+        }
+
+        let bundle = self.bundle.clone(); // TODO
+        let hashed_state = self.reader.provider().hashed_post_state(&bundle);
+
+        Ok(ExecutedBlockWithTrieUpdates::<OpPrimitives> {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(recovered_block),
+                hashed_state: hashed_state.clone().into(),
+                execution_output: Arc::new(ExecutionOutcome {
+                    bundle,
+                    receipts: vec![receipts],
+                    ..Default::default()
+                }),
+            },
+            trie: ExecutedTrieUpdates::Present(Arc::new(TrieInput::from_state(hashed_state).nodes)),
+        })
     }
 }
 
@@ -871,38 +852,33 @@ impl reth_evm::OnStateHook for PendingBlock {
 /// 3. Parallel transaction execution
 /// 4. State diff validation
 /// 5. Final block construction
-pub struct BalPayloadValidator<'a, P> {
-    reader: BalReader<'a, P>,
+pub struct BalPayloadValidator<'a> {
+    reader: Arc<BalReader<'a>>,
     evm_config: OpEvmConfig,
-    chain_spec: OpChainSpec,
-    active_payload: FlashblocksPayloadV1,
-    aggregated_payload: Vec<FlashblocksPayloadV1>,
-    evm_env: EvmEnv<OpSpecId>,
-    execution_ctx: OpBlockExecutionCtx,
-    pending_block: Option<ExecutedBlockWithTrieUpdates<reth_optimism_primitives::OpPrimitives>>,
+    chain_spec: Arc<OpChainSpec>,
+    pending_block: PendingBlock<'a>,
+    sealed_header: SealedHeader,
 }
 
-impl<'a, P> BalPayloadValidator<'a, P>
-where
-    P: StateProvider + HeaderProvider<Header = alloy_consensus::Header> + Clone + Send + Sync,
-{
+impl<'a> BalPayloadValidator<'a> {
     /// Creates a new coordinator from a BAL reader and payload.
     pub fn new(
-        reader: BalReader<'a, P>,
+        reader: BalReader<'a>,
         evm_config: OpEvmConfig,
-        chain_spec: OpChainSpec,
+        chain_spec: Arc<OpChainSpec>,
         active_payload: FlashblocksPayloadV1,
         aggregated_payload: Vec<FlashblocksPayloadV1>,
+        sealed_header: SealedHeader,
     ) -> Self {
+        let reader = Arc::new(reader);
+        let transaction_count = active_payload.diff.transactions.len();
+
         Self {
-            reader,
+            reader: reader.clone(),
             evm_config,
             chain_spec,
-            active_payload,
-            aggregated_payload,
-            pending_block: None,
-            evm_env: EvmEnv::default(),
-            execution_ctx: OpBlockExecutionCtx::default(),
+            pending_block: PendingBlock::new(transaction_count, aggregated_payload, reader.clone()),
+            sealed_header,
         }
     }
 
@@ -917,21 +893,27 @@ where
     /// 4. Validates that computed state diffs match BAL
     /// 5. Constructs and returns `ExecutedBlockWithTrieUpdates`
     pub fn validate_and_execute(
-        self: Arc<Self>,
-        payload: &FlashblocksPayloadV1,
-    ) -> eyre::Result<()> {
+        self,
+        mut payloads: Vec<FlashblocksPayloadV1>,
+    ) -> eyre::Result<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
+        let payload = payloads
+            .pop()
+            .ok_or_else(|| eyre!("No active payload found"))?;
+
         let bal_payload = payload.diff.flash_bal.clone();
 
-        let bal_hash = payload.diff.bal_hash;
-        let buff = &[0u8; 32][..];
-        let computed_bal_hash = keccak256(buff);
-        if bal_hash != computed_bal_hash {
-            return Err(eyre!(
-                "BAL hash mismatch: expected {:?}, got {:?}",
-                bal_hash,
-                computed_bal_hash
-            ));
-        }
+        // let bal_hash = payload.diff.bal_hash;
+        // let buff = &[0u8; 32][..];
+        // payload.diff.flash_bal.encode(&mut buff);
+        // let computed_bal_hash = keccak256(buff);
+
+        // if bal_hash != computed_bal_hash {
+        //     return Err(eyre!(
+        //         "BAL hash mismatch: expected {:?}, got {:?}",
+        //         bal_hash,
+        //         computed_bal_hash
+        //     ));
+        // }
 
         let bal: FlashblockBlockAccessList = bal_payload.into();
 
@@ -954,59 +936,32 @@ where
             .collect::<Result<Vec<Recovered<OpTxEnvelope>>>>()?;
 
         let tx_iter = recovered.into_iter().enumerate().collect::<Vec<_>>();
-
-        let parent_header = self
-            .reader()
-            .provider()
-            .header(&payload.base.as_ref().unwrap().parent_hash)?
-            .ok_or_else(|| eyre!("Parent header not found"))?;
-
-        let pending = PendingBlock::new();
-
-        let state_hook = Box::new(pending.clone().on_state_root());
-        let result_hook = Box::new(pending.clone().on_result());
+        let parent = self.sealed_header.clone();
 
         // Step 2: Execute state root computation and transaction execution in parallel
-        let this = self.clone();
-        let (state_root_result, tx_results) = rayon::join(
-            || this.compute_state_root(state_hook),
-            || {
-                this.execute_all_transactions(
-                    tx_iter,
-                    &parent_header,
-                    Box::new(pending.clone()),
-                    result_hook,
-                )
-            },
+        let this = Arc::new(&self);
+
+        let (_, tx_execution_result) = rayon::join(
+            || this.compute_state_root(),
+            || this.execute_all_transactions(tx_iter, &parent),
         );
 
-        let tx_results = pending.clone().results.lock().clone();
+        tx_execution_result?;
 
-        // Step 3: Validate state diffs from execution match BAL
-        self.validate_execution_diffs(&tx_results)?;
-
-        // Step 4: Build final ExecutedBlockWithTrieUpdates
-        if let Some(pending_block) = &self.pending_block {
-            self.build_block(tx_results, pending_block.recovered_block().state_root())?;
-        }
-        Ok(())
+        this.pending_block.finish()
     }
 
     /// Computes the state root using the BAL reader.
     ///
     /// This can run in parallel with transaction execution.
-    fn compute_state_root(
-        &self,
-        state_hook: Box<dyn Fn(StateRootResult) + Send + Sync + 'static>,
-    ) -> Result<()> {
-        let (state_root, prestate_load_time, root_update_time) = self.reader.state_root()?;
-        state_hook(StateRootResult {
-            state_root,
-            prestate_load_time,
-            root_update_time,
-        });
-
-        Ok(())
+    fn compute_state_root(&self) {
+        if let Ok((state_root, prestate_load_time, root_update_time)) = self.reader.state_root() {
+            self.pending_block.on_state_root(StateRootResult {
+                state_root,
+                prestate_load_time,
+                root_update_time,
+            });
+        }
     }
 
     /// Executes all transactions in parallel.
@@ -1015,62 +970,47 @@ where
     fn execute_all_transactions<I>(
         &self,
         transactions: I,
-        parent_header: &Header,
-        state_hook: Box<PendingBlock>,
-        result_hook: Box<impl Fn(TransactionExecutionResult) + Clone + Send + Sync + 'static>,
-    ) where
+        parent_header: &SealedHeader,
+    ) -> Result<()>
+    where
         I: IntoParallelIterator<Item = (usize, Recovered<OpTxEnvelope>)>,
     {
         let this = Arc::new(self);
-        transactions.into_par_iter().for_each(|(i, tx)| {
-            let state_hook = state_hook.clone();
-            let tx = tx.clone();
-            let this = this.clone();
-            let result_hook = result_hook.clone();
-            let _ =
-                this.execute_transaction_at_index(i as u64, parent_header, move |mut executor| {
-                    let tx_envelope = tx.clone();
-                    let exec_result = executor
-                        .execute_transaction(tx_envelope)
-                        .inspect_err(|e| {
-                            eprintln!("Error executing transaction at index {}: {:?}", i, e);
-                        })
-                        .unwrap_or(0);
+        transactions
+            .into_par_iter()
+            .map(|(i, tx)| {
+                let tx = tx.clone();
+                let this = this.clone();
+                let res = this.execute_transaction_at_index(
+                    i as u64,
+                    parent_header,
+                    move |mut executor| {
+                        let tx_envelope = tx.clone();
+                        let exec_result = executor
+                            .execute_transaction(tx_envelope)
+                            .inspect_err(|e| {
+                                eprintln!("Error executing transaction at index {}: {:?}", i, e);
+                            })
+                            .unwrap_or(0);
 
-                    executor.set_state_hook(Some(state_hook));
+                        let (mut evm, result) = executor.finish()?;
+                        let bundle = evm.db_mut().take_bundle();
 
-                    let res = executor
-                        .finish()
-                        .map(|(fees, receipts)| {
-                            TransactionExecutionResult {
-                                index: i as u64,
-                                state_diff: StateDiff::default(), // Placeholder, would be filled in
-                                gas_used: exec_result,
-                                receipt: receipts.receipts,
-                            }
-                        })
-                        .map_err(|e| eyre!("Execution error: {:?}", e));
+                        let result = TransactionExecutionResult {
+                            index: i as u64,
+                            computed_state_diff: StateDiff::from(bundle),
+                            gas_used: exec_result,
+                            receipt: result.receipts,
+                        };
 
-                    let res = res.unwrap();
+                        Ok(result)
+                    },
+                )?;
 
-                    result_hook(res);
-                });
-        });
-    }
-
-    /// Validates that the state diffs from execution match the BAL.
-    ///
-    /// For each transaction, compares the computed state diff against
-    /// the expected state diff from the BAL.
-    fn validate_execution_diffs(&self, tx_results: &[TransactionExecutionResult]) -> Result<()> {
-        for result in tx_results {
-            // Get expected state diff from BAL
-            let expected_diff = self.reader.changes_at(result.index);
-
-            // Validate that execution result matches BAL
-            self.reader
-                .validate_state_diff(result.index, &expected_diff)?;
-        }
+                self.pending_block.on_result(res);
+                Ok::<(), eyre::Report>(())
+            })
+            .collect::<Result<Vec<()>>>()?;
 
         Ok(())
     }
@@ -1079,17 +1019,22 @@ where
     fn execute_transaction_at_index<F>(
         &self,
         tx_index: u64,
-        header: &Header,
+        header: &SealedHeader,
         f: F,
     ) -> Result<TransactionExecutionResult>
     where
         F: FnOnce(
                 FlashblocksBlockExecutor<
-                    OpEvm<&mut State<StateProviderDatabase<P>>, BalInspector, PrecompilesMap>,
+                    OpEvm<
+                        &mut State<StateProviderDatabase<&Box<dyn StateProvider>>>,
+                        BalInspector,
+                        PrecompilesMap,
+                    >,
                     OpRethReceiptBuilder,
-                    OpChainSpec,
+                    Arc<OpChainSpec>,
                 >,
-            ) + Send
+            ) -> eyre::Result<TransactionExecutionResult>
+            + Send
             + 'a,
     {
         // 1. Reconstruct pre-state bundle for this transaction (state at tx_index - 1)
@@ -1097,25 +1042,18 @@ where
         let bundle_prestate = self.reader.bundle_pre_state_at(pre_state_index)?;
 
         // 2. Initialize EVM with this pre-state
-
-        let state = StateProviderDatabase::new(self.reader().provider().clone());
+        let state = StateProviderDatabase::new(self.reader().provider());
         let mut state = State::builder()
             .with_database(state)
             .with_bundle_prestate(bundle_prestate)
             .with_bundle_update()
             .build();
 
-        let parent = self
-            .reader()
-            .provider()
-            .sealed_header_by_hash(header.parent_hash)?
-            .ok_or_else(|| eyre!("Parent header not found"))?;
-
-        let attributes = OpNextBlockEnvAttributes::build_pending_env(&parent);
+        let attributes = OpNextBlockEnvAttributes::build_pending_env(&header.clone());
 
         let execution_ctx = self
             .evm_config
-            .context_for_next_block(&parent, attributes.clone())?;
+            .context_for_next_block(&header, attributes.clone())?;
 
         let evm_env = self
             .evm_config
@@ -1134,218 +1072,48 @@ where
         )
         .with_receipts(Vec::new());
 
-        f(block_executor);
-
-        // Get the state diff from BAL
-        let state_diff = self.reader.changes_at(tx_index);
-
-        let receipt = OpReceipt::Eip1559(alloy_consensus::Receipt {
-            status: alloy_consensus::Eip658Value::Eip658(true),
-            cumulative_gas_used: 0, // Will be filled in during aggregation
-            logs: vec![],           // Would come from actual execution
-        });
-
-        Ok(TransactionExecutionResult {
-            index: tx_index,
-            state_diff,
-            gas_used: 21000, // Placeholder - would come from actual execution
-            receipt: vec![receipt],
-        })
-    }
-
-    /// Builds the final ExecutedBlockWithTrieUpdates from validated results.
-    fn build_block(
-        &self,
-        tx_results: Vec<TransactionExecutionResult>,
-        state_root_result: B256,
-    ) -> Result<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
-        // Aggregate receipts and compute cumulative gas
-        let mut cumulative_gas_used = 0u64;
-        let mut receipts = Vec::new();
-
-        for result in &tx_results {
-            cumulative_gas_used += result.gas_used;
-
-            receipts.push(result.receipt.clone());
-        }
-
-        // Build final bundle state from BAL
-        let num_txs = self.active_payload.diff.transactions.len() as u64;
-        let last_tx_index = num_txs - 1;
-
-        let mut final_bundle = BundleState::default();
-        let modified_accounts = self.reader.modified_accounts();
-
-        for addr in modified_accounts {
-            let diff = self.reader.read_account_diff(addr, last_tx_index);
-            let base_info = self.reader.state_provider.basic_account(&addr)?.map(|a| {
-                reth::revm::state::AccountInfo {
-                    nonce: a.nonce,
-                    balance: a.balance,
-                    code_hash: a.bytecode_hash.unwrap_or(B256::ZERO),
-                    code: None,
-                }
-            });
-
-            let present_info = self.reader.init_mutated_account_from_diff(
-                addr,
-                base_info.clone(),
-                diff.as_ref(),
-            )?;
-
-            let storage = self
-                .reader
-                .reconstruct_storage_from_diff(addr, diff.as_ref())?;
-
-            let status = if diff.is_some() {
-                reth::revm::db::AccountStatus::Changed
-            } else {
-                reth::revm::db::AccountStatus::Loaded
-            };
-
-            let bundle_account = BundleAccount::new(
-                base_info,
-                Some(present_info),
-                storage.into_iter().collect(),
-                status,
-            );
-
-            final_bundle.state.insert(addr, bundle_account);
-        }
-
-        // Calculate trie updates
-        let hashed_state = self.reader.state_provider.hashed_post_state(&final_bundle);
-        let (_, trie_updates) = self
-            .reader
-            .state_provider
-            .state_root_with_updates(hashed_state.clone())?;
-
-        // Decode transactions for the block
-        let transactions: Vec<_> = self
-            .active_payload
-            .diff
-            .transactions
-            .iter()
-            .map(|bytes| {
-                let mut slice = bytes.as_ref();
-                OpTxEnvelope::decode_2718(&mut slice)
-                    .map_err(|e| eyre!("Failed to decode transaction: {}", e))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        // Build block header (using data from payload)
-        let base = self
-            .active_payload
-            .base
-            .as_ref()
-            .ok_or_else(|| eyre!("Payload missing base"))?;
-
-        let header = Header {
-            parent_hash: base.parent_hash,
-            ommers_hash: alloy_primitives::b256!(
-                "1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
-            ), // Empty ommers
-            beneficiary: base.fee_recipient,
-            state_root: state_root_result,
-            transactions_root: self.active_payload.diff.block_hash, // Placeholder
-            receipts_root: self.active_payload.diff.receipts_root,
-            logs_bloom: self.active_payload.diff.logs_bloom,
-            difficulty: U256::ZERO,
-            number: base.block_number,
-            gas_limit: base.gas_limit,
-            gas_used: self.active_payload.diff.gas_used,
-            timestamp: base.timestamp,
-            extra_data: base.extra_data.clone(),
-            mix_hash: base.prev_randao,
-            nonce: alloy_primitives::B64::ZERO,
-            base_fee_per_gas: Some(base.base_fee_per_gas.to()),
-            withdrawals_root: Some(self.active_payload.diff.withdrawals_root),
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: Some(base.parent_beacon_block_root),
-            requests_hash: None,
-        };
-
-        let sealed_header = SealedHeader::new(header.clone(), self.active_payload.diff.block_hash);
-
-        // Create block body
-        let body = BlockBody {
-            transactions: transactions.clone(),
-            ommers: vec![],
-            withdrawals: Some(Withdrawals::new(
-                self.active_payload.diff.withdrawals.clone(),
-            )),
-        };
-
-        // Create block with transactions
-        let block = Block {
-            header: header.clone(),
-            body,
-        };
-
-        // Extract senders from transactions
-        let senders: Vec<_> = block
-            .body
-            .transactions
-            .iter()
-            .cloned()
-            .map(|tx| tx.recover_signer().unwrap_or_default())
-            .collect();
-
-        let block_assembler = OpBlockAssembler::new(self.chain_spec.clone().into());
-
-        let result = block_assembler.assemble_block(BlockAssemblerInput::<
-            FlashblocksBlockExecutorFactory,
-            Header,
-        >::new(
-            self.evm_env.clone(),
-            self.execution_ctx.clone(),
-            &SealedHeader::new(header.clone(), header.hash_slow()),
-            transactions.clone(),
-            &BlockExecutionResult::<OpReceipt> {
-                receipts: self
-                    .pending_block
-                    .as_ref()
-                    .map(|b| &b.execution_outcome().receipts)
-                    .unwrap()
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .collect(),
-                gas_used: cumulative_gas_used,
-                requests: Requests::default(),
-            },
-            &self
-                .pending_block
-                .as_ref()
-                .map(|b| &b.execution_outcome().bundle)
-                .cloned()
-                .unwrap_or_default(),
-            &self.reader().state_provider.clone() as &dyn StateProvider,
-            self.pending_block
-                .as_ref()
-                .map(|b| b.sealed_block().state_root())
-                .unwrap_or_default(),
-        ))?;
-
-        Ok(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: result.try_into_recovered().unwrap().into(),
-                hashed_state: hashed_state.clone().into(),
-                execution_output: Arc::new(
-                    self.pending_block
-                        .as_ref()
-                        .map(|b| b.execution_outcome().clone())
-                        .unwrap_or_default(),
-                ),
-            },
-            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
-        })
+        f(block_executor)
     }
 
     /// Returns the underlying BAL reader.
-    pub fn reader(&self) -> &BalReader<'a, P> {
+    pub fn reader(&self) -> &BalReader<'a> {
         &self.reader
+    }
+}
+
+/// Represents all state changes at a specific transaction index.
+#[derive(Clone, Debug, Default)]
+pub struct StateDiff {
+    pub mutations: HashMap<Address, AccountState>,
+}
+
+impl From<BundleState> for StateDiff {
+    fn from(value: BundleState) -> Self {
+        let mutations = value
+            .state
+            .into_iter()
+            .filter_map(|(account, state)| {
+                if let Some(info) = state.info {
+                    let account_state = AccountState {
+                        nonce: Some(info.nonce),
+                        balance: Some(info.balance),
+                        code: info.code.as_ref().map(|c| c.bytes().clone()),
+                        storage_writes: Some(
+                            state
+                                .storage
+                                .iter()
+                                .map(|(slot, s)| (B256::from(*slot), B256::from(s.present_value)))
+                                .collect(),
+                        ),
+                    };
+                    Some((account, account_state))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Self { mutations }
     }
 }
 

@@ -178,7 +178,9 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
         let base = value
             .base()
             .ok_or(eyre!("Flashblock is missing base payload"))?;
+
         let diff = value.flashblock.diff.clone();
+
         let header = Header {
             parent_beacon_block_root: None,
             state_root: diff.state_root,
