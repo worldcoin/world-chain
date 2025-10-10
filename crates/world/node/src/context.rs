@@ -220,7 +220,7 @@ where
                         .flashblocks
                         .as_ref()
                         .expect("flashblocks args required")
-                        .interval,
+                        .flashblocks_interval,
                 ),
                 Duration::from_millis(
                     self.config

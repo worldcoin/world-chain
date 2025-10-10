@@ -86,7 +86,7 @@ pub fn test_config() -> WorldChainNodeConfig {
         authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
         builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
         recommit_interval: 50,
-        interval: 200,
+        flashblocks_interval: 200,
     };
 
     WorldChainNodeConfig {

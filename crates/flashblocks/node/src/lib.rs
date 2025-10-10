@@ -248,7 +248,7 @@ where
                 self.flashblocks_handle.clone(),
                 self.flashblocks_state.clone(),
                 self.to_jobs_generator.clone().subscribe(),
-                Duration::from_millis(self.flashblocks.interval),
+                Duration::from_millis(self.flashblocks.flashblocks_interval),
                 Duration::from_millis(self.flashblocks.recommit_interval),
             ))
             .network(fb_network_builder)

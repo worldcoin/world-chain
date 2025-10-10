@@ -60,7 +60,7 @@ pub struct FlashblocksArgs {
         default_value_t = 200,
         requires = "builder_sk"
     )]
-    pub interval: u64,
+    pub flashblocks_interval: u64,
 
     /// Interval at which the block builder
     /// should re-commit to the transaction pool when building a payload.
@@ -104,7 +104,7 @@ mod tests {
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             recommit_interval: 200,
-            interval: 200,
+            flashblocks_interval: 200,
         };
 
         let args = CommandParser::parse_from([
@@ -130,7 +130,7 @@ mod tests {
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
             recommit_interval: 200,
-            interval: 200,
+            flashblocks_interval: 200,
         };
 
         let args = CommandParser::parse_from([

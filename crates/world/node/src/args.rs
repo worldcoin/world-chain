@@ -184,7 +184,7 @@ mod tests {
             spoof_authorizer: true,
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
-            interval: 200,
+            flashblocks_interval: 200,
             recommit_interval: 200,
         };
 
@@ -210,7 +210,7 @@ mod tests {
             spoof_authorizer: false,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
-            interval: 200,
+            flashblocks_interval: 200,
             recommit_interval: 200,
         };
 
