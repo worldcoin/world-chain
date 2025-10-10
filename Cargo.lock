@@ -14042,6 +14042,7 @@ dependencies = [
  "alloy-primitives 1.3.1",
  "alloy-rpc-types",
  "jsonrpsee",
+ "jsonrpsee-core",
  "jsonrpsee-types",
  "reqwest 0.12.23",
  "reth",

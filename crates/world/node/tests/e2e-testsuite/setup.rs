@@ -98,8 +98,12 @@ fn create_chain_spec_from_file(genesis_path: &str) -> eyre::Result<OpChainSpec> 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let path = format!("{}/tests/{}", manifest_dir, genesis_path);
     let genesis_content = fs::read_to_string(&path)?;
-    let genesis: Genesis = serde_json::from_str(&genesis_content)?;   
-    let op_chain_spec = OpChainSpecBuilder::default().chain(Chain::from_named(NamedChain::Mainnet)).genesis(genesis).ecotone_activated().build();
+    let genesis: Genesis = serde_json::from_str(&genesis_content)?;
+    let op_chain_spec = OpChainSpecBuilder::default()
+        .chain(Chain::from_named(NamedChain::Mainnet))
+        .genesis(genesis)
+        .ecotone_activated()
+        .build();
     Ok(op_chain_spec)
 }
 
@@ -193,6 +197,7 @@ where
         let mut node = WorldChainNodeTestContext::new(node, attributes_generator).await?;
         let genesis = node.inner.chain_spec().sealed_genesis_header();
 
+        tracing::info!("Genesis hash: {:?}", genesis.hash());
         node.update_forkchoice(genesis.hash(), genesis.hash())
             .await?;
 

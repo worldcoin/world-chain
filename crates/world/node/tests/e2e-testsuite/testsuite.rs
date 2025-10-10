@@ -19,6 +19,8 @@ use revm_primitives::{Address, Bytes, B256, U256};
 use std::sync::Arc;
 use std::vec;
 use tracing::info;
+use world_chain_rpc::core::EthApiExtClient;
+use world_chain_rpc::{EthApiExtServer, WorldChainEthApiExt};
 use world_chain_test::utils::account;
 
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -151,9 +153,12 @@ async fn test_flashblocks_bal() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let (_, mut nodes, _tasks, mut flashblocks_env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, Some("assets/bal_balance_changes_genesis.json"))
-            .await?;
+    let (_, mut nodes, _tasks, mut flashblocks_env) = setup::<FlashblocksContext>(
+        3,
+        optimism_payload_attributes,
+        Some("assets/bal_balance_changes_genesis.json"),
+    )
+    .await?;
 
     let ext_context_1 = nodes[0].ext_context.clone();
     let ext_context_2 = nodes[1].ext_context.clone();
@@ -194,23 +199,12 @@ async fn test_flashblocks_bal() -> eyre::Result<()> {
     // Send raw tx from execution test spec - bal_balance_changes
     // let signed_tx: &'static str = "0xf86380843b9aca008255f094d9c0e57d447779673b236c7423aeab84e931f3ba648026a0339110b435e122cbcca84763561c0b6d2cf0b0aa64597fe2e923686809de9d6fa05e7a19b0de89e3317da6e4585bff1f5b03a2927feb68c8307fb95405f812d695";
     let tx = bytes!("f86380843b9aca008255f094d9c0e57d447779673b236c7423aeab84e931f3ba648026a0339110b435e122cbcca84763561c0b6d2cf0b0aa64597fe2e923686809de9d6fa05e7a19b0de89e3317da6e4585bff1f5b03a2927feb68c8307fb95405f812d695");
-    
-    // // Decode the transaction
-    // let decoded_tx = OpTransactionSigned::decode_signed_rlp(&mut tx.as_ref())
-    //     .expect("Failed to decode transaction");
-    
-    // info!("Decoded transaction: {:?}", decoded_tx);
-    // info!("Transaction hash: {:?}", decoded_tx.hash());
-    // info!("Transaction from: {:?}", decoded_tx.from());
-    // info!("Transaction to: {:?}", decoded_tx.to());
-    // info!("Transaction value: {:?}", decoded_tx.value());
-    // info!("Transaction gas: {:?}", decoded_tx.gas_limit());
-    // info!("Transaction gas price: {:?}", decoded_tx.gas_price());
-    
-    node.node.rpc.inject_tx(tx.clone()).await?;
+
+    let hash = EthApiExtClient::send_raw_transaction(&node.node.rpc_client().unwrap(), tx).await?;
 
     let ext_context = node.ext_context.clone();
     let block_hash = node.node.block_hash(0);
+    tracing::info!("Block hash: {:?}", block_hash);
 
     let authorization_generator = move |attrs: OpPayloadAttributes| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);

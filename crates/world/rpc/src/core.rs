@@ -1,7 +1,8 @@
 use crate::{sequencer::SequencerClient, EthTransactionsExt};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::erc4337::TransactionConditional;
-use jsonrpsee::{core::async_trait, core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
+use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use world_chain_pool::tx::WorldChainPooledTransaction;
@@ -14,8 +15,7 @@ pub struct WorldChainEthApiExt<Pool, Client> {
     pub(crate) sequencer_client: Option<SequencerClient>,
 }
 
-#[cfg_attr(not(test), rpc(server, namespace = "eth"))]
-#[cfg_attr(test, rpc(server, client, namespace = "eth"))]
+#[rpc(server, client, namespace = "eth")]
 #[async_trait]
 pub trait EthApiExt {
     /// Sends a raw transaction to the pool
@@ -38,6 +38,7 @@ where
     Client: BlockReaderIdExt + StateProviderFactory + 'static,
 {
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
+        tracing::info!(target: "rpc::eth", "Builder got a rpc request of - raw transaction: {:?}", tx);
         Ok(EthTransactionsExt::send_raw_transaction(self, tx).await?)
     }
 
