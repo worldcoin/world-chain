@@ -1,0 +1,488 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>World Chain Specs</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="world-chain-specs"><a class="header" href="#world-chain-specs">World Chain Specs</a></h1>
+<h2 id="about-world-chain"><a class="header" href="#about-world-chain">About World Chain</a></h2>
+<p><a href="https://worldscan.org/">World Chain</a> is a blockchain designed for humans. Prioritizing scalability and accessibility for real users, World Chain provides the rails for a frictionless onchain UX.</p>
+<h2 id="site-navigation"><a class="header" href="#site-navigation">Site Navigation</a></h2>
+<p>Navigate this site using the sidebar on the left, the search icon found at the top of this page, or the left/right
+navigation buttons found to the sides of each page.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="priority-blockspace-for-humans"><a class="header" href="#priority-blockspace-for-humans">Priority Blockspace for Humans</a></h1>
+<p>Priority Blockspace for Humans introduces a new transaction ordering policy on World Chain that grants verified World ID holders top-of-block priority, reducing friction and making transactions fairer for real users.</p>
+<!-- h/t to @dmarzzz for this line -->
+<p>Where <a href="https://collective.flashbots.net/t/it-s-time-to-talk-about-l2-mev/3593#p-7700-network-congestions-7">bots create congestion</a>, PBH is a highway for humans.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="pbh-architecture"><a class="header" href="#pbh-architecture">PBH Architecture</a></h1>
+<p>World Chain is an OP Stack chain that enables Priority Blockspace for Humans (PBH) through the World Chain Builder. World Chain leverages <a href="https://github.com/flashbots/rollup-boost">rollup-boost</a> to support external block production, allowing the builder to propose PBH blocks to the sequencer while remaining fully compatible with the OP Stack.</p>
+<h2 id="block-production-on-the-op-stack"><a class="header" href="#block-production-on-the-op-stack">Block Production on the OP Stack</a></h2>
+<p>The <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">Engine API</a> defines the communication protocol between the Consensus Layer (CL) and the Execution Layer (EL) and is responsible for orchestrating block production on the OP Stack. Periodically, the sequencer's consensus client will send a fork choice update (FCU) to its execution client, signaling for a new block to be built. After a series of API calls between the CL and EL, the EL will return a new <code>ExecutionPayload</code> containing a newly constructed block. The CL will then advance the unsafe head of the chain and peer the new block to other nodes in the network.</p>
+<pre class="mermaid">sequenceDiagram
+    box OP Stack Sequencer
+        participant sequencer-cl as Sequencer CL
+        participant sequencer-el as Sequencer EL
+    end
+    box Network
+        participant peers-cl as Peers
+    end
+
+    Note over sequencer-cl: FCU with Attributes
+    sequencer-cl-&gt;&gt;sequencer-el: engine_forkChoiceUpdatedV3(ForkChoiceState, Attrs)
+    sequencer-el--&gt;&gt;sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: PayloadId}
+    sequencer-el-&gt;&gt;sequencer-el: Build execution payload
+    sequencer-cl-&gt;&gt;sequencer-el: engine_getPayloadV3(PayloadId)
+    sequencer-el--&gt;&gt;sequencer-cl: {executionPayload, blockValue}
+    sequencer-cl-&gt;&gt;peers-cl: Propagate new block
+
+
+</pre>
+<p>For a detailed look at how block production works on the OP Stack, see the <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">OP Stack specs</a>.</p>
+<h2 id="rollup-boost"><a class="header" href="#rollup-boost">Rollup Boost</a></h2>
+<p><code>rollup-boost</code> is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. <code>rollup-boost</code> acts as an intermediary between the sequencer's consensus and execution client. When <code>sequencer-cl</code> sends a new FCU to <code>rollup-boost</code>, the request will be multiplexed to both the sequencer's execution client and external block builders signaling that a new block should be built.</p>
+<p>When the sequencer is ready to propose a new block, <code>op-node</code> will send an <code>engine_getPayload</code> request to <code>rollup-boost</code> which is forwarded to the default execution client and external block builders.</p>
+<p>Once <code>rollup-boost</code> receives the built block from external builder, it will then validate the block by sending it to the sequencer's execution client via <code>engine_newPayload</code>. If the external block is valid, it is returned to the sequencer's <code>op-node</code>, otherwise <code>rollup-boost</code> will return the fallback block. Note that <code>rollup-boost</code> will always fallback to the default execution client's block in the case that the external builder does not respond in time or returns an invalid block.</p>
+<pre class="mermaid">sequenceDiagram
+    box Sequencer
+        participant sequencer-cl as Sequencer CL
+        participant rollup-boost
+        participant sequencer-el as Sequencer EL
+    end
+    box Builder
+        participant builder-el as Builder EL
+    end
+
+    Note over sequencer-cl: FCU with Attributes
+    sequencer-cl-&gt;&gt;rollup-boost: engine_forkChoiceUpdatedV3(..., Attrs)
+
+    Note over rollup-boost: Forward FCU
+    rollup-boost-&gt;&gt;builder-el: engine_forkChoiceUpdatedV3(..., Attrs)
+
+    rollup-boost-&gt;&gt;sequencer-el: engine_forkChoiceUpdatedV3(..., Attrs)
+    sequencer-el--&gt;&gt;rollup-boost: {payloadId: PayloadId}
+    rollup-boost--&gt;&gt;sequencer-cl: {payloadId: PayloadId}
+
+
+    Note over sequencer-cl: Get Payload
+    sequencer-cl-&gt;&gt;rollup-boost: engine_getPayloadV3(PayloadId)
+    Note over rollup-boost: Forward Get Payload
+    rollup-boost-&gt;&gt;sequencer-el: engine_getPayloadV3(PayloadId)
+    rollup-boost-&gt;&gt;builder-el: engine_getPayloadV3(PayloadId)
+    builder-el--&gt;&gt;rollup-boost: {executionPayload, blockValue}
+    sequencer-el--&gt;&gt;rollup-boost: {executionPayload, blockValue}
+
+
+
+    Note over rollup-boost, sequencer-el: Validate builder block
+    rollup-boost-&gt;&gt;sequencer-el: engine_newPayloadV3(ExecutionPayload)
+    sequencer-el-&gt;&gt;rollup-boost: {status: VALID, ...}
+
+    Note over rollup-boost: Propose execution payload
+    rollup-boost-&gt;&gt;sequencer-cl: {executionPayload, blockValue}
+    
+    Note over sequencer-cl: Propagate new block
+</pre>
+<p>In addition to Engine API requests, <code>rollup-boost</code> will proxy all RPC calls from the sequencer <code>op-node</code> to its local execution client. The following RPC calls will also be forwarded to external builders:</p>
+<ul>
+<li><code>miner_*</code>
+<ul>
+<li>The Miner API is used to notify execution clients of changes in effective gas price, extra data, and DA throttling requests from the batcher.</li>
+</ul>
+</li>
+<li><code>eth_sendRawTransaction*</code>
+<ul>
+<li>Forwards transactions the sequencer receives to the builder for block building.</li>
+</ul>
+</li>
+</ul>
+ </br>
+<h2 id="block-production-on-world-chain"><a class="header" href="#block-production-on-world-chain">Block Production on World Chain</a></h2>
+<p>World Chain leverages <code>rollup-boost</code> to enable external block production and integrates the World Chain Builder as a block builder in the network. The World Chain Builder implements a custom block ordering policy (ie. PBH) to provide priority inclusion for transactions with a valid World ID proof. Note that the custom ordering policy adheres to the OP Stack spec.</p>
+<p>Each block has a "PBH blockspace capacity", which determines how many PBH transactions will be included in the block. Blocks on World Chain will always reserve a percentage of blockspace for non-PBH transactions to ensure inclusion for automated systems and non-verified users. If there are not enough pending PBH transactions to fill the entirety of PBH blockspace, standard transactions will be used to fill the remainder of the block.</p>
+<br>
+<div style="display: flex; justify-content: center; gap: 40px;">
+  <div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
+    <div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">Default Block</div>
+    <table style="width: 100%; margin-top: 10px;">
+      <tr>
+        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
+        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
+      </tr>
+      <tr><td>0xaaaa</td><td>$0.04</td></tr>
+      <tr><td>0xbbbb</td><td>$0.04</td></tr>
+      <tr><td>0xcccc</td><td>$0.03</td></tr>
+      <tr><td>0xdddd</td><td>$0.03</td></tr>
+      <tr><td>0xeeee</td><td>$0.03</td></tr>
+      <tr><td>0x2222</td><td>$0.02</td></tr>
+      <tr><td>0x3333</td><td>$0.02</td></tr>
+      <tr><td>0x4444</td><td>$0.02</td></tr>
+      <tr><td>0x5555</td><td>$0.01</td></tr>
+      <tr><td>0x6666</td><td>$0.01</td></tr>
+    </table>
+  </div>
+  <div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
+    <div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">PBH Block</div>
+    <table style="width: 100%; margin-top: 10px;">
+      <tr>
+        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
+        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
+      </tr>
+      <tr style="color: #33ff33;"><td>0x3333</td><td>$0.02</td></tr>
+      <tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
+      <tr style="color: #33ff33;"><td>0x5555</td><td>$0.01</td></tr>
+      <tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
+      <tr><td>0xaaaa</td><td>$0.04</td></tr>
+      <tr><td>0xbbbb</td><td>$0.04</td></tr>
+      <tr><td>0xcccc</td><td>$0.03</td></tr>
+      <tr><td>0xdddd</td><td>$0.03</td></tr>
+      <tr><td>0xeeee</td><td>$0.03</td></tr>
+      <tr><td>0x2222</td><td>$0.02</td></tr>
+    </table>
+  </div>
+</div>
+<br>
+<p>If the amount of pending PBH transactions exceed the PBH blockspace capacity, the remaining PBH transactions will carry over to the next block. PBH transactions aim to provide verified users with faster, cheaper transaction inclusion, especially during network congestion. Note that transactions within PBH blockspace are ordered by priority fee.</p>
+<p>In the event that the block builder is offline, <code>rollup-boost</code> will fallback to the block built by the default execution client with standard OP Stack ordering rules.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="pbh-transactions"><a class="header" href="#pbh-transactions">PBH Transactions</a></h1>
+<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="pbh/./payload.html">PBHPayload</a> encoded in the tx calldata.</p>
+<!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
+<!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
+The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
+<h2 id="pbh-4337-userops"><a class="header" href="#pbh-4337-userops">PBH 4337 UserOps</a></h2>
+<p>The <code>PBHEntryPoint</code> contract also provides priority inclusion for 4337 <a href="https://eips.ethereum.org/EIPS/eip-4337#useroperation">UserOps</a> through PBH bundles. A PBH bundle is a standard 4337 bundle where the aggregated signature field is consists of an array of <code>PBHPayload</code>. A valid PBH bundle should include a <code>n</code> <code>PBHPayload</code>s, with each item corresponding to a <code>UserOp</code> in the bundle.</p>
+<p>When creating a PBH <code>UserOp</code>, users will append the <code>PBHPayload</code> to the <a href="https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/interfaces/PackedUserOperation.sol#L27">signature</a> field and specify the <a href="pbh/">PBHSignatureAggregator</a> as the <a href="https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/legacy/v06/IAccount06.sol#L25-L26">sigAuthorizer</a>. The <code>UserOp</code> can then be sent to a 4337 bundler that supports PBH and maintains an alt-mempool for PBH <code>UserOps</code>.</p>
+<p>The bundler will <a href="pbh/./validation.html">validate the PBHPayload</a>, strip the payload from the <code>userOp.signature</code> field and add it to the aggregated signature.</p>
+<pre><code class="language-solidity">    /**
+     * Aggregate multiple signatures into a single value.
+     * This method is called off-chain to calculate the signature to pass with handleOps()
+     * @param userOps              - Array of UserOperations to collect the signatures from.
+     * @return aggregatedSignature - The aggregated signature.
+     */
+    function aggregateSignatures(PackedUserOperation[] calldata userOps)
+        external
+        view
+        returns (bytes memory aggregatedSignature)
+    {
+        IPBHEntryPoint.PBHPayload[] memory pbhPayloads = new IPBHEntryPoint.PBHPayload[](userOps.length);
+        for (uint256 i = 0; i &lt; userOps.length; ++i) {
+            (, bytes memory proofData) = SafeModuleSignatures.extractProof(
+                userOps[i].signature, ISafe(payable(userOps[i].sender)).getThreshold()
+            );
+            pbhPayloads[i] = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
+        }
+        aggregatedSignature = abi.encode(pbhPayloads);
+    }
+
+</code></pre>
+<p>Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.</p>
+<p>Visit the <a href="pbh/./validation.html#signal-hash">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBH4337Module.sol">PBH4337Module</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="pbh-payload"><a class="header" href="#pbh-payload">PBH Payload</a></h2>
+<p>A <code>PBHPayload</code> consists of the following RLP encoded fields:</p>
+<div class="table-wrapper"><table><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>external_nullifier</code></td><td><code>bytes</code></td><td>A unique identifier derived from the proof version, date marker, and nonce.</td></tr>
+<tr><td><code>nullifier_hash</code></td><td><code>Field</code></td><td>A cryptographic nullifier ensuring uniqueness and preventing double-signaling.</td></tr>
+<tr><td><code>root</code></td><td><code>Field</code></td><td>The Merkle root proving inclusion in the World ID set.</td></tr>
+<tr><td><code>proof</code></td><td><code>Proof</code></td><td>Semaphore proof verifying membership in the World ID set.</td></tr>
+</tbody></table>
+</div>
+<h3 id="external-nullifier"><a class="header" href="#external-nullifier">External Nullifier</a></h3>
+<p>The <code>external_nullifier</code> is a unique identifier used when verifying PBH transactions to prevent double-signaling and enforce PBH transaction rate limiting. For a given <code>external_nullifier</code>, the resulting <a href="https://docs.semaphore.pse.dev/glossary#nullifier">nullifier_hash</a> will be the same, meaning it can be used a unique marker for a given World ID user while maintaining all privacy preserving guarantees provided by World ID. Note that since the <code>external_nullifier</code> is different for every PBH transaction a user sends, no third party can know if two PBH transactions are from the same World ID.</p>
+<p>The <code>external_nullifier</code> is used to enforce that a World ID user can only submit <code>n</code> PBH transactions per month, with the Builder ensuring that all proofs and <code>external_nullifiers</code> are valid before a transaction is included.</p>
+<p>The <code>external_nullifier</code> is encoded as a 32-bit packed unsigned integer, with the following structure:</p>
+<ul>
+<li><strong>Version (<code>uint8</code>)</strong>: Defines the schema version.</li>
+<li><strong>Year (<code>uint16</code>)</strong>: The current year expressed as <code>yyyy</code>.</li>
+<li><strong>Month (<code>uint8</code>)</strong>: The current month expressed as (1-12).</li>
+<li><strong>PBH Nonce (<code>uint8</code>)</strong>: The PBH nonce, where <code>0 &lt;= n &lt; pbhNonceLimit</code>.</li>
+</ul>
+<p>Below is an example of how to encode and decode the <code>external_nullifier</code> for a given PBH transaction.</p>
+<pre><code class="language-solidity">uint8 public constant V1 = 1;
+
+/// @notice Encodes a PBH external nullifier using the provided year, month, and nonce.
+/// @param version An 8-bit version number (0-255) used to identify the encoding format.
+/// @param pbhNonce An 8-bit nonce value (0-255) used to uniquely identify the nullifier within a month.
+/// @param month An 8-bit 1-indexed value representing the month (1-12).
+/// @param year A 16-bit value representing the year (e.g., 2024).
+/// @return The encoded PBHExternalNullifier.
+function encode(uint8 version, uint8 pbhNonce, uint8 month, uint16 year) internal pure returns (uint256) {
+    require(month &gt; 0 &amp;&amp; month &lt; 13, InvalidExternalNullifierMonth());
+    return (uint256(year) &lt;&lt; 24) | (uint256(month) &lt;&lt; 16) | (uint256(pbhNonce) &lt;&lt; 8) | uint256(version);
+}
+
+/// @notice Decodes an encoded PBHExternalNullifier into its constituent components.
+/// @param externalNullifier The encoded external nullifier to decode.
+/// @return version The 8-bit version extracted from the external nullifier.
+/// @return pbhNonce The 8-bit nonce extracted from the external nullifier.
+/// @return month The 8-bit month extracted from the external nullifier.
+/// @return year The 16-bit year extracted from the external nullifier.
+function decode(uint256 externalNullifier)
+    internal
+    pure
+    returns (uint8 version, uint8 pbhNonce, uint8 month, uint16 year)
+{
+    year = uint16(externalNullifier &gt;&gt; 24);
+    month = uint8((externalNullifier &gt;&gt; 16) &amp; 0xFF);
+    pbhNonce = uint8((externalNullifier &gt;&gt; 8) &amp; 0xFF);
+    version = uint8(externalNullifier &amp; 0xFF);
+}
+</code></pre>
+<br>
+<p>The <strong>World Chain Builder</strong> enforces:</p>
+<ul>
+<li>The <code>external_nullifier</code> is correctly formatted and specifies the current month, year and a valid nonce.</li>
+<li>The <code>proof</code> is valid and specifies the <code>external_nullifier</code> as a public input to the proof.</li>
+<li>The <code>external_nullifier</code> has not been used before, ensuring that the <code>pbh_nonce</code> is unique for the given month and year.</li>
+</ul>
+<h3 id="signal-hash"><a class="header" href="#signal-hash">Signal Hash</a></h3>
+<p>One of the required inputs when <a href="https://docs.rs/semaphore-rs/0.3.1/semaphore_rs/protocol/fn.generate_proof.html">generating a World ID proof</a> is the <code>signal_hash</code>.
+As the name suggests, the <code>signal_hash</code> is the hash of the <a href="https://docs.semaphore.pse.dev/V2/technical-reference/circuits#signal">signal</a> which is an arbitrary message provided by the prover, allowing the verifier to hash the <code>signal</code> when verifying the proof, ensuring that the proof was generated with the expected inputs.</p>
+<p>Within the context of PBH, the <code>signal_hash</code> is used to ensure the proof was created for the transaction being submitted. Depending on the type of the PBH transaction, this value could be a hash of the tx calldata, a 4337 UserOp hash or the tx hash itself.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="pbh-validation"><a class="header" href="#pbh-validation">PBH Validation</a></h1>
+<p>Upon receiving new transactions, the World Chain Builder will first ensure that the payload is <a href="https://github.com/paradigmxyz/reth/blob/1e965caf5fa176f244a31c0d2662ba1b590938db/crates/optimism/txpool/src/validator.rs#L136-L203">a valid OP Stack tranasaction</a>. In addition to the default checks, the builder will also <a href="https://github.com/worldcoin/world-chain/blob/kit/docs/world-chain-builder/crates/world/pool/src/validator.rs#L180-L204">evaluate transactions for PBH conditions</a>.</p>
+<p>Any transaction that calls the <code>pbhMulticall()</code> or <code>handleAggregatedOps()</code> function on the <code>PBHEntyrPoint</code> will be considered a PBH transaction and must clear PBH Validation. PBH transactions must contain a valid <code>PBHPayload</code> or <code>PBHPayload[]</code> in the case of PBH 4337 bundles.</p>
+<pre><code class="language-solidity">    struct PBHPayload {
+        uint256 root;
+        uint256 pbhExternalNullifier;
+        uint256 nullifierHash;
+        uint256[8] proof;
+    }
+</code></pre>
+<h3 id="signal-hash-1"><a class="header" href="#signal-hash-1">Signal Hash</a></h3>
+<p>Transactions that target the <code>pbhMulticall()</code> function must provide a valid <code>PBHPayload</code> where included <code>proof</code> is generated with a <code>signalHash</code> specified as:</p>
+<pre><code class="language-solidity">uint256 signalHash = abi.encode(msg.sender, calls).hashToField();
+</code></pre>
+<p>Transactions that target the <code>handleAggregatedOps()</code>function (ie. PBH 4337 Bundles) must contain an aggregated signature consisting of an array of <code>PBHPayload</code> where there is a <code>PBHPayload</code> for each <code>UserOp</code> in the bundle. The included <code>proof</code> must be generated with a <code>signalHash</code> specified as:</p>
+<pre><code class="language-solidity">uint256 signalHash = abi.encodePacked(sender, userOp.nonce, userOp.callData).hashToField();
+</code></pre>
+<h3 id="external-nullifier-1"><a class="header" href="#external-nullifier-1">External Nullifier</a></h3>
+<p>PBH transactions must contain a valid external nullifier where:</p>
+<ul>
+<li>The <code>month</code> is the current month</li>
+<li>The <code>year</code> is the current year (specified as <code>yyyy</code>)</li>
+<li>The <code>pbhNonce</code> is &lt; <code>pbhNonceLimit</code>. PBH nonces are <code>0</code> indexed, meaning if the <code>pbhNonce</code> limit is <code>29</code>, a user is allotted <code>30</code> PBH transactions per month.</li>
+</ul>
+<h3 id="root"><a class="header" href="#root">Root</a></h3>
+<p>The <code>root</code> provided must be a valid <a href="https://github.com/worldcoin/world-id-contracts/blob/main/src/WorldIDIdentityManagerImplV1.sol#L67">World ID Root</a> with a timestamp less than 7 days old.</p>
+<h3 id="proof"><a class="header" href="#proof">Proof</a></h3>
+<p>The <code>proof</code> must be a valid semaphore proof, proving inclusion in the World ID set associated with the specified <code>root</code>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="specs/static/mermaid.min.js"></script>
+        <script src="specs/static/mermaid-init.js"></script>
+        <script src="specs/static/solidity-min.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
