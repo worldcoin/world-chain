@@ -148,6 +148,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_flashblocks() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, mut nodes, _tasks, mut flashblocks_env) =

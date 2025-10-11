@@ -51,6 +51,28 @@ pub struct FlashblocksArgs {
         required = false
     )]
     pub spoof_authorizer: bool,
+
+    /// The interval to publish pre-confirmations
+    /// when building a payload in milliseconds.
+    #[arg(
+        long = "flashblocks.interval",
+        env = "FLASHBLOCKS_INTERVAL",
+        default_value_t = 200,
+        requires = "builder_sk"
+    )]
+    pub flashblocks_interval: u64,
+
+    /// Interval at which the block builder
+    /// should re-commit to the transaction pool when building a payload.
+    ///
+    /// In milliseconds.
+    #[arg(
+        long = "flashblocks.recommit_interval",
+        env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
+        default_value_t = 200,
+        requires = "builder_sk"
+    )]
+    pub recommit_interval: u64,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -81,6 +103,8 @@ mod tests {
             spoof_authorizer: true,
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            recommit_interval: 200,
+            flashblocks_interval: 200,
         };
 
         let args = CommandParser::parse_from([
@@ -89,6 +113,10 @@ mod tests {
             "--flashblocks.spoof_authorizer",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
+            "--flashblocks.interval",
+            "200",
+            "--flashblocks.recommit_interval",
+            "200",
         ]);
 
         assert_eq!(args.flashblocks.unwrap(), flashblocks);
@@ -101,6 +129,8 @@ mod tests {
             spoof_authorizer: false,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
+            recommit_interval: 200,
+            flashblocks_interval: 200,
         };
 
         let args = CommandParser::parse_from([

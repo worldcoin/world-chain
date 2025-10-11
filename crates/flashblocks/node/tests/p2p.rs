@@ -114,6 +114,8 @@ async fn setup_node(
             authorizer_vk: Some(authorizer_sk.verifying_key()),
             builder_sk: Some(builder_sk.clone()),
             spoof_authorizer: false,
+            flashblocks_interval: 200,
+            recommit_interval: 200,
         },
         da_config: Default::default(),
     }

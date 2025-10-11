@@ -19,6 +19,7 @@ use reth_basic_payload_builder::{
 
 use flashblocks_primitives::p2p::Authorization;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use tokio::runtime::Handle;
@@ -26,7 +27,9 @@ use tracing::debug;
 
 use crate::job::FlashblocksPayloadJob;
 use crate::metrics::PayloadBuilderMetrics;
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::{
+    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+};
 use flashblocks_primitives::flashblocks::Flashblock;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
@@ -130,9 +133,10 @@ where
         + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload,
+            BuiltPayload = OpBuiltPayload<OpPrimitives>,
             Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + Unpin
+        > + FlashblockPayloadBuilder
+        + Unpin
         + Clone
         + 'static,
     Builder::Attributes: Unpin + Clone,
@@ -174,10 +178,12 @@ where
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
-        let interval = Box::pin(tokio::time::sleep(self.config.interval));
+        let flashblock_deadline = Box::pin(tokio::time::sleep(self.config.interval));
+        let recommit_interval = tokio::time::interval(self.config.recommitment_interval);
+
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
-        let payload_task_guard = PayloadTaskGuard::new(1);
+        let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
         let maybe_pre_state = self
             .check_for_pre_state(&config.attributes)
@@ -210,8 +216,10 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            flashblock_deadline: interval,
-            interval: self.config.interval,
+            committed_payload: None,
+            flashblock_interval: self.config.interval,
+            flashblock_deadline,
+            recommit_interval,
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
@@ -305,6 +313,10 @@ where
 pub struct FlashblocksJobGeneratorConfig {
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
+    /// The interval at which the job should recommit to the transaction pool.
+    recommitment_interval: Duration,
+    /// The maximum number of concurrent payload build tasks.
+    max_payload_tasks: usize,
     /// The deadline for when the payload builder job should resolve.
     ///
     /// By default this is [`SLOT_DURATION`]: 12s
@@ -333,14 +345,28 @@ impl FlashblocksJobGeneratorConfig {
         self.enable_authorization = enable;
         self
     }
+
+    /// Sets the recommitment interval at which the job should re-commit to the transaction pool.
+    pub const fn recommitment_interval(mut self, interval: Duration) -> Self {
+        self.recommitment_interval = interval;
+        self
+    }
+
+    /// Sets the maximum number of concurrent payload build tasks.
+    pub const fn max_payload_tasks(mut self, max: usize) -> Self {
+        self.max_payload_tasks = max;
+        self
+    }
 }
 
 impl Default for FlashblocksJobGeneratorConfig {
     fn default() -> Self {
         Self {
             interval: Duration::from_millis(200),
+            recommitment_interval: Duration::from_millis(50),
             deadline: Duration::from_secs(2),
             enable_authorization: true,
+            max_payload_tasks: 4,
         }
     }
 }

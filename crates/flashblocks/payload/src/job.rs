@@ -1,11 +1,13 @@
 use std::{
     future::Future,
     pin::{pin, Pin},
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
     time::Duration,
 };
 
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::{
+    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+};
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::flashblocks::Flashblock;
 use flashblocks_primitives::{
@@ -29,7 +31,10 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use tokio::{sync::oneshot, time::Sleep};
+use tokio::{
+    sync::oneshot,
+    time::{Interval, Sleep},
+};
 use tracing::{debug, error, info, span, trace};
 
 use crate::metrics::PayloadBuilderMetrics;
@@ -53,6 +58,9 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) executor: Tasks,
     /// The best payload so far and its state.
     pub(crate) best_payload: PayloadState<Builder::BuiltPayload>,
+    /// The best payload that has been committed, and published to the network.
+    /// This payload is a pre-commitment to all future payloads.
+    pub(crate) committed_payload: Option<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pub(crate) pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -75,7 +83,9 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// The interval at which we should attempt to build new payloads
     pub(crate) flashblock_deadline: Pin<Box<Sleep>>,
     /// The interval timer for spawning new build tasks
-    pub(crate) interval: Duration,
+    pub(crate) flashblock_interval: Duration,
+    /// The recommit interval duration
+    pub(crate) recommit_interval: Interval,
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
     /// The flashblocks state executor
@@ -92,7 +102,8 @@ where
     Builder: PayloadBuilder<
             BuiltPayload = OpBuiltPayload<OpPrimitives>,
             Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + Unpin
+        > + FlashblockPayloadBuilder
+        + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -109,6 +120,7 @@ where
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
+        let committed_payload = self.committed_payload.clone();
         self.metrics.inc_initiated_payload_builds();
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
@@ -127,7 +139,7 @@ where
                 best_payload,
             };
 
-            let result = builder.try_build(args);
+            let result = builder.try_build_with_precommit(args, committed_payload);
             let _ = tx.send(result);
         }));
 
@@ -171,15 +183,30 @@ where
             payload,
         ))
     }
+
+    pub(crate) fn record_payload_metrics(&self, payload: &OpBuiltPayload<OpPrimitives>) {
+        let block = payload.block();
+        let payload_bytes: usize = block
+            .body()
+            .transactions()
+            .map(|tx| tx.encoded_2718().len())
+            .sum();
+        let gas_used = block.header().gas_used;
+        let tx_count = block.body().transactions().count();
+
+        self.metrics
+            .record_payload_metrics(payload_bytes as u64, gas_used, tx_count);
+    }
 }
 
 impl<Tasks, Builder> Future for FlashblocksPayloadJob<Tasks, Builder>
 where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload,
+            BuiltPayload = OpBuiltPayload<OpPrimitives>,
             Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + Unpin
+        > + FlashblockPayloadBuilder
+        + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
@@ -227,31 +254,56 @@ where
             span!(target: "flashblocks::payload_builder", tracing::Level::TRACE, "poll").entered();
         let _enter = _span.enter();
         let this = self.get_mut();
+
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "flashblocks::payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()));
         }
 
+        if this.recommit_interval.poll_tick(cx).is_ready() && !this.best_payload.is_frozen() {
+            trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
+            this.spawn_build_job();
+        }
+
         let network_handle = this.p2p_handler.clone();
         let fut = pin!(network_handle.await_clearance());
 
-        let throttle_start = std::time::Instant::now();
-
-        let joined_fut = pin!(futures::future::join(
+        let mut joined_fut = pin!(futures::future::join(
             fut,
             this.flashblock_deadline.as_mut()
         ));
 
-        ready!(joined_fut.poll(cx));
+        // flashblocks interval reached, and clearance received to publish.
+        // commit to the best payload, reset the interval, and publish the payload
+        if joined_fut.poll_unpin(cx).is_ready() {
+            if let Some(payload) = this.best_payload.payload().cloned() {
+                // record metrics
+                this.record_payload_metrics(&payload);
 
-        let throttle_duration = throttle_start.elapsed();
-        this.metrics
-            .record_p2p_throttle_duration(throttle_duration.as_millis() as f64);
+                trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "committing to best payload");
 
-        this.flashblock_deadline
-            .as_mut()
-            .reset(tokio::time::Instant::now() + this.interval);
+                // publish the new payload to the p2p network
+                if let Err(err) = this.publish_payload(&payload, &this.committed_payload) {
+                    this.metrics.inc_p2p_publishing_errors();
+                    error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
+                } else {
+                    trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
+                }
+
+                // commit to the best payload
+                this.committed_payload = Some(payload.clone());
+
+                // increment the pre-confirmation index
+                this.block_index += 1;
+                this.spawn_build_job();
+                this.recommit_interval.reset();
+
+                this.flashblock_deadline
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + this.flashblock_interval);
+            }
+        }
 
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
@@ -261,38 +313,8 @@ where
                         payload,
                         cached_reads,
                     } => {
-                        let prev = this.best_payload.clone();
                         this.best_payload = PayloadState::Best(payload.clone());
                         this.cached_reads = Some(cached_reads);
-
-                        trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "building new best payload");
-
-                        let block = payload.block();
-                        let payload_bytes: usize = block
-                            .body()
-                            .transactions()
-                            .map(|tx| tx.encoded_2718().len())
-                            .sum();
-                        let gas_used = block.header().gas_used;
-                        let tx_count = block.body().transactions().count();
-
-                        this.metrics.record_payload_metrics(
-                            payload_bytes as u64,
-                            gas_used,
-                            tx_count,
-                        );
-
-                        // publish the new payload to the p2p network
-                        if let Err(err) = this.publish_payload(&payload, &prev.payload().cloned()) {
-                            this.metrics.inc_p2p_publishing_errors();
-                            error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
-                        } else {
-                            trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
-                        }
-
-                        // increment the pre-confirmation index
-                        this.block_index += 1;
-                        this.spawn_build_job();
                     }
                     BuildOutcome::Freeze(payload) => {
                         trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
@@ -352,9 +374,10 @@ impl<Tasks, Builder> PayloadJob for FlashblocksPayloadJob<Tasks, Builder>
 where
     Tasks: TaskSpawner + Clone + 'static,
     Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload,
+            BuiltPayload = OpBuiltPayload<OpPrimitives>,
             Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + Unpin
+        > + FlashblockPayloadBuilder
+        + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
