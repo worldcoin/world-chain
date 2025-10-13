@@ -4,10 +4,14 @@ use flashblocks_cli::FlashblocksArgs;
 use flashblocks_node::FlashblocksNodeBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksP2PProtocol;
 use flashblocks_rpc::op::{FlashblocksOpApi, OpApiExtServer};
+use futures_util::StreamExt;
+use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_network::{events::NetworkPeersEvents, NetworkHandle};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::args::RollupArgs;
-use tracing::info;
+use reth_optimism_primitives::OpPrimitives;
+use tracing::{error, info, instrument::WithSubscriber};
 
 #[derive(Debug, Clone, clap::Args)]
 struct FlashblocksNodeArgs {
@@ -49,10 +53,21 @@ pub fn main() {
             let flashblocks_p2p_protocol =
                 FlashblocksP2PProtocol::new(handle.node.network.clone(), p2p_handle);
 
-            handle
-                .node
-                .network
-                .add_rlpx_sub_protocol(flashblocks_p2p_protocol.into_rlpx_sub_protocol());
+            let network: &NetworkHandle<BasicNetworkPrimitives<OpPrimitives, _, _>> =
+                &handle.node.network;
+
+            // Spawn peer event processing in background
+            let network_clone = network.clone();
+            tokio::spawn(async move {
+                network_clone
+                    .peer_events()
+                    .for_each(|event| async move {
+                        error!(target: "flashblocks::p2p", "peer event: {:?}", event);
+                    })
+                    .await;
+            });
+
+            network.add_rlpx_sub_protocol(flashblocks_p2p_protocol.into_rlpx_sub_protocol());
 
             handle.node_exit_future.await
         })
