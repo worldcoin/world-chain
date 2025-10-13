@@ -321,8 +321,6 @@ pub struct FlashblocksJobGeneratorConfig {
     ///
     /// By default this is [`SLOT_DURATION`]: 12s
     deadline: Duration,
-    /// Whether to enable Authorization's for payloads.
-    enable_authorization: bool,
 }
 
 // === impl Flashblocks ===
@@ -337,12 +335,6 @@ impl FlashblocksJobGeneratorConfig {
     /// Sets the deadline when this job should resolve.
     pub const fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
-        self
-    }
-
-    /// Sets the flag to enable or disable Authorization's for payloads.
-    pub const fn authorization(mut self, enable: bool) -> Self {
-        self.enable_authorization = enable;
         self
     }
 
@@ -365,7 +357,6 @@ impl Default for FlashblocksJobGeneratorConfig {
             interval: Duration::from_millis(200),
             recommitment_interval: Duration::from_millis(50),
             deadline: Duration::from_secs(2),
-            enable_authorization: true,
             max_payload_tasks: 4,
         }
     }
