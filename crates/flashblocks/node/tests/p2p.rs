@@ -185,7 +185,11 @@ fn base_payload(
             extra_data: Bytes::new(),
             base_fee_per_gas: U256::ZERO,
         }),
-        diff: ExecutionPayloadFlashblockDeltaV1::default(),
+        diff: ExecutionPayloadFlashblockDeltaV1 {
+            access_list: flashblocks_primitives::access_list::FlashblockAccessList::default(),
+            access_list_hash: B256::default(),
+            ..ExecutionPayloadFlashblockDeltaV1::default()
+        },
         metadata: FlashblockMetadata::default(),
     }
 }
@@ -208,6 +212,8 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
+            access_list: flashblocks_primitives::access_list::FlashblockAccessList::default(),
+            access_list_hash: B256::default(),
         },
         metadata: FlashblockMetadata::default(),
     }

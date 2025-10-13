@@ -40,13 +40,14 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
-
+alloy-evm.workspace = true
 flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
@@ -67,3 +68,9 @@ serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
 
+[dev-dependencies]
+alloy-sol-types.workspace = true
+revm-interpreter.workspace = true
+alloy-genesis.workspace = true
+lazy_static.workspace = true
+alloy-signer-local.workspace = true

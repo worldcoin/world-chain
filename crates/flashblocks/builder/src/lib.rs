@@ -55,6 +55,7 @@ use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span, trace, warn};
 
+pub mod access_list;
 pub mod executor;
 pub mod payload_txns;
 pub mod traits;

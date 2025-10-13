@@ -94,6 +94,8 @@ impl Flashblock {
                         .unwrap_or_default()
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    access_list: crate::access_list::FlashblockAccessList::default(),
+                    access_list_hash: alloy_primitives::B256::default(),
                 },
                 metadata,
             },

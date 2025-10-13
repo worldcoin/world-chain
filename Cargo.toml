@@ -135,7 +135,7 @@ reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2"
 reth-op = { git = "https://github.com/paradigmxyz/reth", tag = "v1.8.2" }
 
 # alloy op
-op-alloy-consensus = {version = "0.20.0", default-features = false }
+op-alloy-consensus = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types = { version = "0.20.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.20.0", default-features = false }
 op-alloy-network = { version = "0.20.0", default-features = false }
@@ -143,6 +143,9 @@ alloy-op-hardforks = { version = "0.3.5", default-features = false }
 
 # alloy
 alloy = { version = "1.0.37" }
+alloy-evm = { version = "0.21.2", default-features = false, features = [
+    "op"
+]}
 alloy-json-rpc = { version = "1.0.37", default-features = false }
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-provider = { version = "1.0.37", default-features = false }
@@ -165,6 +168,10 @@ alloy-rlp = { version = "0.3.10", default-features = false, features = [
     "derive",
 ] }
 alloy-eips = { version = "1.0.37", default-features = false }
+alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "307eae2", default-features = false, features = [
+    "serde",
+    "rlp",
+] }
 alloy-genesis = { version = "1.0.24", default-features = false }
 alloy-rpc-types-debug = "1.0.37"
 alloy-signer = { version = "1.0.37", default-features = false }
@@ -177,10 +184,11 @@ alloy-hardforks = { version = "0.3.0", default-features = false }
 
 # revm
 revm = { version = "29.0.1", default-features = false }
+revm-interpreter = { version = "27.0.0", default-features = false }
 revm-state = { version = "7.0.5", default-features = false }
 revm-primitives = { version = "20.0.0", default-features = false }
 op-revm = { version = "10.0.0", default-features = false }
-alloy-op-evm = { version = "0.21.0", default-features = false }
+alloy-op-evm = { version = "0.21.2", default-features = false }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
@@ -241,6 +249,7 @@ once_cell = "1.19"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["redis"] }
 
+lazy_static = "1.4"
 
 # WIP
 # [patch."https://github.com/paradigmxyz/reth"]
