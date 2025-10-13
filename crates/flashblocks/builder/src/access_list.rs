@@ -436,13 +436,21 @@ mod tests {
                         block_access_index: 1,
                         post_balance: U256::from(21000),
                     }],
+                    code_changes: vec![CodeChange {
+                        block_access_index: 1,
+                        new_code: bytes!("0x00"),
+                    }],
+                    nonce_changes: vec![NonceChange {
+                        block_access_index: 1,
+                        new_nonce: 0,
+                    }],
                     ..Default::default()
                 },
                 AccountChanges {
                     address: BOB.address(),
                     balance_changes: vec![BalanceChange {
                         block_access_index: 1,
-                        post_balance: U256::from(100),
+                        post_balance: U256::from(101),
                     }],
                     ..Default::default()
                 },
