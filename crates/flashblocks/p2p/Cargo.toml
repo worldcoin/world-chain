@@ -31,4 +31,7 @@ parking_lot.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+# Dependencies for network integration tests
+reth-storage-api.workspace = true  # For NoopProvider
+reth-network-peers.workspace = true  # For PeerId type
+async-trait.workspace = true  # For PeerEventsListener trait
