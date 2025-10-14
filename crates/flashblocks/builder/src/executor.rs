@@ -4,8 +4,9 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
+use alloy_primitives::{keccak256, FixedBytes};
 use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::OptionExt as _;
+use eyre::eyre::{eyre, OptionExt as _};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
@@ -29,10 +30,11 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
+use reth_evm::{ConfigureEvm, Evm, EvmFactory};
+use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes, PayloadBuilderError};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
@@ -690,7 +692,6 @@ where
     };
 
     let flashblock = flashblocks.last();
-    let cancel = CancelOnDrop::default();
     let base = flashblocks.base();
 
     let transactions = flashblock
@@ -699,72 +700,98 @@ where
         .iter()
         .map(|b| {
             let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
-            eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
+            Ok(tx.try_into_recovered().unwrap())
         })
         .collect::<eyre::Result<Vec<_>>>()?;
-
-    let eth_attrs = EthPayloadBuilderAttributes {
-        id: PayloadId(flashblocks.payload_id().to_owned()),
-        parent: base.parent_hash,
-        timestamp: base.timestamp,
-        suggested_fee_recipient: base.fee_recipient,
-        prev_randao: base.prev_randao,
-        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
-        parent_beacon_block_root: Some(base.parent_beacon_block_root),
-    };
-
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        chain_spec.base_fee_params_at_timestamp(base.timestamp),
-    )?;
-
-    let attributes = OpPayloadBuilderAttributes {
-        payload_attributes: eth_attrs,
-        no_tx_pool: true,
-        transactions: transactions.clone(),
-        gas_limit: None,
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
-        min_base_fee: None,
-    };
 
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)?
         .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
 
-    let state_provider = provider.state_by_block_hash(base.parent_hash)?;
-
-    let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
-    let builder_ctx = payload_builder_ctx_builder.build(
-        provider.clone(),
-        evm_config.clone(),
-        state_executor.da_config.clone(),
-        config,
-        &cancel,
-        latest_payload.as_ref().map(|p| p.0.clone()),
-    );
-
-    let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-    let db = StateProviderDatabase::new(&state_provider);
-
-    let outcome = FlashblockBuilder::new(best).build(
-        pool.clone(),
-        db,
-        &state_provider,
-        &builder_ctx,
-        latest_payload.as_ref().map(|p| p.0.clone()),
-    )?;
-
-    let payload = match outcome {
-        BuildOutcomeKind::Better { payload } => payload,
-        BuildOutcomeKind::Freeze(payload) => payload,
-        _ => return Ok(()),
+    let attributes = OpNextBlockEnvAttributes {
+        timestamp: base.timestamp,
+        suggested_fee_recipient: base.fee_recipient,
+        prev_randao: base.prev_randao,
+        gas_limit: base.gas_limit,
+        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+        extra_data: base.extra_data.clone(),
     };
 
-    trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+    // Prepare EVM environment.
+    let evm_env = evm_config
+        .next_evm_env(sealed_header.header(), &attributes)
+        .map_err(PayloadBuilderError::other)?;
 
-    *latest_payload = Some((payload.clone(), flashblock.index));
+    let state_provider = provider.state_by_block_hash(sealed_header.hash())?;
+    let mut state = StateProviderDatabase::new(&state_provider);
+    let mut db = if let Some((payload, _)) = latest_payload {
+        State::builder()
+            .with_database(&mut state)
+            .with_bundle_prestate(
+                payload
+                    .executed_block()
+                    .as_ref()
+                    .unwrap()
+                    .block
+                    .execution_output
+                    .bundle
+                    .clone(),
+            )
+            .with_bundle_update()
+            .build()
+    } else {
+        State::builder()
+            .with_database(&mut state)
+            .with_bundle_update()
+            .build()
+    };
 
-    pending_block.send_replace(payload.executed_block());
+    // Prepare EVM.
+    let evm = evm_config.evm_with_env(&mut db, evm_env);
+    let execution_context = OpBlockExecutionCtx {
+        parent_hash: base.parent_hash,
+        parent_beacon_block_root: Some(base.parent_beacon_block_root),
+        extra_data: base.extra_data.clone(),
+    };
+
+    let mut executor = FlashblocksBlockExecutor::new(
+        evm,
+        execution_context,
+        chain_spec,
+        OpRethReceiptBuilder::default(),
+    );
+
+    // If we don't have a payload yet we need to apply the pre-execution changes
+    if latest_payload.is_none() {
+        executor.apply_pre_execution_changes()?;
+    }
+
+    // Execute each transaction individually
+    for tx in transactions {
+        executor.execute_transaction(tx)?;
+    }
+
+    // TODO: When to apply post execution changes
+
+    // Validate the BAL matches the provided Flashblock BAL
+    let (_, _, access_list) = executor.finish_with_access_list()?;
+
+    // Validation
+    // 1.) BAL Hash Matches
+    let expected_bal_hash = keccak256(alloy_rlp::encode(access_list.build()));
+
+    if expected_bal_hash != flashblock.diff.access_list_hash {
+        return Err(eyre!(format!(
+            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+            expected_bal_hash, flashblock.diff.access_list_hash
+        )));
+    }
+
+    // trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+
+    // *latest_payload = Some((payload.clone(), flashblock.index));
+
+    // pending_block.send_replace(payload.executed_block());
 
     Ok(())
 }
