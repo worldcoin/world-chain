@@ -132,11 +132,8 @@ impl FlashblocksNodeBuilder {
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
-        let flashblocks_state = FlashblocksStateExecutor::new(
-            flashblocks_handle.clone(),
-            self.da_config.clone(),
-            pending_block,
-        );
+        let flashblocks_state =
+            FlashblocksStateExecutor::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

@@ -1,25 +1,19 @@
 use alloy_consensus::{Block, Transaction, TxReceipt};
-use alloy_eips::eip2718::WithEncoded;
-use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
-use alloy_primitives::{keccak256, FixedBytes};
-use alloy_rpc_types_engine::PayloadId;
+use alloy_primitives::{keccak256, U256};
 use eyre::eyre::{eyre, OptionExt as _};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::AuthorizedPayload;
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::StreamExt as _;
-use op_alloy_consensus::{encode_holocene_extra_data, OpTxEnvelope};
+use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
 use reth::core::primitives::Receipt;
-use reth::payload::EthPayloadBuilderAttributes;
-use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
-use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::{ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use reth_evm::execute::{
     BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
@@ -37,15 +31,15 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpBlockAssembler, OpBuiltPayload, OpEvmConfig,
     OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_payload_util::BestPayloadTransactions;
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
-use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
-use reth_transaction_pool::TransactionPool;
+use reth_provider::{
+    BlockExecutionResult, ExecutionOutcome, HeaderProvider, StateProvider, StateProviderFactory,
+};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
@@ -55,7 +49,6 @@ use std::sync::Arc;
 use tracing::{error, trace};
 
 use crate::access_list::FlashblockAccessListConstruction;
-use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks.
@@ -77,7 +70,7 @@ where
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks + Clone,
 {
-    /// Creates a new [`OpBlockExecutor`].
+    /// Creates a new [`FlashblocksBlockExecutor`].
     pub fn new(evm: E, ctx: OpBlockExecutionCtx, spec: Spec, receipt_builder: R) -> Self {
         let executor = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
 
@@ -511,7 +504,6 @@ where
 pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
-    da_config: OpDAConfig,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
@@ -533,7 +525,6 @@ impl FlashblocksStateExecutor {
     /// This function spawn a task that handles updates. It should only be called once.
     pub fn new(
         p2p_handle: FlashblocksHandle,
-        da_config: OpDAConfig,
         pending_block: tokio::sync::watch::Sender<
             Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
         >,
@@ -546,24 +537,16 @@ impl FlashblocksStateExecutor {
         Self {
             inner,
             p2p_handle,
-            da_config,
             pending_block,
         }
     }
 
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node, Pool, P>(
-        &self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-        payload_builder_ctx_builder: P,
-        evm_config: OpEvmConfig,
-    ) where
-        Pool: TransactionPool + 'static,
+    pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
+    where
         Node: FullNodeTypes,
         Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-        P: PayloadBuilderCtxBuilder<Node::Provider, OpEvmConfig, OpChainSpec> + 'static,
     {
         let mut stream = self.p2p_handle.flashblock_stream();
         let this = self.clone();
@@ -577,8 +560,6 @@ impl FlashblocksStateExecutor {
                 while let Some(flashblock) = stream.next().await {
                     if let Err(e) = process_flashblock(
                         &provider,
-                        &pool,
-                        &payload_builder_ctx_builder,
                         &evm_config,
                         &this,
                         &chain_spec,
@@ -645,10 +626,8 @@ impl FlashblocksStateExecutor {
 }
 
 #[expect(clippy::too_many_arguments)]
-fn process_flashblock<Provider, Pool, P>(
+fn process_flashblock<Provider>(
     provider: &Provider,
-    pool: &Pool,
-    payload_builder_ctx_builder: &P,
     evm_config: &OpEvmConfig,
     state_executor: &FlashblocksStateExecutor,
     chain_spec: &OpChainSpec,
@@ -657,9 +636,6 @@ fn process_flashblock<Provider, Pool, P>(
 ) -> eyre::Result<()>
 where
     Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone,
-
-    Pool: TransactionPool + 'static,
-    P: PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec> + 'static,
 {
     trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
 
@@ -756,7 +732,7 @@ where
 
     let mut executor = FlashblocksBlockExecutor::new(
         evm,
-        execution_context,
+        execution_context.clone(),
         chain_spec,
         OpRethReceiptBuilder::default(),
     );
@@ -767,12 +743,12 @@ where
     }
 
     // Execute each transaction individually
-    for tx in transactions {
+    for tx in transactions.iter() {
         executor.execute_transaction(tx)?;
     }
 
     // Validate the BAL matches the provided Flashblock BAL
-    let (_, _, access_list) = executor.finish_with_access_list()?;
+    let (evm, result, access_list) = executor.finish_with_access_list()?;
 
     // Validation
     // 1.) BAL Hash Matches
@@ -785,11 +761,89 @@ where
         )));
     }
 
-    // trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
+    // Create the block assembler
+    let (db, evm_env) = evm.finish();
 
-    // *latest_payload = Some((payload.clone(), flashblock.index));
+    // merge all transitions into bundle state
+    db.merge_transitions(BundleRetention::Reverts);
 
-    // pending_block.send_replace(payload.executed_block());
+    // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
+    // which represent a single atomic state transition. therefore reverts should have length 1
+    // we only retain the first occurance of a revert for any given account.
+    let flattened = db
+        .bundle_state
+        .reverts
+        .iter()
+        .flatten()
+        .scan(HashSet::new(), |visited, (acc, revert)| {
+            if visited.insert(acc) {
+                Some((*acc, revert.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    db.bundle_state.reverts = Reverts::new(vec![flattened]);
+
+    // calculate the state root
+    // TODO: Perform this step during execution. The bundle can be constructed from the previous bundle + the new BAL
+    let hashed_state = state_provider.hashed_post_state(&db.bundle_state);
+    let (state_root, trie_updates) = state_provider
+        .state_root_with_updates(hashed_state.clone())
+        .map_err(BlockExecutionError::other)?;
+
+    let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+    let block_assembler = FlashblocksBlockAssembler::new(Arc::new(chain_spec.clone()));
+
+    let block = block_assembler.assemble_block(BlockAssemblerInput::<
+        '_,
+        '_,
+        FlashblocksBlockExecutorFactory,
+    >::new(
+        evm_env,
+        execution_context.clone(),
+        &sealed_header,
+        transactions,
+        &result,
+        &db.bundle_state,
+        &state_provider,
+        state_root,
+    ))?;
+
+    let block = RecoveredBlock::new_unhashed(block, senders);
+    let sealed_block = Arc::new(block.sealed_block().clone());
+
+    let recovered_block = Arc::new(block);
+
+    trace!(target: "flashblocks::state_executor", hash = %recovered_block.hash(), "setting latest payload");
+
+    let execution_outcome = ExecutionOutcome::new(
+        db.bundle_state.clone(),
+        vec![result.receipts],
+        0,
+        vec![result.requests],
+    );
+
+    let executed_block = ExecutedBlockWithTrieUpdates::new(
+        recovered_block,
+        Arc::new(execution_outcome),
+        Arc::new(hashed_state),
+        ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
+    );
+
+    let payload = OpBuiltPayload::new(
+        flashblock.payload_id,
+        sealed_block,
+        U256::ZERO,
+        Some(executed_block),
+    );
+
+    // construct the full payload
+    *latest_payload = Some((payload.clone(), flashblock.index));
+
+    pending_block.send_replace(payload.executed_block());
 
     Ok(())
 }

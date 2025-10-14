@@ -73,12 +73,7 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state.launch::<_, _, _>(
-            ctx,
-            pool.clone(),
-            self.ctx_builder.clone(),
-            evm_config.clone(),
-        );
+        self.flashblocks_state.launch::<_>(ctx, evm_config.clone());
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
