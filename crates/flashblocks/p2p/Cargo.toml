@@ -19,6 +19,8 @@ ed25519-dalek.workspace = true
 metrics.workspace = true
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true }
 tracing.workspace = true
