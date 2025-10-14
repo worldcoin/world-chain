@@ -771,8 +771,6 @@ where
         executor.execute_transaction(tx)?;
     }
 
-    // TODO: When to apply post execution changes
-
     // Validate the BAL matches the provided Flashblock BAL
     let (_, _, access_list) = executor.finish_with_access_list()?;
 
