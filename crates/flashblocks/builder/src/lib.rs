@@ -1,7 +1,10 @@
 use crate::{
     executor::{FlashblocksBlockBuilder, FlashblocksBlockExecutor},
     payload_txns::BestPayloadTxns,
-    traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
+    traits::{
+        context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
+        payload_builder::FlashblockPayloadBuilder,
+    },
 };
 
 use alloy_consensus::Transaction;
@@ -99,6 +102,7 @@ where
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
+        committed_payload: Option<OpBuiltPayload>,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
@@ -129,7 +133,7 @@ where
                 db,
                 &state_provider,
                 &ctx,
-                best_payload.clone(),
+                committed_payload,
             )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
@@ -138,7 +142,7 @@ where
                 cached_reads.as_db_mut(db),
                 &state_provider,
                 &ctx,
-                best_payload,
+                committed_payload,
             )
         }
         .map(|out| out.with_cached_reads(cached_reads))
@@ -165,10 +169,14 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        self.build_payload(args, |attrs| {
-            self.best_transactions
-                .best_transactions(self.pool.clone(), attrs)
-        })
+        self.build_payload(
+            args,
+            |attrs| {
+                self.best_transactions
+                    .best_transactions(self.pool.clone(), attrs)
+            },
+            None,
+        )
     }
 
     fn on_missing_payload(
@@ -190,11 +198,45 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args, |_| {
-            NoopPayloadTransactions::<Pool::Transaction>::default()
-        })?
+        self.build_payload(
+            args,
+            |_| NoopPayloadTransactions::<Pool::Transaction>::default(),
+            None,
+        )?
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
+    }
+}
+
+impl<Pool, Client, CtxBuilder, Txs> FlashblockPayloadBuilder
+    for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
+where
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
+    CtxBuilder: PayloadBuilderCtxBuilder<
+        Client,
+        OpEvmConfig,
+        OpChainSpec,
+        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+    >,
+{
+    fn try_build_with_precommit(
+        &self,
+        args: BuildArguments<
+            <Self as PayloadBuilder>::Attributes,
+            <Self as PayloadBuilder>::BuiltPayload,
+        >,
+        committed_payload: Option<<Self as PayloadBuilder>::BuiltPayload>,
+    ) -> Result<BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>, PayloadBuilderError> {
+        self.build_payload(
+            args,
+            |attrs| {
+                self.best_transactions
+                    .best_transactions(self.pool.clone(), attrs)
+            },
+            committed_payload,
+        )
     }
 }
 
@@ -245,7 +287,7 @@ where
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: &Ctx,
-        best_payload: Option<OpBuiltPayload>,
+        committed_payload: Option<OpBuiltPayload>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
         Pool: TransactionPool,
@@ -269,7 +311,8 @@ where
         debug!(target: "flashblocks::payload_builder", "building new payload");
 
         // 1. Prepare the db
-        let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &best_payload
+        let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) =
+            &committed_payload
         {
             // if we have a best payload we will always have a bundle
             let execution_result = &payload
@@ -326,7 +369,7 @@ where
 
         // Only execute the sequencer transactions on the first payload. The sequencer transactions
         // will already be in the [`BundleState`] at this point if the `best_payload` is set.
-        let mut info = if best_payload.is_none() {
+        let mut info = if committed_payload.is_none() {
             // 3. apply pre-execution changes
             builder.apply_pre_execution_changes()?;
 
@@ -396,12 +439,20 @@ where
                 .is_none()
             {
                 warn!(target: "flashblocks::payload_builder", "payload build cancelled");
-                if let Some(best_payload) = best_payload {
+                if let Some(best_payload) = committed_payload {
                     // we can return the previous best payload since we didn't include any new txs
                     return Ok(BuildOutcomeKind::Freeze(best_payload));
                 } else {
                     return Err(PayloadBuilderError::MissingPayload);
                 }
+            }
+
+            // check if the new payload is even more valuable
+            if !ctx.is_better_payload(info.total_fees) {
+                // can skip building the block
+                return Ok(BuildOutcomeKind::Aborted {
+                    fees: info.total_fees,
+                });
             }
         }
 

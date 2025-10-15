@@ -21,8 +21,6 @@ pub struct PayloadBuilderMetrics {
     pub(crate) p2p_publishing_errors: Counter,
     /// Total number of database errors.
     pub(crate) database_errors: Counter,
-    /// Histogram of P2P throttle durations in milliseconds.
-    pub(crate) p2p_throttle_duration_ms: Histogram,
     /// Histogram of payload sizes in bytes.
     pub(crate) payload_size_bytes: Histogram,
     /// Histogram of payload gas usage.
@@ -67,11 +65,6 @@ impl PayloadBuilderMetrics {
     /// Increment database errors (state access failures)
     pub(crate) fn inc_database_errors(&self) {
         self.database_errors.increment(1);
-    }
-
-    /// Record P2P throttle duration in milliseconds
-    pub(crate) fn record_p2p_throttle_duration(&self, duration_ms: f64) {
-        self.p2p_throttle_duration_ms.record(duration_ms);
     }
 
     /// Record payload size metrics (bytes, gas, transaction count)

@@ -1,5 +1,7 @@
 // Module defining World Chain Node Preset contexts for components & add-ons.
 
+use std::time::Duration;
+
 use crate::{
     args::WorldChainArgs,
     config::WorldChainNodeConfig,
@@ -212,6 +214,22 @@ where
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
+                Duration::from_millis(
+                    self.config
+                        .args
+                        .flashblocks
+                        .as_ref()
+                        .expect("flashblocks args required")
+                        .flashblocks_interval,
+                ),
+                Duration::from_millis(
+                    self.config
+                        .args
+                        .flashblocks
+                        .as_ref()
+                        .expect("flashblocks args required")
+                        .recommit_interval,
+                ),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())

@@ -27,10 +27,7 @@ contract PBHEntryPointImplV1ProxyTest is Test {
 
     function test_verifyPbh_RevertIf_NotProxy() public {
         IPBHEntryPoint.PBHPayload memory pbhPayload = IPBHEntryPoint.PBHPayload({
-            root: 1,
-            pbhExternalNullifier: 0,
-            nullifierHash: 1,
-            proof: [uint256(0), 0, 0, 0, 0, 0, 0, 0]
+            root: 1, pbhExternalNullifier: 0, nullifierHash: 1, proof: [uint256(0), 0, 0, 0, 0, 0, 0, 0]
         });
 
         vm.expectRevert("Function must be called through active proxy");
@@ -44,17 +41,15 @@ contract PBHEntryPointImplV1ProxyTest is Test {
         address payable beneficiary = payable(address(0));
 
         vm.expectRevert("Function must be called through active proxy");
-        (bool success,) = address(pbhEntryPoint).call(
-            abi.encodeWithSelector(pbhEntryPoint.handleAggregatedOps.selector, opsPerAggregator, beneficiary)
-        );
+        (bool success,) = address(pbhEntryPoint)
+            .call(abi.encodeWithSelector(pbhEntryPoint.handleAggregatedOps.selector, opsPerAggregator, beneficiary));
         assert(!success);
     }
 
     function test_validateSignaturesCallback_RevertIf_NotProxy() public {
         vm.expectRevert("Function must be called through active proxy");
-        (bool success,) = address(pbhEntryPoint).call(
-            abi.encodeWithSelector(pbhEntryPoint.validateSignaturesCallback.selector, bytes32(0))
-        );
+        (bool success,) = address(pbhEntryPoint)
+            .call(abi.encodeWithSelector(pbhEntryPoint.validateSignaturesCallback.selector, bytes32(0)));
         assert(!success);
     }
 

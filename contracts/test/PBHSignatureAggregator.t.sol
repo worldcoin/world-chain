@@ -157,10 +157,7 @@ contract PBHSignatureAggregatorTest is TestSetup {
 
     function test_AggregateSignatures_RevertIf_InvalidSignatureLength() public {
         IPBHEntryPoint.PBHPayload memory proof = IPBHEntryPoint.PBHPayload({
-            root: 0,
-            pbhExternalNullifier: 0,
-            nullifierHash: 0,
-            proof: [uint256(1), 0, 0, 0, 0, 0, 0, 0]
+            root: 0, pbhExternalNullifier: 0, nullifierHash: 0, proof: [uint256(1), 0, 0, 0, 0, 0, 0, 0]
         });
 
         bytes[] memory proofs = new bytes[](2);
