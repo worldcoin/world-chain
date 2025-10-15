@@ -15,7 +15,7 @@ use reth_node_builder::{
     BuilderContext,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, OpPayloadBuilderAttributes};
 use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
     StateProviderFactory,
@@ -23,7 +23,7 @@ use reth_provider::{
 use reth_transaction_pool::TransactionPool;
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: FlashblocksHandle,
@@ -57,7 +57,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
 impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
     for FlashblocksPayloadServiceBuilder<PB>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: OpNodeTypes<Payload = OpEngineTypes>>,
     Node::Provider: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + HeaderProvider<Header = alloy_consensus::Header>
@@ -99,12 +99,16 @@ where
             payload_builder,
             self.p2p_handler,
             self.authorizations_rx.clone(),
-            self.flashblocks_state,
+            self.flashblocks_state.clone(),
             metrics,
         );
 
         let (payload_service, payload_service_handle) =
             PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        let payload_events = payload_service.payload_events_handle();
+        self.flashblocks_state
+            .register_payload_events(payload_events);
 
         ctx.task_executor()
             .spawn_critical("payload builder service", Box::pin(payload_service));
