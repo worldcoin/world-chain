@@ -1,5 +1,5 @@
 use alloy_eip7928::AccountChanges;
-use alloy_primitives::map::HashMap as AlloyHashMap;
+use alloy_primitives::map::foldhash::HashMap as AlloyHashMap;
 use alloy_primitives::{keccak256, Address, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
@@ -19,10 +19,10 @@ pub struct FlashblockAccessList {
 impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
     fn from(value: FlashblockAccessList) -> Self {
         let mut result = HashMap::new();
-        for account in value.changes {
+        for account in value.changes.iter() {
             let address = account.address;
 
-            let mut account_storage = AlloyHashMap::new();
+            let mut account_storage = AlloyHashMap::default();
 
             // Aggregate the storage changes. Keep the latest value stored for each storage key.
             // This assumes that the changes are ordered by transaction index.
@@ -81,7 +81,7 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
             // Insert or update the account in the resulting map.
             result.insert(address, bundle_account);
         }
-        
+
         result
     }
 }
