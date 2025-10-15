@@ -30,10 +30,7 @@ use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpEvmConfig,
-    OpRethReceiptBuilder,
-};
+use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
@@ -761,7 +758,6 @@ where
         )));
     }
 
-    // Create the block assembler
     let (db, evm_env) = evm.finish();
 
     // merge all transitions into bundle state
