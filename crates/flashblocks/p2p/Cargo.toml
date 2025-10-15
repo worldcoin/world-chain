@@ -36,3 +36,16 @@ reth-tasks = { workspace = true }
 reth-storage-api.workspace = true  # For NoopProvider
 reth-network-peers.workspace = true  # For PeerId type
 async-trait.workspace = true  # For PeerEventsListener trait
+tracing-subscriber.workspace = true  # For log capture in tests
+
+# Dependencies for full node integration tests
+flashblocks-node.workspace = true  # For FlashblocksNode, FlashblocksNodeBuilder
+flashblocks-cli.workspace = true  # For FlashblocksArgs
+ed25519-dalek.workspace = true  # For SigningKey
+alloy-genesis.workspace = true  # For Genesis
+reth-optimism-chainspec.workspace = true  # For OpChainSpecBuilder
+reth-node-builder.workspace = true  # For NodeBuilder, Node trait
+reth-node-core.workspace = true  # For NetworkArgs, RpcServerArgs
+reth-provider.workspace = true  # For BlockchainProvider
+reth-tasks.workspace = true  # For TaskExecutor, TaskManager
+serde_json.workspace = true  # For parsing genesis.json
