@@ -9,9 +9,11 @@ use reth_node_builder::{
     BuilderContext,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use tracing::{info, warn};
 
-use crate::protocol::handler::{
-    FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol,
+use crate::{
+    events::{listerners::TrustedPeerDisconnectedAlert, PeerEventsDispatcherBuilder},
+    protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
 };
 
 #[derive(Debug)]
@@ -62,6 +64,26 @@ where
             };
             handle.add_rlpx_sub_protocol(flashblocks_rlpx.into_rlpx_sub_protocol());
         }
+
+        let dispatcher = PeerEventsDispatcherBuilder::new()
+            .with_network(handle.clone())
+            .add_listener(Box::new(TrustedPeerDisconnectedAlert))
+            .build();
+
+        let dispatcher_handle = dispatcher.start();
+
+        ctx.task_executor().spawn_critical_with_graceful_shutdown_signal("flashblocks p2p event listeners", |shutdown| async move {
+            let dispacher_shutdown = dispatcher_handle.shutdown_token();
+            tokio::select! {
+                guard = shutdown => {
+                    dispacher_shutdown.cancel();
+                    drop(guard);
+                }
+                _ = dispatcher_handle.wait() => {
+                    warn!(target: "flashblocks::p2p", "flashblocks p2p event listeners completed, should never happen");
+                }
+            }
+        });
 
         Ok(handle)
     }
