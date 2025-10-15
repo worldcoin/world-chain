@@ -9,7 +9,6 @@ use reth_node_builder::{
     BuilderContext,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use tracing::{info, warn};
 
 use crate::{
     events::{listerners::TrustedPeerDisconnectedAlert, PeerEventsDispatcherBuilder},
@@ -70,20 +69,7 @@ where
             .add_listener(Box::new(TrustedPeerDisconnectedAlert))
             .build();
 
-        let dispatcher_handle = dispatcher.start();
-
-        ctx.task_executor().spawn_critical_with_graceful_shutdown_signal("flashblocks p2p event listeners", |shutdown| async move {
-            let dispacher_shutdown = dispatcher_handle.shutdown_token();
-            tokio::select! {
-                guard = shutdown => {
-                    dispacher_shutdown.cancel();
-                    drop(guard);
-                }
-                _ = dispatcher_handle.wait() => {
-                    warn!(target: "flashblocks::p2p", "flashblocks p2p event listeners completed, should never happen");
-                }
-            }
-        });
+        dispatcher.run_on_task_executor(ctx.task_executor());
 
         Ok(handle)
     }

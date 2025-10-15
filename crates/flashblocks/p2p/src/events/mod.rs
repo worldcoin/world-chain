@@ -6,7 +6,7 @@ pub mod dispatcher;
 pub mod listerners;
 
 // Re-export commonly used dispatcher types for easier access
-pub use dispatcher::{DispatcherHandle, PeerEventsDispatcher, PeerEventsDispatcherBuilder};
+pub use dispatcher::{PeerEventsDispatcher, PeerEventsDispatcherBuilder};
 
 /// A helper trait to bundle all necessary network traits for peer event handling.
 /// This can be used as a bound (`N: NetworkPeersContext`) for generics.

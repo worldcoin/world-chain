@@ -3,9 +3,9 @@ use crate::events::NetworkPeersContext;
 use super::PeerEventsListener;
 use futures::{stream::FuturesUnordered, StreamExt};
 use reth_network::events::{NetworkPeersEvents, PeerEvent};
+use reth_tasks::TaskExecutor;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 mod sealed {
@@ -26,30 +26,7 @@ impl BuilderState for Uninitialized {}
 impl BuilderState for NetworkConfigured {}
 impl BuilderState for HasListeners {}
 
-/// A builder for [`PeerEventsDispatcher`] that uses the typestate pattern to enforce
-/// correct construction order at compile time.
-///
-/// The builder goes through three states:
-/// - `Uninitialized`: Initial state, must call `with_network` to configure
-/// - `NetworkConfigured`: Network handle set, must add at least one listener
-/// - `HasListeners`: At least one listener added, can add more or build
-///
-/// # Example
-/// ```no_run
-/// # use flashblocks_p2p::events::{PeerEventsDispatcherBuilder, PeerEventsListener};
-/// # use reth_network::NetworkHandle;
-/// # async fn example(network_handle: NetworkHandle, my_listener: impl PeerEventsListener<NetworkHandle> + 'static, another_listener: impl PeerEventsListener<NetworkHandle> + 'static) {
-/// let handle = PeerEventsDispatcherBuilder::new()
-///     .with_network(network_handle)
-///     .add_listener(Box::new(my_listener))  // Transitions to HasListeners
-///     .add_listener(Box::new(another_listener))  // Can add more
-///     .build()  // No Result needed - always valid!
-///     .start();  // Returns DispatcherHandle
-///
-/// // Later, shutdown gracefully
-/// handle.shutdown().await;
-/// # }
-/// ```
+/// A typestate builder for [`PeerEventsDispatcher`].
 #[allow(private_interfaces)]
 pub struct PeerEventsDispatcherBuilder<N, State = Uninitialized>
 where
@@ -130,78 +107,44 @@ pub struct PeerEventsDispatcher<N> {
     listeners: Vec<Box<dyn PeerEventsListener<N>>>,
 }
 
-/// Handle to a running dispatcher that allows awaiting completion and graceful shutdown.
-#[derive(Debug)]
-pub struct DispatcherHandle {
-    task: JoinHandle<()>,
-    shutdown: CancellationToken,
-}
-
-impl DispatcherHandle {
-    /// Gracefully shutdown the dispatcher.
-    /// This signals the background task to stop and waits for it to complete.
-    pub async fn shutdown(self) {
-        self.shutdown.cancel();
-        let _ = self.task.await;
-    }
-
-    /// Wait for the dispatcher task to complete.
-    /// This will block until the dispatcher is shutdown or the task panics.
-    pub async fn wait(self) -> Result<(), tokio::task::JoinError> {
-        self.task.await
-    }
-
-    /// Get a reference to the shutdown token.
-    /// This can be cloned and used to trigger shutdown from other parts of the code.
-    pub fn shutdown_token(&self) -> CancellationToken {
-        self.shutdown.clone()
-    }
-}
-
 impl<N> PeerEventsDispatcher<N>
 where
     N: NetworkPeersContext + Send + Sync + 'static,
 {
-    /// Start the dispatcher.
-    /// This spawns a background task that listens for peer events and dispatches
-    /// them to all registered listeners.
-    ///
-    /// Returns a [`DispatcherHandle`] that can be used to await completion or
-    /// trigger graceful shutdown.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use flashblocks_p2p::events::PeerEventsDispatcher;
-    /// # use reth_network::NetworkHandle;
-    /// # async fn example(dispatcher: PeerEventsDispatcher<NetworkHandle>) {
-    /// // Start and run in background
-    /// let handle = dispatcher.start();
-    ///
-    /// // Later, shutdown gracefully
-    /// handle.shutdown().await;
-    /// # }
-    /// ```
-    pub fn start(self) -> DispatcherHandle {
+    /// Run the dispatcher until shutdown is signaled.
+    /// Listens for peer events and dispatches them concurrently to all registered listeners.
+    pub async fn run(self, shutdown_token: CancellationToken) {
         let network = Arc::new(self.network);
         let listeners = Arc::new(self.listeners);
-        let shutdown = CancellationToken::new();
-        let shutdown_token = shutdown.clone();
 
-        let task = tokio::spawn(async move {
-            network
-                .peer_events()
-                .take_until(shutdown_token.cancelled())
-                .for_each_concurrent(None, |event| {
-                    let network = Arc::clone(&network);
-                    let listeners = Arc::clone(&listeners);
-                    async move {
-                        Self::dispatch_concurrent(&network, &listeners, &event).await;
-                    }
-                })
-                .await;
-        });
+        network
+            .peer_events()
+            .take_until(shutdown_token.cancelled())
+            .for_each_concurrent(None, |event| {
+                let network = Arc::clone(&network);
+                let listeners = Arc::clone(&listeners);
+                async move {
+                    Self::dispatch_concurrent(&network, &listeners, &event).await;
+                }
+            })
+            .await;
+    }
 
-        DispatcherHandle { task, shutdown }
+    pub fn run_on_task_executor(self, task_executor: &TaskExecutor) {
+        task_executor.spawn_critical_with_graceful_shutdown_signal(
+            "flashblocks p2p event listeners",
+            |reth_shutdown| async move {
+                let shutdown_token = CancellationToken::new();
+                let shutdown_token_clone = shutdown_token.clone();
+
+                tokio::spawn(async move {
+                    let _guard = reth_shutdown.await;
+                    shutdown_token_clone.cancel();
+                });
+
+                self.run(shutdown_token).await;
+            },
+        );
     }
 
     /// Dispatch an event to all registered listeners concurrently.

@@ -29,6 +29,7 @@ alloy-rlp.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
+reth-tasks = { workspace = true }
 
 [dev-dependencies]
 # Dependencies for network integration tests
