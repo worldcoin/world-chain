@@ -88,9 +88,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         IEntryPoint.UserOpsPerAggregator[] memory userOpsPerAggregator = new IEntryPoint.UserOpsPerAggregator[](1);
         userOpsPerAggregator[0] = IEntryPoint.UserOpsPerAggregator({
-            aggregator: pbhAggregator,
-            userOps: uoTestFixture,
-            signature: aggregatedSignature
+            aggregator: pbhAggregator, userOps: uoTestFixture, signature: aggregatedSignature
         });
 
         bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
@@ -145,9 +143,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         IEntryPoint.UserOpsPerAggregator[] memory userOpsPerAggregator = new IEntryPoint.UserOpsPerAggregator[](1);
         userOpsPerAggregator[0] = IEntryPoint.UserOpsPerAggregator({
-            aggregator: pbhAggregator,
-            userOps: uoTestFixture,
-            signature: aggregatedSignature
+            aggregator: pbhAggregator, userOps: uoTestFixture, signature: aggregatedSignature
         });
 
         bytes32 userOpHash0 = pbhEntryPoint.getUserOpHash(uoTestFixture[0]);
@@ -179,9 +175,7 @@ contract PBHEntryPointImplV1Test is TestSetup {
 
         IEntryPoint.UserOpsPerAggregator[] memory userOpsPerAggregator = new IEntryPoint.UserOpsPerAggregator[](1);
         userOpsPerAggregator[0] = IEntryPoint.UserOpsPerAggregator({
-            aggregator: pbhAggregator,
-            userOps: uoTestFixture,
-            signature: aggregatedSignature
+            aggregator: pbhAggregator, userOps: uoTestFixture, signature: aggregatedSignature
         });
 
         bytes memory innerData = abi.encodeWithSelector(

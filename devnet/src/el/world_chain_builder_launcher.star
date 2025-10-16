@@ -248,7 +248,7 @@ def get_config(
         "--flashblocks.builder_sk={0}".format(signing_key),
         "--flashblocks.interval={0}".format("200"),
         "--flashblocks.recommit_interval={0}".format("20"),
-        "--builder.max-tasks={0}".format("10")
+        "--builder.max-tasks={0}".format("10"),
     ]
 
     observability.expose_metrics_port(ports)
@@ -287,7 +287,9 @@ def get_config(
     env_vars = participant.el_builder_extra_env_vars
     env_vars["BUILDER_PRIVATE_KEY"] = BUILDER_PRIVATE_KEY
 
-    env_vars["RUST_LOG"] = "info,payload_builder=trace,engine::persistence=trace,flashblocks::state_executor=trace"
+    env_vars[
+        "RUST_LOG"
+    ] = "info,payload_builder=trace,engine::persistence=trace,flashblocks::state_executor=trace"
     env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,
