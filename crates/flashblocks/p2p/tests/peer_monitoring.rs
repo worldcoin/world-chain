@@ -253,14 +253,16 @@ struct EventCapturingListener {
     peer_removed: Arc<Mutex<Vec<PeerId>>>,
 }
 
+type EventCapturingListenerResult = (
+    EventCapturingListener,
+    Arc<Mutex<Vec<PeerId>>>,
+    Arc<AtomicBool>,
+    Arc<AtomicBool>,
+    Arc<Mutex<Vec<PeerId>>>,
+);
+
 impl EventCapturingListener {
-    fn new() -> (
-        Self,
-        Arc<Mutex<Vec<PeerId>>>,
-        Arc<AtomicBool>,
-        Arc<AtomicBool>,
-        Arc<Mutex<Vec<PeerId>>>,
-    ) {
+    fn new() -> EventCapturingListenerResult {
         let peer_added = Arc::new(Mutex::new(Vec::new()));
         let session_established = Arc::new(AtomicBool::new(false));
         let session_closed = Arc::new(AtomicBool::new(false));
