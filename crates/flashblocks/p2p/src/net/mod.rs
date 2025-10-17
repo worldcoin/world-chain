@@ -11,7 +11,7 @@ use reth_node_builder::{
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::{
-    events::{listerners::TrustedPeerDisconnectedAlert, PeerEventsDispatcherBuilder},
+    monitor::PeerMonitor,
     protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
 };
 
@@ -64,12 +64,8 @@ where
             handle.add_rlpx_sub_protocol(flashblocks_rlpx.into_rlpx_sub_protocol());
         }
 
-        let dispatcher = PeerEventsDispatcherBuilder::new()
-            .with_network(handle.clone())
-            .add_listener(Box::new(TrustedPeerDisconnectedAlert))
-            .build();
-
-        dispatcher.run_on_task_executor(ctx.task_executor());
+        let peer_monitor = PeerMonitor::new(handle.clone());
+        peer_monitor.run_on_task_executor(ctx.task_executor());
 
         Ok(handle)
     }
