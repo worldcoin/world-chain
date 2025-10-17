@@ -19,6 +19,7 @@ ed25519-dalek.workspace = true
 metrics.workspace = true
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 eyre.workspace = true
 futures = { workspace = true }
 tracing.workspace = true
@@ -27,6 +28,4 @@ alloy-rlp.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
+reth-tasks = { workspace = true }

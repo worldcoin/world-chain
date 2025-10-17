@@ -144,7 +144,7 @@ async fn setup_node(
 
     for (peer_id, addr) in peers {
         // If a trusted peer is provided, add it to the network
-        node.network.add_peer(peer_id, addr);
+        node.network.add_trusted_peer(peer_id, addr);
     }
 
     let http_api_addr = node
@@ -584,6 +584,141 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 
     // Assert that the peer is banned
     assert!(nodes[1].network_handle.get_all_peers().await?.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_peer_monitoring() -> eyre::Result<()> {
+    // Set the peer monitor interval to 200ms for fast tests
+    // This must be set BEFORE nodes are created so PeerMonitor picks it up
+    std::env::set_var("PEER_MONITOR_INTERVAL_MS", "200");
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+
+    let tasks = Box::leak(Box::new(TaskManager::current()));
+    let exec = Box::leak(Box::new(tasks.executor()));
+
+    // Setup node 1 on current execution environment (no peers initially)
+    let builder1 = SigningKey::from_bytes(&[1; 32]);
+    let node1 = setup_node(exec.clone(), authorizer.clone(), builder1, vec![]).await?;
+
+    // Setup node 2 in a separate execution environment
+    let peer1_id = node1.local_node_record.id;
+    let peer1_addr = node1.local_node_record.tcp_addr();
+    let authorizer_clone = authorizer.clone();
+
+    let handle = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let node2 = runtime
+            .block_on(async move {
+                let tasks2 = Box::leak(Box::new(TaskManager::current()));
+                let exec2 = Box::leak(Box::new(tasks2.executor()));
+                let builder2 = SigningKey::from_bytes(&[2; 32]);
+                setup_node(
+                    exec2.clone(),
+                    authorizer_clone,
+                    builder2,
+                    vec![(peer1_id, peer1_addr)],
+                )
+                .await
+            })
+            .unwrap();
+        (runtime, node2)
+    });
+
+    let (runtime2, node2) = handle.join().unwrap();
+
+    // Add node 2 as trusted peer to node 1
+    let peer2_id = node2.local_node_record.id;
+    let peer2_addr = node2.local_node_record.tcp_addr();
+    node1.network_handle.add_trusted_peer(peer2_id, peer2_addr);
+
+    let connection_timeout = tokio::time::Duration::from_secs(10);
+    let poll_interval = tokio::time::Duration::from_millis(100);
+    let start = tokio::time::Instant::now();
+
+    loop {
+        let trusted_peers = node1.network_handle.get_trusted_peers().await?;
+        if trusted_peers.len() == 1 {
+            info!(
+                "Connection established in {:.2}s",
+                start.elapsed().as_secs_f64()
+            );
+            break;
+        }
+
+        if start.elapsed() > connection_timeout {
+            panic!("Timeout waiting for connection to establish");
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+
+    // Determine the monitoring interval from environment variable or default to 200ms for tests
+    let monitor_interval_ms: u64 = std::env::var("PEER_MONITOR_INTERVAL_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200); // Default to 200ms for fast tests
+
+    // Wait for PeerMonitor to see the connected peer (at least 2 ticks to ensure detection)
+    let wait_for_detection_ms = monitor_interval_ms * 2 + 100;
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(wait_for_detection_ms)).await;
+
+    // Shutdown node 2 by dropping its runtime (must use spawn_blocking to avoid async context)
+    println!("Shutting down node 2");
+    tokio::task::spawn_blocking(move || {
+        runtime2.shutdown_timeout(std::time::Duration::from_secs(1));
+    })
+    .await
+    .unwrap();
+
+    // Wait for PeerMonitor to detect the disconnection and emit multiple tick logs
+    // Wait for at least 2-3 ticks to see progression (reduced from 4 for faster tests)
+    let wait_for_ticks_ms = monitor_interval_ms * 3;
+    tokio::time::sleep(tokio::time::Duration::from_millis(wait_for_ticks_ms)).await;
+
+    // Verify that node 2 is no longer connected
+    let trusted_peers_after = node1.network_handle.get_trusted_peers().await?;
+    assert_eq!(
+        trusted_peers_after.len(),
+        0,
+        "Node 2 should have disconnected"
+    );
+
+    // Check that disconnection was logged using tracing-test
+    assert!(
+        logs_contain("trusted peer disconnected"),
+        "Should have logged 'trusted peer disconnected'"
+    );
+    assert!(
+        logs_contain(&peer2_id.to_string()),
+        "Log should contain the disconnected peer ID"
+    );
+
+    // Check for multiple disconnect logs to prove the monitor is repeatedly checking
+    logs_assert(|logs: &[&str]| {
+        let disconnect_logs: Vec<&str> = logs
+            .iter()
+            .filter(|log| {
+                log.contains("trusted peer disconnected") && log.contains(&peer2_id.to_string())
+            })
+            .inspect(|log| println!("Disconnect Log: {}", log))
+            .copied()
+            .collect();
+
+        // We should have at least 2 disconnect logs to prove the monitor is running periodically
+        if disconnect_logs.len() < 2 {
+            return Err(format!(
+                "Should have at least 2 disconnect logs showing periodic monitoring, found {}",
+                disconnect_logs.len()
+            ));
+        }
+
+        Ok(())
+    });
 
     Ok(())
 }

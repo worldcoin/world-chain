@@ -10,8 +10,9 @@ use reth_node_builder::{
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-use crate::protocol::handler::{
-    FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol,
+use crate::{
+    monitor::PeerMonitor,
+    protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
 };
 
 #[derive(Debug)]
@@ -62,6 +63,9 @@ where
             };
             handle.add_rlpx_sub_protocol(flashblocks_rlpx.into_rlpx_sub_protocol());
         }
+
+        let peer_monitor = PeerMonitor::new(handle.clone());
+        peer_monitor.run_on_task_executor(ctx.task_executor());
 
         Ok(handle)
     }
