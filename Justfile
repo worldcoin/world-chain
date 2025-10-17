@@ -5,13 +5,19 @@ default:
     @just --list
 
 # Spawns the devnet
-devnet-up: deploy-devnet deploy-contracts
+# Optional arguments: profile=<dev|release|maxperf> (default: dev)
+devnet-up profile="dev": (deploy-devnet profile) deploy-contracts
 
-deploy-devnet: build
+deploy-devnet profile="dev": (build profile)
   @just ./devnet/devnet-up
 
-build:
-  docker buildx build -t world-chain:latest .
+# Build with configurable profile
+# Usage: just build           (uses dev profile - fastest build, default)
+#        just build dev        (fastest build, slowest runtime - default)
+#        just build release    (balanced - fast build, good performance)
+#        just build maxperf    (slowest build, best runtime)
+build profile="dev":
+  docker buildx build --build-arg BUILD_PROFILE={{profile}} -t world-chain:latest .
 
 deploy-contracts:
   @just ./contracts/deploy-contracts
@@ -44,5 +50,14 @@ e2e-test *args='':
 install *args='':
   cargo install --path crates/world/bin --locked $@
 
+# Run stress tests (ensures maxperf profile is used for optimal performance)
+# Usage: just stress-test stress           # Run normal stress test
+#        just stress-test stress-precompile # Run precompile stress test
+#        just stress-test report           # Generate report
 stress-test *args='':
+  @echo "Note: Stress tests should be run against a maxperf build for accurate results"
+  @echo "If devnet is not running with maxperf, rebuild with: just devnet-up maxperf"
   @just ./devnet/stress-test $@
+
+# Build and deploy devnet with maxperf profile for stress testing
+stress-devnet-up: (devnet-up "maxperf")
