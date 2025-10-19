@@ -433,9 +433,13 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     let receipts = rx.recv().await.expect("should receive receipts");
     info!("Receipts: {:?}", receipts);
-    
-    assert_eq!(receipts.len(), 3, "Should receive receipts from all 3 nodes");
-    
+
+    assert_eq!(
+        receipts.len(),
+        3,
+        "Should receive receipts from all 3 nodes"
+    );
+
     for (idx, receipt_opt) in receipts.iter().enumerate() {
         assert!(
             receipt_opt.is_some(),
@@ -445,7 +449,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     }
 
     let receipts: Vec<_> = receipts.into_iter().map(|r| r.unwrap()).collect();
-    
+
     for (idx, receipt) in receipts.iter().enumerate() {
         assert!(
             receipt.status.coerce_status(),
@@ -453,7 +457,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
             idx
         );
     }
-    
+
     for (idx, receipt) in receipts.iter().enumerate().skip(1) {
         assert_eq!(
             receipt, &receipts[0],

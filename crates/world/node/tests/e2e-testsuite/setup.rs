@@ -1,9 +1,14 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_primitives::{address, Address, Sealed};
+use alloy_sol_types::SolValue;
 use eyre::eyre::eyre;
+use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth::network::PeersHandleProvider;
+use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
 use reth_e2e_test_utils::{Adapter, NodeHelperType, TmpDB};
@@ -13,17 +18,11 @@ use reth_node_api::{
 use reth_node_builder::rpc::{EngineValidatorAddOn, RethRpcAddOns};
 use reth_node_builder::{NodeComponents, NodeComponentsBuilder};
 use reth_node_core::args::RpcServerArgs;
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
-use revm_primitives::{Bytes, U256};
-use alloy_primitives::{address, Address, Sealed};
-use op_alloy_consensus::{TxDeposit, OpTxEnvelope};
-use alloy_eips::eip2718::Encodable2718;
-use revm_primitives::TxKind;
-use alloy_sol_types::SolValue;
+use revm_primitives::{Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
     ops::Range,
@@ -55,11 +54,11 @@ fn create_l1_attributes_deposit_tx() -> Bytes {
     // This is the function called on the L1Block predeploy contract
     const SELECTOR: [u8; 4] = [0x44, 0x0a, 0x5e, 0x20];
 
-    let params = (0u64, 0u64, U256::ZERO,revm_primitives::B256::ZERO, 0u64);
-    
+    let params = (0u64, 0u64, U256::ZERO, revm_primitives::B256::ZERO, 0u64);
+
     let mut calldata = SELECTOR.to_vec();
     calldata.extend_from_slice(&params.abi_encode());
-    
+
     let deposit = TxDeposit {
         source_hash: revm_primitives::B256::ZERO,
         from: SYSTEM_DEPOSITOR,
@@ -70,7 +69,7 @@ fn create_l1_attributes_deposit_tx() -> Bytes {
         is_system_transaction: true,
         input: calldata.into(),
     };
-    
+
     let sealed_deposit = Sealed::new_unchecked(deposit, revm_primitives::B256::ZERO);
     let envelope = OpTxEnvelope::Deposit(sealed_deposit);
     let mut buf = Vec::new();
@@ -86,7 +85,6 @@ pub fn optimism_payload_attributes(
     timestamp: u64,
 ) -> reth_optimism_payload_builder::OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope> {
     use alloy_primitives::b64;
-    use alloy_eips::eip4895::Withdrawals;
     use revm_primitives::{Address, B256};
 
     let eth_attrs = EthPayloadBuilderAttributes {
