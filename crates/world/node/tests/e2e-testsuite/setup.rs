@@ -84,6 +84,7 @@ pub static TX_SET_L1_BLOCK: LazyLock<Bytes> = LazyLock::new(create_l1_attributes
 pub fn optimism_payload_attributes(
     timestamp: u64,
 ) -> reth_optimism_payload_builder::OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope> {
+    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::b64;
     use revm_primitives::{Address, B256};
 
