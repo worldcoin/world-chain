@@ -1,3 +1,4 @@
+use alloy_consensus::TxReceipt;
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
@@ -453,7 +454,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     for (idx, receipt) in receipts.iter().enumerate() {
         assert!(
-            receipt.status.coerce_status(),
+            receipt.inner.inner.status(),
             "Transaction should succeed on node {}",
             idx
         );
