@@ -1,4 +1,3 @@
-use alloy_consensus::TxReceipt;
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::b64;
 use alloy_rpc_types::TransactionRequest;
