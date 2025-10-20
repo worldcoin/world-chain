@@ -1,7 +1,6 @@
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{address, Address, Sealed};
-use alloy_sol_types::SolValue;
 use eyre::eyre::eyre;
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth::api::TreeConfig;
@@ -50,14 +49,13 @@ const L1_BLOCK_PREDEPLOY: Address = address!("4200000000000000000000000000000000
 const SYSTEM_DEPOSITOR: Address = address!("DeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001");
 
 fn create_l1_attributes_deposit_tx() -> Bytes {
-    // setL1BlockValues function selector (0x440a5e20)
-    // This is the function called on the L1Block predeploy contract
     const SELECTOR: [u8; 4] = [0x44, 0x0a, 0x5e, 0x20];
-
-    let params = (0u64, 0u64, U256::ZERO, revm_primitives::B256::ZERO, 0u64);
-
     let mut calldata = SELECTOR.to_vec();
-    calldata.extend_from_slice(&params.abi_encode());
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]); 
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
 
     let deposit = TxDeposit {
         source_hash: revm_primitives::B256::ZERO,
