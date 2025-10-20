@@ -53,7 +53,7 @@ fn create_l1_attributes_deposit_tx() -> Bytes {
     let mut calldata = SELECTOR.to_vec();
     calldata.extend_from_slice(&[0u8; 32]);
     calldata.extend_from_slice(&[0u8; 32]);
-    calldata.extend_from_slice(&[0u8; 32]); 
+    calldata.extend_from_slice(&[0u8; 32]);
     calldata.extend_from_slice(&[0u8; 32]);
     calldata.extend_from_slice(&[0u8; 32]);
 
