@@ -1,33 +1,26 @@
+//! Peer monitor for tracking trusted peers and logging warnings for disconnected peers
+use futures::StreamExt;
+use parking_lot::Mutex;
 use reth_ethereum::network::api::PeerId;
+use reth_network::events::{NetworkPeersEvents, PeerEvent};
 use reth_network::{Peers, PeersInfo};
 use reth_tasks::TaskExecutor;
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
+use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
-/// Default polling interval for checking trusted peer status (production)
 const DEFAULT_PEER_MONITOR_INTERVAL_SECS: u64 = 30;
 
-/// Get the peer monitor polling interval from environment variable or use default.
-/// Mainly for testing purposes.
-fn get_peer_monitor_interval() -> Duration {
-    if let Ok(interval_str) = std::env::var("PEER_MONITOR_INTERVAL_MS") {
-        if let Ok(interval) = interval_str.parse::<u64>() {
-            return Duration::from_millis(interval);
-        } else {
-            tracing::trace!(
-                target: "flashblocks::p2p",
-                interval_str = interval_str,
-                "Invalid PEER_MONITOR_INTERVAL_MS environment variable, using default"
-            );
-        }
-    }
+const DEFAULT_CONNECTION_INIT_TIMEOUT_SECS: u64 = 300;
 
+/// Get the peer monitor polling interval from environment variable or use default.
+fn peer_monitor_interval() -> Duration {
     if let Ok(interval_str) = std::env::var("PEER_MONITOR_INTERVAL_SECS") {
         if let Ok(interval) = interval_str.parse::<u64>() {
             return Duration::from_secs(interval);
         } else {
-            tracing::trace!(
+            tracing::debug!(
                 target: "flashblocks::p2p",
                 interval_str = interval_str,
                 "Invalid PEER_MONITOR_INTERVAL_SECS environment variable, using default"
@@ -38,118 +31,146 @@ fn get_peer_monitor_interval() -> Duration {
     Duration::from_secs(DEFAULT_PEER_MONITOR_INTERVAL_SECS)
 }
 
-/// Tracks the state of a known peer
-#[derive(Debug, Clone, Copy)]
-struct PeerState {
-    /// Number of consecutive ticks this peer has been disconnected (0 if currently connected)
-    disconnected_ticks: u64,
+/// Get the connection initialization timeout from environment variable or use default.
+fn connection_init_timeout() -> Duration {
+    if let Ok(timeout_str) = std::env::var("CONNECTION_TIMEOUT_SECS") {
+        if let Ok(timeout) = timeout_str.parse::<u64>() {
+            return Duration::from_secs(timeout);
+        } else {
+            tracing::debug!(
+                target: "flashblocks::p2p",
+                timeout_str = timeout_str,
+                "Invalid CONNECTION_TIMEOUT_SECS environment variable, using default"
+            );
+        }
+    }
+    Duration::from_secs(DEFAULT_CONNECTION_INIT_TIMEOUT_SECS)
 }
 
-/// Monitors trusted peers and detects disconnections by maintaining a grow-only set
-/// of peers that have been seen and comparing against currently connected peers.
+/// State of trusted peer
+#[derive(Debug, Clone, Copy)]
+struct PeerState {
+    connection_established: bool,
+    added_time: Instant,
+    disconnected_time: Option<Instant>,
+}
+
+/// Tracks the state of known peers via network handle
 pub struct PeerMonitor<N> {
     network: N,
-    /// Map of peer ID to their state (connected or disconnected with tick count)
-    known_peers: HashMap<PeerId, PeerState>,
-    interval: Duration,
+    trusted_peers: Mutex<HashMap<PeerId, PeerState>>,
 }
 
 impl<N> PeerMonitor<N>
 where
-    N: Peers + PeersInfo + Send + Sync + 'static,
+    N: Peers + PeersInfo + NetworkPeersEvents + Send + Sync + 'static,
 {
     /// Create a new peer monitor
     pub fn new(network: N) -> Self {
-        let interval = get_peer_monitor_interval();
+        let trusted_peers = Mutex::new(HashMap::new());
         Self {
             network,
-            known_peers: HashMap::new(),
-            interval,
+            trusted_peers,
         }
     }
 
-    /// Run the peer monitor until shutdown is signaled.
-    /// Periodically checks trusted peers and detects disconnections.
-    pub async fn run(mut self, shutdown_token: CancellationToken) {
-        tracing::info!(
-            target: "flashblocks::p2p",
-            interval_secs = self.interval.as_secs(),
-            "PeerMonitor started"
-        );
-        let mut interval = tokio::time::interval(self.interval);
+    /// Add initial peers to the peer monitor, e.g., from --trusted-peers CLI flag
+    pub fn with_initial_peers(self, peers: impl IntoIterator<Item = PeerId>) -> Self {
+        for peer_id in peers {
+            self.add_peer_idle(peer_id);
+        }
 
-        loop {
-            // FIXME: Just for debugging purposes. Remove this later.
-            tracing::error!(
+        self
+    }
+
+    /// Run the peer monitor on reth's task executor
+    pub fn run_on_task_executor(self, task_executor: &TaskExecutor) {
+        task_executor.spawn_with_graceful_shutdown_signal(|reth_shutdown| async move {
+            let shutdown_token = CancellationToken::new();
+            let shutdown_token_clone = shutdown_token.clone();
+
+            tokio::spawn(async move {
+                let _guard = reth_shutdown.await;
+                shutdown_token_clone.cancel();
+            });
+
+            tracing::info!(
                 target: "flashblocks::p2p",
-                num_known_peers = self.known_peers.len(),
-                "PeerMonitor tick"
+                interval_secs = %peer_monitor_interval().as_secs(),
+                "PeerMonitor started"
             );
+
+            tokio::join! {
+                self.periodically_check_peers(shutdown_token.clone()),
+                self.process_peer_events(shutdown_token),
+            };
+        });
+    }
+
+    /// Periodically check trusted peers and log warnings for disconnected peers
+    async fn periodically_check_peers(&self, shutdown_token: CancellationToken) {
+        let mut interval = interval(peer_monitor_interval());
+        loop {
+            tracing::trace!(
+                target: "flashblocks::p2p",
+                trusted_peers = ?self.trusted_peers.lock().keys().collect::<Vec<&PeerId>>(),
+                "tick"
+            );
+
             tokio::select! {
                 _ = interval.tick() => {
                     self.check_peers().await;
                 }
                 _ = shutdown_token.cancelled() => {
-                    tracing::debug!("Peer monitor shutting down");
+                    tracing::info!("Peer monitor shutting down");
                     break;
                 }
             }
         }
     }
 
-    /// Run the peer monitor on the given task executor to be managed by reth.
-    pub fn run_on_task_executor(self, task_executor: &TaskExecutor) {
-        task_executor.spawn_critical_with_graceful_shutdown_signal(
-            "flashblocks peer monitor",
-            |reth_shutdown| async move {
-                let shutdown_token = CancellationToken::new();
-                let shutdown_token_clone = shutdown_token.clone();
-
-                tokio::spawn(async move {
-                    let _guard = reth_shutdown.await;
-                    shutdown_token_clone.cancel();
-                });
-
-                self.run(shutdown_token).await;
-            },
-        );
-    }
-
-    /// Check current trusted peers and detect disconnections
-    async fn check_peers(&mut self) {
+    /// Check current trusted peers against tracked trusted peers
+    async fn check_peers(&self) {
         match self.network.get_trusted_peers().await {
             Ok(peers) => {
-                let current_peer_ids: std::collections::HashSet<PeerId> =
+                let mut current_peer_ids: HashSet<PeerId> =
                     peers.iter().map(|p| p.remote_id).collect();
 
-                // Add new peers to the grow-only map with connected state
-                // Mainly useful if peers are added after the peer monitor is started via admin API
-                for peer_id in &current_peer_ids {
-                    // Either reset the disconnect counter for existing peers or insert new peers
-                    self.known_peers
-                        .entry(*peer_id)
-                        .and_modify(|state| state.disconnected_ticks = 0)
-                        .or_insert(PeerState {
-                            disconnected_ticks: 0,
-                        });
-                }
-
                 // Detect disconnected peers (in known_peers but not in current_peer_ids)
-                for (peer_id, state) in self.known_peers.iter_mut() {
-                    if !current_peer_ids.contains(peer_id) {
-                        // Increment disconnect tick count
-                        state.disconnected_ticks += 1;
+                for (peer_id, state) in self.trusted_peers.lock().iter_mut() {
+                    if !current_peer_ids.remove(peer_id) {
+                        let now = Instant::now();
+                        // If peer was connected and disconnected_time is None, set it to now
+                        // Happens when connection event was not received e.g., because peer was added via admin RPC
+                        if state.connection_established && state.disconnected_time.is_none() {
+                            state.disconnected_time = Some(now);
+                        }
+                        // Case when peer was connected and then disconnected since disconnected_time is guaranteed to be set
+                        let info = if let Some(dc_time) = state.disconnected_time {
+                            let dc_since = now.duration_since(dc_time).as_secs();
 
-                        // Calculate disconnect duration
-                        let disconnect_duration = self.interval * state.disconnected_ticks as u32;
+                            format!("disconnected since {dc_since}s")
+                        // Peer was never connected
+                        } else {
+                            "never connected".to_string()
+                        };
 
-                        tracing::warn!(
-                            target: "flashblocks::p2p",
-                            peer_id = %peer_id,
-                            disconnected_for_secs = disconnect_duration.as_secs(),
-                            "trusted peer disconnected (detected by peer monitor)"
-                        );
+                        // Log warning either if already connected peer is now disconnected or connection to trusted peer was not established before timeout
+                        if state.connection_established
+                            || now.duration_since(state.added_time) > connection_init_timeout()
+                        {
+                            tracing::warn!(
+                                target: "flashblocks::p2p",
+                                peer_id = %peer_id,
+                                info = %info,
+                                "trusted peer disconnected"
+                            );
+                        }
                     }
+                }
+                // Update tracked peers and connection status
+                for peer_id in current_peer_ids {
+                    self.add_or_update_connected(peer_id);
                 }
             }
             Err(e) => {
@@ -160,5 +181,103 @@ where
                 );
             }
         }
+    }
+
+    /// Additionally process peer events to get more accurate information about peer connections and allow for removing trusted peers via admin RPC
+    async fn process_peer_events(&self, shutdown_token: CancellationToken) {
+        self.network
+            .peer_events()
+            .take_until(shutdown_token.cancelled())
+            .for_each(|event| async {
+                match event {
+                    // Fired when connection with any peer is closed
+                    PeerEvent::SessionClosed { peer_id, reason } => {
+                        if self.update_peer_state(peer_id, |state| {
+                            state.disconnected_time = Some(Instant::now());
+                        }) {
+                            let reason = reason
+                                .map(|r| r.to_string())
+                                .unwrap_or("unknown".to_string());
+
+                            tracing::info!(
+                                target: "flashblocks::p2p",
+                                peer_id = %peer_id,
+                                reason = %reason,
+                                "trusted peer disconnected"
+                            );
+                        }
+                    }
+                    // Fired when connection with any peer is established
+                    PeerEvent::SessionEstablished(session_info) => {
+                        // Note: If the peer was added via admin RPC, it will not be in the trusted_peers map yet.
+                        if self.update_peer_state(session_info.peer_id, |state| {
+                            state.connection_established = true;
+                            state.disconnected_time = None;
+                        }) {
+                            tracing::info!(
+                                target: "flashblocks::p2p",
+                                peer_id = %session_info.peer_id,
+                                "connection to trusted peer established"
+                            );
+                        }
+                    }
+                    // Fired when any peer is removed via admin RPC
+                    PeerEvent::PeerRemoved(fixed_bytes) => {
+                        if self.remove_peer(fixed_bytes) {
+                            tracing::debug!(
+                                target: "flashblocks::p2p",
+                                peer_id = %fixed_bytes,
+                                "trusted peer removed"
+                            );
+                        }
+                    }
+                    // Fired when any peer is added via admin RPC
+                    PeerEvent::PeerAdded(_) => {
+                        // Don't do anything here, can not tell if it's a trusted peer or not due to reth API limitations
+                    }
+                }
+            })
+            .await;
+    }
+
+    /// Add a peer with no connection established
+    fn add_peer_idle(&self, peer_id: PeerId) {
+        let mut trusted_peers = self.trusted_peers.lock();
+
+        let peer_state = PeerState {
+            connection_established: false,
+            added_time: Instant::now(),
+            disconnected_time: None,
+        };
+
+        trusted_peers.insert(peer_id, peer_state);
+    }
+
+    /// Either insert a new peer with connection established or update the connection status if peer already exists
+    fn add_or_update_connected(&self, peer_id: PeerId) {
+        self.trusted_peers
+            .lock()
+            .entry(peer_id)
+            .and_modify(|state| {
+                state.connection_established = true;
+                state.disconnected_time = None;
+            })
+            .or_insert(PeerState {
+                connection_established: true,
+                added_time: Instant::now(),
+                disconnected_time: None,
+            });
+    }
+
+    /// Remove a peer from the peer monitor
+    fn remove_peer(&self, peer_id: PeerId) -> bool {
+        let mut trusted_peers = self.trusted_peers.lock();
+        trusted_peers.remove(&peer_id).is_some()
+    }
+
+    /// Update the state of a peer
+    fn update_peer_state(&self, peer_id: PeerId, f: impl FnOnce(&mut PeerState)) -> bool {
+        let mut trusted_peers = self.trusted_peers.lock();
+        trusted_peers.get_mut(&peer_id).map(f).is_some()
     }
 }
