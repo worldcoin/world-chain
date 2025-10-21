@@ -3780,6 +3780,7 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tracing",

@@ -20,7 +20,7 @@ use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
-use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -32,8 +32,19 @@ use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
 use serde::{Deserialize, Serialize};
-use std::{any::Any, collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{
+    any::Any,
+    collections::HashMap,
+    io::Write,
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
+use tempfile::NamedTempFile;
+use tokio::time::{sleep, Duration, Instant};
 use tracing::{info, Dispatch};
+use url::Host;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Metadata {
@@ -85,6 +96,17 @@ async fn setup_node(
     builder_sk: SigningKey,
     peers: Vec<(PeerId, SocketAddr)>,
 ) -> eyre::Result<NodeContext> {
+    setup_node_with_port_id(exec, authorizer_sk, builder_sk, peers, None, None).await
+}
+
+async fn setup_node_with_port_id(
+    exec: TaskExecutor,
+    authorizer_sk: SigningKey,
+    builder_sk: SigningKey,
+    peers: Vec<(PeerId, SocketAddr)>,
+    port: Option<u16>,
+    p2p_secret_key: Option<PathBuf>,
+) -> eyre::Result<NodeContext> {
     let genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         OpChainSpecBuilder::base_mainnet()
@@ -93,7 +115,7 @@ async fn setup_node(
             .build(),
     );
 
-    let network_config = NetworkArgs {
+    let mut network_config = NetworkArgs {
         discovery: DiscoveryArgs {
             disable_discovery: true,
             ..DiscoveryArgs::default()
@@ -101,11 +123,37 @@ async fn setup_node(
         ..NetworkArgs::default()
     };
 
-    // Use with_unused_ports() to let Reth allocate random ports and avoid port collisions
-    let node_config = NodeConfig::new(chain_spec.clone())
+    // Set the port if one was specified
+    if let Some(p) = port {
+        network_config.port = p;
+    }
+
+    // Set the P2P secret key if one was specified (for deterministic peer ID)
+    if let Some(key_path) = p2p_secret_key {
+        network_config.p2p_secret_key = Some(key_path);
+    }
+
+    // Add trusted peers via NetworkArgs (simulate --trusted-peers CLI flag)
+    network_config.trusted_peers = peers
+        .into_iter()
+        .map(|(peer_id, addr)| {
+            let host = match addr.ip() {
+                IpAddr::V4(ip) => Host::Ipv4(ip),
+                IpAddr::V6(ip) => Host::Ipv6(ip),
+            };
+            TrustedPeer::new(host, addr.port(), peer_id)
+        })
+        .collect();
+
+    // Use with_unused_ports() only if no specific port was provided
+    // This lets Reth allocate random ports to avoid port collisions
+    let mut node_config = NodeConfig::new(chain_spec.clone())
         .with_network(network_config.clone())
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
-        .with_unused_ports();
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    if port.is_none() {
+        node_config = node_config.with_unused_ports();
+    }
 
     let node = FlashblocksNodeBuilder {
         rollup: Default::default(),
@@ -142,10 +190,7 @@ async fn setup_node(
     node.network
         .add_rlpx_sub_protocol(p2p_protocol.into_rlpx_sub_protocol());
 
-    for (peer_id, addr) in peers {
-        // If a trusted peer is provided, add it to the network
-        node.network.add_trusted_peer(peer_id, addr);
-    }
+    // Trusted peers are now added via NetworkArgs (like CLI), so no manual addition needed
 
     let http_api_addr = node
         .rpc_server_handle()
@@ -228,7 +273,7 @@ async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
         nodes.push(node);
     }
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await;
+    sleep(Duration::from_millis(6000)).await;
 
     Ok((nodes, authorizer))
 }
@@ -280,7 +325,7 @@ async fn test_double_failover() -> eyre::Result<()> {
         AuthorizedPayload::new(nodes[0].p2p_handle.builder_sk()?, authorization_0, msg);
     nodes[0].p2p_handle.start_publishing(authorization_0)?;
     nodes[0].p2p_handle.publish_new(authorized_0).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     let payload_1 = next_payload(payload_0.payload_id, 1);
     let authorization_1 = Authorization::new(
@@ -295,9 +340,9 @@ async fn test_double_failover() -> eyre::Result<()> {
         payload_1.clone(),
     );
     nodes[1].p2p_handle.start_publishing(authorization_1)?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
     nodes[1].p2p_handle.publish_new(authorized_1).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     // Send a new block, this time from node 1
     let payload_2 = next_payload(payload_0.payload_id, 2);
@@ -314,9 +359,9 @@ async fn test_double_failover() -> eyre::Result<()> {
         msg.clone(),
     );
     nodes[2].p2p_handle.start_publishing(authorization_2)?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
     nodes[2].p2p_handle.publish_new(authorized_2).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     Ok(())
 }
@@ -368,7 +413,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let authorized = AuthorizedPayload::new(nodes[0].p2p_handle.builder_sk()?, authorization, msg);
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the base payload with an empty delta
     let pending_block = nodes[1]
@@ -395,7 +440,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         payload_1.clone(),
     );
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the second payload with two transactions
     let block = nodes[1]
@@ -432,7 +477,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     nodes[1].p2p_handle.start_publishing(authorization_1)?;
     nodes[2].p2p_handle.start_publishing(authorization_2)?;
     // Wait for clearance to go through
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
     tracing::error!(
         "{}",
         nodes[1]
@@ -440,13 +485,13 @@ async fn test_force_race_condition() -> eyre::Result<()> {
             .publish_new(authorized_1.clone())
             .unwrap_err()
     );
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     nodes[2].p2p_handle.stop_publishing()?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     nodes[1].p2p_handle.publish_new(authorized_1)?;
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     Ok(())
 }
@@ -487,7 +532,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     );
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the base payload with an empty delta
     let pending_block = provider
@@ -512,7 +557,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     );
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the second payload with two transactions
     let block = provider
@@ -575,7 +620,7 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 
     for _ in 0..100 {
         nodes[0].p2p_handle.ctx.peer_tx.send(peer_msg.clone()).ok();
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
         if let Some(rep) = rep_0 {
             assert!(rep < 0, "Peer reputation should be negative");
@@ -591,56 +636,61 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn test_peer_monitoring() -> eyre::Result<()> {
-    // Set the peer monitor interval to 200ms for fast tests
-    // This must be set BEFORE nodes are created so PeerMonitor picks it up
-    std::env::set_var("PEER_MONITOR_INTERVAL_MS", "200");
+    // Set the peer monitor interval to 1s for fast tests
+    std::env::set_var("PEER_MONITOR_INTERVAL_SECS", "1");
+    std::env::set_var("CONNECTION_TIMEOUT_SECS", "2");
 
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 
-    let tasks = Box::leak(Box::new(TaskManager::current()));
-    let exec = Box::leak(Box::new(tasks.executor()));
+    // Create a temporary P2P secret key file for node1 to ensure consistent peer ID across restarts
+    let mut p2p_key_file = NamedTempFile::new()?;
+    p2p_key_file.write_all(b"0101010101010101010101010101010101010101010101010101010101010101")?;
+    p2p_key_file.flush()?;
+    let p2p_key_path = p2p_key_file.path().to_path_buf();
 
-    // Setup node 1 on current execution environment (no peers initially)
+    let tasks1 = TaskManager::new(tokio::runtime::Handle::current());
+    let exec1 = tasks1.executor();
+
+    // Setup node 1 with its own TaskManager (for isolated task cancellation)
+    // Node1 needs static port and P2P key so it can be restarted with same identity
     let builder1 = SigningKey::from_bytes(&[1; 32]);
-    let node1 = setup_node(exec.clone(), authorizer.clone(), builder1, vec![]).await?;
+    let node1 = setup_node_with_port_id(
+        exec1,
+        authorizer.clone(),
+        builder1,
+        vec![],                     // No peers initially
+        None,                       // Use random port (we'll capture it)
+        Some(p2p_key_path.clone()), // Use deterministic P2P key
+    )
+    .await?;
 
-    // Setup node 2 in a separate execution environment
+    let tasks2 = TaskManager::current();
+    let exec2 = tasks2.executor();
+
+    // Capture node1's identity for node2 to use as trusted peer
     let peer1_id = node1.local_node_record.id;
     let peer1_addr = node1.local_node_record.tcp_addr();
-    let authorizer_clone = authorizer.clone();
+    let peer1_port = peer1_addr.port(); // Capture port for restart
 
-    let handle = std::thread::spawn(move || {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let node2 = runtime
-            .block_on(async move {
-                let tasks2 = Box::leak(Box::new(TaskManager::current()));
-                let exec2 = Box::leak(Box::new(tasks2.executor()));
-                let builder2 = SigningKey::from_bytes(&[2; 32]);
-                setup_node(
-                    exec2.clone(),
-                    authorizer_clone,
-                    builder2,
-                    vec![(peer1_id, peer1_addr)],
-                )
-                .await
-            })
-            .unwrap();
-        (runtime, node2)
-    });
+    // Setup node 2 with leaked TaskManager (lives for entire test)
+    // Node2 has node1 configured as trusted peer via CLI-style setup
+    let builder2 = SigningKey::from_bytes(&[2; 32]);
+    let node2 = setup_node_with_port_id(
+        exec2.clone(),
+        authorizer.clone(),
+        builder2,
+        vec![(peer1_id, peer1_addr)], // Node1 as trusted peer
+        None,                         // Use random port
+        None,                         // No deterministic P2P key needed
+    )
+    .await?;
 
-    let (runtime2, node2) = handle.join().unwrap();
-
-    // Add node 2 as trusted peer to node 1
-    let peer2_id = node2.local_node_record.id;
-    let peer2_addr = node2.local_node_record.tcp_addr();
-    node1.network_handle.add_trusted_peer(peer2_id, peer2_addr);
-
-    let connection_timeout = tokio::time::Duration::from_secs(10);
-    let poll_interval = tokio::time::Duration::from_millis(100);
-    let start = tokio::time::Instant::now();
+    let connection_timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
 
     loop {
-        let trusted_peers = node1.network_handle.get_trusted_peers().await?;
+        let trusted_peers = node2.network_handle.get_trusted_peers().await?;
         if trusted_peers.len() == 1 {
             info!(
                 "Connection established in {:.2}s",
@@ -653,69 +703,184 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             panic!("Timeout waiting for connection to establish");
         }
 
-        tokio::time::sleep(poll_interval).await;
+        sleep(poll_interval).await;
     }
 
-    // Determine the monitoring interval from environment variable or default to 200ms for tests
-    let monitor_interval_ms: u64 = std::env::var("PEER_MONITOR_INTERVAL_MS")
+    // Determine the monitoring interval from environment variable
+    let monitor_interval_secs: u64 = std::env::var("PEER_MONITOR_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(200); // Default to 200ms for fast tests
+        .unwrap();
 
-    // Wait for PeerMonitor to see the connected peer (at least 2 ticks to ensure detection)
-    let wait_for_detection_ms = monitor_interval_ms * 2 + 100;
+    // Wait for PeerMonitor's periodic check to discover the trusted peer
+    // Since PeerAdded events are ignored, the monitor relies on periodic polling
+    // Wait for at least one full monitor interval + buffer
+    sleep(Duration::from_secs(monitor_interval_secs + 1)).await;
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(wait_for_detection_ms)).await;
+    // SIMULATE CRASH: Drop node1 and its TaskManager
+    // Dropping the TaskManager cancels all tasks spawned on it
+    info!("Simulating node 1 crash (dropping node and TaskManager)");
+    drop(node1);
+    drop(tasks1);
 
-    // Shutdown node 2 by dropping its runtime (must use spawn_blocking to avoid async context)
-    println!("Shutting down node 2");
-    tokio::task::spawn_blocking(move || {
-        runtime2.shutdown_timeout(std::time::Duration::from_secs(1));
-    })
-    .await
-    .unwrap();
+    // Wait for the event listener to process the SessionClosed event
+    sleep(Duration::from_millis(500)).await;
 
-    // Wait for PeerMonitor to detect the disconnection and emit multiple tick logs
-    // Wait for at least 2-3 ticks to see progression (reduced from 4 for faster tests)
-    let wait_for_ticks_ms = monitor_interval_ms * 3;
-    tokio::time::sleep(tokio::time::Duration::from_millis(wait_for_ticks_ms)).await;
+    // Check that disconnection was logged by the event listener (immediate detection)
+    logs_assert(|logs: &[&str]| {
+        let disconnect_log_exists = logs.iter().any(|log| {
+            log.contains("trusted peer disconnected") && log.contains(&peer1_id.to_string())
+        });
 
-    // Verify that node 2 is no longer connected
-    let trusted_peers_after = node1.network_handle.get_trusted_peers().await?;
+        assert!(
+            disconnect_log_exists,
+            "Should have logged 'trusted peer disconnected' for peer {} from event listener",
+            peer1_id
+        );
+        Ok(())
+    });
+
+    // Wait for PeerMonitor periodic checks to detect the disconnection and emit multiple warning logs
+    // Wait for at least 2 periodic ticks to ensure we get multiple log outputs
+    let wait_for_ticks_secs = monitor_interval_secs * 2 + 1;
+    sleep(Duration::from_secs(wait_for_ticks_secs)).await;
+
+    // Verify that node 1 is no longer connected
+    let trusted_peers_after = node2.network_handle.get_trusted_peers().await?;
     assert_eq!(
         trusted_peers_after.len(),
         0,
-        "Node 2 should have disconnected"
+        "Node 1 should have disconnected"
     );
 
-    // Check that disconnection was logged using tracing-test
-    assert!(
-        logs_contain("trusted peer disconnected"),
-        "Should have logged 'trusted peer disconnected'"
-    );
-    assert!(
-        logs_contain(&peer2_id.to_string()),
-        "Log should contain the disconnected peer ID"
+    // Wait a bit longer to ensure we have multiple warning logs before restarting
+    sleep(Duration::from_secs(1)).await;
+
+    // Test reconnection: restart node 1 and verify it can reconnect
+    info!("Testing peer reconnection after restart");
+    info!("Restarting node 1 with the same port and P2P key");
+
+    // Restart node 1 with node2 configured as trusted peer (CLI-style)
+    let node1_restarted = setup_node_with_port_id(
+        exec2.clone(),
+        authorizer.clone(),
+        SigningKey::from_bytes(&[1; 32]),
+        vec![(
+            node2.local_node_record.id,
+            node2.local_node_record.tcp_addr(),
+        )], // Configure node2 as trusted peer
+        Some(peer1_port),           // Reuse the same port
+        Some(p2p_key_path.clone()), // Reuse the same P2P key
+    )
+    .await?;
+    let peer1_id_new = node1_restarted.local_node_record.id;
+    let peer1_addr_new = node1_restarted.local_node_record.tcp_addr();
+
+    // Verify the address (IP:port) is the same after restart
+    assert_eq!(
+        peer1_addr, peer1_addr_new,
+        "Peer address should remain the same after restart (fixed port)"
     );
 
-    // Check for multiple disconnect logs to prove the monitor is repeatedly checking
+    // Verify the peer ID is the same after restart (because we reused the P2P key)
+    assert_eq!(
+        peer1_id, peer1_id_new,
+        "Peer ID should remain the same after restart (reused P2P key)"
+    );
+
+    info!(
+        "Restarted peer with same ID and address: peer_id={}, addr={}",
+        peer1_id_new, peer1_addr_new
+    );
+
+    let connection_timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let trusted_peers = node2.network_handle.get_trusted_peers().await?;
+        if trusted_peers.len() == 1 {
+            info!(
+                "Reconnection established in {:.2}s",
+                start.elapsed().as_secs_f64()
+            );
+            break;
+        }
+
+        if start.elapsed() > connection_timeout {
+            panic!("Timeout waiting for reconnection to establish");
+        }
+
+        sleep(poll_interval).await;
+    }
+
+    // Assert that the "connection to trusted peer established" log appears for node1
     logs_assert(|logs: &[&str]| {
-        let disconnect_logs: Vec<&str> = logs
+        let reconnection_log_exists = logs.iter().any(|log| {
+            log.contains("connection to trusted peer established")
+                && log.contains(&peer1_id.to_string())
+        });
+
+        assert!(
+            reconnection_log_exists,
+            "Should have logged 'connection to trusted peer established' for peer {} after restart",
+            peer1_id
+        );
+        Ok(())
+    });
+
+    // Wait for at least one more monitor tick to verify warnings stopped
+    sleep(Duration::from_secs(monitor_interval_secs + 1)).await;
+
+    // Count the number of warning logs before and after reconnection to ensure they stopped
+    logs_assert(|logs: &[&str]| {
+        // Find the index where reconnection happened (use rposition to find the LAST occurrence)
+        let reconnection_log_idx = logs
+            .iter()
+            .rposition(|log| log.contains("connection to trusted peer established"))
+            .ok_or_else(|| {
+                "Could not find 'connection to trusted peer established' log".to_string()
+            })?;
+
+        // Split logs at the reconnection point
+        let (logs_before_reconnect, logs_after_reconnect) = logs.split_at(reconnection_log_idx);
+
+        // Filter for disconnect warnings in logs before reconnection
+        let warnings_before_reconnect: Vec<&str> = logs_before_reconnect
             .iter()
             .filter(|log| {
-                log.contains("trusted peer disconnected") && log.contains(&peer2_id.to_string())
+                log.contains(&peer1_id.to_string())
+                    && log.contains("WARN")
+                    && log.contains("trusted peer disconnected")
             })
-            .inspect(|log| println!("Disconnect Log: {}", log))
             .copied()
             .collect();
 
-        // We should have at least 2 disconnect logs to prove the monitor is running periodically
-        if disconnect_logs.len() < 2 {
-            return Err(format!(
-                "Should have at least 2 disconnect logs showing periodic monitoring, found {}",
-                disconnect_logs.len()
-            ));
-        }
+        // We should have seen at least 2 warnings before reconnection
+        assert!(
+            warnings_before_reconnect.len() >= 2,
+            "Should have had at least 2 warnings before reconnection, found {}",
+            warnings_before_reconnect.len()
+        );
+
+        // Filter for disconnect warnings in logs after reconnection
+        let warnings_after_reconnect: Vec<&str> = logs_after_reconnect
+            .iter()
+            .filter(|log| {
+                log.contains(&peer1_id.to_string())
+                    && log.contains("WARN")
+                    && log.contains("trusted peer disconnected")
+            })
+            .copied()
+            .collect();
+
+        // There should be no warnings after reconnection
+        assert!(
+            warnings_after_reconnect.is_empty(),
+            "Should have no warnings after reconnection, found {}: {:?}",
+            warnings_after_reconnect.len(),
+            warnings_after_reconnect
+        );
 
         Ok(())
     });
