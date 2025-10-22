@@ -451,15 +451,11 @@ pub struct FlashblocksStateExecutor {
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
-impl Default for FlashblocksStateExecutor {
-    fn default() -> Self {
-        unimplemented!("FlashblocksStateExecutor::new must be used instead")
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct FlashblocksStateExecutorInner {
+    /// List of flashblocks for the current payload
     flashblocks: Option<Flashblocks>,
+    /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
 }
 
@@ -612,7 +608,9 @@ where
                 if latest_payload.0.id() == flashblock.flashblock.payload_id
                     && latest_payload.1 >= flashblock.flashblock.index
                 {
-                    // Already processed this flashblock
+                    // Already processed this flashblock. This happens when set directly
+                    // from publish_build_payload. Since we already built the payload, no need
+                    // to do it again.
                     pending_block.send_replace(latest_payload.0.executed_block());
                     return Ok(());
                 }
