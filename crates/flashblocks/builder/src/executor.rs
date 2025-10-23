@@ -51,7 +51,7 @@ use revm::database::BundleState;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -573,9 +573,15 @@ impl FlashblocksStateExecutor {
     }
 
     /// Broadcasts a new payload to cache in the in memory tree.
-    pub fn broadcast_payload(&self, event: Events<OpEngineTypes>) -> eyre::Result<()> {
-        if let Some(tx) = &self.inner.read().payload_events {
-            tx.send(event)?;
+    pub fn broadcast_payload(
+        &self,
+        event: Events<OpEngineTypes>,
+        payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
+    ) -> eyre::Result<()> {
+        if let Some(payload_events) = payload_events {
+            if let Err(e) = payload_events.send(event) {
+                warn!("error broadcasting payload: {e:?}");
+            }
         }
         Ok(())
     }
@@ -603,7 +609,7 @@ where
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        ..
+        ref mut payload_events,
     } = *state_executor.inner.write();
 
     let flashblock = Flashblock { flashblock };
@@ -705,7 +711,10 @@ where
     *latest_payload = Some((payload.clone(), index));
     pending_block.send_replace(payload.executed_block());
 
-    state_executor.broadcast_payload(Events::BuiltPayload(payload.clone()))?;
+    state_executor.broadcast_payload(
+        Events::BuiltPayload(payload.clone()),
+        payload_events.clone(),
+    )?;
 
     Ok(())
 }
