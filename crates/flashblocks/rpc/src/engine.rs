@@ -1,8 +1,9 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use flashblocks_primitives::p2p::Authorization;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
@@ -14,11 +15,13 @@ use reth::{
     api::{EngineApiValidator, EngineTypes},
     rpc::api::IntoEngineApiRpcModule,
 };
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_chainspec::EthereumHardforks;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use tracing::trace;
+use tracing::{debug, trace};
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -26,6 +29,8 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A watch channel notifier to the jobs generator.
     to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    /// Watch channel receiver for pending flashblock.
+    pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -35,11 +40,73 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+        pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
     ) -> Self {
         Self {
             inner,
             to_jobs_generator,
+            pending_block_rx,
         }
+    }
+
+    /// Checks if the given payload matches the cached pending block.
+    /// Returns a valid PayloadStatus if there's a match, None otherwise.
+    ///
+    /// Compares:
+    /// - Block hash
+    /// - Parent hash
+    /// - Timestamp
+    /// - Transaction list (order and content)
+    fn check_cached_payload(
+        &self,
+        block_hash: B256,
+        parent_hash: B256,
+        timestamp: u64,
+        transactions: &[alloy_primitives::Bytes],
+    ) -> Option<PayloadStatus> {
+        let pending_block = self.pending_block_rx.borrow();
+
+        if let Some(ref executed_block) = *pending_block {
+            let cached_block = &executed_block.block.recovered_block;
+
+            // Compare basic block attributes
+            if cached_block.hash() != block_hash
+                || cached_block.parent_hash != parent_hash
+                || cached_block.timestamp != timestamp {
+                return None;
+            }
+
+            // Compare transaction count first for quick rejection
+            if cached_block.body().transactions().count() != transactions.len() {
+                return None;
+            }
+
+            // Compare each transaction
+            let cached_txs: Vec<_> = cached_block
+                .body()
+                .transactions()
+                .map(|tx| alloy_eips::eip2718::Encodable2718::encoded_2718(tx))
+                .collect();
+
+            for (cached_tx, input_tx) in cached_txs.iter().zip(transactions.iter()) {
+                if &cached_tx[..] != &input_tx[..] {
+                    return None;
+                }
+            }
+
+            debug!(
+                target: "flashblocks::rpc::engine",
+                %block_hash,
+                "Returning cached payload from flashblocks state executor"
+            );
+
+            return Some(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(cached_block.state_root()),
+            ));
+        }
+
+        None
     }
 }
 
@@ -54,6 +121,16 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
+        // Check if we have this payload cached
+        if let Some(cached_status) = self.check_cached_payload(
+            payload.execution_payload.block_hash,
+            payload.execution_payload.parent_hash,
+            payload.execution_payload.timestamp,
+            &payload.execution_payload.transactions,
+        ) {
+            return Ok(cached_status);
+        }
+
         Ok(self.inner.new_payload_v2(payload).await?)
     }
 
@@ -63,6 +140,16 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
+        // Check if we have this payload cached
+        if let Some(cached_status) = self.check_cached_payload(
+            payload.payload_inner.payload_inner.block_hash,
+            payload.payload_inner.payload_inner.parent_hash,
+            payload.payload_inner.payload_inner.timestamp,
+            &payload.payload_inner.payload_inner.transactions,
+        ) {
+            return Ok(cached_status);
+        }
+
         Ok(self
             .inner
             .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root)
@@ -76,6 +163,16 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
+        // Check if we have this payload cached
+        if let Some(cached_status) = self.check_cached_payload(
+            payload.payload_inner.payload_inner.payload_inner.block_hash,
+            payload.payload_inner.payload_inner.payload_inner.parent_hash,
+            payload.payload_inner.payload_inner.payload_inner.timestamp,
+            &payload.payload_inner.payload_inner.payload_inner.transactions,
+        ) {
+            return Ok(cached_status);
+        }
+
         Ok(self
             .inner
             .new_payload_v4(

@@ -6,11 +6,13 @@ use flashblocks_rpc::engine::OpEngineApiExt;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::version::version_metadata;
 use reth::{payload::PayloadStore, version::CLIENT_CODE};
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
 use reth_optimism_node::OP_NAME_CLIENT;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEngineApi, OP_ENGINE_CAPABILITIES};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
@@ -25,16 +27,20 @@ pub struct FlashblocksEngineApiBuilder<EV> {
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     /// Verifying key for authorizations.
     pub authorizer_vk: VerifyingKey,
+    /// Watch channel receiver for pending flashblock.
+    pub pending_block_rx: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
 impl<EV: Default> Default for FlashblocksEngineApiBuilder<EV> {
     fn default() -> Self {
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
+        let (_, pending_block_rx) = tokio::sync::watch::channel(None);
         Self {
             engine_validator_builder: Default::default(),
             flashblocks_handle: None,
             to_jobs_generator,
             authorizer_vk: VerifyingKey::from_bytes(&[0u8; 32]).expect("valid key"),
+            pending_block_rx,
         }
     }
 }
@@ -65,6 +71,7 @@ where
         let Self {
             engine_validator_builder,
             to_jobs_generator,
+            pending_block_rx,
             ..
         } = self;
 
@@ -95,7 +102,7 @@ where
         );
 
         let op_engine_api = OpEngineApi::new(inner);
-        let op_engine_api_ext = OpEngineApiExt::new(op_engine_api, to_jobs_generator);
+        let op_engine_api_ext = OpEngineApiExt::new(op_engine_api, to_jobs_generator, pending_block_rx);
 
         Ok(op_engine_api_ext)
     }
