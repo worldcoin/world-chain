@@ -27,7 +27,7 @@ use std::{
 use tracing::span;
 use world_chain_node::node::{WorldChainNode, WorldChainNodeContext};
 use world_chain_node::{FlashblocksOpApi, OpApiExtServer};
-use world_chain_test::node::test_config;
+use world_chain_test::node::test_config_with_peers_and_gossip;
 use world_chain_test::utils::{account, tree_root};
 use world_chain_test::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT};
 
@@ -64,6 +64,25 @@ type WorldChainNodeTestContext<T> = NodeHelperType<
 pub async fn setup<T>(
     num_nodes: u8,
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+) -> eyre::Result<(
+    Range<u8>,
+    Vec<WorldChainTestingNodeContext<T>>,
+    TaskManager,
+    Environment<OpEngineTypes>,
+)>
+where
+    T: WorldChainTestContextBounds,
+    WorldChainNode<T>: WorldChainNodeTestBounds<T>,
+{
+    setup_with_tx_peers::<T>(num_nodes, attributes_generator, false, false).await
+}
+
+/// Setup multiple nodes with optional transaction propagation peer configuration
+pub async fn setup_with_tx_peers<T>(
+    num_nodes: u8,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    enable_tx_peers: bool,
+    disable_gossip: bool,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -111,7 +130,19 @@ where
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
         let _enter = span.enter();
-        let config = test_config();
+
+        // Configure tx_peers if enabled and this is not the first node
+        let config = if enable_tx_peers && idx > 0 {
+            // Collect peer IDs from all previously created nodes
+            let previous_peer_ids: Vec<reth_network_peers::PeerId> = node_contexts
+                .iter()
+                .map(|n| n.node.network.record().id)
+                .collect();
+
+            test_config_with_peers_and_gossip(Some(previous_peer_ids), disable_gossip)
+        } else {
+            test_config_with_peers_and_gossip(None, disable_gossip)
+        };
 
         let node = WorldChainNode::<T>::new(config.args.clone().into_config(&op_chain_spec)?);
 
@@ -205,7 +236,7 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
             .extend_accounts(vec![(
                 account(0),
                 GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
-            )]),
+            )])
         )
         .ecotone_activated()
         .build()
