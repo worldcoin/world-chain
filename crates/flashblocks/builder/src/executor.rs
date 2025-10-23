@@ -651,8 +651,6 @@ where
         min_base_fee: None,
     };
 
-    info!("eip1559 params: {:?}", attributes.eip_1559_params);
-
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)?
         .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
