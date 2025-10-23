@@ -451,15 +451,11 @@ pub struct FlashblocksStateExecutor {
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
-impl Default for FlashblocksStateExecutor {
-    fn default() -> Self {
-        unimplemented!("FlashblocksStateExecutor::new must be used instead")
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct FlashblocksStateExecutorInner {
-    flashblocks: Option<Flashblocks>,
+    /// List of flashblocks for the current payload
+    flashblocks: Flashblocks,
+    /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
 }
 
@@ -475,7 +471,7 @@ impl FlashblocksStateExecutor {
         >,
     ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
-            flashblocks: None,
+            flashblocks: Default::default(),
             latest_payload: None,
         }));
 
@@ -542,16 +538,7 @@ impl FlashblocksStateExecutor {
 
         let index = flashblock.index;
         let flashblock = Flashblock { flashblock };
-        let (_flashblocks, _new_payload) = match flashblocks {
-            Some(ref mut f) => {
-                let new_payload = f.push(flashblock.clone())?;
-                (f, new_payload)
-            }
-            None => {
-                *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()])?);
-                (flashblocks.as_mut().unwrap(), true)
-            }
-        };
+        flashblocks.push(flashblock.clone())?;
 
         *latest_payload = Some((built_payload, index));
 
@@ -561,14 +548,12 @@ impl FlashblocksStateExecutor {
     }
 
     /// Returns a reference to the latest flashblock.
-    pub fn last(&self) -> Option<Flashblock> {
-        self.inner.read().flashblocks.as_ref().map(|f| Flashblock {
-            flashblock: f.last().clone(),
-        })
+    pub fn last(&self) -> Flashblock {
+        self.inner.read().flashblocks.last().clone()
     }
 
     /// Returns a reference to the latest flashblock.
-    pub fn flashblocks(&self) -> Option<Flashblocks> {
+    pub fn flashblocks(&self) -> Flashblocks {
         self.inner.read().flashblocks.clone()
     }
 
@@ -606,33 +591,34 @@ where
     } = *state_executor.inner.write();
 
     let flashblock = Flashblock { flashblock };
-    let (flashblocks, _new_payload) = match flashblocks {
-        Some(ref mut f) => {
-            if let Some(latest_payload) = latest_payload {
-                if latest_payload.0.id() == flashblock.flashblock.payload_id
-                    && latest_payload.1 >= flashblock.flashblock.index
-                {
-                    // Already processed this flashblock
-                    pending_block.send_replace(latest_payload.0.executed_block());
-                    return Ok(());
-                }
-            }
 
-            let new_payload = f.push(flashblock.clone())?;
-            (f, new_payload)
+    if let Some(latest_payload) = latest_payload {
+        if latest_payload.0.id() == flashblock.flashblock.payload_id
+            && latest_payload.1 >= flashblock.flashblock.index
+        {
+            // Already processed this flashblock. This happens when set directly
+            // from publish_build_payload. Since we already built the payload, no need
+            // to do it again.
+            pending_block.send_replace(latest_payload.0.executed_block());
+            return Ok(());
         }
-        None => {
-            *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
-            (flashblocks.as_mut().unwrap(), true)
-        }
+    }
+
+    // If for whatever reason we are not processing flashblocks in order
+    // we will error and return here.
+    let base = if flashblocks.is_new_payload(&flashblock)? {
+        *latest_payload = None;
+        // safe unwrap from check in is_new_payload
+        flashblock.base().unwrap()
+    } else {
+        flashblocks.base()
     };
 
-    let flashblock = flashblocks.last();
+    let diff = &flashblock.flashblock.diff;
+    let index = flashblock.flashblock.index;
     let cancel = CancelOnDrop::default();
-    let base = flashblocks.base();
 
-    let transactions = flashblock
-        .diff
+    let transactions = diff
         .transactions
         .iter()
         .map(|b| {
@@ -642,12 +628,12 @@ where
         .collect::<eyre::Result<Vec<_>>>()?;
 
     let eth_attrs = EthPayloadBuilderAttributes {
-        id: PayloadId(flashblocks.payload_id().to_owned()),
+        id: PayloadId(flashblock.payload_id().to_owned()),
         parent: base.parent_hash,
         timestamp: base.timestamp,
         suggested_fee_recipient: base.fee_recipient,
         prev_randao: base.prev_randao,
-        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
+        withdrawals: Withdrawals(diff.withdrawals.clone()),
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
     };
 
@@ -699,9 +685,8 @@ where
     };
 
     trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
-
-    *latest_payload = Some((payload.clone(), flashblock.index));
-
+    flashblocks.push(flashblock)?;
+    *latest_payload = Some((payload.clone(), index));
     pending_block.send_replace(payload.executed_block());
 
     Ok(())
