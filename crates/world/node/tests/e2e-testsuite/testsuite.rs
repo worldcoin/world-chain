@@ -4,6 +4,7 @@ use alloy_rpc_types::TransactionRequest;
 use ed25519_dalek::SigningKey;
 use flashblocks_primitives::p2p::Authorization;
 use futures::StreamExt;
+use op_alloy_consensus::encode_holocene_extra_data;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
 use reth::primitives::RecoveredBlock;
@@ -387,6 +388,15 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     let (sender, _) = tokio::sync::mpsc::channel(1);
 
+    let eip1559 = encode_holocene_extra_data(
+        Default::default(),
+        nodes[0]
+            .node
+            .inner
+            .chain_spec()
+            .base_fee_params_at_timestamp(timestamp),
+    )?;
+
     // Compose a Mine Block action with an eth_getTransactionReceipt action
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
@@ -398,7 +408,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         },
         transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
         no_tx_pool: Some(false),
-        eip_1559_params: Some(b64!("0000000800000008")),
+        eip_1559_params: Some(eip1559[1..=8].try_into()?),
         gas_limit: Some(30_000_000),
         min_base_fee: None,
     };
@@ -427,7 +437,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
     let transaction_receipt =
-        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 230, tx);
+        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 240, tx);
 
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;

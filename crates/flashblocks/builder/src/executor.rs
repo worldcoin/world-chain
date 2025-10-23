@@ -50,7 +50,7 @@ use revm::database::states::reverts::Reverts;
 use revm::database::BundleState;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -651,6 +651,8 @@ where
         min_base_fee: None,
     };
 
+    info!("eip1559 params: {:?}", attributes.eip_1559_params);
+
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)?
         .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
@@ -683,6 +685,12 @@ where
         BuildOutcomeKind::Freeze(payload) => payload,
         _ => return Ok(()),
     };
+
+    debug_assert_eq!(
+        payload.block().hash(),
+        flashblock.diff.block_hash,
+        "executed block hash does not match flashblock diff block hash"
+    );
 
     trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
     flashblocks.push(flashblock)?;
