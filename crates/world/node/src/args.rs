@@ -2,9 +2,11 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use hex::FromHex;
 use reth::chainspec::NamedChain;
+use reth_network_peers::PeerId;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::str::FromStr;
@@ -29,11 +31,33 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// Comma-separated list of peer IDs to which transactions should be propagated
+    #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
+    pub tx_peers: Option<Vec<PeerId>>,
 }
 
 impl WorldChainArgs {
     pub fn into_config(mut self, spec: &OpChainSpec) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+
+        if let Some(peers) = &self.tx_peers {
+            if self.rollup.disable_txpool_gossip {
+                warn!(
+                    target: "world_chain::network",
+                    "--tx-peers is ignored when transaction pool gossip is disabled \
+                     (--rollup.disable-tx-pool-gossip). The --tx-peers flag is shadowed and has no effect."
+                );
+                self.tx_peers = None;
+            } else {
+                tracing::info!(
+                    target: "world_chain::network",
+                    "Transaction propagation restricted to {} peer(s)",
+                    peers.len()
+                );
+            }
+        }
+
         match spec.chain.named() {
             Some(NamedChain::World) => {
                 if self.pbh.entrypoint == Address::default() {
@@ -169,6 +193,7 @@ pub fn parse_vk(s: &str) -> eyre::Result<VerifyingKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
     use clap::Parser;
 
     #[derive(Debug, Parser)]
@@ -274,5 +299,65 @@ mod tests {
     fn none() {
         let args = CommandParser::parse_from(["bin"]).world;
         assert!(args.flashblocks.is_none());
+    }
+
+    #[test]
+    fn test_tx_peers_basic() {
+        let peer1 = "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0";
+        let peer2 = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6db18b2a4b46dcd226f73d917f6652a2b0a96b4f78a";
+
+        let args =
+            CommandParser::parse_from(["bin", "--tx-peers", &format!("{},{}", peer1, peer2)]).world;
+
+        assert!(args.tx_peers.is_some());
+        assert_eq!(args.tx_peers.as_ref().unwrap().len(), 2);
+
+        let args = CommandParser::parse_from(["bin"]).world;
+        assert!(args.tx_peers.is_none());
+    }
+
+    #[test]
+    fn test_tx_peers_shadowing_by_disable_gossip() {
+        let peer_id = "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0";
+
+        let rollup_args = RollupArgs {
+            disable_txpool_gossip: true,
+            ..Default::default()
+        };
+
+        let args = WorldChainArgs {
+            rollup: rollup_args,
+            pbh: PbhArgs {
+                verified_blockspace_capacity: 70,
+                entrypoint: Default::default(),
+                world_id: Default::default(),
+                signature_aggregator: Default::default(),
+            },
+            builder: BuilderArgs {
+                enabled: false,
+                private_key: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                    .parse()
+                    .unwrap(),
+            },
+            flashblocks: None,
+            tx_peers: Some(vec![peer_id.parse().unwrap()]),
+        };
+
+        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let config = args.into_config(&spec).unwrap();
+
+        // tx_peers should be set to None due to shadowing
+        assert!(config.args.tx_peers.is_none());
+    }
+
+    #[test]
+    fn test_clap_empty_string_behavior() {
+        // Clap with value_delimiter and a type that requires parsing (like PeerId)
+        // will ERROR on empty string because it can't parse "" as PeerId
+        let result = CommandParser::try_parse_from(["bin", "--tx-peers="]);
+        assert!(
+            result.is_err(),
+            "Clap should error on empty string for PeerId"
+        );
     }
 }

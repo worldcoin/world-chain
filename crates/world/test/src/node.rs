@@ -60,6 +60,7 @@ use world_chain_pool::{
 
 use flashblocks_primitives::ed25519_dalek::SigningKey;
 use rand::Rng as _;
+use reth_network_peers::PeerId;
 use reth_optimism_node::OpDAConfig;
 
 use world_chain_node::{
@@ -68,6 +69,16 @@ use world_chain_node::{
 };
 
 pub fn test_config() -> WorldChainNodeConfig {
+    test_config_with_peers_and_gossip(None, false)
+}
+
+/// Creates a test config with optional transaction propagation peers and gossip control
+pub fn test_config_with_peers_and_gossip(
+    tx_peers: Option<Vec<PeerId>>,
+    disable_txpool_gossip: bool,
+) -> WorldChainNodeConfig {
+    use reth_optimism_node::args::RollupArgs;
+
     let builder = BuilderArgs {
         enabled: true,
         private_key: signer(6),
@@ -89,12 +100,18 @@ pub fn test_config() -> WorldChainNodeConfig {
         flashblocks_interval: 200,
     };
 
+    let rollup = RollupArgs {
+        disable_txpool_gossip,
+        ..Default::default()
+    };
+
     WorldChainNodeConfig {
         args: WorldChainArgs {
-            rollup: Default::default(),
+            rollup,
             builder,
             pbh,
             flashblocks: Some(flashblocks),
+            tx_peers,
         },
         da_config: OpDAConfig::default(),
     }
@@ -709,14 +726,21 @@ where
 
     async fn validate_transaction(
         &self,
-        _origin: TransactionOrigin,
+        origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        // Just propagate all transactions
+        let propagate = match origin {
+            TransactionOrigin::External => true,
+            TransactionOrigin::Local => true,
+            TransactionOrigin::Private => true,
+        };
+
         TransactionValidationOutcome::Valid {
             balance: U256::ZERO,
             state_nonce: 0,
             transaction: ValidTransaction::Valid(transaction),
-            propagate: false,
+            propagate,
             bytecode_hash: None,
             authorities: None,
         }
