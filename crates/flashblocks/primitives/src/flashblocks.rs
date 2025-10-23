@@ -227,8 +227,19 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
 /// - Non-empty
 /// - All flashblocks have the same payload ID
 /// - Flashblocks have contiguous indices starting from 0
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Flashblocks(Vec<Flashblock>);
+
+impl Default for Flashblocks {
+    fn default() -> Self {
+        Flashblocks(vec![Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                base: Some(ExecutionPayloadBaseV1::default()),
+                ..Default::default()
+            },
+        }])
+    }
+}
 
 impl Flashblocks {
     /// Creates a new `Flashblocks` collection from the given vector of flashblocks.
@@ -271,6 +282,15 @@ impl Flashblocks {
     /// Returns `Ok(true)` if the collection was reset, `Ok(false)` if the flashblock
     /// was added to the existing collection, or an error if the conditions are not met.
     pub fn push(&mut self, flashblock: Flashblock) -> eyre::Result<bool> {
+        let is_new_payload = self.is_new_payload(&flashblock)?;
+        if is_new_payload {
+            self.0.clear();
+        }
+        self.0.push(flashblock);
+        Ok(is_new_payload)
+    }
+
+    pub fn is_new_payload(&self, flashblock: &Flashblock) -> eyre::Result<bool> {
         if flashblock.payload_id() != self.payload_id() {
             if flashblock.flashblock.index != 0 {
                 bail!("New flashblock has different payload_id and index is not 0");
@@ -282,25 +302,23 @@ impl Flashblocks {
                 bail!("New flashblock has different payload_id and must have a later timestamp than the current base");
             }
 
-            self.0.clear();
-            self.0.push(flashblock);
             return Ok(true);
         }
 
         if flashblock.flashblock.index != (self.0.len() as u64) {
             bail!(
-                "New flashblock index is not contiguous expected {}, got {}",
+                "New flashblock index is not contiguous expected {}, got {}, payload_id: {}",
                 self.0.len(),
-                flashblock.flashblock.index
+                flashblock.flashblock.index,
+                self.payload_id()
             );
         }
 
-        self.0.push(flashblock);
         Ok(false)
     }
 
-    pub fn last(&self) -> &FlashblocksPayloadV1 {
-        &self.0.last().unwrap().flashblock
+    pub fn last(&self) -> &Flashblock {
+        &self.0.last().unwrap()
     }
 
     pub fn flashblocks(&self) -> &[Flashblock] {
