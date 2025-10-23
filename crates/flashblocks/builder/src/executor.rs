@@ -50,7 +50,7 @@ use revm::database::states::reverts::Reverts;
 use revm::database::BundleState;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -686,7 +686,7 @@ where
 
     debug_assert_eq!(
         payload.block().hash(),
-        flashblock.diff.block_hash,
+        flashblock.diff().block_hash,
         "executed block hash does not match flashblock diff block hash"
     );
 
