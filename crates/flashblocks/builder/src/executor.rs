@@ -51,7 +51,7 @@ use revm::database::BundleState;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, trace, warn};
+use tracing::{error, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -580,7 +580,7 @@ impl FlashblocksStateExecutor {
     ) -> eyre::Result<()> {
         if let Some(payload_events) = payload_events {
             if let Err(e) = payload_events.send(event) {
-                warn!("error broadcasting payload: {e:?}");
+                error!("error broadcasting payload: {e:?}");
             }
         }
         Ok(())
