@@ -743,7 +743,6 @@ where
     };
 
     let execution_context_clone = execution_context.clone();
-
     let provided_bal_hash = flashblock.diff.access_list_hash;
 
     let state_provider_clone = state_provider.clone();
@@ -751,6 +750,7 @@ where
 
     let sealed_header_clone = sealed_header.clone();
     let transactions_clone = transactions.clone();
+    
     let (execution_result, state_root_result) = rayon::join(
         move || {
             execute_transactions(

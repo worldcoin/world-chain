@@ -246,7 +246,7 @@ def get_config(
         "--flashblocks.enabled",
         "--flashblocks.authorizer_vk={0}".format(FLASHBLOCKS_AUTHORIZER_VK),
         "--flashblocks.builder_sk={0}".format(signing_key),
-        "--flashblocks.flashblocks_interval={0}".format("200"),
+        "--flashblocks.interval={0}".format("200"),
         "--flashblocks.recommit_interval={0}".format("20"),
         "--builder.max-tasks={0}".format("10")
     ]
