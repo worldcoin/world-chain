@@ -7,7 +7,7 @@ use bytes::{Buf as _, BufMut as _, BytesMut};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::FlashblocksError, primitives::FlashblocksPayloadV1};
+use crate::{error::FlashblocksError, primitives::FlashblocksPayload};
 
 /// An authorization token that grants a builder permission to publish flashblocks for a specific payload.
 ///
@@ -58,16 +58,16 @@ pub enum FlashblocksP2PMsg {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
 pub enum AuthorizedMsg {
     /// A flashblock payload containing a list of transactions and associated metadata
-    FlashblocksPayloadV1(FlashblocksPayloadV1) = 0x00,
+    FlashblocksPayload(FlashblocksPayload) = 0x00,
     /// A declaration to start publishing flashblock payloads from a specific block number
     StartPublish(StartPublish) = 0x01,
     /// A declaration to stop publishing flashblock payloads
     StopPublish(StopPublish) = 0x02,
 }
 
-impl From<FlashblocksPayloadV1> for AuthorizedMsg {
-    fn from(payload: FlashblocksPayloadV1) -> Self {
-        Self::FlashblocksPayloadV1(payload)
+impl From<FlashblocksPayload> for AuthorizedMsg {
+    fn from(payload: FlashblocksPayload) -> Self {
+        Self::FlashblocksPayload(payload)
     }
 }
 
@@ -463,10 +463,10 @@ impl FlashblocksP2PMsg {
     }
 }
 
-impl AsRef<FlashblocksPayloadV1> for AuthorizedMsg {
-    fn as_ref(&self) -> &FlashblocksPayloadV1 {
+impl AsRef<FlashblocksPayload> for AuthorizedMsg {
+    fn as_ref(&self) -> &FlashblocksPayload {
         match self {
-            Self::FlashblocksPayloadV1(p) => p,
+            Self::FlashblocksPayload(p) => p,
             _ => panic!("not a FlashblocksPayloadV1 message"),
         }
     }
@@ -521,7 +521,7 @@ impl Decodable for StopPublish {
 impl Encodable for AuthorizedMsg {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         match self {
-            Self::FlashblocksPayloadV1(payload) => {
+            Self::FlashblocksPayload(payload) => {
                 Header {
                     list: true,
                     payload_length: 1 + payload.length(),
@@ -553,7 +553,7 @@ impl Encodable for AuthorizedMsg {
 
     fn length(&self) -> usize {
         let body_len = match self {
-            Self::FlashblocksPayloadV1(payload) => 1 + payload.length(),
+            Self::FlashblocksPayload(payload) => 1 + payload.length(),
             Self::StartPublish(start) => 1 + start.length(),
             Self::StopPublish(stop) => 1 + stop.length(),
         };
@@ -578,7 +578,7 @@ impl Decodable for AuthorizedMsg {
 
         let tag = u8::decode(buf)?;
         let value = match tag {
-            0 => Self::FlashblocksPayloadV1(FlashblocksPayloadV1::decode(buf)?),
+            0 => Self::FlashblocksPayload(FlashblocksPayload::decode(buf)?),
             1 => Self::StartPublish(StartPublish::decode(buf)?),
             2 => Self::StopPublish(StopPublish::decode(buf)?),
             _ => return Err(alloy_rlp::Error::Custom("unknown tag")),
@@ -591,12 +591,19 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
+        access_list::FlashblockAccessList,
         flashblocks::FlashblockMetadata,
-        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
+        primitives::{
+            ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
+            ExecutionPayloadFlashblockDeltaV2, FlashblocksPayloadV1, FlashblocksPayloadV2,
+        },
     };
 
     use super::*;
-    use alloy_primitives::{Address, Bloom, B256, U256};
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    };
+    use alloy_primitives::{keccak256, Address, Bloom, FixedBytes, B256, U256};
     use alloy_rlp::{encode, Decodable, Encodable};
     use alloy_rpc_types_eth::Withdrawal;
     use bytes::{BufMut, BytesMut};
@@ -633,8 +640,43 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
-            access_list: crate::access_list::FlashblockAccessList::default(),
-            access_list_hash: B256::from([0x55; 32]),
+        }
+    }
+
+    fn sample_diff_v2() -> ExecutionPayloadFlashblockDeltaV2 {
+        let bal = sample_access_list();
+        ExecutionPayloadFlashblockDeltaV2 {
+            inner: sample_diff(),
+            access_list: bal.clone(),
+            access_list_hash: keccak256(alloy_rlp::encode(bal)),
+        }
+    }
+
+    fn sample_access_list() -> FlashblockAccessList {
+        FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: Address::default(),
+                storage_changes: vec![SlotChanges {
+                    slot: FixedBytes::with_last_byte(0x2),
+                    changes: vec![StorageChange {
+                        block_access_index: 1,
+                        new_value: FixedBytes::with_last_byte(0x3),
+                    }],
+                }],
+                code_changes: vec![CodeChange {
+                    block_access_index: 2,
+                    new_code: Bytes::from_static(b"\xCA\xFE"),
+                }],
+                storage_reads: vec![FixedBytes::with_last_byte(0x4)],
+                balance_changes: vec![BalanceChange {
+                    block_access_index: 3,
+                    post_balance: U256::from(1_000_000u64),
+                }],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 4,
+                    new_nonce: 42,
+                }],
+            }],
         }
     }
 
@@ -652,14 +694,24 @@ mod tests {
         }
     }
 
-    fn sample_flashblocks_payload() -> FlashblocksPayloadV1 {
-        FlashblocksPayloadV1 {
+    fn sample_flashblocks_payload_v1() -> FlashblocksPayload {
+        FlashblocksPayload::V1(FlashblocksPayloadV1 {
             payload_id: PayloadId::default(),
             index: 42,
             diff: sample_diff(),
             metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
-        }
+        })
+    }
+
+    fn sample_flashblocks_payload_v2() -> FlashblocksPayload {
+        FlashblocksPayload::V2(FlashblocksPayloadV2 {
+            payload_id: PayloadId::default(),
+            index: 100,
+            diff: sample_diff_v2(),
+            metadata: FlashblockMetadata::default(),
+            base: Some(sample_base()),
+        })
     }
 
     #[test]
@@ -701,12 +753,36 @@ mod tests {
     }
 
     #[test]
-    fn authorized_rlp_roundtrip_and_verify() {
+    fn authorized_rlp_roundtrip_and_verify_v1() {
         let (builder_sk, _builder_vk) = key_pair(2);
         let (authorization, authorizer_vk) = sample_authorization();
 
-        let payload = sample_flashblocks_payload();
-        let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
+        let payload = sample_flashblocks_payload_v1();
+        let msg = AuthorizedMsg::FlashblocksPayload(payload);
+
+        let authorized = Authorized::new(&builder_sk, authorization, msg);
+
+        // Encode → decode
+        let encoded = encode(&authorized);
+        assert_eq!(encoded.len(), authorized.length());
+
+        let mut slice = encoded.as_ref();
+        let decoded = Authorized::decode(&mut slice).expect("decoding succeeds");
+        assert!(slice.is_empty());
+        assert_eq!(decoded, authorized);
+
+        decoded
+            .verify(authorizer_vk)
+            .expect("composite verification succeeds");
+    }
+
+    #[test]
+    fn authorized_rlp_roundtrip_and_verify_v2() {
+        let (builder_sk, _builder_vk) = key_pair(2);
+        let (authorization, authorizer_vk) = sample_authorization();
+
+        let payload = sample_flashblocks_payload_v2();
+        let msg = AuthorizedMsg::FlashblocksPayload(payload);
 
         let authorized = Authorized::new(&builder_sk, authorization, msg);
 
@@ -728,8 +804,8 @@ mod tests {
     fn authorized_builder_signature_tamper_is_detected() {
         let (builder_sk, _) = key_pair(2);
         let (authorization, authorizer_vk) = sample_authorization();
-        let payload = sample_flashblocks_payload();
-        let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
+        let payload = sample_flashblocks_payload_v2();
+        let msg = AuthorizedMsg::FlashblocksPayload(payload);
 
         let mut authorized = Authorized::new(&builder_sk, authorization, msg);
 
@@ -743,7 +819,7 @@ mod tests {
     #[test]
     fn authorized_msg_variants_rlp_roundtrip() {
         let variants = [
-            AuthorizedMsg::FlashblocksPayloadV1(sample_flashblocks_payload()),
+            AuthorizedMsg::FlashblocksPayload(sample_flashblocks_payload_v1()),
             AuthorizedMsg::StartPublish(StartPublish),
             AuthorizedMsg::StopPublish(StopPublish),
         ];
@@ -763,8 +839,8 @@ mod tests {
     fn p2p_msg_roundtrip() {
         let (builder_sk, _) = key_pair(2);
         let (authorization, _authorizer_vk) = sample_authorization();
-        let payload = sample_flashblocks_payload();
-        let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
+        let payload = sample_flashblocks_payload_v2();
+        let msg = AuthorizedMsg::FlashblocksPayload(payload);
 
         let authorized = Authorized::new(&builder_sk, authorization, msg);
         let p2p = FlashblocksP2PMsg::Authorized(authorized.clone());

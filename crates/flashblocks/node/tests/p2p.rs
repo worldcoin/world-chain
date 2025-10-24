@@ -14,7 +14,10 @@ use flashblocks_primitives::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
         StartPublish,
     },
-    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    primitives::{
+        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayload,
+        FlashblocksPayloadV1,
+    },
 };
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_eth_wire::BasicNetworkPrimitives;
@@ -170,8 +173,8 @@ fn base_payload(
     payload_id: PayloadId,
     index: u64,
     hash: B256,
-) -> FlashblocksPayloadV1 {
-    FlashblocksPayloadV1 {
+) -> FlashblocksPayload {
+    FlashblocksPayload::V1(FlashblocksPayloadV1 {
         payload_id,
         index,
         base: Some(ExecutionPayloadBaseV1 {
@@ -185,21 +188,17 @@ fn base_payload(
             extra_data: Bytes::new(),
             base_fee_per_gas: U256::ZERO,
         }),
-        diff: ExecutionPayloadFlashblockDeltaV1 {
-            access_list: flashblocks_primitives::access_list::FlashblockAccessList::default(),
-            access_list_hash: B256::default(),
-            ..ExecutionPayloadFlashblockDeltaV1::default()
-        },
         metadata: FlashblockMetadata::default(),
-    }
+        diff: ExecutionPayloadFlashblockDeltaV1::default(),
+    })
 }
 
-fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
+fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayload {
     let tx1 = Bytes::from_str("0x7ef8f8a042a8ae5ec231af3d0f90f68543ec8bca1da4f7edd712d5b51b490688355a6db794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000044d000a118b00000000000000040000000067cb7cb0000000000077dbd4000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014edd27304108914dd6503b19b9eeb9956982ef197febbeeed8a9eac3dbaaabdf000000000000000000000000fc56e7272eebbba5bc6c544e159483c4a38f8ba3").unwrap();
     let tx2 = Bytes::from_str("0xf8cd82016d8316e5708302c01c94f39635f2adf40608255779ff742afe13de31f57780b8646e530e9700000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000156ddc81eed2a36d68302948ba0a608703e79b22164f74523d188a11f81c25a65dd59535bab1cd1d8b30d115f3ea07f4cfbbad77a139c9209d3bded89091867ff6b548dd714109c61d1f8e7a84d14").unwrap();
 
     // Send another test flashblock payload
-    FlashblocksPayloadV1 {
+    FlashblocksPayload::V1(FlashblocksPayloadV1 {
         payload_id,
         index,
         base: None,
@@ -212,11 +211,9 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
-            access_list: flashblocks_primitives::access_list::FlashblockAccessList::default(),
-            access_list_hash: B256::default(),
         },
         metadata: FlashblockMetadata::default(),
-    }
+    })
 }
 
 async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
@@ -252,7 +249,8 @@ async fn test_double_failover() -> eyre::Result<()> {
             println!("\n////////////////////////////////////////////////////////////////////\n");
             println!(
                 "Received flashblock, payload_id: {}, index: {}",
-                payload.payload_id, payload.index
+                payload.payload_id(),
+                payload.index()
             );
             println!("\n////////////////////////////////////////////////////////////////////\n");
         }
@@ -276,7 +274,7 @@ async fn test_double_failover() -> eyre::Result<()> {
 
     let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     let authorization_0 = Authorization::new(
-        payload_0.payload_id,
+        *payload_0.payload_id(),
         0,
         &authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
@@ -288,9 +286,9 @@ async fn test_double_failover() -> eyre::Result<()> {
     nodes[0].p2p_handle.publish_new(authorized_0).unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let payload_1 = next_payload(payload_0.payload_id, 1);
+    let payload_1 = next_payload(*payload_0.payload_id(), 1);
     let authorization_1 = Authorization::new(
-        payload_1.payload_id,
+        *payload_1.payload_id(),
         0,
         &authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
@@ -306,10 +304,10 @@ async fn test_double_failover() -> eyre::Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Send a new block, this time from node 1
-    let payload_2 = next_payload(payload_0.payload_id, 2);
+    let payload_2 = next_payload(*payload_0.payload_id(), 2);
     let msg = payload_2.clone();
     let authorization_2 = Authorization::new(
-        payload_2.payload_id,
+        *payload_2.payload_id(),
         0,
         &authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
@@ -340,7 +338,8 @@ async fn test_force_race_condition() -> eyre::Result<()> {
             println!("\n////////////////////////////////////////////////////////////////////\n");
             println!(
                 "Received flashblock, payload_id: {}, index: {}",
-                payload.payload_id, payload.index
+                payload.payload_id(),
+                payload.index()
             );
             println!("\n////////////////////////////////////////////////////////////////////\n");
         }
@@ -365,7 +364,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     info!("Sending payload 0, index 0");
     let authorization = Authorization::new(
-        payload_0.payload_id,
+        *payload_0.payload_id(),
         0,
         &authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
@@ -388,9 +387,9 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     assert_eq!(pending_block.transactions.hashes().len(), 0);
 
     info!("Sending payload 0, index 1");
-    let payload_1 = next_payload(payload_0.payload_id, 1);
+    let payload_1 = next_payload(*payload_0.payload_id(), 1);
     let authorization = Authorization::new(
-        payload_1.payload_id,
+        *payload_1.payload_id(),
         0,
         &authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
@@ -418,13 +417,13 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let payload_2 = base_payload(1, PayloadId::new([1; 8]), 0, latest_block.hash());
     info!("Sending payload 1, index 0");
     let authorization_1 = Authorization::new(
-        payload_2.payload_id,
+        *payload_2.payload_id(),
         1,
         &authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorization_2 = Authorization::new(
-        payload_2.payload_id,
+        *payload_2.payload_id(),
         1,
         &authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
@@ -481,7 +480,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let payload_id = PayloadId::new([0; 8]);
     let base_payload = base_payload(0, payload_id, 0, latest_block.hash());
     let authorization = Authorization::new(
-        base_payload.payload_id,
+        *base_payload.payload_id(),
         0,
         &authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
@@ -506,7 +505,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
 
     let next_payload = next_payload(payload_id, 1);
     let authorization = Authorization::new(
-        next_payload.payload_id,
+        *next_payload.payload_id(),
         0,
         &authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
@@ -544,7 +543,8 @@ async fn test_peer_reputation() -> eyre::Result<()> {
             println!("\n////////////////////////////////////////////////////////////////////\n");
             println!(
                 "Received flashblock, payload_id: {}, index: {}",
-                payload.payload_id, payload.index
+                *payload.payload_id(),
+                payload.index()
             );
             println!("\n////////////////////////////////////////////////////////////////////\n");
         }
@@ -561,7 +561,7 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
     info!("Sending bad authorization");
     let authorization = Authorization::new(
-        payload_0.payload_id,
+        *payload_0.payload_id(),
         0,
         &invalid_authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),

@@ -277,30 +277,30 @@ where
         let flashblocks = self.flashblocks_state.flashblocks();
 
         if let Some(flashblocks) = flashblocks {
-            let block = Flashblock::reduce(flashblocks);
-            if let Some(flashblock) = block {
-                if *flashblock.payload_id() == attributes.payload_id().0 {
-                    // If we have a pre-confirmed state, we can use it to build the payload
-                    debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
+            let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
+                PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
+            })?;
+            if *flashblock.payload_id() == attributes.payload_id() {
+                // If we have a pre-confirmed state, we can use it to build the payload
+                debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
 
-                    let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                        flashblock.clone().try_into().map_err(|_| {
-                            PayloadBuilderError::Other(
-                                eyre!("Failed to convert flashblock to recovered block").into(),
-                            )
-                        })?;
+                let block: RecoveredBlock<Block<OpTxEnvelope>> =
+                    flashblock.clone().try_into().map_err(|_| {
+                        PayloadBuilderError::Other(
+                            eyre!("Failed to convert flashblock to recovered block").into(),
+                        )
+                    })?;
 
-                    let sealed = block.into_sealed_block();
+                let sealed = block.into_sealed_block();
 
-                    let payload = OpBuiltPayload::new(
-                        attributes.payload_id(),
-                        Arc::new(sealed),
-                        flashblock.flashblock().metadata.fees,
-                        None,
-                    );
+                let payload = OpBuiltPayload::new(
+                    attributes.payload_id(),
+                    Arc::new(sealed),
+                    flashblock.flashblock.metadata().fees,
+                    None,
+                );
 
-                    return Ok(Some(payload));
-                }
+                return Ok(Some(payload));
             }
         }
 

@@ -1,10 +1,12 @@
-use alloy_primitives::B256;
 use ed25519_dalek::SigningKey;
 use flashblocks_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
     p2p::{Authorization, AuthorizedPayload},
-    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    primitives::{
+        ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayload,
+        FlashblocksPayloadV1,
+    },
 };
 use futures::StreamExt as _;
 use reth::payload::PayloadId;
@@ -19,8 +21,8 @@ fn signing_key(byte: u8) -> SigningKey {
 }
 
 /// Helper: a minimal Flashblock (index 0) for the given payload-id.
-fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayloadV1 {
-    FlashblocksPayloadV1 {
+fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayload {
+    FlashblocksPayload::V1(FlashblocksPayloadV1 {
         payload_id,
         index: idx,
         base: Some(ExecutionPayloadBaseV1 {
@@ -28,12 +30,10 @@ fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayload
             ..Default::default()
         }),
         diff: ExecutionPayloadFlashblockDeltaV1 {
-            access_list: flashblocks_primitives::access_list::FlashblockAccessList::default(),
-            access_list_hash: B256::default(),
             ..ExecutionPayloadFlashblockDeltaV1::default()
         },
         metadata: FlashblockMetadata::default(),
-    }
+    })
 }
 
 /// Build a fresh handle plus its broadcast receiver.
@@ -127,8 +127,8 @@ async fn flashblock_stream_is_ordered() {
     // Expect to receive 0, then 1 over the ordered broadcast.
     let first = flashblock_stream.next().await.unwrap();
     let second = flashblock_stream.next().await.unwrap();
-    assert_eq!(first.index, 0);
-    assert_eq!(second.index, 1);
+    assert_eq!(first.index(), 0);
+    assert_eq!(second.index(), 1);
 }
 
 #[tokio::test]
@@ -239,7 +239,7 @@ async fn flashblock_stream_buffers_and_live() {
 
     // first item comes from the cached vector
     let first = stream.next().await.unwrap();
-    assert_eq!(first.index, 0);
+    assert_eq!(first.index(), 0);
 
     // publish index 1 after the stream exists
     let signed1 = AuthorizedPayload::new(builder_sk, auth, payload(pid, 1));
@@ -247,7 +247,7 @@ async fn flashblock_stream_buffers_and_live() {
 
     // second item should be delivered live
     let second = stream.next().await.unwrap();
-    assert_eq!(second.index, 1);
+    assert_eq!(second.index(), 1);
 }
 
 #[tokio::test]

@@ -16,6 +16,14 @@ pub struct FlashblockAccessList {
     pub changes: Vec<AccountChanges>,
 }
 
+impl FlashblockAccessList {
+    pub fn extend(&mut self, other: &FlashblockAccessList) {
+        todo!("Implement merging of access lists");
+
+        self.changes.extend_from_slice(&other.changes);
+    }
+}
+
 impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
     fn from(value: FlashblockAccessList) -> Self {
         let mut result = HashMap::new();

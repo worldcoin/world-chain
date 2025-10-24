@@ -1,5 +1,5 @@
-use crate::primitives::FlashblocksPayloadV1;
 use crate::primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1};
+use crate::primitives::{FlashblocksPayload, FlashblocksPayloadV1};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
@@ -7,7 +7,8 @@ use alloy_consensus::{
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{FixedBytes, U256};
+use alloy_primitives::U256;
+use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
@@ -23,13 +24,13 @@ use serde::{Deserialize, Serialize};
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
 pub struct Flashblock {
-    pub flashblock: FlashblocksPayloadV1,
+    pub flashblock: FlashblocksPayload,
 }
 
 impl Flashblock {
     pub fn new(
         payload: &OpBuiltPayload,
-        config: PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
         index: u64,
         transactions_offset: usize,
     ) -> Self {
@@ -75,6 +76,7 @@ impl Flashblock {
                     .expect("time went backwards"),
             ),
         };
+
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
                 payload_id: config.attributes.payload_id(),
@@ -94,11 +96,10 @@ impl Flashblock {
                         .unwrap_or_default()
                         .to_vec(),
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
-                    access_list: crate::access_list::FlashblockAccessList::default(),
-                    access_list_hash: alloy_primitives::B256::default(),
                 },
                 metadata,
-            },
+            }
+            .into(),
         }
     }
 }
@@ -113,59 +114,61 @@ pub struct FlashblockMetadata {
 }
 
 impl Flashblock {
-    pub fn flashblock(&self) -> &FlashblocksPayloadV1 {
+    pub fn flashblock(&self) -> &FlashblocksPayload {
         &self.flashblock
     }
 
-    pub fn into_flashblock(self) -> FlashblocksPayloadV1 {
+    pub fn into_flashblock(self) -> FlashblocksPayload {
         self.flashblock
     }
 
-    pub fn payload_id(&self) -> &FixedBytes<8> {
-        &self.flashblock.payload_id.0
+    pub fn payload_id(&self) -> &PayloadId {
+        self.flashblock.payload_id()
     }
 
     pub fn base(&self) -> Option<&ExecutionPayloadBaseV1> {
-        self.flashblock.base.as_ref()
+        self.flashblock.base()
     }
 
-    pub fn diff(&self) -> &ExecutionPayloadFlashblockDeltaV1 {
-        &self.flashblock.diff
+    pub fn diff_v1(&self) -> &ExecutionPayloadFlashblockDeltaV1 {
+        &self.flashblock.diff_v1()
     }
 }
 
 impl Flashblock {
-    pub fn reduce(flashblocks: Flashblocks) -> Option<Flashblock> {
+    pub fn reduce(flashblocks: Flashblocks) -> eyre::Result<Flashblock> {
         let mut iter = flashblocks.0.into_iter();
-        let mut acc = iter.next()?.flashblock;
+        let mut acc = iter.next().ok_or(eyre!("flashblocks is empty"))?.flashblock;
 
         for next in iter {
             debug_assert_eq!(
-                acc.payload_id, next.flashblock.payload_id,
+                *acc.payload_id(),
+                *next.flashblock.payload_id(),
                 "all flashblocks should have the same payload_id"
             );
 
-            if acc.base.is_none() && next.flashblock.base.is_some() {
-                acc.base = next.flashblock.base;
-            }
+            acc.extend(&next.flashblock())?;
+            // if acc.base.is_none() && next.flashblock.base().is_some() {
+            //     acc.base = next.flashblock.base().cloned();
+            // }
 
-            acc.diff.gas_used = next.flashblock.diff.gas_used;
+            // acc.diff.gas_used = next.flashblock.diff_v1().gas_used;
 
-            acc.diff
-                .transactions
-                .extend(next.flashblock.diff.transactions);
-            acc.diff
-                .withdrawals
-                .extend(next.flashblock.diff.withdrawals);
+            // acc.diff
+            //     .transactions
+            //     .extend(next.flashblock.diff_v1().transactions);
+            // acc.diff
+            //     .withdrawals
+            //     .extend(next.flashblock.diff_v1().withdrawals);
 
-            acc.diff.state_root = next.flashblock.diff.state_root;
-            acc.diff.receipts_root = next.flashblock.diff.receipts_root;
-            acc.diff.logs_bloom = next.flashblock.diff.logs_bloom;
-            acc.diff.withdrawals_root = next.flashblock.diff.withdrawals_root;
-            acc.diff.block_hash = next.flashblock.diff.block_hash;
+            // acc.diff.state_root = next.flashblock.diff_v1().state_root;
+            // acc.diff.receipts_root = next.flashblock.diff_v1().receipts_root;
+            // acc.diff.logs_bloom = next.flashblock.diff_v1().logs_bloom;
+            // acc.diff.withdrawals_root = next.flashblock.diff_v1().withdrawals_root;
+            // acc.diff.block_hash = next.flashblock.diff_v1().block_hash;
         }
 
-        Some(Flashblock { flashblock: acc })
+        Ok(Flashblock { flashblock: acc })
     }
 }
 
@@ -177,7 +180,7 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
         let base = value
             .base()
             .ok_or(eyre!("Flashblock is missing base payload"))?;
-        let diff = value.flashblock.diff.clone();
+        let diff = value.flashblock.diff_v1().clone();
         let header = Header {
             parent_beacon_block_root: None,
             state_root: diff.state_root,
@@ -246,7 +249,7 @@ impl Flashblocks {
         let mut iter = flashblocks.iter();
 
         let first = iter.next().unwrap();
-        if first.flashblock.base.is_none() {
+        if first.flashblock.base().is_none() {
             bail!("The first flashblock must contain the base payload");
         }
 
@@ -256,7 +259,7 @@ impl Flashblocks {
         }
 
         for (i, fb) in flashblocks.iter().enumerate() {
-            if fb.flashblock.index != i as u64 {
+            if fb.flashblock.index() != i as u64 {
                 bail!("Flashblocks must have contiguous indices starting from 0");
             }
         }
@@ -274,10 +277,10 @@ impl Flashblocks {
     /// was added to the existing collection, or an error if the conditions are not met.
     pub fn push(&mut self, flashblock: Flashblock) -> eyre::Result<bool> {
         if flashblock.payload_id() != self.payload_id() {
-            if flashblock.flashblock.index != 0 {
+            if flashblock.flashblock.index() != 0 {
                 bail!("New flashblock has different payload_id and index is not 0");
             }
-            let Some(base) = &flashblock.flashblock.base else {
+            let Some(base) = &flashblock.flashblock.base() else {
                 bail!("New flashblock has different payload_id and must contain the base payload");
             };
             if base.timestamp <= self.base().timestamp {
@@ -289,11 +292,11 @@ impl Flashblocks {
             return Ok(true);
         }
 
-        if flashblock.flashblock.index != (self.0.len() as u64) {
+        if flashblock.flashblock.index() != (self.0.len() as u64) {
             bail!(
                 "New flashblock index is not contiguous expected {}, got {}",
                 self.0.len(),
-                flashblock.flashblock.index
+                flashblock.flashblock.index()
             );
         }
 
@@ -301,7 +304,7 @@ impl Flashblocks {
         Ok(false)
     }
 
-    pub fn last(&self) -> &FlashblocksPayloadV1 {
+    pub fn last(&self) -> &FlashblocksPayload {
         &self.0.last().unwrap().flashblock
     }
 
@@ -309,12 +312,12 @@ impl Flashblocks {
         &self.0
     }
 
-    pub fn payload_id(&self) -> &FixedBytes<8> {
+    pub fn payload_id(&self) -> &PayloadId {
         self.0.first().unwrap().payload_id()
     }
 
     pub fn base(&self) -> &ExecutionPayloadBaseV1 {
-        self.0.first().unwrap().flashblock.base.as_ref().unwrap()
+        self.0.first().unwrap().flashblock.base().as_ref().unwrap()
     }
 }
 
@@ -323,7 +326,7 @@ impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
 
     /// Converts a collection of flashblocks into a single `RecoveredBlock`.
     fn try_from(value: Flashblocks) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
-        let reduced = Flashblock::reduce(value).ok_or(eyre!("No flashblocks to reduce"))?;
+        let reduced = Flashblock::reduce(value)?;
         reduced.try_into()
     }
 }

@@ -9,7 +9,7 @@ use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
-use flashblocks_primitives::flashblocks::Flashblock;
+use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayload};
 use flashblocks_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
@@ -161,7 +161,7 @@ where
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
-        let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
+        let flashblock = Flashblock::new(payload, &self.config, self.block_index, offset);
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
@@ -175,8 +175,8 @@ where
 
     pub(crate) fn authorization_for(
         &self,
-        payload: FlashblocksPayloadV1,
-    ) -> Result<AuthorizedPayload<FlashblocksPayloadV1>, FlashblocksP2PError> {
+        payload: FlashblocksPayload,
+    ) -> Result<AuthorizedPayload<FlashblocksPayload>, FlashblocksP2PError> {
         Ok(AuthorizedPayload::new(
             self.p2p_handler.builder_sk()?,
             self.authorization,
