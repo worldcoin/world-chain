@@ -3,6 +3,7 @@ use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
+use dashmap::DashMap;
 use eyre::eyre::{eyre, OptionExt as _};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -77,7 +78,7 @@ where
         Self {
             inner: executor,
             flashblock_access_list: FlashblockAccessListConstruction {
-                changes: HashMap::default(),
+                changes: DashMap::new(),
             },
         }
     }
@@ -109,7 +110,7 @@ where
 
     /// Records the transitions from the EVM's database into the access list construction.
     fn record_transitions(&mut self) {
-        let transitions = self.evm().db().transition_state.as_ref().cloned();
+        let transitions = self.evm().db().transition_state.as_ref();
         let index = self.inner.receipts.len();
 
         self.flashblock_access_list
@@ -189,11 +190,11 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        let mut access_list = self.flashblock_access_list.clone();
+        let access_list = self.flashblock_access_list.clone();
         let index = self.inner.receipts.len();
         let res = self.inner.finish();
         if let Ok((evm, _)) = &res {
-            access_list.on_state_transition(evm.db().transition_state.as_ref().cloned(), index);
+            access_list.on_state_transition(evm.db().transition_state.as_ref(), index);
         }
 
         res
