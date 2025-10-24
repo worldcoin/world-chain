@@ -157,10 +157,7 @@ where
         tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_without_commit(&tx)
-            .and_then(|output| {
-                println!("Output: {:#?}", output.result);
-                self.commit_transaction(output, &tx)
-            })
+            .and_then(|output| self.commit_transaction(output, &tx))
     }
 
     fn execute_transaction_with_commit_condition(
@@ -494,6 +491,95 @@ where
     }
 }
 
+impl<'a, DB, N, E> FlashblocksBlockBuilder<'a, N, E>
+where
+    DB: Database + 'a,
+    N: NodePrimitives<
+        Receipt = OpReceipt,
+        SignedTx = OpTransactionSigned,
+        Block = alloy_consensus::Block<OpTransactionSigned>,
+        BlockHeader = alloy_consensus::Header,
+    >,
+    E: Evm<
+        DB = &'a mut State<DB>,
+        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Spec = OpSpecId,
+        HaltReason = OpHaltReason,
+    >,
+{
+    // TODO: unify duplicate code
+    pub fn finish_with_access_list(
+        self,
+        state: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<N>, FlashblockAccessList), BlockExecutionError> {
+        let (evm, result, access_list) = self.inner.executor.finish_with_access_list()?;
+
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
+        // which represent a single atomic state transition. therefore reverts should have length 1
+        // we only retain the first occurance of a revert for any given account.
+        let flattened = db
+            .bundle_state
+            .reverts
+            .iter()
+            .flatten()
+            .scan(HashSet::new(), |visited, (acc, revert)| {
+                if visited.insert(acc) {
+                    Some((*acc, revert.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        db.bundle_state.reverts = Reverts::new(vec![flattened]);
+
+        // calculate the state root
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+
+        let (transactions, senders) = self
+            .inner
+            .transactions
+            .into_iter()
+            .map(|tx| tx.into_parts())
+            .unzip();
+
+        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+            '_,
+            '_,
+            FlashblocksBlockExecutorFactory,
+        >::new(
+            evm_env,
+            self.inner.ctx,
+            self.inner.parent,
+            transactions,
+            &result,
+            &db.bundle_state,
+            &state,
+            state_root,
+        ))?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok((
+            BlockBuilderOutcome {
+                execution_result: result,
+                hashed_state,
+                trie_updates,
+                block,
+            },
+            access_list.build(),
+        ))
+    }
+}
+
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -738,7 +824,7 @@ where
     };
 
     let execution_context_clone = execution_context.clone();
-    let provided_bal_hash = flashblock.diff_v2().unwrap().access_list_hash; // FIXME:
+    let provided_bal_hash = flashblock.diff_v2().unwrap().access_list_hash;
 
     let state_provider_clone = state_provider.clone();
     let state_provider_clone2 = state_provider.clone();
