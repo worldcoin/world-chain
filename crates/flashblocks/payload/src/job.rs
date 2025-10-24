@@ -55,7 +55,6 @@ impl<P: Send + Sync + 'static> From<FlashblocksPendingPayload<P>> for PendingPay
     fn from(value: FlashblocksPendingPayload<P>) -> Self {
         let FlashblocksPendingPayload { _cancel, payload } = value;
 
-        // Map the receiver to drop the access list and keep only the BuildOutcome
         let payload = async move {
             match payload.await {
                 Ok(Ok((outcome, _access_list))) => Ok(outcome),
@@ -64,7 +63,6 @@ impl<P: Send + Sync + 'static> From<FlashblocksPendingPayload<P>> for PendingPay
             }
         };
 
-        // Convert the mapped future back into a oneshot::Receiver via a new channel
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let _ = tx.send(payload.await);

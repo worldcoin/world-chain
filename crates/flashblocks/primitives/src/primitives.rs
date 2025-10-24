@@ -237,7 +237,7 @@ where
                     .diff
                     .access_list
                     .extend(&other_inner.diff.access_list);
-                
+
                 self_inner.diff.access_list_hash = other_inner.diff.access_list_hash.clone();
                 self_inner.diff.inner.state_root = other_inner.diff.inner.state_root;
                 self_inner.diff.inner.receipts_root = other_inner.diff.inner.receipts_root;
