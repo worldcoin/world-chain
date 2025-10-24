@@ -1,26 +1,27 @@
-use std::collections::{HashMap, HashSet};
-
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
 use alloy_primitives::{Address, U256};
+use dashmap::DashMap;
 use flashblocks_primitives::access_list::FlashblockAccessList;
+use rayon::prelude::*;
 use revm::{database::TransitionState, state::Bytecode};
+use std::collections::{HashMap, HashSet};
 
 pub type BlockAccessIndex = u16;
 
 /// A convenience builder type for [`FlashblockAccessList`]
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone)]
 pub struct FlashblockAccessListConstruction {
     /// Map from Address -> AccountChangesConstruction
-    pub changes: HashMap<Address, AccountChangesConstruction>,
+    pub changes: DashMap<Address, AccountChangesConstruction>,
 }
 
 impl FlashblockAccessListConstruction {
     /// Creates a new empty [`FlashblockAccessListConstruction`]
     pub fn new() -> Self {
         Self {
-            changes: HashMap::new(),
+            changes: DashMap::new(),
         }
     }
 }
@@ -121,89 +122,92 @@ impl AccountChangesConstruction {
 
 impl FlashblockAccessListConstruction {
     /// Consumes the builder and produces a [`FlashblockAccessList`]
-    pub fn build(mut self) -> FlashblockAccessList {
+    pub fn build(self) -> FlashblockAccessList {
         // Sort addresses lexicographically
-        let mut keys = self.changes.keys().cloned().collect::<Vec<_>>();
-        keys.sort_unstable();
+        let mut changes: Vec<_> = self
+            .changes
+            .into_par_iter()
+            .map(|(k, v)| v.build(k))
+            .collect();
 
-        FlashblockAccessList {
-            changes: keys
-                .into_iter()
-                .map(|k| self.changes.remove(&k).unwrap().build(k))
-                .collect(),
-        }
+        changes.par_sort_unstable_by_key(|a| a.address);
+
+        FlashblockAccessList { changes }
     }
 }
 
 impl FlashblockAccessListConstruction {
-    pub fn on_state_transition(&mut self, transitions: Option<TransitionState>, index: usize) {
+    pub fn on_state_transition(&self, transitions: Option<&TransitionState>, index: usize) {
         let transitions = match transitions {
             Some(t) => t,
             None => return,
         };
 
         let index = index as BlockAccessIndex;
-        for (address, transition) in &transitions.transitions {
-            if !transition.status.is_not_modified() {
-                let acc_changes = self.changes.entry(*address).or_default();
+        transitions
+            .transitions
+            .par_iter()
+            .for_each(|(address, transition)| {
+                if !transition.status.is_not_modified() {
+                    let mut acc_changes = self.changes.entry(*address).or_default();
 
-                // Storage changes
-                for (slot, slot_value) in &transition.storage {
-                    if slot_value.is_changed() {
-                        acc_changes
-                            .storage_changes
-                            .entry(*slot)
-                            .or_default()
-                            .insert(index, slot_value.present_value());
-                    } else {
-                        acc_changes.storage_reads.insert(*slot);
-                    }
-                }
-
-                if let Some(present_info) = &transition.info {
-                    if transition
-                        .previous_info
-                        .as_ref()
-                        .map(|info| info.nonce != present_info.nonce)
-                        .unwrap_or(true)
-                    {
-                        acc_changes
-                            .nonce_changes
-                            .entry(index)
-                            .and_modify(|nonce| *nonce = present_info.nonce)
-                            .or_insert(present_info.nonce);
-                    }
-
-                    if transition
-                        .previous_info
-                        .as_ref()
-                        .map(|info| info.balance != present_info.balance)
-                        .unwrap_or(true)
-                    {
-                        acc_changes
-                            .balance_changes
-                            .entry(index)
-                            .and_modify(|bal| *bal = present_info.balance)
-                            .or_insert(present_info.balance);
-                    }
-
-                    if transition
-                        .previous_info
-                        .as_ref()
-                        .map(|info| info.code_hash != present_info.code_hash)
-                        .unwrap_or(true)
-                    {
-                        if let Some(code) = &present_info.code {
+                    // Storage changes
+                    for (slot, slot_value) in &transition.storage {
+                        if slot_value.is_changed() {
                             acc_changes
-                                .code_changes
+                                .storage_changes
+                                .entry(*slot)
+                                .or_default()
+                                .insert(index, slot_value.present_value());
+                        } else {
+                            acc_changes.storage_reads.insert(*slot);
+                        }
+                    }
+
+                    if let Some(present_info) = &transition.info {
+                        if transition
+                            .previous_info
+                            .as_ref()
+                            .map(|info| info.nonce != present_info.nonce)
+                            .unwrap_or(true)
+                        {
+                            acc_changes
+                                .nonce_changes
                                 .entry(index)
-                                .and_modify(|bc| *bc = code.clone())
-                                .or_insert_with(|| code.to_owned());
+                                .and_modify(|nonce| *nonce = present_info.nonce)
+                                .or_insert(present_info.nonce);
+                        }
+
+                        if transition
+                            .previous_info
+                            .as_ref()
+                            .map(|info| info.balance != present_info.balance)
+                            .unwrap_or(true)
+                        {
+                            acc_changes
+                                .balance_changes
+                                .entry(index)
+                                .and_modify(|bal| *bal = present_info.balance)
+                                .or_insert(present_info.balance);
+                        }
+
+                        if transition
+                            .previous_info
+                            .as_ref()
+                            .map(|info| info.code_hash != present_info.code_hash)
+                            .unwrap_or(true)
+                        {
+                            if let Some(code) = &present_info.code {
+                                acc_changes
+                                    .code_changes
+                                    .entry(index)
+                                    .and_modify(|bc| *bc = code.clone())
+                                    .or_insert_with(|| code.to_owned());
+                            }
                         }
                     }
                 }
-            }
-        }
+            })
     }
 }
 
