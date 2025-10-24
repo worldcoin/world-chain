@@ -6,11 +6,11 @@ use eyre::eyre::{eyre, Result};
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
 use futures::future::BoxFuture;
+use op_alloy_rpc_types::OpTransactionReceipt;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_primitives::OpReceipt;
 use revm_primitives::{Address, Bytes, B256, U256};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -643,7 +643,7 @@ pub struct EthGetTransactionReceipt {
     /// Duration in milliseconds of backoff before fetching the receipt
     pub backoff: u64,
     /// Tx sender for receipt results
-    pub tx: tokio::sync::mpsc::Sender<Vec<Option<OpReceipt>>>,
+    pub tx: tokio::sync::mpsc::Sender<Vec<Option<OpTransactionReceipt>>>,
 }
 
 impl EthGetTransactionReceipt {
@@ -652,7 +652,7 @@ impl EthGetTransactionReceipt {
         hash: B256,
         node_idxs: Vec<usize>,
         backoff: u64,
-        tx: tokio::sync::mpsc::Sender<Vec<Option<OpReceipt>>>,
+        tx: tokio::sync::mpsc::Sender<Vec<Option<OpTransactionReceipt>>>,
     ) -> Self {
         Self {
             hash,
@@ -674,12 +674,12 @@ impl Action<OpEngineTypes> for EthGetTransactionReceipt {
             let mut receipts = vec![];
             for node_idx in &self.node_idxs {
                 let rpc_client = env.node_clients[*node_idx].rpc.clone();
-                let receipt: Option<OpReceipt> =
+                let receipt: Option<OpTransactionReceipt> =
                     EthApiClient::<
                         TransactionRequest,
                         Transaction,
                         alloy_rpc_types_eth::Block,
-                        OpReceipt,
+                        OpTransactionReceipt,
                         Header,
                     >::transaction_receipt(&rpc_client, self.hash)
                     .await?;
