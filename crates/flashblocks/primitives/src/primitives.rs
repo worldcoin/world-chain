@@ -130,6 +130,16 @@ impl<M> FlashblocksPayload<M>
 where
     M: Default + Clone,
 {
+    /// Returns true if the flashblock payload is of version 1.
+    pub fn is_v1(&self) -> bool {
+        matches!(self, FlashblocksPayload::V1(_))
+    }
+
+    /// Returns true if the flashblock payload is of version 2.
+    pub fn is_v2(&self) -> bool {
+        matches!(self, FlashblocksPayload::V2(_))
+    }
+
     /// Returns the payload id of the flashblock payload.
     pub fn payload_id(&self) -> &PayloadId {
         match self {

@@ -746,30 +746,48 @@ where
     let sealed_header_clone = sealed_header.clone();
     let transactions_clone = transactions.clone();
 
-    let (execution_result, state_root_result) = rayon::join(
-        move || {
-            execute_transactions(
-                transactions_clone.clone(),
-                provided_bal_hash,
-                &evm_config,
-                sealed_header.clone(),
-                state_provider_clone.clone(),
-                &attributes,
-                latest_bundle,
-                execution_context_clone.clone(),
-                chain_spec,
-            )
-        },
-        move || {
-            let optimistic_bundle: HashMap<Address, BundleAccount> =
-                flashblock.diff_v2().unwrap().access_list.clone().into(); // FIXME:
+    let (execution_result, state_root_result) = if flashblock.is_v2() {
+        let (execution_result, state_root_result) = rayon::join(
+            move || {
+                execute_transactions(
+                    transactions_clone.clone(),
+                    provided_bal_hash,
+                    &evm_config,
+                    sealed_header.clone(),
+                    state_provider_clone.clone(),
+                    &attributes,
+                    latest_bundle,
+                    execution_context_clone.clone(),
+                    chain_spec,
+                )
+            },
+            move || {
+                let optimistic_bundle: HashMap<Address, BundleAccount> =
+                    flashblock.diff_v2().unwrap().access_list.clone().into();
 
-            compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
-        },
-    );
+                compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
+            },
+        );
 
-    let (bundle_state, block_execution_result, _access_list, evm_env) = execution_result?;
-    let (state_root, trie_updates, hashed_state) = state_root_result?;
+        (execution_result?, state_root_result?)
+    } else {
+        let execution_result = execute_transactions(
+            transactions_clone,
+            provided_bal_hash,
+            &evm_config,
+            sealed_header_clone,
+            state_provider_clone,
+            &attributes,
+            latest_bundle,
+            execution_context_clone,
+            chain_spec,
+        )?;
+
+        todo!()
+    };
+
+    let (bundle_state, block_execution_result, _access_list, evm_env) = execution_result;
+    let (state_root, trie_updates, hashed_state) = state_root_result;
 
     let block_assembler = FlashblocksBlockAssembler::new(Arc::new(chain_spec.clone()));
 
