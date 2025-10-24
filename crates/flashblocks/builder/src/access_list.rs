@@ -130,7 +130,7 @@ impl FlashblockAccessListConstruction {
             .map(|(k, v)| v.build(k))
             .collect();
 
-        changes.sort_unstable_by_key(|a| a.address);
+        changes.par_sort_unstable_by_key(|a| a.address);
 
         FlashblockAccessList { changes }
     }
