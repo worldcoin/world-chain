@@ -233,8 +233,12 @@ where
                 self_inner.diff.withdrawals_root = other_inner.diff.withdrawals_root;
             }
             (FlashblocksPayload::V2(self_inner), FlashblocksPayload::V2(other_inner)) => {
-                self_inner.diff.access_list = other_inner.diff.access_list.clone();
-                self_inner.diff.access_list_hash = other_inner.diff.access_list_hash;
+                self_inner
+                    .diff
+                    .access_list
+                    .extend(&other_inner.diff.access_list);
+
+                self_inner.diff.access_list_hash = other_inner.diff.access_list_hash.clone();
                 self_inner.diff.inner.state_root = other_inner.diff.inner.state_root;
                 self_inner.diff.inner.receipts_root = other_inner.diff.inner.receipts_root;
                 self_inner.diff.inner.logs_bloom = other_inner.diff.inner.logs_bloom;

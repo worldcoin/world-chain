@@ -220,7 +220,7 @@ where
             flashblock_interval: self.config.interval,
             flashblock_deadline,
             recommit_interval,
-            best_payload: PayloadState::Missing,
+            best_payload: (PayloadState::Missing, None),
             pending_block: None,
             cached_reads,
             payload_task_guard,

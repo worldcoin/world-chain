@@ -13,6 +13,7 @@ use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use eyre::eyre::eyre;
+use flashblocks_primitives::access_list::FlashblockAccessList;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
@@ -104,7 +105,7 @@ where
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
         committed_payload: Option<OpBuiltPayload>,
-    ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<(BuildOutcome<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
     {
@@ -146,7 +147,7 @@ where
                 committed_payload,
             )
         }
-        .map(|out| out.with_cached_reads(cached_reads))
+        .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
     }
 }
 
@@ -178,6 +179,7 @@ where
             },
             None,
         )
+        .map(|(outcome, _access_list)| outcome)
     }
 
     fn on_missing_payload(
@@ -204,6 +206,7 @@ where
             |_| NoopPayloadTransactions::<Pool::Transaction>::default(),
             None,
         )?
+        .0
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -229,7 +232,13 @@ where
             <Self as PayloadBuilder>::BuiltPayload,
         >,
         committed_payload: Option<<Self as PayloadBuilder>::BuiltPayload>,
-    ) -> Result<BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>, PayloadBuilderError> {
+    ) -> Result<
+        (
+            BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>,
+            FlashblockAccessList,
+        ),
+        PayloadBuilderError,
+    > {
         self.build_payload(
             args,
             |attrs| {
@@ -289,7 +298,7 @@ where
         state_provider: impl StateProvider,
         ctx: &Ctx,
         committed_payload: Option<OpBuiltPayload>,
-    ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
+    ) -> Result<(BuildOutcomeKind<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
     where
         Pool: TransactionPool,
         Txs: PayloadTransactions,
@@ -442,7 +451,10 @@ where
                 warn!(target: "flashblocks::payload_builder", "payload build cancelled");
                 if let Some(best_payload) = committed_payload {
                     // we can return the previous best payload since we didn't include any new txs
-                    return Ok(BuildOutcomeKind::Freeze(best_payload));
+                    return Ok((
+                        BuildOutcomeKind::Freeze(best_payload),
+                        FlashblockAccessList::default(),
+                    ));
                 } else {
                     return Err(PayloadBuilderError::MissingPayload);
                 }
@@ -451,14 +463,17 @@ where
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted {
-                    fees: info.total_fees,
-                });
+                return Ok((
+                    BuildOutcomeKind::Aborted {
+                        fees: info.total_fees,
+                    },
+                    FlashblockAccessList::default(),
+                ));
             }
         }
 
         // 6. Build the block
-        let build_outcome = builder.finish(&state_provider)?;
+        let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
 
         // 7. Seal the block
         let BlockBuilderOutcome {
@@ -498,10 +513,10 @@ where
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
             // in the payload. In other words, the payload is deterministic and we can
             // freeze it once we've successfully built it.
-            Ok(BuildOutcomeKind::Freeze(payload))
+            Ok((BuildOutcomeKind::Freeze(payload), access_list))
         } else {
             // always better since we are re-using built payloads
-            Ok(BuildOutcomeKind::Better { payload })
+            Ok((BuildOutcomeKind::Better { payload }, access_list))
         }
     }
 

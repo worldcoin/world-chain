@@ -1,4 +1,8 @@
-use crate::primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1};
+use crate::access_list::FlashblockAccessList;
+use crate::primitives::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, ExecutionPayloadFlashblockDeltaV2,
+    FlashblocksPayloadV2,
+};
 use crate::primitives::{FlashblocksPayload, FlashblocksPayloadV1};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_consensus::{
@@ -7,7 +11,7 @@ use alloy_consensus::{
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_eips::Decodable2718;
 use alloy_eips::Encodable2718;
-use alloy_primitives::U256;
+use alloy_primitives::{keccak256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
@@ -33,6 +37,7 @@ impl Flashblock {
         config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
         index: u64,
         transactions_offset: usize,
+        access_list: FlashblockAccessList,
     ) -> Self {
         let block = payload.block();
         let fees = payload.fees();
@@ -78,24 +83,28 @@ impl Flashblock {
         };
 
         Flashblock {
-            flashblock: FlashblocksPayloadV1 {
+            flashblock: FlashblocksPayloadV2 {
                 payload_id: config.attributes.payload_id(),
                 index,
                 base: payload_base,
-                diff: ExecutionPayloadFlashblockDeltaV1 {
-                    state_root: block.state_root(),
-                    receipts_root: block.receipts_root(),
-                    logs_bloom: block.logs_bloom(),
-                    gas_used: block.gas_used(),
-                    block_hash: block.hash(),
-                    transactions,
-                    withdrawals: block
-                        .body()
-                        .withdrawals()
-                        .cloned()
-                        .unwrap_or_default()
-                        .to_vec(),
-                    withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                diff: ExecutionPayloadFlashblockDeltaV2 {
+                    inner: ExecutionPayloadFlashblockDeltaV1 {
+                        state_root: block.state_root(),
+                        receipts_root: block.receipts_root(),
+                        logs_bloom: block.logs_bloom(),
+                        gas_used: block.gas_used(),
+                        block_hash: block.hash(),
+                        transactions,
+                        withdrawals: block
+                            .body()
+                            .withdrawals()
+                            .cloned()
+                            .unwrap_or_default()
+                            .to_vec(),
+                        withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    },
+                    access_list: access_list.clone(),
+                    access_list_hash: keccak256(alloy_rlp::encode(access_list)),
                 },
                 metadata,
             }
