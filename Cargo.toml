@@ -249,6 +249,7 @@ once_cell = "1.19"
 # Test
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["redis"] }
+tracing-test = { version = "0.2", features = ["no-env-filter"] }
 
 lazy_static = "1.4"
 
