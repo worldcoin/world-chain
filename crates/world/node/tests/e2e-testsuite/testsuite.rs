@@ -30,7 +30,6 @@ use world_chain_node::context::FlashblocksContext;
 use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
 use world_chain_test::utils::signer;
 
-
 use crate::setup::{setup, setup_with_tx_peers, CHAIN_SPEC};
 
 #[tokio::test]

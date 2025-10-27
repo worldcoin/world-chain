@@ -14083,7 +14083,6 @@ dependencies = [
  "serde",
  "test-case",
  "tokio",
- "tracing",
  "world-chain-node",
  "world-chain-pbh",
  "world-chain-pool",
