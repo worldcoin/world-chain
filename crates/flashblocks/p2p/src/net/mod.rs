@@ -1,5 +1,7 @@
-use std::time::Duration;
-
+use crate::{
+    monitor::PeerMonitor,
+    protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
+};
 use reth::chainspec::Hardforks;
 use reth_eth_wire::NetPrimitivesFor;
 use reth_ethereum::network::api::FullNetwork;
@@ -11,28 +13,18 @@ use reth_node_builder::{
     BuilderContext,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use crate::{
-    monitor::{PeerMonitor, PeerMonitorConfig},
-    protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
-};
 
 #[derive(Debug)]
 pub struct FlashblocksNetworkBuilder<T> {
     inner: T,
     flashblocks_p2p_handle: Option<FlashblocksHandle>,
-    peer_monitor_config: PeerMonitorConfig,
 }
 
 impl<T> FlashblocksNetworkBuilder<T> {
-    pub fn new(
-        inner: T,
-        flashblocks_p2p_handle: FlashblocksHandle,
-        peer_monitor_config: PeerMonitorConfig,
-    ) -> Self {
+    pub fn new(inner: T, flashblocks_p2p_handle: FlashblocksHandle) -> Self {
         Self {
             inner,
             flashblocks_p2p_handle: Some(flashblocks_p2p_handle),
-            peer_monitor_config,
         }
     }
 
@@ -40,10 +32,6 @@ impl<T> FlashblocksNetworkBuilder<T> {
         Self {
             inner,
             flashblocks_p2p_handle: None,
-            peer_monitor_config: PeerMonitorConfig {
-                peer_monitor_interval: Duration::from_secs(30),
-                connection_init_timeout: Duration::from_secs(300),
-            },
         }
     }
 }
@@ -79,7 +67,7 @@ where
             let toml_peers = ctx.reth_config().peers.trusted_nodes.iter();
             let all_trusted_peers = cli_peers.chain(toml_peers).map(|peer| peer.id);
 
-            PeerMonitor::new(handle.clone(), self.peer_monitor_config)
+            PeerMonitor::new(handle.clone())
                 .with_initial_peers(all_trusted_peers)
                 .run_on_task_executor(ctx.task_executor());
         }

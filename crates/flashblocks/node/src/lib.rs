@@ -5,10 +5,7 @@ use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
 };
 use flashblocks_cli::FlashblocksArgs;
-use flashblocks_p2p::{
-    monitor::PeerMonitorConfig, net::FlashblocksNetworkBuilder,
-    protocol::handler::FlashblocksHandle,
-};
+use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use op_alloy_consensus::OpTxEnvelope;
@@ -228,18 +225,8 @@ where
             disable_discovery_v4: !discovery_v4,
         };
 
-        let peer_monitor_config = PeerMonitorConfig {
-            peer_monitor_interval: Duration::from_secs(self.flashblocks.peer_monitor_interval_secs),
-            connection_init_timeout: Duration::from_secs(
-                self.flashblocks.peer_monitor_init_timeout,
-            ),
-        };
-
-        let fb_network_builder = FlashblocksNetworkBuilder::new(
-            op_network_builder,
-            self.flashblocks_handle.clone(),
-            peer_monitor_config,
-        );
+        let fb_network_builder =
+            FlashblocksNetworkBuilder::new(op_network_builder, self.flashblocks_handle.clone());
 
         ComponentsBuilder::default()
             .node_types::<N>()

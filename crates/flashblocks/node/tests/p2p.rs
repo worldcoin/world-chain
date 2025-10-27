@@ -103,8 +103,6 @@ async fn setup_node(
         peers,
         None,
         None,
-        None,
-        None,
     )
     .await
 }
@@ -116,8 +114,6 @@ async fn setup_node_extended_cfg(
     peers: Vec<(PeerId, SocketAddr)>,
     port: Option<u16>,
     p2p_secret_key: Option<PathBuf>,
-    peer_monitor_interval_secs: Option<u64>,
-    peer_monitor_init_timeout: Option<u64>,
 ) -> eyre::Result<NodeContext> {
     let genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -176,8 +172,6 @@ async fn setup_node_extended_cfg(
             spoof_authorizer: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
-            peer_monitor_interval_secs: peer_monitor_interval_secs.unwrap_or(30),
-            peer_monitor_init_timeout: peer_monitor_init_timeout.unwrap_or(300),
         },
         da_config: Default::default(),
     }
@@ -661,9 +655,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     let tasks1 = TaskManager::new(tokio::runtime::Handle::current());
     let exec1 = tasks1.executor();
 
-    let peer_monitor_interval_secs = Duration::from_secs(1);
-    let peer_monitor_init_timeout = Duration::from_secs(2);
-
     // Setup node 1 with its own TaskManager (for isolated task cancellation)
     // Node1 needs static port and P2P key so it can be restarted with same identity
     let builder1 = SigningKey::from_bytes(&[1; 32]);
@@ -674,8 +665,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         vec![],                     // No peers initially
         None,                       // Use random port (we'll capture it)
         Some(p2p_key_path.clone()), // Use deterministic P2P key
-        Some(peer_monitor_interval_secs.as_secs()),
-        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
 
@@ -697,8 +686,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         vec![(peer1_id, peer1_addr)], // Node1 as trusted peer
         None,                         // Use random port
         None,                         // No deterministic P2P key needed
-        Some(peer_monitor_interval_secs.as_secs()),
-        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
 
@@ -723,7 +710,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     // Wait for PeerMonitor's periodic check to discover the trusted peer
     // Since PeerAdded events are ignored, the monitor relies on periodic polling
     // Wait for at least one full monitor interval + buffer (1s interval + 1s buffer)
-    sleep(peer_monitor_interval_secs + Duration::from_secs(1)).await;
+    sleep(Duration::from_secs(2)).await;
 
     // SIMULATE CRASH: Drop node1 and its TaskManager
     // Dropping the TaskManager cancels all tasks spawned on it
@@ -749,9 +736,8 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     });
 
     // Wait for PeerMonitor periodic checks to detect the disconnection and emit multiple warning logs
-    // Wait for at least 2 periodic ticks to ensure we get multiple log outputs
-    let wait_for_ticks_secs = peer_monitor_interval_secs * 2 + Duration::from_secs(1);
-    sleep(wait_for_ticks_secs).await;
+    // Wait for at least 2 periodic ticks to ensure we get multiple log outputs (1s * 3 + 1s buffer for safety)
+    sleep(Duration::from_secs(4)).await;
 
     // Verify that node 1 is no longer connected
     let trusted_peers_after = node2.network_handle.get_trusted_peers().await?;
@@ -761,8 +747,9 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         "Node 1 should have disconnected"
     );
 
-    // Wait a bit longer to ensure we have multiple warning logs before restarting
-    sleep(Duration::from_secs(1)).await;
+    // Wait longer to ensure we accumulate multiple warnings before reconnection
+    // This gives the peer monitor more time to detect and log the disconnection
+    sleep(Duration::from_secs(2)).await;
 
     // Test reconnection: restart node 1 and verify it can reconnect
     info!("Testing peer reconnection after restart");
@@ -779,8 +766,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         )], // Configure node2 as trusted peer
         Some(peer1_port),           // Reuse the same port
         Some(p2p_key_path.clone()), // Reuse the same P2P key
-        Some(peer_monitor_interval_secs.as_secs()),
-        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
     let peer1_id_new = node1_restarted.local_node_record.id;
@@ -840,7 +825,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     });
 
     // Wait for at least one more monitor tick to verify warnings stopped (1s interval + 1s buffer)
-    sleep(peer_monitor_interval_secs + Duration::from_secs(1)).await;
+    sleep(Duration::from_secs(2)).await;
 
     // Count the number of warning logs before and after reconnection to ensure they stopped
     logs_assert(|logs: &[&str]| {
