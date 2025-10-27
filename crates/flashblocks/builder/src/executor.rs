@@ -958,7 +958,8 @@ where
     Ok(())
 }
 
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+
 fn execute_transactions(
     transactions: Vec<Recovered<OpTransactionSigned>>,
     provided_bal_hash: FixedBytes<32>,
