@@ -4,10 +4,7 @@ use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData},
-    flashblocks::FlashblockMetadata,
-};
+use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetadata};
 
 /// Represents the modified portions of an execution payload within a flashblock.
 /// This structure contains only the fields that can be updated during block construction,
@@ -38,18 +35,6 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals_root: B256,
     /// Optional [`FlashblockAccessList`] and associated Hash
     pub access_list_data: Option<FlashblockAccessListData>,
-}
-
-#[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
-)]
-pub struct ExecutionPayloadFlashblockDeltaV2 {
-    /// The access list of the block.
-    pub access_list: FlashblockAccessList,
-    /// The hash of the RLP-encoded [`FlashblockAccessList`]
-    pub access_list_hash: B256,
-    /// The inner payload delta
-    pub inner: ExecutionPayloadFlashblockDeltaV1,
 }
 
 /// Represents the base configuration of an execution payload that remains constant
@@ -217,6 +202,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::access_list::FlashblockAccessList;
+
     use super::*;
     use alloy_rlp::{encode, Decodable};
 
