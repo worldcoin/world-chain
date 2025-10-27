@@ -73,6 +73,28 @@ pub struct FlashblocksArgs {
         requires = "builder_sk"
     )]
     pub recommit_interval: u64,
+
+    /// Interval in seconds between peer monitor checks.
+    ///
+    /// The peer monitor periodically checks the status of trusted peers
+    /// and logs warnings for disconnected peers.
+    #[arg(
+        long = "flashblocks.peer_monitor.interval",
+        env = "FLASHBLOCKS_PEER_MONITOR_INTERVAL",
+        default_value_t = 30
+    )]
+    pub peer_monitor_interval_secs: u64,
+
+    /// Connection initialization timeout in seconds.
+    ///
+    /// Maximum time to wait for initial connection to a trusted peer
+    /// before logging a warning.
+    #[arg(
+        long = "flashblocks.peer_monitor.init_timeout",
+        env = "FLASHBLOCKS_PEER_MONITOR_INIT_TIMEOUT",
+        default_value_t = 300
+    )]
+    pub peer_monitor_init_timeout: u64,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -105,6 +127,8 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             recommit_interval: 200,
             flashblocks_interval: 200,
+            peer_monitor_interval_secs: 30,
+            peer_monitor_init_timeout: 300,
         };
 
         let args = CommandParser::parse_from([
@@ -131,6 +155,8 @@ mod tests {
             builder_sk: None,
             recommit_interval: 200,
             flashblocks_interval: 200,
+            peer_monitor_interval_secs: 30,
+            peer_monitor_init_timeout: 300,
         };
 
         let args = CommandParser::parse_from([

@@ -10,41 +10,13 @@ use std::time::{Duration, Instant};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
-const DEFAULT_PEER_MONITOR_INTERVAL_SECS: u64 = 30;
-
-const DEFAULT_CONNECTION_INIT_TIMEOUT_SECS: u64 = 300;
-
-/// Get the peer monitor polling interval from environment variable or use default.
-fn peer_monitor_interval() -> Duration {
-    if let Ok(interval_str) = std::env::var("PEER_MONITOR_INTERVAL_SECS") {
-        if let Ok(interval) = interval_str.parse::<u64>() {
-            return Duration::from_secs(interval);
-        } else {
-            tracing::debug!(
-                target: "flashblocks::p2p",
-                interval_str = interval_str,
-                "Invalid PEER_MONITOR_INTERVAL_SECS environment variable, using default"
-            );
-        }
-    }
-
-    Duration::from_secs(DEFAULT_PEER_MONITOR_INTERVAL_SECS)
-}
-
-/// Get the connection initialization timeout from environment variable or use default.
-fn connection_init_timeout() -> Duration {
-    if let Ok(timeout_str) = std::env::var("CONNECTION_TIMEOUT_SECS") {
-        if let Ok(timeout) = timeout_str.parse::<u64>() {
-            return Duration::from_secs(timeout);
-        } else {
-            tracing::debug!(
-                target: "flashblocks::p2p",
-                timeout_str = timeout_str,
-                "Invalid CONNECTION_TIMEOUT_SECS environment variable, using default"
-            );
-        }
-    }
-    Duration::from_secs(DEFAULT_CONNECTION_INIT_TIMEOUT_SECS)
+/// Configuration for peer monitoring
+#[derive(Debug, Clone, Copy)]
+pub struct PeerMonitorConfig {
+    /// Interval between peer monitor checks
+    pub peer_monitor_interval: Duration,
+    /// Connection initialization timeout
+    pub connection_init_timeout: Duration,
 }
 
 /// State of trusted peer
@@ -59,6 +31,7 @@ struct PeerState {
 pub struct PeerMonitor<N> {
     network: N,
     trusted_peers: Mutex<HashMap<PeerId, PeerState>>,
+    config: PeerMonitorConfig,
 }
 
 impl<N> PeerMonitor<N>
@@ -66,11 +39,12 @@ where
     N: Peers + PeersInfo + NetworkPeersEvents + Send + Sync + 'static,
 {
     /// Create a new peer monitor
-    pub fn new(network: N) -> Self {
+    pub fn new(network: N, config: PeerMonitorConfig) -> Self {
         let trusted_peers = Mutex::new(HashMap::new());
         Self {
             network,
             trusted_peers,
+            config,
         }
     }
 
@@ -96,7 +70,7 @@ where
 
             tracing::info!(
                 target: "flashblocks::p2p",
-                interval_secs = %peer_monitor_interval().as_secs(),
+                interval_secs = %self.config.peer_monitor_interval.as_secs(),
                 "PeerMonitor started"
             );
 
@@ -109,7 +83,7 @@ where
 
     /// Periodically check trusted peers and log warnings for disconnected peers
     async fn periodically_check_peers(&self, shutdown_token: CancellationToken) {
-        let mut interval = interval(peer_monitor_interval());
+        let mut interval = interval(self.config.peer_monitor_interval);
         loop {
             tracing::trace!(
                 target: "flashblocks::p2p",
@@ -157,7 +131,7 @@ where
 
                         // Log warning either if already connected peer is now disconnected or connection to trusted peer was not established before timeout
                         if state.connection_established
-                            || now.duration_since(state.added_time) > connection_init_timeout()
+                            || now.duration_since(state.added_time) > self.config.connection_init_timeout
                         {
                             tracing::warn!(
                                 target: "flashblocks::p2p",

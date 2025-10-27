@@ -96,16 +96,28 @@ async fn setup_node(
     builder_sk: SigningKey,
     peers: Vec<(PeerId, SocketAddr)>,
 ) -> eyre::Result<NodeContext> {
-    setup_node_with_port_id(exec, authorizer_sk, builder_sk, peers, None, None).await
+    setup_node_extended_cfg(
+        exec,
+        authorizer_sk,
+        builder_sk,
+        peers,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
 }
 
-async fn setup_node_with_port_id(
+async fn setup_node_extended_cfg(
     exec: TaskExecutor,
     authorizer_sk: SigningKey,
     builder_sk: SigningKey,
     peers: Vec<(PeerId, SocketAddr)>,
     port: Option<u16>,
     p2p_secret_key: Option<PathBuf>,
+    peer_monitor_interval_secs: Option<u64>,
+    peer_monitor_init_timeout: Option<u64>,
 ) -> eyre::Result<NodeContext> {
     let genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -164,6 +176,8 @@ async fn setup_node_with_port_id(
             spoof_authorizer: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
+            peer_monitor_interval_secs: peer_monitor_interval_secs.unwrap_or(30),
+            peer_monitor_init_timeout: peer_monitor_init_timeout.unwrap_or(300),
         },
         da_config: Default::default(),
     }
@@ -636,10 +650,6 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn test_peer_monitoring() -> eyre::Result<()> {
-    // Set the peer monitor interval to 1s for fast tests
-    std::env::set_var("PEER_MONITOR_INTERVAL_SECS", "1");
-    std::env::set_var("CONNECTION_TIMEOUT_SECS", "2");
-
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 
     // Create a temporary P2P secret key file for node1 to ensure consistent peer ID across restarts
@@ -651,16 +661,21 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     let tasks1 = TaskManager::new(tokio::runtime::Handle::current());
     let exec1 = tasks1.executor();
 
+    let peer_monitor_interval_secs = Duration::from_secs(1);
+    let peer_monitor_init_timeout = Duration::from_secs(2);
+
     // Setup node 1 with its own TaskManager (for isolated task cancellation)
     // Node1 needs static port and P2P key so it can be restarted with same identity
     let builder1 = SigningKey::from_bytes(&[1; 32]);
-    let node1 = setup_node_with_port_id(
+    let node1 = setup_node_extended_cfg(
         exec1,
         authorizer.clone(),
         builder1,
         vec![],                     // No peers initially
         None,                       // Use random port (we'll capture it)
         Some(p2p_key_path.clone()), // Use deterministic P2P key
+        Some(peer_monitor_interval_secs.as_secs()),
+        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
 
@@ -675,18 +690,18 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     // Setup node 2 with leaked TaskManager (lives for entire test)
     // Node2 has node1 configured as trusted peer via CLI-style setup
     let builder2 = SigningKey::from_bytes(&[2; 32]);
-    let node2 = setup_node_with_port_id(
+    let node2 = setup_node_extended_cfg(
         exec2.clone(),
         authorizer.clone(),
         builder2,
         vec![(peer1_id, peer1_addr)], // Node1 as trusted peer
         None,                         // Use random port
         None,                         // No deterministic P2P key needed
+        Some(peer_monitor_interval_secs.as_secs()),
+        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
 
-    let connection_timeout = Duration::from_secs(10);
-    let poll_interval = Duration::from_millis(100);
     let start = Instant::now();
 
     loop {
@@ -699,23 +714,16 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             break;
         }
 
-        if start.elapsed() > connection_timeout {
+        if start.elapsed() > Duration::from_secs(10) {
             panic!("Timeout waiting for connection to establish");
         }
 
-        sleep(poll_interval).await;
+        sleep(Duration::from_millis(100)).await;
     }
-
-    // Determine the monitoring interval from environment variable
-    let monitor_interval_secs: u64 = std::env::var("PEER_MONITOR_INTERVAL_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap();
-
     // Wait for PeerMonitor's periodic check to discover the trusted peer
     // Since PeerAdded events are ignored, the monitor relies on periodic polling
-    // Wait for at least one full monitor interval + buffer
-    sleep(Duration::from_secs(monitor_interval_secs + 1)).await;
+    // Wait for at least one full monitor interval + buffer (1s interval + 1s buffer)
+    sleep(peer_monitor_interval_secs + Duration::from_secs(1)).await;
 
     // SIMULATE CRASH: Drop node1 and its TaskManager
     // Dropping the TaskManager cancels all tasks spawned on it
@@ -742,8 +750,8 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     // Wait for PeerMonitor periodic checks to detect the disconnection and emit multiple warning logs
     // Wait for at least 2 periodic ticks to ensure we get multiple log outputs
-    let wait_for_ticks_secs = monitor_interval_secs * 2 + 1;
-    sleep(Duration::from_secs(wait_for_ticks_secs)).await;
+    let wait_for_ticks_secs = peer_monitor_interval_secs * 2 + Duration::from_secs(1);
+    sleep(wait_for_ticks_secs).await;
 
     // Verify that node 1 is no longer connected
     let trusted_peers_after = node2.network_handle.get_trusted_peers().await?;
@@ -761,7 +769,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     info!("Restarting node 1 with the same port and P2P key");
 
     // Restart node 1 with node2 configured as trusted peer (CLI-style)
-    let node1_restarted = setup_node_with_port_id(
+    let node1_restarted = setup_node_extended_cfg(
         exec2.clone(),
         authorizer.clone(),
         SigningKey::from_bytes(&[1; 32]),
@@ -771,6 +779,8 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         )], // Configure node2 as trusted peer
         Some(peer1_port),           // Reuse the same port
         Some(p2p_key_path.clone()), // Reuse the same P2P key
+        Some(peer_monitor_interval_secs.as_secs()),
+        Some(peer_monitor_init_timeout.as_secs()),
     )
     .await?;
     let peer1_id_new = node1_restarted.local_node_record.id;
@@ -829,8 +839,8 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         Ok(())
     });
 
-    // Wait for at least one more monitor tick to verify warnings stopped
-    sleep(Duration::from_secs(monitor_interval_secs + 1)).await;
+    // Wait for at least one more monitor tick to verify warnings stopped (1s interval + 1s buffer)
+    sleep(peer_monitor_interval_secs + Duration::from_secs(1)).await;
 
     // Count the number of warning logs before and after reconnection to ensure they stopped
     logs_assert(|logs: &[&str]| {

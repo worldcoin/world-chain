@@ -16,7 +16,10 @@ use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
 };
-use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
+use flashblocks_p2p::{
+    monitor::PeerMonitorConfig, net::FlashblocksNetworkBuilder,
+    protocol::handler::FlashblocksHandle,
+};
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
@@ -185,9 +188,24 @@ where
             disable_discovery_v4: !discovery_v4,
         };
 
+        let flashblocks_args = self
+            .config
+            .args
+            .flashblocks
+            .as_ref()
+            .expect("flashblocks args required");
+
+        let peer_monitor_config = PeerMonitorConfig {
+            peer_monitor_interval: Duration::from_secs(flashblocks_args.peer_monitor_interval_secs),
+            connection_init_timeout: Duration::from_secs(
+                flashblocks_args.peer_monitor_init_timeout,
+            ),
+        };
+
         let fb_network_builder = FlashblocksNetworkBuilder::new(
             op_network_builder,
             components_context.flashblocks_handle.clone(),
+            peer_monitor_config,
         );
 
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
@@ -214,22 +232,8 @@ where
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
-                Duration::from_millis(
-                    self.config
-                        .args
-                        .flashblocks
-                        .as_ref()
-                        .expect("flashblocks args required")
-                        .flashblocks_interval,
-                ),
-                Duration::from_millis(
-                    self.config
-                        .args
-                        .flashblocks
-                        .as_ref()
-                        .expect("flashblocks args required")
-                        .recommit_interval,
-                ),
+                Duration::from_millis(flashblocks_args.flashblocks_interval),
+                Duration::from_millis(flashblocks_args.recommit_interval),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
