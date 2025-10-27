@@ -1,3 +1,7 @@
+use crate::{
+    monitor::PeerMonitor,
+    protocol::handler::{FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol},
+};
 use reth::chainspec::Hardforks;
 use reth_eth_wire::NetPrimitivesFor;
 use reth_ethereum::network::api::FullNetwork;
@@ -9,10 +13,6 @@ use reth_node_builder::{
     BuilderContext,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
-use crate::protocol::handler::{
-    FlashblocksHandle, FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol,
-};
 
 #[derive(Debug)]
 pub struct FlashblocksNetworkBuilder<T> {
@@ -61,6 +61,15 @@ where
                 handle: flashblocks_handle,
             };
             handle.add_rlpx_sub_protocol(flashblocks_rlpx.into_rlpx_sub_protocol());
+
+            // Merge trusted peers from both CLI args and reth.toml config file
+            let cli_peers = ctx.config().network.trusted_peers.iter();
+            let toml_peers = ctx.reth_config().peers.trusted_nodes.iter();
+            let all_trusted_peers = cli_peers.chain(toml_peers).map(|peer| peer.id);
+
+            PeerMonitor::new(handle.clone())
+                .with_initial_peers(all_trusted_peers)
+                .run_on_task_executor(ctx.task_executor());
         }
 
         Ok(handle)

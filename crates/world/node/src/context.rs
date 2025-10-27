@@ -268,6 +268,13 @@ where
         let wc_network_builder =
             WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
+        let flashblocks_args = self
+            .config
+            .args
+            .flashblocks
+            .as_ref()
+            .expect("flashblocks args required");
+
         let fb_network_builder = FlashblocksNetworkBuilder::new(
             wc_network_builder,
             components_context.flashblocks_handle.clone(),
@@ -297,22 +304,8 @@ where
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
                 components_context.to_jobs_generator.clone().subscribe(),
-                Duration::from_millis(
-                    self.config
-                        .args
-                        .flashblocks
-                        .as_ref()
-                        .expect("flashblocks args required")
-                        .flashblocks_interval,
-                ),
-                Duration::from_millis(
-                    self.config
-                        .args
-                        .flashblocks
-                        .as_ref()
-                        .expect("flashblocks args required")
-                        .recommit_interval,
-                ),
+                Duration::from_millis(flashblocks_args.flashblocks_interval),
+                Duration::from_millis(flashblocks_args.recommit_interval),
             ))
             .network(fb_network_builder)
             .executor(OpExecutorBuilder::default())
