@@ -47,6 +47,7 @@ use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::{BundleAccount, BundleState};
+use tokio::time::Instant;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -854,13 +855,15 @@ where
     let sealed_header_clone = sealed_header.clone();
     let transactions_clone = transactions.clone();
 
+    let before_execution = Instant::now();
+
     let (execution_result, state_root_result) =
         if let Some(access_list_data) = flashblock.diff().access_list_data.as_ref() {
             let (execution_result, state_root_result) = rayon::join(
                 move || {
                     execute_transactions(
                         transactions_clone.clone(),
-                        access_list_data.access_list_hash,
+                        Some(access_list_data.access_list_hash),
                         &evm_config,
                         sealed_header.clone(),
                         state_provider_clone.clone(),
@@ -880,12 +883,29 @@ where
 
             (execution_result?, state_root_result?)
         } else {
-            todo!()
+            let execution_result = execute_transactions(
+                        transactions_clone.clone(),
+                        None,
+                        &evm_config,
+                        sealed_header.clone(),
+                        state_provider_clone.clone(),
+                        &attributes,
+                        latest_bundle,
+                        execution_context_clone.clone(),
+                        chain_spec,
+                    )?;
+
+            let converted: HashMap<Address, BundleAccount>= execution_result.clone().0.state.into_iter().collect();
+            let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
+            (execution_result, state_root_result)
         };
 
-    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) =
-        execution_result;
 
+    let elapsed = before_execution.elapsed().as_millis();
+    tracing::info!(target: "flashblocks::state_executor", "time taken to get here: {:?}, bal enabled: {}", elapsed, flashblock.diff().access_list_data.is_some());
+
+    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) = execution_result;
+    
     let (state_root, trie_updates, hashed_state) = state_root_result;
 
     debug_assert_eq!(
@@ -962,7 +982,7 @@ where
 
 fn execute_transactions(
     transactions: Vec<Recovered<OpTransactionSigned>>,
-    provided_bal_hash: FixedBytes<32>,
+    provided_bal_hash: Option<FixedBytes<32>>,
     evm_config: &OpEvmConfig,
     sealed_header: Arc<SealedHeader<Header>>,
     state_provider: Arc<dyn StateProvider>,
@@ -1040,12 +1060,12 @@ fn execute_transactions(
     // Validate the BAL matches the provided Flashblock BAL
     let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));
 
-    if expected_bal_hash != provided_bal_hash {
+    if provided_bal_hash.is_some() && expected_bal_hash != provided_bal_hash.unwrap() {
         return Err(eyre!(format!(
-            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-            expected_bal_hash, provided_bal_hash
-        )));
-    };
+                "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+                expected_bal_hash, provided_bal_hash.unwrap()
+            )));
+    }
 
     let (db, env) = evm.finish();
 
