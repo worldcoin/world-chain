@@ -7,7 +7,10 @@ use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_node::{FlashblocksNode, FlashblocksNodeBuilder};
-use flashblocks_p2p::protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg};
+use flashblocks_p2p::{
+    monitor,
+    protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg},
+};
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
     p2p::{
@@ -96,15 +99,7 @@ async fn setup_node(
     builder_sk: SigningKey,
     peers: Vec<(PeerId, SocketAddr)>,
 ) -> eyre::Result<NodeContext> {
-    setup_node_extended_cfg(
-        exec,
-        authorizer_sk,
-        builder_sk,
-        peers,
-        None,
-        None,
-    )
-    .await
+    setup_node_extended_cfg(exec, authorizer_sk, builder_sk, peers, None, None).await
 }
 
 async fn setup_node_extended_cfg(
@@ -710,7 +705,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     // Wait for PeerMonitor's periodic check to discover the trusted peer
     // Since PeerAdded events are ignored, the monitor relies on periodic polling
     // Wait for at least one full monitor interval + buffer (1s interval + 1s buffer)
-    sleep(Duration::from_secs(2)).await;
+    sleep(monitor::PEER_MONITOR_INTERVAL + Duration::from_secs(1)).await;
 
     // SIMULATE CRASH: Drop node1 and its TaskManager
     // Dropping the TaskManager cancels all tasks spawned on it
@@ -737,7 +732,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     // Wait for PeerMonitor periodic checks to detect the disconnection and emit multiple warning logs
     // Wait for at least 2 periodic ticks to ensure we get multiple log outputs (1s * 3 + 1s buffer for safety)
-    sleep(Duration::from_secs(4)).await;
+    sleep(monitor::PEER_MONITOR_INTERVAL * 2 + Duration::from_secs(1)).await;
 
     // Verify that node 1 is no longer connected
     let trusted_peers_after = node2.network_handle.get_trusted_peers().await?;
@@ -825,7 +820,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     });
 
     // Wait for at least one more monitor tick to verify warnings stopped (1s interval + 1s buffer)
-    sleep(Duration::from_secs(2)).await;
+    sleep(monitor::PEER_MONITOR_INTERVAL + Duration::from_secs(1)).await;
 
     // Count the number of warning logs before and after reconnection to ensure they stopped
     logs_assert(|logs: &[&str]| {

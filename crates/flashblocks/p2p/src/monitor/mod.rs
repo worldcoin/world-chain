@@ -20,11 +20,11 @@ const CONNECTION_INIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Peer monitor interval in seconds (make tests faster)
 #[cfg(feature = "test-utils")]
-const PEER_MONITOR_INTERVAL: Duration = Duration::from_secs(1);
+pub const PEER_MONITOR_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Connection initialization timeout in seconds (make tests faster)
 #[cfg(feature = "test-utils")]
-const CONNECTION_INIT_TIMEOUT: Duration = Duration::from_secs(2);
+pub const CONNECTION_INIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// State of trusted peer
 #[derive(Debug, Clone, Copy)]

@@ -35,6 +35,89 @@ use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
 
+use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
+use reth::primitives::Hardforks;
+use reth_network::PeersInfo;
+use reth_network_peers::PeerId;
+use reth_node_builder::{components::NetworkBuilder, BuilderContext};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
+
+/// Network builder for World Chain that optionally applies custom transaction propagation policy.
+///
+/// Extends OpNetworkBuilder to support restricting transaction gossip to specific peers.
+#[derive(Debug, Clone)]
+pub struct WorldChainNetworkBuilder {
+    op_network_builder: OpNetworkBuilder,
+    tx_peers: Option<Vec<PeerId>>,
+}
+
+impl WorldChainNetworkBuilder {
+    pub fn new(
+        disable_txpool_gossip: bool,
+        disable_discovery_v4: bool,
+        tx_peers: Option<Vec<PeerId>>,
+    ) -> Self {
+        let op_network_builder = OpNetworkBuilder {
+            disable_txpool_gossip,
+            disable_discovery_v4,
+        };
+
+        Self {
+            op_network_builder,
+            tx_peers,
+        }
+    }
+}
+
+impl<Node, Pool> NetworkBuilder<Node, Pool> for WorldChainNetworkBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = <<Node::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::SignedTx,
+            >,
+        > + Unpin
+        + 'static,
+{
+    type Network = <OpNetworkBuilder as NetworkBuilder<Node, Pool>>::Network;
+
+    async fn build_network(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<Self::Network> {
+        let network_config = self.op_network_builder.network_config(ctx)?;
+
+        let network = reth_network::NetworkManager::builder(network_config).await?;
+
+        // Start network with custom policy if specified, otherwise use default
+        let handle = if let Some(peers) = self.tx_peers {
+            tracing::info!(
+                target: "world_chain::network",
+                "Applying peer white listing transaction policy. Number of peers: {}",
+                peers.len()
+            );
+            let policy = WorldChainTransactionPropagationPolicy::new(peers);
+            let tx_config = ctx.config().network.transactions_manager_config();
+            ctx.start_network_with(network, pool, tx_config, policy)
+        } else {
+            tracing::info!(
+                target: "world_chain::network",
+                "Starting network with default propagation policy"
+            );
+            ctx.start_network(network, pool)
+        };
+
+        tracing::info!(
+            target: "world_chain::network",
+            enode = %handle.local_node_record(),
+            "World Chain P2P networking initialized"
+        );
+
+        Ok(handle)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct BasicContext(WorldChainNodeConfig);
 
@@ -53,7 +136,7 @@ where
         OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
     >,
 {
-    type Net = OpNetworkBuilder;
+    type Net = WorldChainNetworkBuilder;
     type Evm = OpEvmConfig;
     type PayloadServiceBuilder = BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>;
 
@@ -75,6 +158,7 @@ where
                     rollup,
                     builder,
                     pbh,
+                    tx_peers,
                     ..
                 },
             da_config,
@@ -86,6 +170,9 @@ where
             discovery_v4,
             ..
         } = rollup;
+
+        let network_builder =
+            WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
         ComponentsBuilder::default()
             .node_types::<N>()
@@ -105,10 +192,7 @@ where
                 )
                 .with_da_config(da_config),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(network_builder)
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -139,7 +223,7 @@ where
         OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
     >,
 {
-    type Net = FlashblocksNetworkBuilder<OpNetworkBuilder>;
+    type Net = FlashblocksNetworkBuilder<WorldChainNetworkBuilder>;
     type Evm = OpEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
@@ -166,6 +250,7 @@ where
                             rollup,
                             builder,
                             pbh,
+                            tx_peers,
                             ..
                         },
                     da_config,
@@ -180,10 +265,8 @@ where
             ..
         } = rollup;
 
-        let op_network_builder = OpNetworkBuilder {
-            disable_txpool_gossip,
-            disable_discovery_v4: !discovery_v4,
-        };
+        let wc_network_builder =
+            WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
         let flashblocks_args = self
             .config
@@ -193,7 +276,7 @@ where
             .expect("flashblocks args required");
 
         let fb_network_builder = FlashblocksNetworkBuilder::new(
-            op_network_builder,
+            wc_network_builder,
             components_context.flashblocks_handle.clone(),
         );
 

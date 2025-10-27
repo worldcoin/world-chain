@@ -318,7 +318,7 @@ impl Flashblocks {
     }
 
     pub fn last(&self) -> &Flashblock {
-        &self.0.last().unwrap()
+        self.0.last().unwrap()
     }
 
     pub fn flashblocks(&self) -> &[Flashblock] {
