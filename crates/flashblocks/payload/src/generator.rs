@@ -296,7 +296,7 @@ where
                 let payload = OpBuiltPayload::new(
                     attributes.payload_id(),
                     Arc::new(sealed),
-                    flashblock.flashblock.metadata().fees,
+                    flashblock.flashblock.metadata.fees,
                     None,
                 );
 

@@ -9,11 +9,11 @@ use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
+use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayloadV1};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList,
     p2p::{Authorization, AuthorizedPayload},
 };
-use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayload};
 use std::task::ready;
 
 use futures::FutureExt;
@@ -223,8 +223,13 @@ where
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
-        let flashblock =
-            Flashblock::new(payload, &self.config, self.block_index, offset, access_list);
+        let flashblock = Flashblock::new(
+            payload,
+            &self.config,
+            self.block_index,
+            offset,
+            Some(access_list),
+        );
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
@@ -238,8 +243,8 @@ where
 
     pub(crate) fn authorization_for(
         &self,
-        payload: FlashblocksPayload,
-    ) -> Result<AuthorizedPayload<FlashblocksPayload>, FlashblocksP2PError> {
+        payload: FlashblocksPayloadV1,
+    ) -> Result<AuthorizedPayload<FlashblocksPayloadV1>, FlashblocksP2PError> {
         Ok(AuthorizedPayload::new(
             self.p2p_handler.builder_sk()?,
             self.authorization,

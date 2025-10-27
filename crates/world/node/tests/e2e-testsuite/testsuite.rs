@@ -184,8 +184,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
             info!(
                 "Received flashblocks after {:?}: 0: {:?}, 1: {:?}",
                 elapsed.as_millis(),
-                flashblock_0.payload_id(),
-                flashblock_1.payload_id()
+                flashblock_0.payload_id,
+                flashblock_1.payload_id
             );
 
             flashblocks_0.lock().push(flashblock_0);

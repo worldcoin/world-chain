@@ -12,6 +12,25 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Default,
+    Deserialize,
+    Serialize,
+    Eq,
+    RlpEncodable,
+    RlpDecodable,
+)]
+pub struct FlashblockAccessListData {
+    /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occured throughout execution of a
+    /// single Flashblock `diff`
+    pub access_list: FlashblockAccessList,
+    /// The associated Keccak256 hash of the RLP-Encoding of [`FlashblockAccessList`]
+    pub access_list_hash: B256,
+}
+
+#[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockAccessList {

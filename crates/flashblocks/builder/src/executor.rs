@@ -8,7 +8,7 @@ use eyre::eyre::{eyre, OptionExt as _};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use flashblocks_primitives::p2p::AuthorizedPayload;
-use flashblocks_primitives::primitives::FlashblocksPayload;
+use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::StreamExt as _;
 use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
@@ -662,7 +662,7 @@ impl FlashblocksStateExecutor {
 
     pub fn publish_built_payload(
         &self,
-        authorized_payload: AuthorizedPayload<FlashblocksPayload>,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
         built_payload: OpBuiltPayload,
     ) -> eyre::Result<()> {
         let flashblock = authorized_payload.msg().clone();
@@ -673,7 +673,7 @@ impl FlashblocksStateExecutor {
             ..
         } = *self.inner.write();
 
-        let index = flashblock.index();
+        let index = flashblock.index;
         let flashblock = Flashblock { flashblock };
         let (_flashblocks, _new_payload) = match flashblocks {
             Some(ref mut f) => {
@@ -719,14 +719,14 @@ fn process_flashblock<Provider>(
     evm_config: &OpEvmConfig,
     state_executor: &FlashblocksStateExecutor,
     chain_spec: &OpChainSpec,
-    flashblock: FlashblocksPayload,
+    flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
     Provider:
         StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone + 'static,
 {
-    trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id(), index = %flashblock.index(), "processing flashblock");
+    trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
 
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
@@ -738,8 +738,8 @@ where
     let (flashblocks, _new_payload) = match flashblocks {
         Some(ref mut f) => {
             if let Some(latest_payload) = latest_payload {
-                if latest_payload.0.id() == *flashblock.flashblock.payload_id()
-                    && latest_payload.1 >= flashblock.flashblock.index()
+                if latest_payload.0.id() == flashblock.flashblock.payload_id
+                    && latest_payload.1 >= flashblock.flashblock.index
                 {
                     // Already processed this flashblock
                     pending_block.send_replace(latest_payload.0.executed_block());
@@ -760,7 +760,7 @@ where
     let base = flashblocks.base();
 
     let transactions = flashblock
-        .diff_v1()
+        .diff
         .transactions
         .iter()
         .map(|b| {
@@ -825,7 +825,6 @@ where
     };
 
     let execution_context_clone = execution_context.clone();
-    let provided_bal_hash = flashblock.diff_v2().unwrap().access_list_hash;
 
     let state_provider_clone = state_provider.clone();
     let state_provider_clone2 = state_provider.clone();
@@ -833,45 +832,34 @@ where
     let sealed_header_clone = sealed_header.clone();
     let transactions_clone = transactions.clone();
 
-    let (execution_result, state_root_result) = if flashblock.is_v2() {
-        let (execution_result, state_root_result) = rayon::join(
-            move || {
-                execute_transactions(
-                    transactions_clone.clone(),
-                    provided_bal_hash,
-                    &evm_config,
-                    sealed_header.clone(),
-                    state_provider_clone.clone(),
-                    &attributes,
-                    latest_bundle,
-                    execution_context_clone.clone(),
-                    chain_spec,
-                )
-            },
-            move || {
-                let optimistic_bundle: HashMap<Address, BundleAccount> =
-                    flashblock.diff_v2().unwrap().access_list.clone().into();
+    let (execution_result, state_root_result) =
+        if let Some(access_list_data) = flashblock.diff.access_list_data.as_ref() {
+            let (execution_result, state_root_result) = rayon::join(
+                move || {
+                    execute_transactions(
+                        transactions_clone.clone(),
+                        access_list_data.access_list_hash,
+                        &evm_config,
+                        sealed_header.clone(),
+                        state_provider_clone.clone(),
+                        &attributes,
+                        latest_bundle,
+                        execution_context_clone.clone(),
+                        chain_spec,
+                    )
+                },
+                move || {
+                    let optimistic_bundle: HashMap<Address, BundleAccount> =
+                        access_list_data.access_list.clone().into();
 
-                compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
-            },
-        );
+                    compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
+                },
+            );
 
-        (execution_result?, state_root_result?)
-    } else {
-        let execution_result = execute_transactions(
-            transactions_clone,
-            provided_bal_hash,
-            &evm_config,
-            sealed_header_clone,
-            state_provider_clone,
-            &attributes,
-            latest_bundle,
-            execution_context_clone,
-            chain_spec,
-        )?;
-
-        todo!()
-    };
+            (execution_result?, state_root_result?)
+        } else {
+            todo!()
+        };
 
     let (bundle_state, block_execution_result, _access_list, evm_env) = execution_result;
     let (state_root, trie_updates, hashed_state) = state_root_result;
@@ -918,14 +906,14 @@ where
     );
 
     let payload = OpBuiltPayload::new(
-        *flashblock.payload_id(),
+        flashblock.payload_id,
         sealed_block,
         U256::ZERO,
         Some(executed_block),
     );
 
     // construct the full payload
-    *latest_payload = Some((payload.clone(), flashblock.index()));
+    *latest_payload = Some((payload.clone(), flashblock.index));
 
     pending_block.send_replace(payload.executed_block());
 
@@ -1000,7 +988,7 @@ fn execute_transactions<'a>(
     let access_list = access_list.build();
 
     // Validate the BAL matches the provided Flashblock BAL
-    let expected_bal_hash = keccak256(alloy_rlp::encode(access_list.clone()));
+    let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));
 
     if expected_bal_hash != provided_bal_hash {
         return Err(eyre!(format!(

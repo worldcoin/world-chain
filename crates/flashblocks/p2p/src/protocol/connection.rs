@@ -8,7 +8,7 @@ use flashblocks_primitives::{
     p2p::{
         Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, StartPublish, StopPublish,
     },
-    primitives::FlashblocksPayload,
+    primitives::FlashblocksPayloadV1,
 };
 use futures::{Stream, StreamExt};
 use metrics::gauge;
@@ -199,7 +199,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
 
                     match &authorized.msg {
-                        AuthorizedMsg::FlashblocksPayload(_) => {
+                        AuthorizedMsg::FlashblocksPayloadV1(_) => {
                             metrics::counter!("flashblocks.bandwidth_inbound")
                                 .increment(buf.len() as u64);
                             this.handle_flashblocks_payload_v1(authorized.into_unchecked());
@@ -235,7 +235,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// - Forwards valid payloads to the protocol handler for processing
     fn handle_flashblocks_payload_v1(
         &mut self,
-        authorized_payload: AuthorizedPayload<FlashblocksPayload>,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) {
         let mut state = self.protocol.handle.state.lock();
         let authorization = &authorized_payload.authorized.authorization;
@@ -256,18 +256,18 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         }
 
         // Check if this is a new payload from this peer
-        if self.payload_id != *msg.payload_id() {
-            self.payload_id = *msg.payload_id();
+        if self.payload_id != msg.payload_id {
+            self.payload_id = msg.payload_id;
             self.received.fill(false);
         }
 
         // Check if the payload index is within the allowed range
-        if msg.index() as usize > MAX_FLASHBLOCK_INDEX {
+        if msg.index as usize > MAX_FLASHBLOCK_INDEX {
             tracing::error!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                index = msg.index(),
-                payload_id = %msg.payload_id(),
+                index = msg.index,
+                payload_id = %msg.payload_id,
                 max_index = MAX_FLASHBLOCK_INDEX,
                 "Received flashblocks payload with index exceeding maximum"
             );
@@ -277,15 +277,15 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         // Check if this peer is spamming us with the same payload index
         let len = self.received.len();
         self.received
-            .resize_with(len.max(msg.index() as usize + 1), || false);
-        if self.received[msg.index() as usize] {
+            .resize_with(len.max(msg.index as usize + 1), || false);
+        if self.received[msg.index as usize] {
             // We've already seen this index from this peer.
             // They could be trying to DOS us.
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                payload_id = %msg.payload_id(),
-                index = msg.index(),
+                payload_id = %msg.payload_id,
+                index = msg.index,
                 "received duplicate flashblock from peer",
             );
             self.protocol
@@ -293,7 +293,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 .reputation_change(self.peer_id, ReputationChangeKind::AlreadySeenTransaction);
             return;
         }
-        self.received[msg.index() as usize] = true;
+        self.received[msg.index as usize] = true;
 
         state.publishing_status.send_modify(|status| {
             let active_publishers = match status {
@@ -330,7 +330,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             .timestamp_nanos_opt()
             .expect("time went backwards");
 
-        if let Some(flashblock_timestamp) = msg.metadata().flashblock_timestamp {
+        if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
         }

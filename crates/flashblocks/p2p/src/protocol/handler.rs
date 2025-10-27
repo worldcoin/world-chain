@@ -7,7 +7,7 @@ use flashblocks_primitives::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
         StartPublish, StopPublish,
     },
-    primitives::FlashblocksPayload,
+    primitives::FlashblocksPayloadV1,
 };
 use futures::{stream, Stream, StreamExt};
 use metrics::histogram;
@@ -123,7 +123,7 @@ pub struct FlashblocksP2PState {
     /// Buffer of flashblocks for the current payload, indexed by flashblock sequence number.
     /// Contains `None` for flashblocks not yet received, enabling out-of-order receipt
     /// while maintaining in-order delivery.
-    pub flashblocks: Vec<Option<FlashblocksPayload>>,
+    pub flashblocks: Vec<Option<FlashblocksPayloadV1>>,
 }
 
 impl FlashblocksP2PState {
@@ -152,7 +152,7 @@ pub struct FlashblocksP2PCtx {
     pub peer_tx: broadcast::Sender<PeerMsg>,
     /// Broadcast sender for verified and strictly ordered flashblock payloads.
     /// Used by RPC overlays and other consumers of flashblock data.
-    pub flashblock_tx: broadcast::Sender<FlashblocksPayload>,
+    pub flashblock_tx: broadcast::Sender<FlashblocksPayloadV1>,
 }
 
 /// Handle for the flashblocks P2P protocol.
@@ -183,7 +183,7 @@ impl FlashblocksHandle {
         Self { ctx, state }
     }
 
-    pub fn flashblocks_tx(&self) -> broadcast::Sender<FlashblocksPayload> {
+    pub fn flashblocks_tx(&self) -> broadcast::Sender<FlashblocksPayloadV1> {
         self.ctx.flashblock_tx.clone()
     }
 
@@ -254,7 +254,7 @@ impl FlashblocksHandle {
     /// authorization for the current block.
     pub fn publish_new(
         &self,
-        authorized_payload: AuthorizedPayload<FlashblocksPayload>,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) -> Result<(), FlashblocksP2PError> {
         let mut state = self.state.lock();
         let PublishingStatus::Publishing { authorization } = *state.publishing_status.borrow()
@@ -447,7 +447,7 @@ impl FlashblocksHandle {
     /// # Behavior
     /// The stream will continue to yield flashblocks for consecutive payloads as well, so
     /// consumers should take care to handle the stream appropriately.
-    pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayload> + Send + 'static {
+    pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
         let flashblocks = self
             .state
             .lock()
@@ -483,18 +483,18 @@ impl FlashblocksP2PCtx {
     pub fn publish(
         &self,
         state: &mut FlashblocksP2PState,
-        authorized_payload: AuthorizedPayload<FlashblocksPayload>,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) {
         let payload = authorized_payload.msg();
         let authorization = authorized_payload.authorized.authorization;
 
         // Do some basic validation
-        if authorization.payload_id != *payload.payload_id() {
+        if authorization.payload_id != payload.payload_id {
             // Since the builders are trusted, the only reason this should happen is a bug.
             tracing::error!(
                 target: "flashblocks::p2p",
                 authorization_payload_id = %authorization.payload_id,
-                flashblock_payload_id = %payload.payload_id(),
+                flashblock_payload_id = %payload.payload_id,
                 "Authorization payload id does not match flashblocks payload id"
             );
             return;
@@ -509,10 +509,10 @@ impl FlashblocksP2PCtx {
         }
 
         // Resize our array if needed
-        if payload.index() as usize > MAX_FLASHBLOCK_INDEX {
+        if payload.index as usize > MAX_FLASHBLOCK_INDEX {
             tracing::error!(
                 target: "flashblocks::p2p",
-                index = payload.index(),
+                index = payload.index,
                 max_index = MAX_FLASHBLOCK_INDEX,
                 "Received flashblocks payload with index exceeding maximum"
             );
@@ -521,8 +521,8 @@ impl FlashblocksP2PCtx {
         let len = state.flashblocks.len();
         state
             .flashblocks
-            .resize_with(len.max(payload.index() as usize + 1), || None);
-        let flashblock = &mut state.flashblocks[payload.index() as usize];
+            .resize_with(len.max(payload.index as usize + 1), || None);
+        let flashblock = &mut state.flashblocks[payload.index as usize];
 
         // If we've already seen this index, skip it
         // Otherwise, add it to the list
@@ -533,8 +533,8 @@ impl FlashblocksP2PCtx {
             *flashblock = Some(payload.clone());
             tracing::trace!(
                 target: "flashblocks::p2p",
-                payload_id = %payload.payload_id(),
-                flashblock_index = payload.index(),
+                payload_id = %payload.payload_id,
+                flashblock_index = payload.index,
                 "queueing flashblock",
             );
 
@@ -561,13 +561,13 @@ impl FlashblocksP2PCtx {
             }
 
             metrics::histogram!("flashblocks.size").record(len as f64);
-            metrics::histogram!("flashblocks.gas_used").record(payload.diff_v1().gas_used as f64);
+            metrics::histogram!("flashblocks.gas_used").record(payload.diff.gas_used as f64);
             metrics::histogram!("flashblocks.tx_count")
-                .record(payload.diff_v1().transactions.len() as f64);
+                .record(payload.diff.transactions.len() as f64);
 
             let peer_msg = PeerMsg::FlashblocksPayloadV1((
-                *payload.payload_id(),
-                payload.index() as usize,
+                payload.payload_id,
+                payload.index as usize,
                 bytes,
             ));
 
@@ -582,7 +582,7 @@ impl FlashblocksP2PCtx {
                 // Publish the flashblock
                 debug!(
                     target: "flashblocks::p2p",
-                    payload_id = %flashblock_event.payload_id(),
+                    payload_id = %flashblock_event.payload_id,
                     flashblock_index = %state.flashblock_index,
                     "publishing flashblock"
                 );
