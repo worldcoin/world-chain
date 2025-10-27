@@ -82,7 +82,7 @@ impl Flashblock {
         let access_list_data = if let Some(access_list) = access_list {
             let hash = keccak256(alloy_rlp::encode(&access_list));
             Some(FlashblockAccessListData {
-                access_list: access_list,
+                access_list,
                 access_list_hash: hash,
             })
         } else {

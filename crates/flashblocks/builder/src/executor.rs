@@ -124,6 +124,7 @@ where
             .on_state_transition(transitions, self.inner.receipts.len());
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn finish_with_access_list(
         self,
     ) -> Result<
@@ -724,7 +725,6 @@ impl FlashblocksStateExecutor {
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
@@ -931,7 +931,8 @@ where
     Ok(())
 }
 
-fn execute_transactions<'a>(
+#[expect(clippy::too_many_arguments)]
+fn execute_transactions(
     transactions: Vec<Recovered<OpTransactionSigned>>,
     provided_bal_hash: FixedBytes<32>,
     evm_config: &OpEvmConfig,
@@ -952,7 +953,7 @@ fn execute_transactions<'a>(
 > {
     // Prepare EVM environment.
     let evm_env = evm_config
-        .next_evm_env(sealed_header.clone().header(), &attributes)
+        .next_evm_env(sealed_header.clone().header(), attributes)
         .map_err(PayloadBuilderError::other)?;
 
     let state = StateProviderDatabase::new(&state_provider);
@@ -1039,8 +1040,7 @@ fn compute_state_root(
     state_provider: Arc<Box<dyn StateProvider>>,
     bundle: &HashMap<Address, BundleAccount>,
 ) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), eyre::Report> {
-    let bundle_state: HashMap<&Address, &BundleAccount> =
-        bundle.iter().map(|(k, v)| (k, v)).collect();
+    let bundle_state: HashMap<&Address, &BundleAccount> = bundle.iter().collect();
 
     // compute hashed post state
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
