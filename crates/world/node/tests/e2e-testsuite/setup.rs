@@ -236,7 +236,7 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
             .extend_accounts(vec![(
                 account(0),
                 GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
-            )])
+            )]),
         )
         .ecotone_activated()
         .build()

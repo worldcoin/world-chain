@@ -300,7 +300,7 @@ impl Flashblocks {
     }
 
     pub fn last(&self) -> &FlashblocksPayloadV1 {
-        &self.0.last().unwrap().flashblock
+        &self.0.last().as_ref().unwrap().flashblock
     }
 
     pub fn flashblocks(&self) -> &[Flashblock] {
