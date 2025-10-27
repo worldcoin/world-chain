@@ -7,16 +7,19 @@ use futures::StreamExt;
 use op_alloy_consensus::encode_holocene_extra_data;
 use parking_lot::Mutex;
 use reth::chainspec::EthChainSpec;
+use reth::network::{NetworkSyncUpdater, SyncState};
 use reth::primitives::RecoveredBlock;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_node_api::{Block, PayloadAttributes};
-use reth_optimism_node::OpPayloadAttributes;
+use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_transaction_pool::TransactionPool;
 use revm_primitives::fixed_bytes;
 use revm_primitives::{Address, Bytes, B256, U256};
 use std::sync::Arc;
+use std::time::Duration;
 use std::vec;
 use tracing::info;
 use world_chain_test::utils::account;
@@ -27,7 +30,8 @@ use world_chain_node::context::FlashblocksContext;
 use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
 use world_chain_test::utils::signer;
 
-use crate::setup::{optimism_payload_attributes, setup, CHAIN_SPEC};
+
+use crate::setup::{setup, setup_with_tx_peers, CHAIN_SPEC};
 
 #[tokio::test]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
@@ -677,3 +681,275 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
 // TODO: Mock failover scenario test
 // - Assert Mined block of both nodes is identical in a failover scenario for FCU's with the same parent attributes
+//
+
+// Transaction Propagation Tests
+
+/// Test default transaction propagation behavior without tx_peers configuration
+///
+/// Verifies that without tx_peers configuration, transactions propagate to ALL connected peers
+/// using Reth's default TransactionPropagationKind::All policy.
+#[tokio::test]
+async fn test_default_propagation_policy() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Spin up 3 nodes WITHOUT tx_peers configuration
+    let (_, mut nodes, _tasks, _) =
+        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+
+    let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
+        unreachable!()
+    };
+    let node_0 = &mut node_0_ctx.node;
+    let node_1 = &mut node_1_ctx.node;
+    let node_2 = &mut node_2_ctx.node;
+
+    // Set nodes to Idle state to enable transaction propagation
+    node_0.inner.network.update_sync_state(SyncState::Idle);
+    node_1.inner.network.update_sync_state(SyncState::Idle);
+    node_2.inner.network.update_sync_state(SyncState::Idle);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Create and inject transaction into Node 0
+    let tx_request = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
+    let wallet = signer(0);
+    let signer_wallet = EthereumWallet::from(wallet);
+    let signed =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &signer_wallet)
+            .await
+            .unwrap();
+
+    let raw_tx: Bytes = signed.encoded_2718().into();
+    let tx_hash = *signed.tx_hash();
+
+    let result = node_0.rpc.inject_tx(raw_tx.clone()).await;
+    assert!(result.is_ok(), "Transaction should be accepted by Node 0");
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    assert!(
+        node_0.inner.pool().contains(&tx_hash),
+        "Transaction should be in Node 0's pool"
+    );
+
+    assert!(
+        node_1.inner.pool().contains(&tx_hash),
+        "Transaction SHOULD propagate to Node 1 with default policy (TransactionPropagationKind::All)"
+    );
+
+    assert!(
+        node_2.inner.pool().contains(&tx_hash),
+        "Transaction SHOULD propagate to Node 2 with default policy (TransactionPropagationKind::All)"
+    );
+
+    Ok(())
+}
+
+/// Test selective transaction propagation with tx_peers configuration
+///
+/// Verifies that with tx_peers configuration, transactions only propagate to whitelisted peers
+/// using WorldChainTransactionPropagationPolicy.
+///
+/// Setup:
+/// - Node 0: no tx_peers (default propagation)
+/// - Node 1: tx_peers = [Node 0] (only propagates to Node 0)
+/// - Node 2: tx_peers = [Node 0, Node 1] (propagates to both)
+///
+/// Test Part 1:
+/// - Inject tx into Node 1 -> should propagate to Node 0 only
+/// - Node 2 should NOT receive it (not in Node 1's whitelist)
+///
+/// Test Part 2:
+/// - Inject tx into Node 2 -> should propagate to both Node 0 and Node 1
+/// - Verifies multi-peer whitelist works correctly
+#[tokio::test]
+async fn test_selective_propagation_policy() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // We disconnect Node 0 from Node 2 to prevent multi-hop forwarding in Part 1
+    let (_, mut nodes, _tasks, _) =
+        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, false)
+            .await?;
+
+    let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
+        unreachable!()
+    };
+
+    let node_0 = &mut node_0_ctx.node;
+    let node_1 = &mut node_1_ctx.node;
+    let node_2 = &mut node_2_ctx.node;
+
+    let node_0_peer_id = node_0.network.record().id;
+    let node_1_peer_id = node_1.network.record().id;
+    let node_2_peer_id = node_2.network.record().id;
+
+    // Set nodes to Idle state to enable transaction propagation
+    use reth::network::{NetworkSyncUpdater, Peers, SyncState};
+    node_0.inner.network.update_sync_state(SyncState::Idle);
+    node_1.inner.network.update_sync_state(SyncState::Idle);
+    node_2.inner.network.update_sync_state(SyncState::Idle);
+
+    // Disconnect Node 0 from Node 2 to prevent multi-hop forwarding
+    node_0.inner.network.disconnect_peer(node_2_peer_id);
+    node_2.inner.network.disconnect_peer(node_0_peer_id);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Create and inject transaction into Node 1 (which has tx_peers = [Node 0 only])
+    let tx_request = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
+    let wallet = signer(0);
+    let signer_wallet = EthereumWallet::from(wallet);
+    let signed =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &signer_wallet)
+            .await
+            .unwrap();
+
+    let raw_tx: Bytes = signed.encoded_2718().into();
+    let tx_hash = *signed.tx_hash();
+
+    let result = node_1.rpc.inject_tx(raw_tx.clone()).await;
+    assert!(result.is_ok(), "Transaction should be accepted by Node 1");
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert!(
+        node_1.inner.pool().contains(&tx_hash),
+        "Transaction should be in Node 1's pool"
+    );
+
+    assert!(
+        node_0.inner.pool().contains(&tx_hash),
+        "Transaction SHOULD propagate to Node 0 (whitelisted in Node 1's tx_peers)"
+    );
+
+    assert!(
+        !node_2.inner.pool().contains(&tx_hash),
+        "Transaction should NOT propagate to Node 2 (NOT in Node 1's tx_peers whitelist)"
+    );
+
+    // Part 2: Test Node 2 -> Node 0 and Node 1
+    // Disconnect node 0 and node 1
+    node_0.inner.network.disconnect_peer(node_1_peer_id);
+    node_1.inner.network.disconnect_peer(node_0_peer_id);
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Reconnect Node 0 and Node 2
+    let node_0_addr = node_0.network.record().tcp_addr();
+    node_2.inner.network.add_peer(node_0_peer_id, node_0_addr);
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Create a new transaction and inject into Node 2
+    // Node 2 has tx_peers = [Node 0, Node 1], so it should propagate to both
+    let tx_request_2 = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
+    let wallet_2 = signer(1); // Different signer
+    let signer_wallet_2 = EthereumWallet::from(wallet_2);
+    let signed_2 =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request_2, &signer_wallet_2)
+            .await
+            .unwrap();
+
+    let raw_tx_2: Bytes = signed_2.encoded_2718().into();
+    let tx_hash_2 = *signed_2.tx_hash();
+
+    // Inject transaction into Node 2
+    let result = node_2.rpc.inject_tx(raw_tx_2.clone()).await;
+    assert!(result.is_ok(), "Transaction should be accepted by Node 2");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert!(
+        node_2.inner.pool().contains(&tx_hash_2),
+        "Transaction should be in Node 2's pool"
+    );
+
+    assert!(
+        node_0.inner.pool().contains(&tx_hash_2),
+        "Transaction SHOULD propagate to Node 0 (whitelisted in Node 2's tx_peers)"
+    );
+
+    assert!(
+        node_1.inner.pool().contains(&tx_hash_2),
+        "Transaction SHOULD propagate to Node 1 (whitelisted in Node 2's tx_peers)"
+    );
+
+    Ok(())
+}
+
+/// Test that transactions do NOT propagate when gossip is completely disabled
+///
+/// Verifies that when --rollup.disable-tx-pool-gossip is set, transactions do NOT
+/// propagate to ANY peers, regardless of tx_peers configuration. This flag completely
+/// disables transaction gossip and takes precedence over tx_peers whitelist.
+///
+/// Setup:
+/// - Node 0: gossip disabled, no tx_peers
+/// - Node 1: gossip disabled, tx_peers = [Node 0]
+/// - Node 2: gossip disabled, tx_peers = [Node 0, Node 1]
+///
+/// Test:
+/// - Inject tx into Node 0 -> should NOT propagate to any node
+/// - Inject tx into Node 1 -> should NOT propagate to any node (even though Node 0 is whitelisted)
+/// - Verifies that disable_txpool_gossip takes precedence over tx_peers
+#[tokio::test]
+async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    use crate::setup::setup_with_tx_peers;
+
+    let (_, mut nodes, _tasks, _) =
+        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true)
+            .await?;
+
+    let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
+        unreachable!()
+    };
+    let node_0 = &mut node_0_ctx.node;
+    let node_1 = &mut node_1_ctx.node;
+    let node_2 = &mut node_2_ctx.node;
+
+    // Set nodes to Idle state to enable transaction propagation
+    node_0.inner.network.update_sync_state(SyncState::Idle);
+    node_1.inner.network.update_sync_state(SyncState::Idle);
+    node_2.inner.network.update_sync_state(SyncState::Idle);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Inject transaction into Node 1 (which has tx_peers = [Node 0])
+    // Even with tx_peers configured, gossip disabled should prevent propagation
+    let tx_request_2 = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
+    let wallet_2 = signer(1);
+    let signer_wallet_2 = EthereumWallet::from(wallet_2);
+    let signed_2 =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request_2, &signer_wallet_2)
+            .await
+            .unwrap();
+
+    let raw_tx_2: Bytes = signed_2.encoded_2718().into();
+    let tx_hash_2 = *signed_2.tx_hash();
+
+    let result = node_1.rpc.inject_tx(raw_tx_2.clone()).await;
+    assert!(result.is_ok(), "Transaction should be accepted by Node 1");
+
+    // Wait for potential propagation
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert!(
+        node_1.inner.pool().contains(&tx_hash_2),
+        "Transaction should be in Node 1's pool"
+    );
+
+    assert!(
+        !node_0.inner.pool().contains(&tx_hash_2),
+        "Transaction should NOT propagate to Node 0 (gossip disabled takes precedence over tx_peers)"
+    );
+
+    assert!(
+        !node_2.inner.pool().contains(&tx_hash_2),
+        "Transaction should NOT propagate to Node 2 (gossip disabled)"
+    );
+
+    Ok(())
+}
