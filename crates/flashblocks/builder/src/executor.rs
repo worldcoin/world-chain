@@ -812,7 +812,7 @@ where
 
     let latest_bundle = latest_payload.as_ref().map(|(p, _)| {
         p.executed_block()
-            .unwrap()
+            .unwrap() // Safe unwrap
             .block
             .execution_output
             .bundle
@@ -883,8 +883,16 @@ where
             todo!()
         };
 
-    let (bundle_state, block_execution_result, _access_list, evm_env) = execution_result;
+    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) =
+        execution_result;
+
     let (state_root, trie_updates, hashed_state) = state_root_result;
+
+    debug_assert_eq!(
+        state_root,
+        flashblock.diff().state_root,
+        "Computed state root does not match state root provided in flashblock"
+    );
 
     let block_assembler = FlashblocksBlockAssembler::new(Arc::new(chain_spec.clone()));
 
@@ -930,7 +938,10 @@ where
     let payload = OpBuiltPayload::new(
         *flashblock.payload_id(),
         sealed_block,
-        U256::ZERO,
+        latest_payload
+            .as_ref()
+            .map(|p| p.0.fees() + total_fees)
+            .unwrap_or(total_fees),
         Some(executed_block),
     );
 
@@ -964,6 +975,7 @@ fn execute_transactions(
         BlockExecutionResult<OpReceipt>,
         FlashblockAccessList,
         EvmEnv<OpSpecId>,
+        U256,
     ),
     eyre::Report,
 > {
@@ -988,13 +1000,15 @@ fn execute_transactions(
     };
 
     let evm = evm_config.evm_with_env(&mut state, evm_env);
-
+    let base_fee = evm.block().basefee;
     let mut executor = FlashblocksBlockExecutor::new(
         evm,
         execution_context.clone(),
         chain_spec,
         OpRethReceiptBuilder::default(),
     );
+
+    let mut total_fees = U256::ZERO;
 
     if latest_bundle.is_none() {
         executor
@@ -1003,9 +1017,16 @@ fn execute_transactions(
     }
 
     for transaction in transactions.iter() {
-        executor
+        let gas_used = executor
             .execute_transaction(transaction)
             .map_err(|e| eyre!(format!("failed to execute transaction: {e}")))?;
+
+        if !transaction.is_deposit() {
+            let miner_fee = transaction
+                .effective_tip_per_gas(base_fee)
+                .expect("fee is always valid; execution succeeded");
+            total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        }
     }
 
     // Apply post execution changes
@@ -1049,7 +1070,13 @@ fn execute_transactions(
 
     db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
-    Ok((db.bundle_state.clone(), result, access_list, env))
+    Ok((
+        db.bundle_state.clone(),
+        result,
+        access_list,
+        env,
+        total_fees,
+    ))
 }
 
 fn compute_state_root(
