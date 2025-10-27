@@ -122,7 +122,7 @@ impl AccountChangesConstruction {
 
 impl FlashblockAccessListConstruction {
     /// Consumes the builder and produces a [`FlashblockAccessList`]
-    pub fn build(self) -> FlashblockAccessList {
+    pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
         // Sort addresses lexicographically
         let mut changes: Vec<_> = self
             .changes
@@ -132,7 +132,11 @@ impl FlashblockAccessListConstruction {
 
         changes.par_sort_unstable_by_key(|a| a.address);
 
-        FlashblockAccessList { changes }
+        FlashblockAccessList {
+            changes,
+            min_tx_index,
+            max_tx_index,
+        }
     }
 }
 
@@ -407,8 +411,8 @@ mod tests {
                 executor.execute_transaction(tx).unwrap();
             }
 
-            let (_, _, access_list) = executor.finish_with_access_list().unwrap();
-            let access_list = access_list.build();
+            let (_, _, access_list, _, _) = executor.finish_with_access_list().unwrap();
+            let access_list = access_list.build(0, 1);
 
             assert_eq!(
                 access_list, self.expected,
@@ -459,6 +463,8 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            max_tx_index: 1,
+            min_tx_index: 0,
         };
 
         AccessListTest::new()
@@ -538,6 +544,8 @@ mod tests {
                         ..Default::default()
                     },
                 ],
+                max_tx_index: 1,
+                min_tx_index: 0,
             })
             .test();
     }

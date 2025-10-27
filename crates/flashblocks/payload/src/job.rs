@@ -9,11 +9,11 @@ use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
-use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayloadV1};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList,
     p2p::{Authorization, AuthorizedPayload},
 };
+use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayloadV1};
 use std::task::ready;
 
 use futures::FutureExt;

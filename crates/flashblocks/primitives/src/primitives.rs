@@ -223,7 +223,11 @@ mod tests {
 
     fn sample_access_list_data() -> FlashblockAccessListData {
         FlashblockAccessListData {
-            access_list: FlashblockAccessList { changes: vec![] },
+            access_list: FlashblockAccessList {
+                changes: vec![],
+                max_tx_index: 0,
+                min_tx_index: 0,
+            },
             access_list_hash: B256::with_last_byte(0x4),
         }
     }

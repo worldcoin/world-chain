@@ -12,15 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Default,
-    Deserialize,
-    Serialize,
-    Eq,
-    RlpEncodable,
-    RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockAccessListData {
     /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occured throughout execution of a
@@ -34,7 +26,13 @@ pub struct FlashblockAccessListData {
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockAccessList {
+    /// All [`AccountChanges`] constructed during the execution of transactions from `min_tx_index` to `max_tx_index`
     pub changes: Vec<AccountChanges>,
+    /// The Minimum transaction index in the global indexing of the block.
+    pub min_tx_index: u64,
+    /// The Maximum transaction index in the global indexing of the block.
+    /// Note: This will always correspond to the System Transaction e.g. Balance Increments
+    pub max_tx_index: u64,
 }
 
 impl FlashblockAccessList {
@@ -128,6 +126,10 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
     existing.code_changes = code_map.into_values().collect();
 }
 
+/// Conversion from a [`FlashblockAccessList`] to a HashMap of Bundle Accounts.
+/// This is useful for Pre-Loading a bundle into the EVM Database, or Constructing the Hashed Post State from a [`FlashblockAccessList`]
+///
+/// See [`reth_trie_common::hashed_state::HashedPostState::from_bundle_state`]
 impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
     fn from(value: FlashblockAccessList) -> Self {
         let mut result = HashMap::new();

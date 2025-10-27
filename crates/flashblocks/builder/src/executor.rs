@@ -59,6 +59,8 @@ where
 {
     inner: OpBlockExecutor<Evm, R, Spec>,
     flashblock_access_list: FlashblockAccessListConstruction,
+    min_tx_index: u64,
+    max_tx_index: u64,
 }
 
 impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
@@ -80,6 +82,8 @@ where
             flashblock_access_list: FlashblockAccessListConstruction {
                 changes: DashMap::new(),
             },
+            max_tx_index: Default::default(),
+            min_tx_index: Default::default(),
         }
     }
 
@@ -93,6 +97,9 @@ where
 
     /// Extends the receipts to reflect the aggregated execution result
     pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
+        // Update Access list transaction indices
+        self.min_tx_index = receipts.len() as u64;
+        self.max_tx_index = self.min_tx_index;
         self.inner.receipts.extend_from_slice(&receipts);
         self
     }
@@ -110,11 +117,11 @@ where
 
     /// Records the transitions from the EVM's database into the access list construction.
     fn record_transitions(&mut self) {
+        // TODO: Double check this
+        self.max_tx_index = 1 + self.inner.receipts.len() as u64;
         let transitions = self.evm().db().transition_state.as_ref();
-        let index = self.inner.receipts.len();
-
         self.flashblock_access_list
-            .on_state_transition(transitions, index);
+            .on_state_transition(transitions, self.inner.receipts.len());
     }
 
     pub fn finish_with_access_list(
@@ -124,12 +131,15 @@ where
             E,
             BlockExecutionResult<R::Receipt>,
             FlashblockAccessListConstruction,
+            u64,
+            u64,
         ),
         BlockExecutionError,
     > {
+        let (min_tx_index, max_tx_index) = (self.min_tx_index, self.max_tx_index);
         let (evm, result) = self.inner.finish()?;
         let access_list = self.flashblock_access_list.clone();
-        Ok((evm, result, access_list))
+        Ok((evm, result, access_list, min_tx_index, max_tx_index))
     }
 }
 
@@ -513,7 +523,8 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<N>, FlashblockAccessList), BlockExecutionError> {
-        let (evm, result, access_list) = self.inner.executor.finish_with_access_list()?;
+        let (evm, result, access_list, min_tx_index, max_tx_index) =
+            self.inner.executor.finish_with_access_list()?;
 
         let (db, evm_env) = evm.finish();
 
@@ -576,7 +587,7 @@ where
                 trie_updates,
                 block,
             },
-            access_list.build(),
+            access_list.build(min_tx_index, max_tx_index),
         ))
     }
 }
@@ -981,11 +992,11 @@ fn execute_transactions<'a>(
     }
 
     // Apply post execution changes
-    let (evm, result, access_list) = executor
+    let (evm, result, access_list, min_tx_index, max_tx_index) = executor
         .finish_with_access_list()
         .map_err(|e| eyre!(format!("failed to finish execution: {e}")))?;
 
-    let access_list = access_list.build();
+    let access_list = access_list.build(min_tx_index, max_tx_index);
 
     // Validate the BAL matches the provided Flashblock BAL
     let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));

@@ -671,6 +671,8 @@ mod tests {
                     new_nonce: 42,
                 }],
             }],
+            max_tx_index: 5,
+            min_tx_index: 0,
         }
     }
 

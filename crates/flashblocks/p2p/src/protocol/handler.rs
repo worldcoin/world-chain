@@ -565,11 +565,8 @@ impl FlashblocksP2PCtx {
             metrics::histogram!("flashblocks.tx_count")
                 .record(payload.diff.transactions.len() as f64);
 
-            let peer_msg = PeerMsg::FlashblocksPayloadV1((
-                payload.payload_id,
-                payload.index as usize,
-                bytes,
-            ));
+            let peer_msg =
+                PeerMsg::FlashblocksPayloadV1((payload.payload_id, payload.index as usize, bytes));
 
             self.peer_tx.send(peer_msg).ok();
 
