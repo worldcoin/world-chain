@@ -30,13 +30,13 @@ use reth_evm::{
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_evm::{Evm, EvmFactory};
-use reth_node_api::{BuiltPayload as _, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEvmConfig, OpPayloadBuilderAttributes,
-    OpRethReceiptBuilder,
+    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEngineTypes, OpEvmConfig,
+    OpPayloadBuilderAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::BestPayloadTransactions;
@@ -50,6 +50,7 @@ use revm::database::states::reverts::Reverts;
 use revm::database::BundleState;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::{error, trace};
 
 use crate::{FlashblockBuilder, PayloadBuilderCtxBuilder};
@@ -451,16 +452,13 @@ pub struct FlashblocksStateExecutor {
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 }
 
-impl Default for FlashblocksStateExecutor {
-    fn default() -> Self {
-        unimplemented!("FlashblocksStateExecutor::new must be used instead")
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct FlashblocksStateExecutorInner {
-    flashblocks: Option<Flashblocks>,
+    /// List of flashblocks for the current payload
+    flashblocks: Flashblocks,
+    /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
+    payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
 }
 
 impl FlashblocksStateExecutor {
@@ -475,8 +473,9 @@ impl FlashblocksStateExecutor {
         >,
     ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
-            flashblocks: None,
+            flashblocks: Default::default(),
             latest_payload: None,
+            payload_events: None,
         }));
 
         Self {
@@ -542,16 +541,7 @@ impl FlashblocksStateExecutor {
 
         let index = flashblock.index;
         let flashblock = Flashblock { flashblock };
-        let (_flashblocks, _new_payload) = match flashblocks {
-            Some(ref mut f) => {
-                let new_payload = f.push(flashblock.clone())?;
-                (f, new_payload)
-            }
-            None => {
-                *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()])?);
-                (flashblocks.as_mut().unwrap(), true)
-            }
-        };
+        flashblocks.push(flashblock.clone())?;
 
         *latest_payload = Some((built_payload, index));
 
@@ -561,14 +551,12 @@ impl FlashblocksStateExecutor {
     }
 
     /// Returns a reference to the latest flashblock.
-    pub fn last(&self) -> Option<Flashblock> {
-        self.inner.read().flashblocks.as_ref().map(|f| Flashblock {
-            flashblock: f.last().clone(),
-        })
+    pub fn last(&self) -> Flashblock {
+        self.inner.read().flashblocks.last().clone()
     }
 
     /// Returns a reference to the latest flashblock.
-    pub fn flashblocks(&self) -> Option<Flashblocks> {
+    pub fn flashblocks(&self) -> Flashblocks {
         self.inner.read().flashblocks.clone()
     }
 
@@ -577,6 +565,25 @@ impl FlashblocksStateExecutor {
         &self,
     ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
         self.pending_block.subscribe()
+    }
+
+    /// Registers a new broadcast channel for built payloads.
+    pub fn register_payload_events(&self, tx: broadcast::Sender<Events<OpEngineTypes>>) {
+        self.inner.write().payload_events = Some(tx);
+    }
+
+    /// Broadcasts a new payload to cache in the in memory tree.
+    pub fn broadcast_payload(
+        &self,
+        event: Events<OpEngineTypes>,
+        payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
+    ) -> eyre::Result<()> {
+        if let Some(payload_events) = payload_events {
+            if let Err(e) = payload_events.send(event) {
+                error!("error broadcasting payload: {e:?}");
+            }
+        }
+        Ok(())
     }
 }
 
@@ -602,37 +609,38 @@ where
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        ..
+        ref mut payload_events,
     } = *state_executor.inner.write();
 
     let flashblock = Flashblock { flashblock };
-    let (flashblocks, _new_payload) = match flashblocks {
-        Some(ref mut f) => {
-            if let Some(latest_payload) = latest_payload {
-                if latest_payload.0.id() == flashblock.flashblock.payload_id
-                    && latest_payload.1 >= flashblock.flashblock.index
-                {
-                    // Already processed this flashblock
-                    pending_block.send_replace(latest_payload.0.executed_block());
-                    return Ok(());
-                }
-            }
 
-            let new_payload = f.push(flashblock.clone())?;
-            (f, new_payload)
+    if let Some(latest_payload) = latest_payload {
+        if latest_payload.0.id() == flashblock.flashblock.payload_id
+            && latest_payload.1 >= flashblock.flashblock.index
+        {
+            // Already processed this flashblock. This happens when set directly
+            // from publish_build_payload. Since we already built the payload, no need
+            // to do it again.
+            pending_block.send_replace(latest_payload.0.executed_block());
+            return Ok(());
         }
-        None => {
-            *flashblocks = Some(Flashblocks::new(vec![flashblock.clone()]).unwrap());
-            (flashblocks.as_mut().unwrap(), true)
-        }
+    }
+
+    // If for whatever reason we are not processing flashblocks in order
+    // we will error and return here.
+    let base = if flashblocks.is_new_payload(&flashblock)? {
+        *latest_payload = None;
+        // safe unwrap from check in is_new_payload
+        flashblock.base().unwrap()
+    } else {
+        flashblocks.base()
     };
 
-    let flashblock = flashblocks.last();
+    let diff = &flashblock.flashblock.diff;
+    let index = flashblock.flashblock.index;
     let cancel = CancelOnDrop::default();
-    let base = flashblocks.base();
 
-    let transactions = flashblock
-        .diff
+    let transactions = diff
         .transactions
         .iter()
         .map(|b| {
@@ -642,12 +650,12 @@ where
         .collect::<eyre::Result<Vec<_>>>()?;
 
     let eth_attrs = EthPayloadBuilderAttributes {
-        id: PayloadId(flashblocks.payload_id().to_owned()),
+        id: PayloadId(flashblock.payload_id().to_owned()),
         parent: base.parent_hash,
         timestamp: base.timestamp,
         suggested_fee_recipient: base.fee_recipient,
         prev_randao: base.prev_randao,
-        withdrawals: Withdrawals(flashblock.diff.withdrawals.clone()),
+        withdrawals: Withdrawals(diff.withdrawals.clone()),
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
     };
 
@@ -699,10 +707,14 @@ where
     };
 
     trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
-
-    *latest_payload = Some((payload.clone(), flashblock.index));
-
+    flashblocks.push(flashblock)?;
+    *latest_payload = Some((payload.clone(), index));
     pending_block.send_replace(payload.executed_block());
+
+    state_executor.broadcast_payload(
+        Events::BuiltPayload(payload.clone()),
+        payload_events.clone(),
+    )?;
 
     Ok(())
 }
