@@ -12,15 +12,7 @@ use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetada
 /// like parent hash and block number are excluded since they remain constant throughout
 /// the block's construction.
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Default,
-    Deserialize,
-    Serialize,
-    Eq,
-    RlpEncodable,
-    RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct ExecutionPayloadFlashblockDeltaV1 {

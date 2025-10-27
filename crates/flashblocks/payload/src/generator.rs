@@ -279,7 +279,7 @@ where
         let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
             PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
         })?;
-        
+
         if *flashblock.payload_id() == attributes.payload_id() {
             // If we have a pre-confirmed state, we can use it to build the payload
             debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
