@@ -1,3 +1,5 @@
+use core::fmt;
+
 use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
@@ -35,6 +37,36 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals_root: B256,
     /// Optional [`FlashblockAccessList`] and associated Hash
     pub access_list_data: Option<FlashblockAccessListData>,
+}
+
+impl fmt::Display for ExecutionPayloadFlashblockDeltaV1 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ExecutionPayloadFlashblockDeltaV1 {{ \
+             state_root: {}, \
+             receipts_root: {}, \
+             logs_bloom: {}, \
+             gas_used: {}, \
+             block_hash: {}, \
+             transactions: {} tx(s), \
+             withdrawals: {} withdrawal(s), \
+             withdrawals_root: {}, \
+             access_list_data: {} \
+             }}",
+            self.state_root,
+            self.receipts_root,
+            self.logs_bloom,
+            self.gas_used,
+            self.block_hash,
+            self.transactions.len(),
+            self.withdrawals.len(),
+            self.withdrawals_root,
+            self.access_list_data
+                .as_ref()
+                .map_or_else(|| "None".to_string(), |data| format!("{:#?}", data))
+        )
+    }
 }
 
 /// Represents the base configuration of an execution payload that remains constant

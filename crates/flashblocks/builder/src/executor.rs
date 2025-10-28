@@ -47,11 +47,12 @@ use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::{BundleAccount, BundleState};
-use tokio::time::Instant;
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tokio::time::Instant;
+use tracing::{error, info, trace};
 
 use crate::access_list::FlashblockAccessListConstruction;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -78,7 +79,13 @@ where
     Spec: OpHardforks + Clone,
 {
     /// Creates a new [`FlashblocksBlockExecutor`].
-    pub fn new(evm: E, ctx: OpBlockExecutionCtx, spec: Spec, receipt_builder: R) -> Self {
+    pub fn new(
+        evm: E,
+        ctx: OpBlockExecutionCtx,
+        spec: Spec,
+        receipt_builder: R,
+        min_tx_index: u64,
+    ) -> Self {
         let executor = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
 
         Self {
@@ -86,8 +93,8 @@ where
             flashblock_access_list: FlashblockAccessListConstruction {
                 changes: DashMap::new(),
             },
-            max_tx_index: Default::default(),
-            min_tx_index: Default::default(),
+            max_tx_index: min_tx_index + 1,
+            min_tx_index,
         }
     }
 
@@ -101,9 +108,6 @@ where
 
     /// Extends the receipts to reflect the aggregated execution result
     pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
-        // Update Access list transaction indices
-        self.min_tx_index = receipts.len() as u64;
-        self.max_tx_index = self.min_tx_index;
         self.inner.receipts.extend_from_slice(&receipts);
         self
     }
@@ -122,11 +126,10 @@ where
 
     /// Records the transitions from the EVM's database into the access list construction.
     fn record_transitions(&mut self) {
-        // TODO: Double check this
-        self.max_tx_index = 1 + self.inner.receipts.len() as u64;
         let transitions = self.evm().db().transition_state.as_ref();
         self.flashblock_access_list
             .on_state_transition(transitions, self.inner.receipts.len());
+        info!(target: "test_target", "recorded transitions for tx index range: {} - {}", self.min_tx_index, self.max_tx_index);
     }
 
     #[expect(clippy::type_complexity)]
@@ -143,8 +146,9 @@ where
         BlockExecutionError,
     > {
         let (min_tx_index, max_tx_index) = (self.min_tx_index, self.max_tx_index);
-        let (evm, result) = self.inner.finish()?;
         let access_list = self.flashblock_access_list.clone();
+        let (evm, result) = self.inner.finish()?;
+
         Ok((evm, result, access_list, min_tx_index, max_tx_index))
     }
 }
@@ -169,20 +173,15 @@ where
         res
     }
 
-    fn execute_transaction(
-        &mut self,
-        tx: impl ExecutableTx<Self>,
-    ) -> Result<u64, BlockExecutionError> {
-        self.execute_transaction_without_commit(&tx)
-            .and_then(|output| self.commit_transaction(output, &tx))
-    }
-
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+        self.record_transitions();
+        self.max_tx_index += 1;
+        res
     }
 
     fn execute_transaction_without_commit(
@@ -197,9 +196,7 @@ where
         output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
         tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
-        let res = self.inner.commit_transaction(output, tx);
-        self.record_transitions();
-        res
+        self.inner.commit_transaction(output, tx)
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -292,6 +289,7 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
                 ctx,
                 self.spec().clone(),
                 OpRethReceiptBuilder::default(),
+                0,
             )
             .with_bundle_prestate(pre_state.clone()); // TODO: Terrible clone here
         }
@@ -301,6 +299,7 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
             ctx,
             self.spec().clone(),
             OpRethReceiptBuilder::default(),
+            0,
         )
     }
 }
@@ -556,7 +555,11 @@ where
 
         db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
-        // calculate the state root
+        // Write the expected bundle state to a JSON
+        // let json = serde_json::to_string_pretty(&db.bundle_state).map_err(BlockExecutionError::other)?;
+        // std::fs::write("expected_bundle_state.json", json).map_err(BlockExecutionError::other)?;
+
+        // calculate the state root``
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
@@ -586,6 +589,21 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
+        let access_list_before = access_list.clone();
+        // TODO: Remove debug traces
+        trace!(target: "test_target", "recorded transitions for tx index range: {} - {}, transactions length {:#?}", min_tx_index, max_tx_index, block.body().transactions().count());
+        trace!(target: "test_target", "finished execution with access list length {:#?}", access_list_before.changes.len());
+
+        let access_list_after = access_list.build(min_tx_index, max_tx_index);
+        // let access_list_bundle: HashMap<Address, BundleAccount> =
+        //     access_list_after.clone().into();
+
+        // // Write the access list to a JSON
+        // let json = serde_json::to_string_pretty(&access_list_bundle)
+        //     .map_err(BlockExecutionError::other)?;
+        // std::fs::write("flashblock_access_list_bundle.json", json).map_err(BlockExecutionError::other)?;
+
+        trace!(target: "test_target", "built final access list length {:#?}", access_list_after.changes.len());
         Ok((
             BlockBuilderOutcome {
                 execution_result: result,
@@ -593,7 +611,7 @@ where
                 trie_updates,
                 block,
             },
-            access_list.build(min_tx_index, max_tx_index),
+            access_list_after,
         ))
     }
 }
@@ -748,7 +766,7 @@ where
     Provider:
         StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone + 'static,
 {
-    trace!(target: "flashblocks::state_executor",id = %flashblock.payload_id, index = %flashblock.index, "processing flashblock");
+    trace!(target: "flashblocks::state_executor", id = %flashblock.payload_id, diff = %flashblock.diff, index = %flashblock.index, "processing flashblock");
 
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
@@ -780,7 +798,7 @@ where
         flashblocks.base()
     };
 
-    let flashblock = flashblocks.last();
+    let index = flashblock.flashblock().index;
 
     let transactions = flashblock
         .diff()
@@ -857,58 +875,62 @@ where
 
     let before_execution = Instant::now();
 
-    let (execution_result, state_root_result) =
-        if let Some(access_list_data) = flashblock.diff().access_list_data.as_ref() {
-            let (execution_result, state_root_result) = rayon::join(
-                move || {
-                    execute_transactions(
-                        transactions_clone.clone(),
-                        Some(access_list_data.access_list_hash),
-                        &evm_config,
-                        sealed_header.clone(),
-                        state_provider_clone.clone(),
-                        &attributes,
-                        latest_bundle,
-                        execution_context_clone.clone(),
-                        chain_spec,
-                    )
-                },
-                move || {
-                    let optimistic_bundle: HashMap<Address, BundleAccount> =
-                        access_list_data.access_list.clone().into();
+    let (execution_result, state_root_result) = if let Some(access_list_data) =
+        flashblock.diff().access_list_data.as_ref()
+    {
+        info!(target: "flashblocks::state_executor", "executing flashblock with access list");
+        let (execution_result, state_root_result) = rayon::join(
+            move || {
+                execute_transactions(
+                    transactions_clone.clone(),
+                    Some(access_list_data.access_list_hash),
+                    &evm_config,
+                    sealed_header.clone(),
+                    state_provider_clone.clone(),
+                    &attributes,
+                    latest_bundle,
+                    execution_context_clone.clone(),
+                    chain_spec,
+                )
+            },
+            move || {
+                let optimistic_bundle: HashMap<Address, BundleAccount> =
+                    access_list_data.access_list.clone().into();
 
-                    compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
-                },
-            );
+                compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
+            },
+        );
 
-            (execution_result?, state_root_result?)
-        } else {
-            let execution_result = execute_transactions(
-                        transactions_clone.clone(),
-                        None,
-                        &evm_config,
-                        sealed_header.clone(),
-                        state_provider_clone.clone(),
-                        &attributes,
-                        latest_bundle,
-                        execution_context_clone.clone(),
-                        chain_spec,
-                    )?;
+        (execution_result?, state_root_result?)
+    } else {
+        info!(target: "flashblocks::state_executor", "executing flashblock without access list");
+        let execution_result = execute_transactions(
+            transactions_clone.clone(),
+            None,
+            &evm_config,
+            sealed_header.clone(),
+            state_provider_clone.clone(),
+            &attributes,
+            latest_bundle,
+            execution_context_clone.clone(),
+            chain_spec,
+        )?;
 
-            let converted: HashMap<Address, BundleAccount>= execution_result.clone().0.state.into_iter().collect();
-            let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
-            (execution_result, state_root_result)
-        };
-
+        let converted: HashMap<Address, BundleAccount> =
+            execution_result.clone().0.state.into_iter().collect();
+        let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
+        (execution_result, state_root_result)
+    };
 
     let elapsed = before_execution.elapsed().as_millis();
     tracing::info!(target: "flashblocks::state_executor", "time taken to get here: {:?}, bal enabled: {}", elapsed, flashblock.diff().access_list_data.is_some());
 
-    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) = execution_result;
-    
+    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) =
+        execution_result;
+
     let (state_root, trie_updates, hashed_state) = state_root_result;
 
-    debug_assert_eq!(
+    assert_eq!(
         state_root,
         flashblock.diff().state_root,
         "Computed state root does not match state root provided in flashblock"
@@ -965,8 +987,9 @@ where
         Some(executed_block),
     );
 
+    flashblocks.push(flashblock)?;
     // construct the full payload
-    *latest_payload = Some((payload.clone(), flashblock.flashblock.index));
+    *latest_payload = Some((payload.clone(), index));
 
     pending_block.send_replace(payload.executed_block());
 
@@ -1027,6 +1050,7 @@ fn execute_transactions(
         execution_context.clone(),
         chain_spec,
         OpRethReceiptBuilder::default(),
+        0, // TODO: Need to pre-load receipts from the latest payload if available min_tx_index = receipts.len() as u64
     );
 
     let mut total_fees = U256::ZERO;
@@ -1062,9 +1086,10 @@ fn execute_transactions(
 
     if provided_bal_hash.is_some() && expected_bal_hash != provided_bal_hash.unwrap() {
         return Err(eyre!(format!(
-                "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-                expected_bal_hash, provided_bal_hash.unwrap()
-            )));
+            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+            expected_bal_hash,
+            provided_bal_hash.unwrap()
+        )));
     }
 
     let (db, env) = evm.finish();
@@ -1100,7 +1125,7 @@ fn execute_transactions(
     ))
 }
 
-fn compute_state_root(
+pub fn compute_state_root(
     state_provider: Arc<Box<dyn StateProvider>>,
     bundle: &HashMap<Address, BundleAccount>,
 ) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), eyre::Report> {

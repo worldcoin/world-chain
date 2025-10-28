@@ -176,7 +176,8 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
                 .map(|change| change.new_code())
                 .unwrap_or_default();
 
-            let code_hash = keccak256(latest_code_changes.as_ref());
+            let bytecode = Bytecode::new_raw(latest_code_changes.clone());
+            let code_hash = bytecode.hash_slow();
 
             let account_info = AccountInfo {
                 balance: latest_balance_change,

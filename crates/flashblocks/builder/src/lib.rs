@@ -30,7 +30,7 @@ use reth_evm::{
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
-use tracing::error;
+use tracing::{error, info};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -448,16 +448,16 @@ where
                 )?
                 .is_none()
             {
-                warn!(target: "flashblocks::payload_builder", "payload build cancelled");
-                if let Some(best_payload) = committed_payload {
-                    // we can return the previous best payload since we didn't include any new txs
-                    return Ok((
-                        BuildOutcomeKind::Freeze(best_payload),
-                        FlashblockAccessList::default(),
-                    ));
-                } else {
-                    return Err(PayloadBuilderError::MissingPayload);
-                }
+                // warn!(target: "flashblocks::payload_builder", "payload build cancelled");
+                // if let Some(best_payload) = committed_payload {
+                //     // we can return the previous best payload since we didn't include any new txs
+                //     return Ok((
+                //         BuildOutcomeKind::Freeze(best_payload),
+                //         FlashblockAccessList::default(),
+                //     ));
+                // } else {
+                //     return Err(PayloadBuilderError::MissingPayload);
+                // }
             }
 
             // check if the new payload is even more valuable
@@ -474,6 +474,7 @@ where
 
         // 6. Build the block
         let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
+        info!(target: "test_target", "built new payload with {} transactions, {:#?}", build_outcome.block.body().transactions().count(), access_list.changes.len());
 
         // 7. Seal the block
         let BlockBuilderOutcome {
@@ -578,11 +579,14 @@ where
             .context_for_next_block(ctx.parent(), attributes)
             .map_err(PayloadBuilderError::other)?;
 
+        let min_tx_index = receipts.len() as u64;
+
         let mut executor = FlashblocksBlockExecutor::new(
             evm,
             execution_ctx.clone(),
             ctx.spec().clone(),
             OpRethReceiptBuilder::default(),
+            min_tx_index,
         )
         .with_receipts(receipts);
 

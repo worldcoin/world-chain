@@ -7,6 +7,7 @@ use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
 use revm::{database::TransitionState, state::Bytecode};
 use std::collections::{HashMap, HashSet};
+use tracing::{info, trace};
 
 pub type BlockAccessIndex = u16;
 
@@ -113,7 +114,7 @@ impl AccountChangesConstruction {
                 .into_iter()
                 .map(|(tx_index, bytecode)| CodeChange {
                     block_access_index: tx_index as u64,
-                    new_code: bytecode.bytes(),
+                    new_code: bytecode.original_bytes(),
                 })
                 .collect(),
         }
@@ -123,6 +124,7 @@ impl AccountChangesConstruction {
 impl FlashblockAccessListConstruction {
     /// Consumes the builder and produces a [`FlashblockAccessList`]
     pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
+        trace!(target: "test_target", "Building FlashblockAccessList with {} account changes", self.changes.len());
         // Sort addresses lexicographically
         let mut changes: Vec<_> = self
             .changes
@@ -130,6 +132,7 @@ impl FlashblockAccessListConstruction {
             .map(|(k, v)| v.build(k))
             .collect();
 
+        trace!(target: "test_target", "Built {} account changes", changes.len());
         changes.par_sort_unstable_by_key(|a| a.address);
 
         FlashblockAccessList {
@@ -142,6 +145,7 @@ impl FlashblockAccessListConstruction {
 
 impl FlashblockAccessListConstruction {
     pub fn on_state_transition(&self, transitions: Option<&TransitionState>, index: usize) {
+        info!(target: "test_target", "Processing state transition for tx index {} changes length {}", index, self.changes.len());
         let transitions = match transitions {
             Some(t) => t,
             None => return,
@@ -217,7 +221,7 @@ impl FlashblockAccessListConstruction {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::FlashblocksBlockExecutor;
+    use crate::executor::{compute_state_root, FlashblocksBlockExecutor};
     use alloy_consensus::{constants::KECCAK_EMPTY, TxEip1559};
     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
     use alloy_genesis::{Genesis, GenesisAccount};
@@ -234,10 +238,12 @@ mod tests {
     use reth_evm::{block::BlockExecutor, ConfigureEvm, EvmFactory};
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
-    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives::{transaction::SignedTransaction, Recovered};
+    use reth_provider::BlockExecutionResult;
     use revm::{
-        database::InMemoryDB,
+        context::ContextTr,
+        database::{BundleState, InMemoryDB},
         state::{AccountInfo, Bytecode},
     };
 
@@ -251,7 +257,7 @@ mod tests {
             }
         }
 
-        #[sol(bytecode = "0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b929150505600")]
+        #[sol(bytecode = "608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
         contract SomeContract {
             mapping(uint256 => bool) public map;
             uint256 public nonce;
@@ -389,7 +395,15 @@ mod tests {
             self
         }
 
-        pub fn test(mut self) {
+        pub fn test<'a>(
+            mut self,
+        ) -> (
+            BundleState,
+            BlockExecutionResult<OpReceipt>,
+            FlashblockAccessList,
+            u64,
+            u64,
+        ) {
             let evm_env = EVM_CONFIG.evm_env(CHAIN_SPEC.genesis_header()).unwrap();
             let evm = OpEvmFactory::default().create_evm(&mut self.db, evm_env);
             let ctx = OpBlockExecutionCtx {
@@ -403,6 +417,7 @@ mod tests {
                 ctx,
                 CHAIN_SPEC.clone(),
                 OpRethReceiptBuilder::default(),
+                0,
             );
 
             let _ = executor.apply_pre_execution_changes();
@@ -411,7 +426,9 @@ mod tests {
                 executor.execute_transaction(tx).unwrap();
             }
 
-            let (_, _, access_list, _, _) = executor.finish_with_access_list().unwrap();
+            let (mut evm, execution_result, access_list, min_tx_index, max_tx_index) =
+                executor.finish_with_access_list().unwrap();
+
             let access_list = access_list.build(0, 1);
 
             assert_eq!(
@@ -419,54 +436,21 @@ mod tests {
                 "Access list does not match got {:#?}, expected {:#?}",
                 access_list, self.expected
             );
+
+            let bundle = evm.db_mut().take_bundle();
+
+            (
+                bundle,
+                execution_result,
+                access_list,
+                min_tx_index,
+                max_tx_index,
+            )
         }
     }
 
     #[test]
     fn test_bal_balance_changes() {
-        let expected = FlashblockAccessList {
-            changes: vec![
-                AccountChanges {
-                    address: ALICE.address(),
-                    balance_changes: vec![BalanceChange {
-                        block_access_index: 1,
-                        post_balance: U256::from(10_u128.pow(21) - 100 - 21000),
-                    }],
-                    nonce_changes: vec![NonceChange {
-                        block_access_index: 1,
-                        new_nonce: 1,
-                    }],
-                    ..Default::default()
-                },
-                AccountChanges {
-                    address: address!("0x4200000000000000000000000000000000000019"),
-                    balance_changes: vec![BalanceChange {
-                        block_access_index: 1,
-                        post_balance: U256::from(21000),
-                    }],
-                    code_changes: vec![CodeChange {
-                        block_access_index: 1,
-                        new_code: bytes!("0x00"),
-                    }],
-                    nonce_changes: vec![NonceChange {
-                        block_access_index: 1,
-                        new_nonce: 0,
-                    }],
-                    ..Default::default()
-                },
-                AccountChanges {
-                    address: BOB.address(),
-                    balance_changes: vec![BalanceChange {
-                        block_access_index: 1,
-                        post_balance: U256::from(101),
-                    }],
-                    ..Default::default()
-                },
-            ],
-            max_tx_index: 1,
-            min_tx_index: 0,
-        };
-
         AccessListTest::new()
             .with_tx(
                 ALICE.clone(),
@@ -474,7 +458,48 @@ mod tests {
                 U256::from(100),
                 Bytes::default(),
             )
-            .with_expected(expected)
+            .with_expected(FlashblockAccessList {
+                changes: vec![
+                    AccountChanges {
+                        address: ALICE.address(),
+                        balance_changes: vec![BalanceChange {
+                            block_access_index: 1,
+                            post_balance: U256::from(10_u128.pow(21) - 100 - 21000),
+                        }],
+                        nonce_changes: vec![NonceChange {
+                            block_access_index: 1,
+                            new_nonce: 1,
+                        }],
+                        ..Default::default()
+                    },
+                    AccountChanges {
+                        address: address!("0x4200000000000000000000000000000000000019"),
+                        balance_changes: vec![BalanceChange {
+                            block_access_index: 1,
+                            post_balance: U256::from(21000),
+                        }],
+                        code_changes: vec![CodeChange {
+                            block_access_index: 1,
+                            new_code: Bytes::default(),
+                        }],
+                        nonce_changes: vec![NonceChange {
+                            block_access_index: 1,
+                            new_nonce: 0,
+                        }],
+                        ..Default::default()
+                    },
+                    AccountChanges {
+                        address: BOB.address(),
+                        balance_changes: vec![BalanceChange {
+                            block_access_index: 1,
+                            post_balance: U256::from(101),
+                        }],
+                        ..Default::default()
+                    },
+                ],
+                max_tx_index: 1,
+                min_tx_index: 0,
+            })
             .test();
     }
 
@@ -523,7 +548,7 @@ mod tests {
                         }],
                         code_changes: vec![CodeChange {
                             block_access_index: 1,
-                            new_code: bytes!("0x00"),
+                            new_code: Bytes::default(),
                         }],
                         ..Default::default()
                     },
@@ -548,5 +573,34 @@ mod tests {
                 min_tx_index: 0,
             })
             .test();
+    }
+
+    #[test]
+    fn test_bal_state_root_computation() {
+        // let (bundle_state, outcome, access_list, min_tx_index, max_tx_index) =
+        //     AccessListTest::new()
+        //         .with_tx(
+        //             ALICE.clone(),
+        //             Some(BOB.address()),
+        //             U256::ONE,
+        //             Bytes::default(),
+        //         )
+        //         .with_tx(
+        //             ALICE.clone(),
+        //             Some(BOB.address()),
+        //             U256::ONE,
+        //             Bytes::default(),
+        //         )
+        //         .with_tx(
+        //             ALICE.clone(),
+        //             Some(BOB.address()),
+        //             U256::ONE,
+        //             Bytes::default(),
+        //         )
+        //         .with_expected(Default::default())
+        //         .test();
+
+        // Re-construct the state root both from the created bundle from the executor, and from the converted access list
+        // let constructed_bundl_hash = compute_state_root()
     }
 }

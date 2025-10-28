@@ -230,6 +230,7 @@ where
             offset,
             Some(access_list),
         );
+
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;
