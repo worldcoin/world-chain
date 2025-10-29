@@ -1,6 +1,5 @@
 use crate::{
     executor::bal_builder::BalBuilderBlockExecutor,
-    executor::bal_builder::FlashblocksBlockBuilder,
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -8,6 +7,7 @@ use crate::{
     },
 };
 
+use crate::block_builder::FlashblocksBlockBuilder;
 use alloy_consensus::Transaction;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvm;
