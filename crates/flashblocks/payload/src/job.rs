@@ -270,7 +270,7 @@ where
 
         // flashblocks interval reached, and clearance received to publish.
         // commit to the best payload, reset the interval, and publish the payload
-        if joined_fut.poll_unpin(cx).is_ready() {
+        if joined_fut.poll_unpin(cx).is_ready() && !this.best_payload.is_frozen() {
             if let Some(payload) = this.best_payload.payload().cloned() {
                 // record metrics
                 this.record_payload_metrics(&payload);

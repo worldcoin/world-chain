@@ -221,12 +221,12 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            committed_payload: None,
+            committed_payload: pre_state.clone(),
             flashblock_interval: self.config.interval,
             flashblock_deadline,
             recommit_interval,
             best_payload: pre_state
-                .map(|p| PayloadState::Frozen(p))
+                .map(PayloadState::Frozen)
                 .unwrap_or(PayloadState::Missing),
             pending_block: None,
             cached_reads,
