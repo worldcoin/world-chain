@@ -1,16 +1,28 @@
+use alloy_consensus::TxReceipt;
 use alloy_consensus::{Header, Transaction};
-use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_eips::Encodable2718;
+use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
+use alloy_op_evm::OpBlockExecutor;
+use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
+use dashmap::DashMap;
 use eyre::eyre::eyre;
 use flashblocks_primitives::access_list::FlashblockAccessList;
+use parking_lot::RwLock;
+use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutionError, BlockExecutor};
 use reth_evm::op_revm::OpSpecId;
-use reth_evm::{ConfigureEvm, Evm, EvmEnv};
+use reth_evm::{
+    block::{CommitChanges, ExecutableTx},
+    Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
+};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::Recovered;
@@ -18,13 +30,126 @@ use reth_primitives::SealedHeader;
 use reth_provider::{BlockExecutionResult, StateProvider};
 use reth_trie_common::updates::TrieUpdates;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState};
+use revm::database::{BundleAccount, BundleState, CacheDB};
+use revm::DatabaseRef;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
+
+/// A Block Executor for Optimism that can load pre state from previous flashblocks
+///
+/// A Block Access List is used to improve execution speed
+///
+/// 'BlockExecutor' trait is not flexible enough for our purposes.
+/// TODO: WIP, currently unused
+pub struct BalBlockExecutor<Evm, R, Spec>
+where
+    R: OpReceiptBuilder,
+{
+    inner: OpBlockExecutor<Evm, R, Spec>,
+    flashblock_access_list: FlashblockAccessList,
+}
+
+pub struct ParallelTxExecutor<Evm, R, Spec>
+where
+    R: OpReceiptBuilder,
+{
+    inner: OpBlockExecutor<Evm, R, Spec>,
+    flashblock_access_list: FlashblockAccessListConstruction,
+}
+
+impl<'db, DB, E, R, Spec> BalBlockExecutor<E, R, Spec>
+where
+    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + 'db,
+    E: Evm<
+            DB = &'db mut State<DB>,
+            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+            Spec = OpSpecId,
+        > + Send
+        + Sync,
+    R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt> + Send + Sync,
+    Spec: OpHardforks + Clone + Send + Sync,
+{
+    /// Creates a new [`FlashblocksBlockExecutor`].
+    pub fn new(
+        evm: E,
+        ctx: OpBlockExecutionCtx,
+        spec: Spec,
+        receipt_builder: R,
+        flashblock_access_list: FlashblockAccessList,
+    ) -> Self {
+        let executor = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
+
+        Self {
+            inner: executor,
+            flashblock_access_list,
+        }
+    }
+
+    /// Extends the [`BundleState`] of the executor with a specified pre-image.
+    ///
+    /// This should be used _only_ when initializing the executor
+    pub fn with_bundle_prestate(mut self, pre_state: BundleState) -> Self {
+        self.inner.evm_mut().db_mut().bundle_state.extend(pre_state);
+        self
+    }
+
+    /// Extends the receipts to reflect the aggregated execution result
+    pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
+        self.inner.receipts.extend_from_slice(&receipts);
+        self
+    }
+
+    fn execute_transaction(
+        self: Arc<Self>,
+        // tx: impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Send + Sync,
+        tx: (),
+    ) -> Result<(), BlockExecutionError> {
+        // self.inner.evm.components_mut
+        todo!();
+    }
+
+    fn finish(self) -> Result<(E, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
+        let res = self.inner.finish();
+
+        res
+    }
+
+    fn execute_block(
+        mut self,
+        transactions: impl IntoParallelIterator<
+            // Item = impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Sized + Send + Sync,
+            Item = (),
+        >,
+    ) -> Result<
+        BlockExecutionResult<<OpBlockExecutor<E, R, Spec> as BlockExecutor>::Receipt>,
+        BlockExecutionError,
+    >
+    where
+        Self: Sized,
+    {
+        self.inner.apply_pre_execution_changes()?;
+
+        let (state, env) = self.inner.evm.finish();
+        let cache_db = CacheDB::new(&*state);
+        let cache_db2 = cache_db.clone();
+
+        let evm = OpEvmFactory::default().create_evm(cache_db, env);
+        // let new = clone_state(&tmp_state);
+
+        // let res = transactions
+        //     .into_par_iter()
+        //     .try_for_each(|tx| arc.execute_transaction(tx));
+
+        // self.inner.apply_post_execution_changes()
+        todo!()
+    }
+}
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_transactions(
@@ -164,4 +289,15 @@ pub fn compute_state_root(
         .map_err(BlockExecutionError::other)?;
 
     Ok((state_root, trie_updates, hashed_state))
+}
+
+pub fn clone_state<DB>(state: &State<Arc<DB>>) -> State<Arc<DB>> {
+    State {
+        cache: state.cache.clone(),
+        database: state.database.clone(),
+        transition_state: state.transition_state.clone(),
+        bundle_state: state.bundle_state.clone(),
+        use_preloaded_bundle: state.use_preloaded_bundle.clone(),
+        block_hashes: state.block_hashes.clone(),
+    }
 }

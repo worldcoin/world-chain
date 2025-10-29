@@ -143,7 +143,12 @@ impl FlashblockAccessListConstruction {
     }
 
     pub fn with_transition_state(&self, transitions: Option<&TransitionState>, index: usize) {
-        info!(target: "test_target", "Processing state transition for tx index {} changes length {}", index, self.changes.len());
+        info!(
+            target: "test_target",
+            "Processing state transition for tx index {} changes length {}",
+            index,
+            self.changes.len()
+        );
         let transitions = match transitions {
             Some(t) => t,
             None => return,
