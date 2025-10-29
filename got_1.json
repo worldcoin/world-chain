@@ -1,0 +1,133 @@
+{
+  "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001": {
+    "info": {
+      "balance": "0x0",
+      "nonce": 35,
+      "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code": {
+        "LegacyAnalyzed": {
+          "bytecode": "0x00",
+          "original_len": 0,
+          "jump_table": {
+            "order": "bitvec::order::Lsb0",
+            "head": {
+              "width": 8,
+              "index": 0
+            },
+            "bits": 0,
+            "data": []
+          }
+        }
+      }
+    },
+    "original_info": null,
+    "storage": {},
+    "status": "Changed"
+  },
+  "0x0000f90827f1c53a10cb7a02335b175320002935": {
+    "info": {
+      "balance": "0x0",
+      "nonce": 1,
+      "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code": {
+        "LegacyAnalyzed": {
+          "bytecode": "0x00",
+          "original_len": 0,
+          "jump_table": {
+            "order": "bitvec::order::Lsb0",
+            "head": {
+              "width": 8,
+              "index": 0
+            },
+            "bits": 0,
+            "data": []
+          }
+        }
+      }
+    },
+    "original_info": null,
+    "storage": {
+      "0x22": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0x3c877b5c8e610d06a34759b93739c83c11bb4a462e8ff006d35e98441c4d2fda"
+      }
+    },
+    "status": "Changed"
+  },
+  "0x000f3df6d732807ef1319fb7b8bb8522d0beac02": {
+    "info": {
+      "balance": "0x0",
+      "nonce": 1,
+      "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code": {
+        "LegacyAnalyzed": {
+          "bytecode": "0x00",
+          "original_len": 0,
+          "jump_table": {
+            "order": "bitvec::order::Lsb0",
+            "head": {
+              "width": 8,
+              "index": 0
+            },
+            "bits": 0,
+            "data": []
+          }
+        }
+      }
+    },
+    "original_info": null,
+    "storage": {
+      "0x17b5": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0x69028f87"
+      },
+      "0x37b4": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0xc29ef37544f8e643c51240d66e6d066359dd9f4c2f39a93a0b9f8b880b68e508"
+      }
+    },
+    "status": "Changed"
+  },
+  "0x4200000000000000000000000000000000000015": {
+    "info": {
+      "balance": "0x0",
+      "nonce": 0,
+      "code_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code": {
+        "LegacyAnalyzed": {
+          "bytecode": "0x00",
+          "original_len": 0,
+          "jump_table": {
+            "order": "bitvec::order::Lsb0",
+            "head": {
+              "width": 8,
+              "index": 0
+            },
+            "bits": 0,
+            "data": []
+          }
+        }
+      }
+    },
+    "original_info": null,
+    "storage": {
+      "0x2": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0xa5f640b7284c749d1aa7037e5f13327714c63d06b2212fca332049e100bc866"
+      },
+      "0x3": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0x558000c5fc50000000000000000"
+      },
+      "0x0": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0x69028f71000000000000001a"
+      },
+      "0x1": {
+        "previous_or_original_value": "0x0",
+        "present_value": "0x2c68502"
+      }
+    },
+    "status": "Changed"
+  }
+}

@@ -223,7 +223,7 @@ where
 
         // Write the expected bundle state to a JSON
         let expected_json =
-            serde_json::to_string_pretty(&db.bundle_state).map_err(BlockExecutionError::other)?;
+            serde_json::to_string_pretty(&db.bundle_state.state).map_err(BlockExecutionError::other)?;
         // std::fs::write("expected_bundle_state.json", json).map_err(BlockExecutionError::other)?;
 
         // calculate the state root``

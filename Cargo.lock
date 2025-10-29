@@ -13925,6 +13925,7 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "op-alloy-consensus",
+ "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "parking_lot",
  "rand 0.9.2",
