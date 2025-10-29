@@ -2,7 +2,7 @@ use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
 use alloy_primitives::map::foldhash::HashMap as AlloyHashMap;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
     db::{states::StorageSlot, AccountStatus, BundleAccount},

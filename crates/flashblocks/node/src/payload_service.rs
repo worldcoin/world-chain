@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::executor::bal_builder::FlashblocksStateExecutor;
 use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::generator::{

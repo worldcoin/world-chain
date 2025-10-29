@@ -28,7 +28,8 @@ use tracing::debug;
 use crate::job::FlashblocksPayloadJob;
 use crate::metrics::PayloadBuilderMetrics;
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+    executor::bal_builder::FlashblocksStateExecutor,
+    traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_primitives::flashblocks::Flashblock;
 

@@ -1,7 +1,7 @@
 use alloy_consensus::{Block, Header, Transaction, TxReceipt};
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
 use dashmap::DashMap;
 use eyre::eyre::{eyre, OptionExt as _};
@@ -16,7 +16,7 @@ use reth::core::primitives::Receipt;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_chain_state::{ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
+use reth_evm::block::BlockExecutorFactory;
 use reth_evm::execute::{
     BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
     ExecutorTx,
@@ -26,7 +26,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes, PayloadBuilderError};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -47,7 +47,6 @@ use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::{BundleAccount, BundleState};
-use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -55,10 +54,13 @@ use tokio::time::Instant;
 use tracing::{error, info, trace};
 
 use crate::access_list::FlashblockAccessListConstruction;
+use crate::executor::factory::FlashblocksBlockExecutorFactory;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
-/// A Block Executor for Optimism that can load pre state from previous flashblocks.
-pub struct FlashblocksBlockExecutor<Evm, R, Spec>
+/// A Block Executor for Optimism that can load pre state from previous flashblocks
+///
+/// A Block Access List is constucted during execution
+pub struct BalBuilderBlockExecutor<Evm, R, Spec>
 where
     R: OpReceiptBuilder,
 {
@@ -68,7 +70,7 @@ where
     max_tx_index: u64,
 }
 
-impl<'db, DB, E, R, Spec> FlashblocksBlockExecutor<E, R, Spec>
+impl<'db, DB, E, R, Spec> BalBuilderBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
@@ -128,7 +130,7 @@ where
     fn record_transitions(&mut self) {
         let transitions = self.evm().db().transition_state.as_ref();
         self.flashblock_access_list
-            .on_state_transition(transitions, self.inner.receipts.len());
+            .with_transition_state(transitions, self.inner.receipts.len());
         info!(target: "test_target", "recorded transitions for tx index range: {} - {}", self.min_tx_index, self.max_tx_index);
     }
 
@@ -153,7 +155,7 @@ where
     }
 }
 
-impl<'db, DB, E, R, Spec> BlockExecutor for FlashblocksBlockExecutor<E, R, Spec>
+impl<'db, DB, E, R, Spec> BlockExecutor for BalBuilderBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
     E: Evm<
@@ -204,7 +206,7 @@ where
         let index = self.inner.receipts.len();
         let res = self.inner.finish();
         if let Ok((evm, _)) = &res {
-            access_list.on_state_transition(evm.db().transition_state.as_ref(), index);
+            access_list.with_transition_state(evm.db().transition_state.as_ref(), index);
         }
 
         res
@@ -223,89 +225,8 @@ where
     }
 }
 
-/// Ethereum block executor factory.
-#[derive(Debug, Clone)]
-pub struct FlashblocksBlockExecutorFactory {
-    inner: OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-    pre_state: Option<BundleState>,
-}
-
-impl FlashblocksBlockExecutorFactory {
-    /// Creates a new [`OpBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
-    /// [`OpReceiptBuilder`].
-    pub const fn new(
-        receipt_builder: OpRethReceiptBuilder,
-        spec: OpChainSpec,
-        evm_factory: OpEvmFactory,
-    ) -> Self {
-        Self {
-            inner: OpBlockExecutorFactory::new(receipt_builder, spec, evm_factory),
-            pre_state: None,
-        }
-    }
-
-    /// Exposes the chain specification.
-    pub const fn spec(&self) -> &OpChainSpec {
-        self.inner.spec()
-    }
-
-    /// Exposes the EVM factory.
-    pub const fn evm_factory(&self) -> &OpEvmFactory {
-        self.inner.evm_factory()
-    }
-
-    pub const fn take_bundle(&mut self) -> Option<BundleState> {
-        self.pre_state.take()
-    }
-
-    /// Sets the pre-state for the block executor factory.
-    pub fn set_pre_state(&mut self, pre_state: BundleState) {
-        self.pre_state = Some(pre_state);
-    }
-}
-
-impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
-    type EvmFactory = OpEvmFactory;
-    type ExecutionCtx<'a> = OpBlockExecutionCtx;
-    type Transaction = OpTransactionSigned;
-    type Receipt = OpReceipt;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        self.inner.evm_factory()
-    }
-
-    fn create_executor<'a, DB, I>(
-        &'a self,
-        evm: <OpEvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
-        ctx: Self::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
-    where
-        DB: Database + 'a,
-        I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
-    {
-        if let Some(pre_state) = &self.pre_state {
-            return FlashblocksBlockExecutor::new(
-                evm,
-                ctx,
-                self.spec().clone(),
-                OpRethReceiptBuilder::default(),
-                0,
-            )
-            .with_bundle_prestate(pre_state.clone()); // TODO: Terrible clone here
-        }
-
-        FlashblocksBlockExecutor::new(
-            evm,
-            ctx,
-            self.spec().clone(),
-            OpRethReceiptBuilder::default(),
-            0,
-        )
-    }
-}
-
-/// Block builder for Optimism.
-#[derive(Debug)]
+/// Assembles the full block from the bundle state and Execution Result
+#[derive(Clone, Debug)]
 pub struct FlashblocksBlockAssembler {
     inner: OpBlockAssembler<OpChainSpec>,
 }
@@ -315,31 +236,6 @@ impl FlashblocksBlockAssembler {
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self {
             inner: OpBlockAssembler::new(chain_spec),
-        }
-    }
-}
-
-impl FlashblocksBlockAssembler {
-    /// Builds a block for `input` without any bounds on header `H`.
-    pub fn assemble_block<
-        F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = OpBlockExecutionCtx,
-            Transaction: SignedTransaction,
-            Receipt: Receipt + DepositReceipt,
-        >,
-        H,
-    >(
-        &self,
-        input: BlockAssemblerInput<'_, '_, F, H>,
-    ) -> Result<Block<F::Transaction>, BlockExecutionError> {
-        self.inner.assemble_block(input)
-    }
-}
-
-impl Clone for FlashblocksBlockAssembler {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
         }
     }
 }
@@ -358,7 +254,7 @@ where
         &self,
         input: BlockAssemblerInput<'_, '_, F>,
     ) -> Result<Self::Block, BlockExecutionError> {
-        self.assemble_block(input)
+        self.inner.assemble_block(input)
     }
 }
 
@@ -367,7 +263,7 @@ pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
         FlashblocksBlockExecutorFactory,
-        FlashblocksBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
@@ -378,7 +274,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: FlashblocksBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        executor: BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
     ) -> Self {
@@ -411,7 +307,7 @@ where
     >,
 {
     type Primitives = N;
-    type Executor = FlashblocksBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
+    type Executor = BalBuilderBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -766,7 +662,13 @@ where
     Provider:
         StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone + 'static,
 {
-    trace!(target: "flashblocks::state_executor", id = %flashblock.payload_id, diff = %flashblock.diff, index = %flashblock.index, "processing flashblock");
+    trace!(
+        target: "flashblocks::state_executor",
+        id = %flashblock.payload_id,
+        diff = %flashblock.diff,
+        index = %flashblock.index,
+        "processing flashblock"
+    );
 
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
@@ -1045,7 +947,7 @@ fn execute_transactions(
 
     let evm = evm_config.evm_with_env(&mut state, evm_env);
     let base_fee = evm.block().basefee;
-    let mut executor = FlashblocksBlockExecutor::new(
+    let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_context.clone(),
         chain_spec,

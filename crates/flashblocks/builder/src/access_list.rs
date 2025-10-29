@@ -141,10 +141,8 @@ impl FlashblockAccessListConstruction {
             max_tx_index,
         }
     }
-}
 
-impl FlashblockAccessListConstruction {
-    pub fn on_state_transition(&self, transitions: Option<&TransitionState>, index: usize) {
+    pub fn with_transition_state(&self, transitions: Option<&TransitionState>, index: usize) {
         info!(target: "test_target", "Processing state transition for tx index {} changes length {}", index, self.changes.len());
         let transitions = match transitions {
             Some(t) => t,
@@ -221,12 +219,12 @@ impl FlashblockAccessListConstruction {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::{compute_state_root, FlashblocksBlockExecutor};
+    use crate::executor::bal_builder::BalBuilderBlockExecutor;
     use alloy_consensus::{constants::KECCAK_EMPTY, TxEip1559};
     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
-    use alloy_primitives::{address, bytes, keccak256, Address, Bytes, FixedBytes, TxKind, U256};
+    use alloy_primitives::{address, keccak256, Address, Bytes, FixedBytes, TxKind, U256};
 
     use alloy_signer_local::PrivateKeySigner;
     use alloy_sol_types::{sol, SolCall};
@@ -412,7 +410,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let mut executor = FlashblocksBlockExecutor::new(
+            let mut executor = BalBuilderBlockExecutor::new(
                 evm,
                 ctx,
                 CHAIN_SPEC.clone(),

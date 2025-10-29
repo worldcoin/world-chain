@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::executor::bal_builder::FlashblocksStateExecutor;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,

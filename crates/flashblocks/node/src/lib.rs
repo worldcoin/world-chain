@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
+    executor::bal_builder::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
 };
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
