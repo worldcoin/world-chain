@@ -28,8 +28,7 @@ use tracing::debug;
 use crate::job::FlashblocksPayloadJob;
 use crate::metrics::PayloadBuilderMetrics;
 use flashblocks_builder::{
-    executor::bal_builder::FlashblocksStateExecutor,
-    traits::payload_builder::FlashblockPayloadBuilder,
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_primitives::flashblocks::Flashblock;
 
@@ -52,7 +51,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: FlashblocksStateExecutor,
+    flashblocks_state: FlashblocksExecutionCoordinator,
     /// Metrics for tracking job generator operations and errors
     metrics: PayloadBuilderMetrics,
 }
@@ -68,7 +67,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {

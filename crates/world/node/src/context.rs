@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::executor::bal_builder::FlashblocksStateExecutor;
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -353,7 +353,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -387,7 +387,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
         let flashblocks_state =
-            FlashblocksStateExecutor::new(flashblocks_handle.clone(), pending_block);
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

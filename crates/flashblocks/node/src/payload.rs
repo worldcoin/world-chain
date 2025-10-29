@@ -1,4 +1,4 @@
-use flashblocks_builder::executor::bal_builder::FlashblocksStateExecutor;
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_builder::payload_builder::FlashblocksPayloadBuilder;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use flashblocks_builder::traits::context_builder::PayloadBuilderCtxBuilder;
@@ -18,7 +18,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub da_config: OpDAConfig,
 }
 
@@ -28,7 +28,7 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         da_config: OpDAConfig,
     ) -> Self {
         Self {

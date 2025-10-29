@@ -6,8 +6,7 @@ use std::{
 };
 
 use flashblocks_builder::{
-    executor::bal_builder::FlashblocksStateExecutor,
-    traits::payload_builder::FlashblockPayloadBuilder,
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
@@ -150,7 +149,7 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
     /// The flashblocks state executor
-    pub(crate) flashblocks_state: FlashblocksStateExecutor,
+    pub(crate) flashblocks_state: FlashblocksExecutionCoordinator,
     /// Any pre-confirmed state on the Payload ID corresponding to this job
     pub(crate) pre_built_payload: Option<Builder::BuiltPayload>,
     /// Block index

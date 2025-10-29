@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use flashblocks_builder::executor::bal_builder::FlashblocksStateExecutor;
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::generator::{
@@ -27,7 +27,7 @@ use reth_transaction_pool::TransactionPool;
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: FlashblocksHandle,
-    flashblocks_state: FlashblocksStateExecutor,
+    flashblocks_state: FlashblocksExecutionCoordinator,
     authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
     interval: Duration,
     recommitment_interval: Duration,
@@ -38,7 +38,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     pub const fn new(
         pb: PB,
         p2p_handler: FlashblocksHandle,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         interval: Duration,
         recommitment_interval: Duration,
