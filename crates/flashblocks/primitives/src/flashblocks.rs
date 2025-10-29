@@ -100,7 +100,7 @@ impl Flashblock {
                     gas_used: block.gas_used(),
                     block_hash: block.hash(),
                     transactions,
-                    withdrawals: withdrawals,
+                    withdrawals,
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
                 },
                 metadata,
