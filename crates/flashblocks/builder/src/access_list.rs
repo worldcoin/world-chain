@@ -393,7 +393,7 @@ mod tests {
             self
         }
 
-        pub fn test<'a>(
+        pub fn test(
             mut self,
         ) -> (
             BundleState,

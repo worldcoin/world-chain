@@ -1,4 +1,5 @@
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_primitives::Address;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::execute::{
@@ -19,7 +20,8 @@ use reth_provider::StateProvider;
 use revm::context::result::ExecutionResult;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use std::collections::HashSet;
+use revm::database::BundleAccount;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::trace;
 
@@ -220,7 +222,8 @@ where
         db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
         // Write the expected bundle state to a JSON
-        // let json = serde_json::to_string_pretty(&db.bundle_state).map_err(BlockExecutionError::other)?;
+        let expected_json =
+            serde_json::to_string_pretty(&db.bundle_state).map_err(BlockExecutionError::other)?;
         // std::fs::write("expected_bundle_state.json", json).map_err(BlockExecutionError::other)?;
 
         // calculate the state root``
@@ -259,15 +262,25 @@ where
         trace!(target: "test_target", "finished execution with access list length {:#?}", access_list_before.changes.len());
 
         let access_list_after = access_list.build(min_tx_index, max_tx_index);
-        // let access_list_bundle: HashMap<Address, BundleAccount> =
-        //     access_list_after.clone().into();
+        let access_list_bundle: HashMap<Address, BundleAccount> = access_list_after.clone().into();
 
         // // Write the access list to a JSON
-        // let json = serde_json::to_string_pretty(&access_list_bundle)
+        let got_json = serde_json::to_string_pretty(&access_list_bundle)
+            .map_err(BlockExecutionError::other)?;
+        // std::fs::write("flashblock_access_list_bundle.json", json)
         //     .map_err(BlockExecutionError::other)?;
-        // std::fs::write("flashblock_access_list_bundle.json", json).map_err(BlockExecutionError::other)?;
 
         trace!(target: "test_target", "built final access list length {:#?}", access_list_after.changes.len());
+        let block_number = block.header().number;
+
+        std::fs::write(format!("expected_{}", block_number), expected_json).unwrap();
+
+        std::fs::write(
+            format!("flashblock_access_list_bundle_{}", block_number),
+            got_json,
+        )
+        .unwrap();
+
         Ok((
             BlockBuilderOutcome {
                 execution_result: result,

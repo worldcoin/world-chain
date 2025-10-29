@@ -105,14 +105,6 @@ def run(plan, args={}):
         description="Extracting enode from builder 2",
     )
 
-    plan.print(
-        '{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
-        + '"'
-        + "{0}".format(builder_0_enode["extract.enode"])
-        + '"'
-        + '],"id":1}'
-    )
-
     add_trusted_peer_0_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -123,12 +115,7 @@ def run(plan, args={}):
         + '],"id":1}',
         port_id="rpc",
     )
-
-    plan.print('{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
-        + '"'
-        + "{0}".format(builder_0_enode["extract.enode"])
-        + '"'
-        + '],"id":1}')
+    
     add_trusted_peer_1_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",

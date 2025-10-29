@@ -50,6 +50,7 @@ pub struct FlashblocksExecutionCoordinatorInner {
     flashblocks: Flashblocks,
     /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
+    /// Broadcast channel for built payload events
     payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
 }
 
@@ -339,7 +340,9 @@ where
 
         let converted: HashMap<Address, BundleAccount> =
             execution_result.clone().0.state.into_iter().collect();
+        
         let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
+        
         (execution_result, state_root_result)
     };
 
@@ -409,13 +412,14 @@ where
     );
 
     flashblocks.push(flashblock)?;
+
     // construct the full payload
     *latest_payload = Some((payload.clone(), index));
 
     pending_block.send_replace(payload.executed_block());
 
     state_executor.broadcast_payload(
-        Events::BuiltPayload(payload.clone()),
+        Events::BuiltPayload(payload),
         payload_events.clone(),
     )?;
 
