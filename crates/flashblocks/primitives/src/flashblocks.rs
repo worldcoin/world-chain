@@ -67,6 +67,18 @@ impl Flashblock {
             .map(|tx| tx.encoded_2718().into())
             .collect::<Vec<_>>();
 
+        let withdrawals = block
+            .body()
+            .withdrawals()
+            .map(|withdrawals| {
+                withdrawals
+                    .into_iter()
+                    .cloned()
+                    .skip(transactions_offset)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
         let metadata = FlashblockMetadata {
             fees,
             flashblock_timestamp: Some(
@@ -75,6 +87,7 @@ impl Flashblock {
                     .expect("time went backwards"),
             ),
         };
+
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
                 payload_id: config.attributes.payload_id(),
@@ -87,12 +100,7 @@ impl Flashblock {
                     gas_used: block.gas_used(),
                     block_hash: block.hash(),
                     transactions,
-                    withdrawals: block
-                        .body()
-                        .withdrawals()
-                        .cloned()
-                        .unwrap_or_default()
-                        .to_vec(),
+                    withdrawals: withdrawals,
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
                 },
                 metadata,
