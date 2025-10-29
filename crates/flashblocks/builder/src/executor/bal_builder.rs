@@ -1,4 +1,4 @@
-use alloy_consensus::{Block, Header, Transaction, TxReceipt};
+use alloy_consensus::{Header, Transaction, TxReceipt};
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
@@ -12,11 +12,9 @@ use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::StreamExt as _;
 use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
-use reth::core::primitives::Receipt;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_chain_state::{ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_evm::block::BlockExecutorFactory;
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_evm::op_revm::OpSpecId;
 use reth_evm::{
@@ -29,10 +27,8 @@ use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpRethReceiptBuilder,
-};
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::{transaction::SignedTransaction, SealedHeader};
 use reth_primitives::{Recovered, RecoveredBlock};
 use reth_provider::{
@@ -51,6 +47,7 @@ use tokio::time::Instant;
 use tracing::{error, info, trace};
 
 use crate::access_list::FlashblockAccessListConstruction;
+use crate::assembler::FlashblocksBlockAssembler;
 use crate::executor::factory::FlashblocksBlockExecutorFactory;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
@@ -219,39 +216,6 @@ where
 
     fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.inner.set_state_hook(hook)
-    }
-}
-
-/// Assembles the full block from the bundle state and Execution Result
-#[derive(Clone, Debug)]
-pub struct FlashblocksBlockAssembler {
-    inner: OpBlockAssembler<OpChainSpec>,
-}
-
-impl FlashblocksBlockAssembler {
-    /// Creates a new [`OpBlockAssembler`].
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self {
-            inner: OpBlockAssembler::new(chain_spec),
-        }
-    }
-}
-
-impl<F> BlockAssembler<F> for FlashblocksBlockAssembler
-where
-    F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
-{
-    type Block = Block<F::Transaction>;
-
-    fn assemble_block(
-        &self,
-        input: BlockAssemblerInput<'_, '_, F>,
-    ) -> Result<Self::Block, BlockExecutionError> {
-        self.inner.assemble_block(input)
     }
 }
 
