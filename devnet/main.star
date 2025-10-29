@@ -93,6 +93,26 @@ def run(plan, args={}):
         description="Extracting enode from builder 0",
     )
 
+    builder_1_enode = plan.request(
+        service_name="op-el-2151908-2-custom-op-node-op-kurtosis",
+        recipe=extract_enode_recipe,
+        description="Extracting enode from builder 1",
+    )
+
+    builder_2_enode = plan.request(
+        service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
+        recipe=extract_enode_recipe,
+        description="Extracting enode from builder 2",
+    )
+
+    plan.print(
+        '{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_0_enode["extract.enode"])
+        + '"'
+        + '],"id":1}'
+    )
+
     add_trusted_peer_0_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -104,6 +124,11 @@ def run(plan, args={}):
         port_id="rpc",
     )
 
+    plan.print('{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_0_enode["extract.enode"])
+        + '"'
+        + '],"id":1}')
     add_trusted_peer_1_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -115,6 +140,29 @@ def run(plan, args={}):
         port_id="rpc",
     )
 
+    add_trusted_peer_2_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_1_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
+        port_id="rpc",
+    )
+
+    add_trusted_peer_3_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_2_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
+        port_id="rpc",
+    )
+
+
     plan.request(
         service_name="op-el-2151908-2-custom-op-node-op-kurtosis",
         recipe=add_trusted_peer_0_recipe,
@@ -124,6 +172,18 @@ def run(plan, args={}):
     plan.request(
         service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
         recipe=add_trusted_peer_1_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
+    plan.request(
+        service_name="op-el-builder-2151908-1-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_2_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
+    plan.request(
+        service_name="op-el-builder-2151908-1-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_3_recipe,
         description="Adding trusted peers to the builders",
     )
 

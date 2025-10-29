@@ -467,7 +467,7 @@ impl AsRef<FlashblocksPayloadV1> for AuthorizedMsg {
     fn as_ref(&self) -> &FlashblocksPayloadV1 {
         match self {
             Self::FlashblocksPayloadV1(p) => p,
-            _ => panic!("not a FlashblocksPayloadV1 message"),
+            _ => panic!("not a FlashblocksPayloadV1V1 message"),
         }
     }
 }
@@ -591,12 +591,18 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
+        access_list::{FlashblockAccessList, FlashblockAccessListData},
         flashblocks::FlashblockMetadata,
-        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
+        primitives::{
+            ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+        },
     };
 
     use super::*;
-    use alloy_primitives::{Address, Bloom, B256, U256};
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    };
+    use alloy_primitives::{Address, Bloom, FixedBytes, B256, U256};
     use alloy_rlp::{encode, Decodable, Encodable};
     use alloy_rpc_types_eth::Withdrawal;
     use bytes::{BufMut, BytesMut};
@@ -633,6 +639,40 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
+            access_list_data: Some(FlashblockAccessListData {
+                access_list: sample_access_list(),
+                access_list_hash: B256::with_last_byte(0x4),
+            }),
+        }
+    }
+
+    fn sample_access_list() -> FlashblockAccessList {
+        FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: Address::default(),
+                storage_changes: vec![SlotChanges {
+                    slot: FixedBytes::with_last_byte(0x2),
+                    changes: vec![StorageChange {
+                        block_access_index: 1,
+                        new_value: FixedBytes::with_last_byte(0x3),
+                    }],
+                }],
+                code_changes: vec![CodeChange {
+                    block_access_index: 2,
+                    new_code: Bytes::from_static(b"\xCA\xFE"),
+                }],
+                storage_reads: vec![FixedBytes::with_last_byte(0x4)],
+                balance_changes: vec![BalanceChange {
+                    block_access_index: 3,
+                    post_balance: U256::from(1_000_000u64),
+                }],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 4,
+                    new_nonce: 42,
+                }],
+            }],
+            max_tx_index: 5,
+            min_tx_index: 0,
         }
     }
 
@@ -699,7 +739,31 @@ mod tests {
     }
 
     #[test]
-    fn authorized_rlp_roundtrip_and_verify() {
+    fn authorized_rlp_roundtrip_and_verify_v1() {
+        let (builder_sk, _builder_vk) = key_pair(2);
+        let (authorization, authorizer_vk) = sample_authorization();
+
+        let payload = sample_flashblocks_payload();
+        let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
+
+        let authorized = Authorized::new(&builder_sk, authorization, msg);
+
+        // Encode → decode
+        let encoded = encode(&authorized);
+        assert_eq!(encoded.len(), authorized.length());
+
+        let mut slice = encoded.as_ref();
+        let decoded = Authorized::decode(&mut slice).expect("decoding succeeds");
+        assert!(slice.is_empty());
+        assert_eq!(decoded, authorized);
+
+        decoded
+            .verify(authorizer_vk)
+            .expect("composite verification succeeds");
+    }
+
+    #[test]
+    fn authorized_rlp_roundtrip_and_verify_v2() {
         let (builder_sk, _builder_vk) = key_pair(2);
         let (authorization, authorizer_vk) = sample_authorization();
 

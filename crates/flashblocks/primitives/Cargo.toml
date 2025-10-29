@@ -20,9 +20,10 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["map-foldhash"] }
 alloy-serde.workspace = true
 alloy-rlp.workspace = true
+alloy-eip7928.workspace = true
 
 op-alloy-consensus.workspace = true
 

@@ -28,7 +28,7 @@ use tracing::debug;
 use crate::job::FlashblocksPayloadJob;
 use crate::metrics::PayloadBuilderMetrics;
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_primitives::flashblocks::Flashblock;
 
@@ -51,7 +51,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: FlashblocksStateExecutor,
+    flashblocks_state: FlashblocksExecutionCoordinator,
     /// Metrics for tracking job generator operations and errors
     metrics: PayloadBuilderMetrics,
 }
@@ -67,7 +67,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {
@@ -220,7 +220,7 @@ where
             flashblock_interval: self.config.interval,
             flashblock_deadline,
             recommit_interval,
-            best_payload: PayloadState::Missing,
+            best_payload: (PayloadState::Missing, None),
             pending_block: None,
             cached_reads,
             payload_task_guard,
@@ -276,30 +276,31 @@ where
         // check for any pending pre state received over p2p
         let flashblocks = self.flashblocks_state.flashblocks();
 
-        let block = Flashblock::reduce(flashblocks);
-        if let Some(flashblock) = block {
-            if *flashblock.payload_id() == attributes.payload_id().0 {
-                // If we have a pre-confirmed state, we can use it to build the payload
-                debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
+        let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
+            PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
+        })?;
 
-                let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                    flashblock.clone().try_into().map_err(|_| {
-                        PayloadBuilderError::Other(
-                            eyre!("Failed to convert flashblock to recovered block").into(),
-                        )
-                    })?;
+        if *flashblock.payload_id() == attributes.payload_id() {
+            // If we have a pre-confirmed state, we can use it to build the payload
+            debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
 
-                let sealed = block.into_sealed_block();
+            let block: RecoveredBlock<Block<OpTxEnvelope>> =
+                flashblock.clone().try_into().map_err(|_| {
+                    PayloadBuilderError::Other(
+                        eyre!("Failed to convert flashblock to recovered block").into(),
+                    )
+                })?;
 
-                let payload = OpBuiltPayload::new(
-                    attributes.payload_id(),
-                    Arc::new(sealed),
-                    flashblock.flashblock().metadata.fees,
-                    None,
-                );
+            let sealed = block.into_sealed_block();
 
-                return Ok(Some(payload));
-            }
+            let payload = OpBuiltPayload::new(
+                attributes.payload_id(),
+                Arc::new(sealed),
+                flashblock.flashblock.metadata.fees,
+                None,
+            );
+
+            return Ok(Some(payload));
         }
 
         Ok(None)

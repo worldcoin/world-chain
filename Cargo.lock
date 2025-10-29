@@ -244,6 +244,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-eip7928"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/eips?rev=307eae2#307eae28f0d56cf7693fed662441c9d3f294a671"
+dependencies = [
+ "alloy-primitives 1.3.1",
+ "alloy-rlp",
+ "serde",
+]
+
+[[package]]
 name = "alloy-eips"
 version = "1.0.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2938,6 +2948,7 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+ "rayon",
 ]
 
 [[package]]
@@ -3659,17 +3670,24 @@ name = "flashblocks-builder"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
+ "alloy-evm",
+ "alloy-genesis",
  "alloy-op-evm",
  "alloy-primitives 1.3.1",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "alloy-signer-local",
+ "alloy-sol-types 1.3.1",
  "color-eyre",
+ "dashmap 6.1.0",
  "flashblocks-p2p",
  "flashblocks-primitives",
  "futures",
  "jsonrpsee",
  "jsonrpsee-core",
+ "lazy_static",
  "metrics",
  "metrics-derive",
  "op-alloy-consensus",
@@ -3677,6 +3695,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "parking_lot",
+ "rayon",
  "reth",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -3700,7 +3719,9 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "reth-trie-common",
  "revm",
+ "revm-interpreter",
  "serde",
  "serde_json",
  "tokio",
@@ -3845,6 +3866,7 @@ name = "flashblocks-primitives"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives 1.3.1",
  "alloy-rlp",
