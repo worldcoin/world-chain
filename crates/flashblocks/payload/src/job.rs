@@ -90,8 +90,6 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) p2p_handler: FlashblocksHandle,
     /// The flashblocks state executor
     pub(crate) flashblocks_state: FlashblocksStateExecutor,
-    /// Any pre-confirmed state on the Payload ID corresponding to this job
-    pub(crate) pre_built_payload: Option<Builder::BuiltPayload>,
     /// Block index
     pub(crate) block_index: u64,
 }
@@ -125,10 +123,6 @@ where
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
-
-        if let Some(pre_built_payload) = self.pre_built_payload.clone() {
-            self.best_payload = PayloadState::Frozen(pre_built_payload);
-        }
 
         self.executor.spawn_blocking(Box::pin(async move {
             let _permit = guard.acquire().await;
@@ -387,7 +381,7 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        if let Some(payload) = self.best_payload.payload() {
+        if let Some(payload) = &self.committed_payload {
             trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
             Ok(payload.clone())
         } else {
@@ -411,8 +405,7 @@ where
         &mut self,
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let best_payload = self.best_payload.payload().cloned();
-        if best_payload.is_none() && self.pending_block.is_none() {
+        if self.committed_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
         }
@@ -420,7 +413,7 @@ where
         let maybe_better = self.pending_block.take();
         let mut empty_payload = None;
 
-        if best_payload.is_none() {
+        if self.committed_payload.is_none() {
             debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
@@ -464,7 +457,7 @@ where
         }
 
         let fut = ResolveBestPayload {
-            best_payload,
+            best_payload: self.committed_payload.clone(),
             maybe_better,
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };
