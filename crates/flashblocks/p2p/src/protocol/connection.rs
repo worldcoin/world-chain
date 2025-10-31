@@ -397,7 +397,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
                     *status = PublishingStatus::NotPublishing {
                         active_publishers: vec![(
-                            our_authorization.builder_vk,
+                            authorization.builder_vk,
                             authorization.timestamp,
                         )],
                     };
