@@ -50,9 +50,8 @@ where
         let pending_block = self.pending_block.borrow().clone();
 
         if let Some(pending_block) = pending_block {
-            let block = pending_block.block.recovered_block;
+            let block = pending_block.recovered_block;
             let receipts = pending_block
-                .block
                 .execution_output
                 .receipts
                 .clone()

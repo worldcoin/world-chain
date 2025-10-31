@@ -11,6 +11,8 @@ use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
+use reth_optimism_primitives::OpReceipt;
+use reth_primitives::TransactionSigned;
 use revm_primitives::{Address, Bytes, B256, U256};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -98,6 +100,7 @@ where
                 alloy_rpc_types_eth::Block,
                 alloy_consensus::Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
@@ -681,6 +684,7 @@ impl Action<OpEngineTypes> for EthGetTransactionReceipt {
                         alloy_rpc_types_eth::Block,
                         OpTransactionReceipt,
                         Header,
+                        TransactionSigned,
                     >::transaction_receipt(&rpc_client, self.hash)
                     .await?;
                 receipts.push(receipt);
@@ -740,6 +744,7 @@ impl Action<OpEngineTypes> for EthCall {
                         alloy_rpc_types_eth::Block,
                         alloy_consensus::Receipt,
                         Header,
+                        TransactionSigned,
                     >::call(
                         &env.node_clients[*idx].rpc,
                         self.transaction.clone(),
@@ -842,6 +847,7 @@ impl Action<OpEngineTypes> for EthGetBlockByHash {
                         alloy_rpc_types_eth::Block,
                         alloy_consensus::Receipt,
                         Header,
+                        TransactionSigned,
                     >::block_by_hash(&rpc_client, self.hash, true)
                     .await?;
                 blocks.push(block);
@@ -903,6 +909,7 @@ impl Action<OpEngineTypes> for EthGetBalance {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
+                    TransactionSigned,
                 >::balance(
                     &rpc_client, self.address, Some(BlockId::pending())
                 )
@@ -966,6 +973,7 @@ impl Action<OpEngineTypes> for EthGetCode {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
+                    TransactionSigned,
                 >::get_code(
                     &rpc_client, self.address, Some(BlockId::pending())
                 )
@@ -1029,6 +1037,7 @@ impl Action<OpEngineTypes> for EthGetTransactionCount {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
+                    TransactionSigned,
                 >::transaction_count(
                     &rpc_client, self.address, Some(BlockId::pending())
                 )
@@ -1098,6 +1107,7 @@ impl Action<OpEngineTypes> for EthStorage {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
+                    TransactionSigned,
                 >::storage_at(
                     &rpc_client,
                     self.address,
