@@ -203,32 +203,14 @@ impl DatabaseProviderFactory for MockEthProvider {
 impl HeaderProvider for MockEthProvider {
     type Header = Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Header>> {
         let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
+        Ok(lock.get(&block_hash).cloned())
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number == num).cloned())
-    }
-
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(hash).map(|target| {
-            lock.values()
-                .filter(|h| h.number < target.number)
-                .fold(target.difficulty, |td, h| td + h.difficulty)
-        }))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        let sum = lock
-            .values()
-            .filter(|h| h.number <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty);
-        Ok(Some(sum))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -598,6 +580,10 @@ impl BlockReader for MockEthProvider {
     ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
         Ok(vec![])
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl BlockReaderIdExt for MockEthProvider {
@@ -838,6 +824,14 @@ impl ChangeSetReader for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        unimplemented!()
     }
 }
 
