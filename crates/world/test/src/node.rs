@@ -320,6 +320,10 @@ impl BlockReader for WorldChainNoopProvider {
     fn block_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Block>> {
         Ok(None)
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl BlockBodyIndicesProvider for WorldChainNoopProvider {
@@ -463,19 +467,11 @@ impl ReceiptProviderIdExt for WorldChainNoopProvider {}
 impl HeaderProvider for WorldChainNoopProvider {
     type Header = Header;
 
-    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    fn header(&self, _block_hash: BlockHash) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
 
     fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
-        Ok(None)
-    }
-
-    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        Ok(None)
-    }
-
-    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
         Ok(None)
     }
 
@@ -508,6 +504,14 @@ impl ChangeSetReader for WorldChainNoopProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
     }
 }
 
