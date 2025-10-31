@@ -707,6 +707,12 @@ where
         _ => return Ok(()),
     };
 
+    debug_assert_eq!(
+        payload.block().hash(),
+        flashblock.diff().block_hash,
+        "executed block hash does not match flashblock diff block hash"
+    );
+
     trace!(target: "flashblocks::state_executor", hash = %payload.block().hash(), "setting latest payload");
     flashblocks.push(flashblock)?;
     *latest_payload = Some((payload.clone(), index));
