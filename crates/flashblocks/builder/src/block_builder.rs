@@ -5,7 +5,7 @@ use reth::revm::State;
 use reth_evm::execute::{
     BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
 };
-use reth_evm::op_revm::{OpHaltReason, OpSpecId};
+use reth_evm::op_revm::{OpHaltReason, OpSpecId, OpTransaction};
 use reth_evm::Evm;
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
@@ -18,6 +18,7 @@ use reth_primitives::SealedHeader;
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
 use reth_provider::StateProvider;
 use revm::context::result::ExecutionResult;
+use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::BundleAccount;
@@ -33,7 +34,7 @@ pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
         FlashblocksBlockExecutorFactory,
-        BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        BalBuilderBlockExecutor<'a, Evm, OpRethReceiptBuilder, OpChainSpec>,
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
@@ -44,7 +45,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        executor: BalBuilderBlockExecutor<'a, Evm, OpRethReceiptBuilder, OpChainSpec>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
     ) -> Self {
@@ -71,13 +72,15 @@ where
     >,
     E: Evm<
         DB = &'a mut State<DB>,
-        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Tx = OpTransaction<TxEnv>,
         Spec = OpSpecId,
         HaltReason = OpHaltReason,
     >,
+    OpTransaction<TxEnv>:
+        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = N;
-    type Executor = BalBuilderBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
+    type Executor = BalBuilderBlockExecutor<'a, E, OpRethReceiptBuilder, OpChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -184,10 +187,12 @@ where
     >,
     E: Evm<
         DB = &'a mut State<DB>,
-        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Tx = OpTransaction<TxEnv>,
         Spec = OpSpecId,
         HaltReason = OpHaltReason,
     >,
+    OpTransaction<TxEnv>:
+        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     // TODO: unify duplicate code
     pub fn finish_with_access_list(
@@ -222,8 +227,8 @@ where
         db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
         // Write the expected bundle state to a JSON
-        let expected_json =
-            serde_json::to_string_pretty(&db.bundle_state.state).map_err(BlockExecutionError::other)?;
+        let expected_json = serde_json::to_string_pretty(&db.bundle_state.state)
+            .map_err(BlockExecutionError::other)?;
         // std::fs::write("expected_bundle_state.json", json).map_err(BlockExecutionError::other)?;
 
         // calculate the state root``

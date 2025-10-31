@@ -340,9 +340,9 @@ where
 
         let converted: HashMap<Address, BundleAccount> =
             execution_result.clone().0.state.into_iter().collect();
-        
+
         let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
-        
+
         (execution_result, state_root_result)
     };
 
@@ -418,10 +418,7 @@ where
 
     pending_block.send_replace(payload.executed_block());
 
-    state_executor.broadcast_payload(
-        Events::BuiltPayload(payload),
-        payload_events.clone(),
-    )?;
+    state_executor.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
 
     Ok(())
 }

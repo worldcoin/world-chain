@@ -40,6 +40,7 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-genesis.workspace = true
 alloy-eip7928.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-network.workspace = true
@@ -77,6 +78,4 @@ lazy_static.workspace = true
 [dev-dependencies]
 alloy-sol-types.workspace = true
 revm-interpreter.workspace = true
-alloy-genesis.workspace = true
 alloy-signer-local.workspace = true
-

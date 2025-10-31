@@ -529,12 +529,14 @@ where
 
     let min_tx_index = receipts.len() as u64;
 
+    let genesis_alloc = &ctx.spec().genesis.alloc;
     let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_ctx.clone(),
         ctx.spec().clone(),
         OpRethReceiptBuilder::default(),
         min_tx_index,
+        genesis_alloc,
     )
     .with_receipts(receipts);
 
