@@ -7,7 +7,6 @@ use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth::network::PeersHandleProvider;
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
 use reth_e2e_test_utils::{Adapter, NodeHelperType, TmpDB};
@@ -78,34 +77,6 @@ fn create_l1_attributes_deposit_tx() -> Bytes {
 
 /// L1 attributes deposit transaction - required as the first transaction in Optimism blocks
 pub static TX_SET_L1_BLOCK: LazyLock<Bytes> = LazyLock::new(create_l1_attributes_deposit_tx);
-
-/// Generate basic Optimism payload attributes for testing
-pub fn optimism_payload_attributes(
-    timestamp: u64,
-) -> reth_optimism_payload_builder::OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope> {
-    use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::b64;
-    use revm_primitives::{Address, B256};
-
-    let eth_attrs = EthPayloadBuilderAttributes {
-        id: PayloadId::new([0u8; 8]),
-        parent: B256::ZERO,
-        timestamp,
-        suggested_fee_recipient: Address::random(),
-        prev_randao: B256::random(),
-        withdrawals: Withdrawals::default(),
-        parent_beacon_block_root: Some(B256::ZERO),
-    };
-
-    reth_optimism_payload_builder::OpPayloadBuilderAttributes {
-        payload_attributes: eth_attrs,
-        transactions: vec![],
-        no_tx_pool: false,
-        eip_1559_params: Some(b64!("0000000800000008")),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    }
-}
 
 pub struct WorldChainTestingNodeContext<T: WorldChainTestContextBounds>
 where

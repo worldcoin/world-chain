@@ -11,7 +11,6 @@ use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_primitives::OpReceipt;
 use reth_primitives::TransactionSigned;
 use revm_primitives::{Address, Bytes, B256, U256};
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
