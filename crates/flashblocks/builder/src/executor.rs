@@ -3,6 +3,7 @@ use alloy_eips::eip2718::WithEncoded;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_eips::{Decodable2718, Encodable2718};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
+use alloy_op_evm::block::OpTxEnv;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::OptionExt as _;
@@ -18,7 +19,7 @@ use reth::revm::cancelled::CancelOnDrop;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use reth_evm::execute::{
     BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
@@ -45,6 +46,7 @@ use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
 use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use revm::context::result::{ExecutionResult, ResultAndState};
+use revm::context::BlockEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::BundleState;
@@ -66,7 +68,7 @@ where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks + Clone,
@@ -103,7 +105,7 @@ where
     DB: Database + 'db,
     E: Evm<
         DB = &'db mut State<DB>,
-        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction> + OpTxEnv,
     >,
     R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: OpHardforks,
@@ -336,9 +338,10 @@ where
     >,
     E: Evm<
         DB = &'a mut State<DB>,
-        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+        Tx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned> + OpTxEnv,
         Spec = OpSpecId,
         HaltReason = OpHaltReason,
+        BlockEnv = BlockEnv,
     >,
 {
     type Primitives = N;
@@ -449,7 +452,7 @@ pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
     da_config: OpDAConfig,
-    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -468,9 +471,7 @@ impl FlashblocksStateExecutor {
     pub fn new(
         p2p_handle: FlashblocksHandle,
         da_config: OpDAConfig,
-        pending_block: tokio::sync::watch::Sender<
-            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
-        >,
+        pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
     ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
             flashblocks: Default::default(),
@@ -563,7 +564,7 @@ impl FlashblocksStateExecutor {
     /// Returns a receiver for the pending block.
     pub fn pending_block(
         &self,
-    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
+    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>> {
         self.pending_block.subscribe()
     }
 
@@ -596,7 +597,7 @@ fn process_flashblock<Provider, Pool, P>(
     state_executor: &FlashblocksStateExecutor,
     chain_spec: &OpChainSpec,
     flashblock: FlashblocksPayloadV1,
-    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
     Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone,
