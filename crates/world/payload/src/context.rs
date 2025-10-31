@@ -262,7 +262,7 @@ where
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
-                None, // TODO: get more info
+                None, // TODO: related to Jovian
             ) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
