@@ -5,10 +5,8 @@ use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::OpBlockExecutor;
 use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
-use dashmap::DashMap;
 use eyre::eyre::eyre;
 use flashblocks_primitives::access_list::FlashblockAccessList;
-use parking_lot::RwLock;
 use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
@@ -33,7 +31,7 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState, CacheDB};
+use revm::database::{BundleAccount, BundleState, CacheDB, TransitionState};
 use revm::DatabaseRef;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -110,8 +108,7 @@ where
         // tx: impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Send + Sync,
         tx: (),
     ) -> Result<(), BlockExecutionError> {
-        // self.inner.evm.components_mut
-        todo!();
+        todo!()
     }
 
     fn finish(self) -> Result<(E, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
@@ -123,8 +120,8 @@ where
     fn execute_block(
         mut self,
         transactions: impl IntoParallelIterator<
-            // Item = impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Sized + Send + Sync,
-            Item = (),
+            Item = impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Sized + Send + Sync,
+            // Item = (),
         >,
     ) -> Result<
         BlockExecutionResult<<OpBlockExecutor<E, R, Spec> as BlockExecutor>::Receipt>,
@@ -137,18 +134,41 @@ where
 
         let (state, env) = self.inner.evm.finish();
         let cache_db = CacheDB::new(&*state);
-        let cache_db2 = cache_db.clone();
+        let evm = OpEvmFactory::default().create_evm(cache_db, env.clone());
 
-        let evm = OpEvmFactory::default().create_evm(cache_db, env);
-        // let new = clone_state(&tmp_state);
-
-        // let res = transactions
-        //     .into_par_iter()
-        //     .try_for_each(|tx| arc.execute_transaction(tx));
+        let res = transactions
+            .into_par_iter()
+            .try_for_each(|tx| arc.execute_transaction(tx));
 
         // self.inner.apply_post_execution_changes()
         todo!()
     }
+}
+
+pub fn transaction_evms<DB>(
+    bal: FlashblockAccessList,
+    db: &DB,
+    evm_env: &EvmEnv<OpSpecId>,
+) -> Vec<impl Evm>
+where
+    DB: DatabaseRef<Error: Send + Sync + 'static> + std::fmt::Debug,
+{
+    let cache_db = CacheDB::new(db);
+    let evm = OpEvmFactory::default().create_evm(cache_db, evm_env.clone());
+
+    let len = (bal.max_tx_index - bal.min_tx_index + 1) as usize;
+    let mut transitions = vec![TransitionState::default(); len];
+    for account in &bal.changes {
+        for slot in &account.storage_changes {
+            for storage in &slot.changes {
+                let transition = &mut transitions[storage.block_access_index as usize];
+                let transition_account = transition.transitions.entry(account.address).or_default();
+                // transition_account.info
+            }
+        }
+    }
+    // transitions
+    todo!()
 }
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]

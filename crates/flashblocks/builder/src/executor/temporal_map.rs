@@ -1,15 +1,16 @@
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::ops::Bound::{Included, Unbounded};
 
 /// A map where each key has versions indexed by some ordered index `I`.
 /// `get(index, key)` returns the value last set at or before `index`.
-#[derive(Debug, Default)]
-pub struct TemporalMap<K, I, V> {
+#[derive(Clone, Debug, Default)]
+pub struct TemporalMap<K, V, I> {
     inner: HashMap<K, BTreeMap<I, V>>,
 }
 
-impl<K, I, V> TemporalMap<K, I, V>
+impl<K, V, I> TemporalMap<K, V, I>
 where
     K: Eq + Hash,
     I: Ord + Clone,
@@ -23,6 +24,10 @@ where
     /// Insert a value versioned at `index` for `key`.
     pub fn insert(&mut self, index: I, key: K, value: V) {
         self.inner.entry(key).or_default().insert(index, value);
+    }
+
+    pub fn entry(&mut self, index: I, key: K, value: V) -> Entry<'_, I, V> {
+        self.inner.entry(key).or_default().entry(index)
     }
 
     /// Get the value for `key` as of `index` (i.e., last set at or before `index`).
@@ -52,7 +57,7 @@ mod tests {
 
     #[test]
     fn basics() {
-        let mut map = TemporalMap::<&str, i32, &str>::new();
+        let mut map = TemporalMap::<&str, &str, i32>::new();
 
         map.insert(1, "key_a", "val_a");
         map.insert(5, "key_b", "val_b");

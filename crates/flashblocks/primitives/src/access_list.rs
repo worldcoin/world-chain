@@ -5,7 +5,9 @@ use alloy_primitives::map::foldhash::HashMap as AlloyHashMap;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use rayon::prelude::*;
+use reth::revm::database::EvmStateProvider;
 use reth::revm::db::TransitionState;
+use reth::revm::DatabaseRef;
 use reth::revm::{
     db::{states::StorageSlot, AccountStatus, BundleAccount},
     state::{AccountInfo, Bytecode},
@@ -84,7 +86,6 @@ impl FlashblockAccessList {
         transitions
     }
 }
-
 /// Helper function to merge two [`AccountChanges`] preserving lexicographic order.
 fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) {
     let mut storage_map: BTreeMap<B256, BTreeMap<u64, StorageChange>> = BTreeMap::new();
