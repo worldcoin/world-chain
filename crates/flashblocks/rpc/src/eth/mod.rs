@@ -9,9 +9,10 @@ mod pending_block;
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
+use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
@@ -20,8 +21,8 @@ use reth_optimism_rpc::{
 };
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
+        LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes,
@@ -45,7 +46,7 @@ use reth_tasks::{
 #[derive(Clone)]
 pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     inner: OpEthApi<N, Rpc>,
-    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>,
 }
 
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
@@ -55,9 +56,7 @@ where
 {
     pub fn new(
         inner: OpEthApi<N, Rpc>,
-        pending_block: tokio::sync::watch::Receiver<
-            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
-        >,
+        pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>,
     ) -> Self {
         Self {
             inner,
@@ -132,17 +131,9 @@ where
     Rpc: RpcConvert + Clone,
     OpEthApi<N, Rpc>: EthApiSpec,
 {
-    type Transaction = <OpEthApi<N, Rpc> as EthApiSpec>::Transaction;
-    type Rpc = <OpEthApi<N, Rpc> as EthApiSpec>::Rpc;
-
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
-    }
-
-    #[inline]
-    fn signers(&self) -> &SignersForApi<Self> {
-        self.inner.signers()
     }
 }
 
@@ -247,17 +238,6 @@ where
 {
 }
 
-impl<N, Rpc> AddDevSigners for FlashblocksEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert,
-    OpEthApi<N, Rpc>: AddDevSigners + Clone,
-{
-    fn with_dev_accounts(&self) {
-        self.inner.with_dev_accounts()
-    }
-}
-
 impl<N, Rpc> std::fmt::Debug for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -273,7 +253,7 @@ where
 #[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
-    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>,
 }
 
 impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
@@ -290,9 +270,7 @@ impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new(
         inner: OpEthApiBuilder<NetworkT>,
-        pending_block: tokio::sync::watch::Receiver<
-            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
-        >,
+        pending_block: tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>,
     ) -> Self {
         Self {
             inner,
@@ -306,10 +284,11 @@ where
     N: FullNodeComponents<
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>> + Unpin>,
     >,
+    N: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT> + Clone,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
-        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     FlashblocksEthApi<
         N,
         RpcConverter<
@@ -319,7 +298,7 @@ where
             (),
             OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
         >,
-    >: FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+    >: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<
         N,
         EthApi = OpEthApi<
