@@ -34,7 +34,7 @@ pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
         FlashblocksBlockExecutorFactory,
-        BalBuilderBlockExecutor<'a, Evm, OpRethReceiptBuilder, OpChainSpec>,
+        BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
@@ -45,7 +45,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: BalBuilderBlockExecutor<'a, Evm, OpRethReceiptBuilder, OpChainSpec>,
+        executor: BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
     ) -> Self {
@@ -80,7 +80,7 @@ where
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = N;
-    type Executor = BalBuilderBlockExecutor<'a, E, OpRethReceiptBuilder, OpChainSpec>;
+    type Executor = BalBuilderBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -264,9 +264,9 @@ where
         let access_list_before = access_list.clone();
         // TODO: Remove debug traces
         trace!(target: "test_target", "recorded transitions for tx index range: {} - {}, transactions length {:#?}", min_tx_index, max_tx_index, block.body().transactions().count());
-        trace!(target: "test_target", "finished execution with access list length {:#?}", access_list_before.changes.len());
+        trace!(target: "test_target", "finished execution with access list length {:#?}", access_list_before.access_list.changes.len());
 
-        let access_list_after = access_list.build(min_tx_index, max_tx_index);
+        let access_list_after = access_list.access_list;
         let access_list_bundle: HashMap<Address, BundleAccount> = access_list_after.clone().into();
 
         // // Write the access list to a JSON

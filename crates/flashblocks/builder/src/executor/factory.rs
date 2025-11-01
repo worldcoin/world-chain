@@ -3,7 +3,7 @@ use reth::revm::State;
 use reth_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     op_revm::OpTransaction,
-    EvmFactory, IntoTxEnv,
+    EvmFactory,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
@@ -79,7 +79,6 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
             self.spec().clone(),
             OpRethReceiptBuilder::default(),
             0,
-            &self.spec().genesis.alloc,
         );
 
         if let Some(pre_state) = &self.pre_state {

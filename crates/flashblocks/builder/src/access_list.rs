@@ -26,18 +26,21 @@ pub(crate) type GenesisAlloc<'a> = &'a BTreeMap<Address, GenesisAccount>;
 
 /// A convenience builder type for [`FlashblockAccessList`]
 #[derive(Debug, Clone)]
-pub struct FlashblockAccessListConstruction<'a> {
+pub struct FlashblockAccessListConstruction {
     /// Map from Address -> AccountChangesConstruction
     pub changes: DashMap<Address, AccountChangesConstruction>,
-    /// A reference to the Genesis containing all pre-deployed contracts
-    pub genesis_alloc: GenesisAlloc<'a>,
 }
 
-impl<'a> FlashblockAccessListConstruction<'a> {
+impl Default for FlashblockAccessListConstruction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FlashblockAccessListConstruction {
     /// Creates a new empty [`FlashblockAccessListConstruction`]
-    pub fn new(genesis_alloc: GenesisAlloc<'a>) -> Self {
+    pub fn new() -> Self {
         Self {
-            genesis_alloc,
             changes: DashMap::new(),
         }
     }
@@ -137,10 +140,9 @@ impl AccountChangesConstruction {
     }
 }
 
-impl FlashblockAccessListConstruction<'_> {
+impl FlashblockAccessListConstruction {
     /// Consumes the builder and produces a [`FlashblockAccessList`]
     pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
-        trace!(target: "test_target", "Building FlashblockAccessList with {} account changes", self.changes.len());
         // Sort addresses lexicographically
         let mut changes: Vec<_> = self
             .changes
@@ -148,7 +150,6 @@ impl FlashblockAccessListConstruction<'_> {
             .map(|(k, v)| v.build(k))
             .collect();
 
-        trace!(target: "test_target", "Built {} account changes", changes.len());
         changes.par_sort_unstable_by_key(|a| a.address);
 
         FlashblockAccessList {
@@ -158,7 +159,8 @@ impl FlashblockAccessListConstruction<'_> {
         }
     }
 
-    pub fn with_account_change<F>(&self, address: Address, f: F)
+    /// Maps a mutable reference to the [`AccountChangesConstruction`] corresponding to `address` at the given closure.
+    pub fn map_account_change<F>(&self, address: Address, f: F)
     where
         F: FnOnce(&mut AccountChangesConstruction),
     {
@@ -364,15 +366,12 @@ mod tests {
                 ..Default::default()
             };
 
-            let genesis_alloc = &CHAIN_SPEC.genesis().alloc;
-
             let mut executor = BalBuilderBlockExecutor::new(
                 evm,
                 ctx,
                 CHAIN_SPEC.clone(),
                 OpRethReceiptBuilder::default(),
                 0,
-                genesis_alloc,
             );
 
             let _ = executor.apply_pre_execution_changes();
@@ -384,7 +383,7 @@ mod tests {
             let (mut evm, execution_result, access_list, min_tx_index, max_tx_index) =
                 executor.finish_with_access_list().unwrap();
 
-            let access_list = access_list.build(0, 1);
+            let access_list = access_list.access_list;
 
             assert_eq!(
                 access_list, self.expected,

@@ -78,7 +78,6 @@ pub fn execute_transactions(
         chain_spec,
         OpRethReceiptBuilder::default(),
         0, // TODO: Need to pre-load receipts from the latest payload if available min_tx_index = receipts.len() as u64
-        genesis_alloc,
     );
 
     let mut total_fees = U256::ZERO;
@@ -107,7 +106,7 @@ pub fn execute_transactions(
         .finish_with_access_list()
         .map_err(|e| eyre!(format!("failed to finish execution: {e}")))?;
 
-    let access_list = access_list.build(min_tx_index, max_tx_index);
+    let access_list = access_list.access_list;
 
     // Validate the BAL matches the provided Flashblock BAL
     let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));

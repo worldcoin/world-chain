@@ -396,16 +396,16 @@ where
             .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
             .is_none()
         {
-            // warn!(target: "flashblocks::payload_builder", "payload build cancelled");
-            // if let Some(best_payload) = committed_payload {
-            //     // we can return the previous best payload since we didn't include any new txs
-            //     return Ok((
-            //         BuildOutcomeKind::Freeze(best_payload),
-            //         FlashblockAccessList::default(),
-            //     ));
-            // } else {
-            //     return Err(PayloadBuilderError::MissingPayload);
-            // }
+            warn!(target: "flashblocks::payload_builder", "payload build cancelled");
+            if let Some(best_payload) = committed_payload {
+                // we can return the previous best payload since we didn't include any new txs
+                return Ok((
+                    BuildOutcomeKind::Freeze(best_payload),
+                    FlashblockAccessList::default(),
+                ));
+            } else {
+                return Err(PayloadBuilderError::MissingPayload);
+            }
         }
 
         // check if the new payload is even more valuable
@@ -536,7 +536,6 @@ where
         ctx.spec().clone(),
         OpRethReceiptBuilder::default(),
         min_tx_index,
-        genesis_alloc,
     )
     .with_receipts(receipts);
 
