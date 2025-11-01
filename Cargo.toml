@@ -253,8 +253,8 @@ tracing-test = { version = "0.2", features = ["no-env-filter"] }
 
 lazy_static = "1.4"
 
-[patch.crates-io]
-revm = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
+# [patch.crates-io]
+# revm = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
 # revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
 # revm-primitives = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
 # revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }

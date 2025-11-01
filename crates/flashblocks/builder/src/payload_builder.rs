@@ -31,7 +31,7 @@ use reth_evm::{
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
