@@ -38,6 +38,7 @@ use std::sync::Arc;
 
 use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
+use crate::executor::cached_db::TemporalCachedDbFactory;
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
@@ -121,7 +122,6 @@ where
         mut self,
         transactions: impl IntoParallelIterator<
             Item = impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Sized + Send + Sync,
-            // Item = (),
         >,
     ) -> Result<
         BlockExecutionResult<<OpBlockExecutor<E, R, Spec> as BlockExecutor>::Receipt>,
@@ -133,12 +133,19 @@ where
         self.inner.apply_pre_execution_changes()?;
 
         let (state, env) = self.inner.evm.finish();
+        // TODO: may not need this cache
         let cache_db = CacheDB::new(&*state);
-        let evm = OpEvmFactory::default().create_evm(cache_db, env.clone());
+        let temporal_factory = TemporalCachedDbFactory::new(&cache_db, self.flashblock_access_list);
+        // let base_evm = OpEvmFactory::default().create_evm(cache_db, env.clone());
 
-        let res = transactions
-            .into_par_iter()
-            .try_for_each(|tx| arc.execute_transaction(tx));
+        let res = transactions.into_par_iter().try_for_each(|tx| {
+            let index = todo!();
+            let db = temporal_factory.db(index);
+            // TODO: we probably can get rid of this cache as well
+            let db = CacheDB::new(db);
+            let evm = OpEvmFactory::default().create_evm(db, env.clone());
+            evm.transact(tx);
+        });
 
         // self.inner.apply_post_execution_changes()
         todo!()

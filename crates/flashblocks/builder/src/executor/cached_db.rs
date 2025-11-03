@@ -29,6 +29,24 @@ pub struct CacheAccountInfo {
     pub status: AccountStatus,
 }
 
+#[derive(Clone, Debug)]
+pub struct TemporalCachedDbFactory<'a, DB: DatabaseRef> {
+    pub db: &'a DB,
+    pub cache: TemporalCacheState,
+}
+
+impl<'a, DB: DatabaseRef> TemporalCachedDbFactory<'a, DB> {
+    pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
+        let cache: TemporalCacheState = list.into();
+        TemporalCachedDbFactory { db, cache }
+    }
+
+    pub fn db(&'a self, index: u64) -> TemporalCachedDb<'a, DB> {
+        TemporalCachedDb::new(self.db, &self.cache, index)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct TemporalCachedDb<'a, DB: DatabaseRef> {
     pub db: &'a DB,
     pub cache: &'a TemporalCacheState,
