@@ -5,7 +5,7 @@ use alloy_eips::{eip2935::HISTORY_STORAGE_ADDRESS, eip4788::BEACON_ROOTS_ADDRESS
 use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor,
 };
-use alloy_primitives::{keccak256, Address, Bytes};
+use alloy_primitives::{keccak256, Address};
 use flashblocks_primitives::access_list::FlashblockAccessListData;
 use reth::revm::State;
 
@@ -26,15 +26,15 @@ use revm::{
         TxEnv,
     },
     database::BundleState,
-    state::{Account, AccountInfo, Bytecode, EvmState},
+    state::{Account, AccountInfo, EvmState},
     DatabaseCommit,
 };
 
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},
     executor::utils::{
-        transact_beacon_root_contract_call, transact_blockhashes_contract_call,
-        CREATE_2_DEPLOYER_ADDR, CREATE_2_DEPLOYER_BYTECODE, CREATE_2_DEPLOYER_CODEHASH,
+        ensure_create2_deployer, transact_beacon_root_contract_call,
+        transact_blockhashes_contract_call, CREATE_2_DEPLOYER_ADDR,
     },
 };
 
@@ -48,7 +48,6 @@ where
     inner: OpBlockExecutor<Evm, R, Spec>,
     flashblock_access_list: FlashblockAccessListConstruction,
     min_tx_index: u64,
-    max_tx_index: u64,
 }
 
 impl<'db, DB, E, R, Spec> BalBuilderBlockExecutor<E, R, Spec>
@@ -60,21 +59,20 @@ where
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`BalBuilderBlockExecutor`].
-    pub fn new(
-        evm: E,
-        ctx: OpBlockExecutionCtx,
-        spec: Spec,
-        receipt_builder: R,
-        min_tx_index: u64,
-    ) -> Self {
+    pub fn new(evm: E, ctx: OpBlockExecutionCtx, spec: Spec, receipt_builder: R) -> Self {
         let executor = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
 
         Self {
             inner: executor,
             flashblock_access_list: FlashblockAccessListConstruction::default(),
-            max_tx_index: min_tx_index + 1,
-            min_tx_index,
+            min_tx_index: 0,
         }
+    }
+
+    /// Sets the minimum transaction index for the constructed BAL
+    pub fn with_min_tx_index(mut self, min_tx_index: u64) -> Self {
+        self.min_tx_index = min_tx_index;
+        self
     }
 
     /// Extends the [`BundleState`] of the executor with a specified pre-image.
@@ -108,15 +106,18 @@ where
         core::mem::take(&mut self.flashblock_access_list)
     }
 
+    /// Returns the current [`BlockAccessIndex`].
+    pub fn block_access_index(&self) -> BlockAccessIndex {
+        self.inner.receipts.len() as BlockAccessIndex + 1
+    }
+
     /// Commits state at a given [`BlockAccessIndex`] to the BAL.
     ///
     /// State should be cleared between indices to ensure that the [`EvmState`] passed here corresponds to only [`Account`] changes
     /// that have occured in the transaction at [`BlockAccessIndex`].
-    pub fn with_state(
-        &mut self,
-        state: &EvmState,
-        index: BlockAccessIndex,
-    ) -> Result<(), BlockExecutionError> {
+    pub fn with_state(&mut self, state: &EvmState) -> Result<(), BlockExecutionError> {
+        let index = self.block_access_index();
+
         // Update target account if it exists
         for (address, account) in state.iter() {
             let initial_account = self
@@ -130,8 +131,18 @@ where
 
             self.flashblock_access_list
                 .map_account_change(*address, |account_changes| {
-                    Self::modify_account_changes(index, account, &initial_account, account_changes)
+                    Self::modify_account_changes(index, account, &initial_account, account_changes);
                 });
+
+            // Remove empty account changes
+            if self
+                .flashblock_access_list
+                .changes
+                .get(address)
+                .map_or(false, |changes| changes.is_empty())
+            {
+                self.flashblock_access_list.changes.remove(address);
+            }
         }
 
         Ok(())
@@ -150,9 +161,10 @@ where
         ),
         BlockExecutionError,
     > {
+        let block_access_index = self.block_access_index();
+
         let Self {
             flashblock_access_list: access_list,
-            max_tx_index,
             min_tx_index,
             mut inner,
         } = self;
@@ -190,11 +202,15 @@ where
                 for (address, account) in state.iter() {
                     access_list.map_account_change(*address, |account_changes| {
                         Self::modify_account_changes(
-                            inner.receipts.len() as BlockAccessIndex,
+                            block_access_index,
                             account,
                             &initial_accounts.get(address).unwrap().clone(),
                             account_changes,
-                        )
+                        );
+
+                        if account_changes.is_empty() {
+                            access_list.changes.remove(address);
+                        }
                     });
                 }
 
@@ -211,7 +227,7 @@ where
             .map(|r| r.cumulative_gas_used())
             .unwrap_or_default();
 
-        let access_list = access_list.build(min_tx_index, max_tx_index);
+        let access_list = access_list.build(min_tx_index, block_access_index.into());
 
         let data = FlashblockAccessListData {
             access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
@@ -224,7 +240,13 @@ where
             gas_used,
         };
 
-        Ok((inner.evm, result, data, min_tx_index, max_tx_index))
+        Ok((
+            inner.evm,
+            result,
+            data,
+            min_tx_index,
+            block_access_index.into(),
+        ))
     }
 
     pub(crate) fn modify_account_changes(
@@ -288,48 +310,6 @@ where
             }
         }
     }
-
-    /// The Canyon hardfork issues an irregular state transition that force-deploys the create2
-    /// deployer contract. This is done by directly setting the code of the create2 deployer account
-    /// prior to executing any transactions on the timestamp activation of the fork.
-    pub(crate) fn ensure_create2_deployer(
-        chain_spec: impl OpHardforks,
-        timestamp: u64,
-        db: &mut State<DB>,
-    ) -> Result<Option<(AccountInfo, Account)>, DB::Error> {
-        // If the canyon hardfork is active at the current timestamp, and it was not active at the
-        // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
-        // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-        if chain_spec.is_canyon_active_at_timestamp(timestamp)
-            && !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
-        {
-            // Load the create2 deployer account from the cache.
-            let acc = db.load_cache_account(CREATE_2_DEPLOYER_ADDR)?;
-
-            // Update the account info with the create2 deployer codehash and bytecode.
-            let mut acc_info = acc.account_info().unwrap_or_default();
-            let initial_account = acc_info.clone();
-
-            acc_info.code_hash = CREATE_2_DEPLOYER_CODEHASH;
-            acc_info.code = Some(Bytecode::new_raw(Bytes::from_static(
-                &CREATE_2_DEPLOYER_BYTECODE,
-            )));
-
-            // Convert the cache account back into a revm account and mark it as touched.
-            let mut revm_acc: revm::state::Account = acc_info.into();
-            revm_acc.mark_touch();
-
-            // Commit the create2 deployer account to the database.
-            db.commit(HashMap::from_iter([(
-                CREATE_2_DEPLOYER_ADDR,
-                revm_acc.clone(),
-            )]));
-
-            return Ok(Some((initial_account, revm_acc)));
-        }
-
-        Ok(None)
-    }
 }
 
 impl<'db, DB, E, R, Spec> BlockExecutor for BalBuilderBlockExecutor<E, R, Spec>
@@ -344,12 +324,16 @@ where
     type Receipt = R::Receipt;
     type Evm = E;
 
+    // TODO: Clean this up, open a PR into alloy-evm to make these system calls reusable
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        let block_access_index = 0;
+
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag = self
             .inner
             .spec
             .is_spurious_dragon_active_at_block(self.inner.evm.block().number.saturating_to());
+
         self.inner
             .evm
             .db_mut()
@@ -377,19 +361,28 @@ where
                 .get(&HISTORY_STORAGE_ADDRESS)
                 .cloned()
                 .unwrap_or_default();
+
             self.flashblock_access_list.map_account_change(
                 HISTORY_STORAGE_ADDRESS,
                 |account_changes| {
                     Self::modify_account_changes(
-                        0,
+                        block_access_index,
                         &history_storage_account,
                         &history_storage_info,
                         account_changes,
-                    )
+                    );
+
+                    if account_changes.is_empty() {
+                        self.flashblock_access_list
+                            .changes
+                            .remove(&HISTORY_STORAGE_ADDRESS);
+                    }
                 },
             );
+
             self.inner.evm.db_mut().commit(res.state);
         }
+
         let initial_parent_beacon_block_root_info = self
             .inner
             .evm
@@ -416,11 +409,17 @@ where
                 BEACON_ROOTS_ADDRESS,
                 |account_changes| {
                     Self::modify_account_changes(
-                        0,
+                        block_access_index,
                         &parent_beacon_block_root_account,
                         &initial_parent_beacon_block_root_info,
                         account_changes,
-                    )
+                    );
+
+                    if account_changes.is_empty() {
+                        self.flashblock_access_list
+                            .changes
+                            .remove(&BEACON_ROOTS_ADDRESS);
+                    }
                 },
             );
 
@@ -431,7 +430,7 @@ where
         // blocks will always have at least a single transaction in them (the L1 info transaction),
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
-        let result = Self::ensure_create2_deployer(
+        let result = ensure_create2_deployer(
             &self.inner.spec,
             self.inner.evm.block().timestamp.saturating_to(),
             self.inner.evm.db_mut(),
@@ -442,11 +441,38 @@ where
             self.flashblock_access_list.map_account_change(
                 CREATE_2_DEPLOYER_ADDR,
                 |account_changes| {
-                    Self::modify_account_changes(0, &account, &initial_account, account_changes)
+                    Self::modify_account_changes(
+                        block_access_index,
+                        &account,
+                        &initial_account,
+                        account_changes,
+                    );
+
+                    if account_changes.is_empty() {
+                        self.flashblock_access_list
+                            .changes
+                            .remove(&CREATE_2_DEPLOYER_ADDR);
+                    }
                 },
             );
         }
         Ok(())
+    }
+
+    fn execute_transaction(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        let result = self.execute_transaction_without_commit(&tx)?;
+        self.with_state(&result.state)?;
+        self.commit_transaction(result, tx)
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        self.inner.execute_transaction_without_commit(&tx)
     }
 
     fn execute_transaction_with_commit_condition(
@@ -457,20 +483,11 @@ where
         self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
-    fn execute_transaction_without_commit(
-        &mut self,
-        tx: impl ExecutableTx<Self>,
-    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
-        self.inner.execute_transaction_without_commit(tx)
-    }
-
     fn commit_transaction(
         &mut self,
         output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
         tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
-        let index = self.inner.receipts.len() as BlockAccessIndex;
-        self.with_state(&output.state, index)?;
         self.inner.commit_transaction(output, tx)
     }
 

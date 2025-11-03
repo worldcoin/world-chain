@@ -78,7 +78,6 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
             ctx,
             self.spec().clone(),
             OpRethReceiptBuilder::default(),
-            0,
         );
 
         if let Some(pre_state) = &self.pre_state {

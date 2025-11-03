@@ -1,35 +1,26 @@
 use std::collections::HashMap;
 
 use alloy_eips::{eip2935::HISTORY_STORAGE_ADDRESS, eip4788::BEACON_ROOTS_ADDRESS};
-use alloy_primitives::{Address, B256, Bytes, address, b256, hex};
-use flashblocks_primitives::access_list::FlashblockAccessList;
+use alloy_primitives::{address, b256, hex, Address, Bytes, B256};
 use reth::revm::State;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{Evm, block::{BlockExecutionError, BlockValidationError}};
+use reth_evm::{
+    block::{BlockExecutionError, BlockValidationError},
+    Evm,
+};
 use reth_optimism_forks::OpHardforks;
-use revm::{Database, DatabaseCommit, context::result::ResultAndState, state::Bytecode};
-
-/// Applys Post Execution changes to the [`FlashblockAccessList`]
-pub(crate) fn apply_post_execution_changes_to_access_list(
-    access_list: &mut FlashblockAccessList,
-    state: &revm::state::EvmState,
-) -> Result<(), BlockExecutionError> {
-    Ok(())
-}
-
-/// Applys Pre Execution changes to the [`FlashblockAccessList`]
-pub(crate) fn apply_pre_execution_changes_to_access_list(
-    access_list: &mut FlashblockAccessList,
-    state: &revm::state::EvmState,
-) -> Result<(), BlockExecutionError> {
-    Ok(())
-}
+use revm::{
+    context::result::ResultAndState,
+    state::{Account, AccountInfo, Bytecode},
+    Database, DatabaseCommit,
+};
 
 /// The address of the create2 deployer
-pub(crate)const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
+pub(crate) const CREATE_2_DEPLOYER_ADDR: Address =
+    address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
 
 /// The codehash of the create2 deployer contract.
-pub(crate)const CREATE_2_DEPLOYER_CODEHASH: B256 =
+pub(crate) const CREATE_2_DEPLOYER_CODEHASH: B256 =
     b256!("0xb0550b5b431e30d38000efb7107aaa0ade03d48a7198a140edda9d27134468b2");
 
 /// The raw bytecode of the create2 deployer contract.
@@ -61,10 +52,12 @@ pub(crate) fn transact_beacon_root_contract_call<Halt>(
     // be 0x0 and no system transaction may occur as per EIP-4788
     if evm.block().number.is_zero() {
         if !parent_beacon_block_root.is_zero() {
-            return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
-                parent_beacon_block_root,
-            }
-            .into());
+            return Err(
+                BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
+                    parent_beacon_block_root,
+                }
+                .into(),
+            );
         }
         return Ok(None);
     }
@@ -122,11 +115,57 @@ pub(crate) fn transact_blockhashes_contract_call<Halt>(
     ) {
         Ok(res) => res,
         Err(e) => {
-            return Err(
-                BlockValidationError::BlockHashContractCall { message: e.to_string() }.into()
-            )
+            return Err(BlockValidationError::BlockHashContractCall {
+                message: e.to_string(),
+            }
+            .into())
         }
     };
 
     Ok(Some(res))
+}
+
+/// The Canyon hardfork issues an irregular state transition that force-deploys the create2
+/// deployer contract. This is done by directly setting the code of the create2 deployer account
+/// prior to executing any transactions on the timestamp activation of the fork.
+pub(crate) fn ensure_create2_deployer<DB>(
+    chain_spec: impl OpHardforks,
+    timestamp: u64,
+    db: &mut State<DB>,
+) -> Result<Option<(AccountInfo, Account)>, DB::Error>
+where
+    DB: Database,
+{
+    // If the canyon hardfork is active at the current timestamp, and it was not active at the
+    // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
+    // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
+    if chain_spec.is_canyon_active_at_timestamp(timestamp)
+        && !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
+    {
+        // Load the create2 deployer account from the cache.
+        let acc = db.load_cache_account(CREATE_2_DEPLOYER_ADDR)?;
+
+        // Update the account info with the create2 deployer codehash and bytecode.
+        let mut acc_info = acc.account_info().unwrap_or_default();
+        let initial_account = acc_info.clone();
+
+        acc_info.code_hash = CREATE_2_DEPLOYER_CODEHASH;
+        acc_info.code = Some(Bytecode::new_raw(Bytes::from_static(
+            &CREATE_2_DEPLOYER_BYTECODE,
+        )));
+
+        // Convert the cache account back into a revm account and mark it as touched.
+        let mut revm_acc: revm::state::Account = acc_info.into();
+        revm_acc.mark_touch();
+
+        // Commit the create2 deployer account to the database.
+        db.commit(HashMap::from_iter([(
+            CREATE_2_DEPLOYER_ADDR,
+            revm_acc.clone(),
+        )]));
+
+        return Ok(Some((initial_account, revm_acc)));
+    }
+
+    Ok(None)
 }

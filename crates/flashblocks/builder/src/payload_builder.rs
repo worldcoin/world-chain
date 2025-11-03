@@ -528,16 +528,15 @@ where
         .map_err(PayloadBuilderError::other)?;
 
     let min_tx_index = receipts.len() as u64;
-
-    let genesis_alloc = &ctx.spec().genesis.alloc;
+    
     let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_ctx.clone(),
         ctx.spec().clone(),
         OpRethReceiptBuilder::default(),
-        min_tx_index,
     )
-    .with_receipts(receipts);
+    .with_receipts(receipts)
+    .with_min_tx_index(min_tx_index);
 
     if let Some(cumulative_gas_used) = cumulative_gas_used {
         executor = executor.with_gas_used(cumulative_gas_used)

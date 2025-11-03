@@ -79,3 +79,4 @@ lazy_static.workspace = true
 alloy-sol-types.workspace = true
 revm-interpreter.workspace = true
 alloy-signer-local.workspace = true
+reth-tracing.workspace = true

@@ -1,28 +1,15 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
-use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, TxKind, U256};
+use alloy_primitives::{Address, U256};
 use dashmap::DashMap;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
-use reth::revm::State;
-use reth_evm::{
-    block::{BlockExecutionError, ExecutableTx},
-    Database, Evm,
-};
-use revm::{
-    context::TxEnv,
-    database::TransitionState,
-    state::{Bytecode, EvmState},
-};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use tracing::{info, trace};
 
-use crate::executor::bal_builder::BalBuilderBlockExecutor;
+use revm::state::Bytecode;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) type BlockAccessIndex = u16;
-pub(crate) type GenesisAlloc<'a> = &'a BTreeMap<Address, GenesisAccount>;
 
 /// A convenience builder type for [`FlashblockAccessList`]
 #[derive(Debug, Clone)]
@@ -138,6 +125,14 @@ impl AccountChangesConstruction {
                 .collect(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.storage_changes.is_empty()
+            && self.storage_reads.is_empty()
+            && self.balance_changes.is_empty()
+            && self.nonce_changes.is_empty()
+            && self.code_changes.is_empty()
+    }
 }
 
 impl FlashblockAccessListConstruction {
@@ -175,12 +170,14 @@ impl FlashblockAccessListConstruction {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use crate::executor::bal_builder::BalBuilderBlockExecutor;
     use alloy_consensus::{constants::KECCAK_EMPTY, TxEip1559};
     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
-    use alloy_primitives::{address, keccak256, Address, Bytes, FixedBytes, TxKind, U256};
+    use alloy_primitives::{address, bytes, keccak256, Address, Bytes, FixedBytes, TxKind, U256};
 
     use alloy_signer_local::PrivateKeySigner;
     use alloy_sol_types::{sol, SolCall};
@@ -189,6 +186,7 @@ mod tests {
     use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
     use op_alloy_network::TxSignerSync;
     use reth::revm::State;
+    use reth_evm::Evm;
     use reth_evm::{block::BlockExecutor, ConfigureEvm, EvmFactory};
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
@@ -196,8 +194,10 @@ mod tests {
     use reth_primitives::{transaction::SignedTransaction, Recovered};
     use reth_provider::BlockExecutionResult;
     use revm::{
-        context::ContextTr,
-        database::{BundleState, InMemoryDB},
+        database::{
+            states::{bundle_state::BundleRetention, reverts::Reverts},
+            BundleAccount, BundleState, InMemoryDB,
+        },
         state::{AccountInfo, Bytecode},
     };
 
@@ -371,7 +371,6 @@ mod tests {
                 ctx,
                 CHAIN_SPEC.clone(),
                 OpRethReceiptBuilder::default(),
-                0,
             );
 
             let _ = executor.apply_pre_execution_changes();
@@ -380,10 +379,12 @@ mod tests {
                 executor.execute_transaction(tx).unwrap();
             }
 
-            let (mut evm, execution_result, access_list, min_tx_index, max_tx_index) =
+            let (evm, execution_result, access_list, min_tx_index, max_tx_index) =
                 executor.finish_with_access_list().unwrap();
 
             let access_list = access_list.access_list;
+
+            let (db, _) = evm.finish();
 
             assert_eq!(
                 access_list, self.expected,
@@ -391,10 +392,30 @@ mod tests {
                 access_list, self.expected
             );
 
-            let bundle = evm.db_mut().take_bundle();
+            // merge all transitions into bundle state
+            db.merge_transitions(BundleRetention::Reverts);
+
+            // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
+            // which represent a single atomic state transition. therefore reverts should have length 1
+            // we only retain the first occurance of a revert for any given account.
+            let flattened = db
+                .bundle_state
+                .reverts
+                .iter()
+                .flatten()
+                .scan(HashSet::new(), |visited, (acc, revert)| {
+                    if visited.insert(acc) {
+                        Some((*acc, revert.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            db.bundle_state.reverts = Reverts::new(vec![flattened]);
 
             (
-                bundle,
+                db.bundle_state.clone(),
                 execution_result,
                 access_list,
                 min_tx_index,
@@ -415,10 +436,11 @@ mod tests {
             .with_expected(FlashblockAccessList {
                 changes: vec![
                     AccountChanges {
-                        address: ALICE.address(),
+                        address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
                         balance_changes: vec![BalanceChange {
                             block_access_index: 1,
-                            post_balance: U256::from(10_u128.pow(21) - 100 - 21000),
+                            post_balance: U256::from_str_radix("999999999999999978900", 10)
+                                .unwrap(),
                         }],
                         nonce_changes: vec![NonceChange {
                             block_access_index: 1,
@@ -428,22 +450,15 @@ mod tests {
                     },
                     AccountChanges {
                         address: address!("0x4200000000000000000000000000000000000019"),
+
                         balance_changes: vec![BalanceChange {
                             block_access_index: 1,
                             post_balance: U256::from(21000),
                         }],
-                        code_changes: vec![CodeChange {
-                            block_access_index: 1,
-                            new_code: Bytes::default(),
-                        }],
-                        nonce_changes: vec![NonceChange {
-                            block_access_index: 1,
-                            new_nonce: 0,
-                        }],
                         ..Default::default()
                     },
                     AccountChanges {
-                        address: BOB.address(),
+                        address: address!("0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"),
                         balance_changes: vec![BalanceChange {
                             block_access_index: 1,
                             post_balance: U256::from(101),
@@ -451,8 +466,8 @@ mod tests {
                         ..Default::default()
                     },
                 ],
-                max_tx_index: 1,
                 min_tx_index: 0,
+                max_tx_index: 1,
             })
             .test();
     }
@@ -468,20 +483,88 @@ mod tests {
                 SomeContractFactory::createCall::SELECTOR.into(),
             )
             .with_expected(FlashblockAccessList {
+    changes: vec![
+        AccountChanges {
+            address: address!("0x1234567890123456789012345678901234567890"),  
+            nonce_changes: vec![
+                NonceChange {
+                    block_access_index: 1,
+                    new_nonce: 1,
+                },
+            ],
+            code_changes: vec![
+                CodeChange {
+                    block_access_index: 1,
+                    new_code: bytes!("6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063efc81a8c14602a575b5f5ffd5b60306032565b005b5f604051603d90605a565b604051809103905ff0801580156055573d5f5f3e3d5ffd5b505050565b61013e806100688339019056fe6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056"),
+                },
+            ],
+            ..Default::default()
+        },
+        AccountChanges {
+            address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
+            balance_changes: vec![
+                BalanceChange {
+                    block_access_index: 1,
+                    post_balance: U256::from_str_radix("999999999999999888515", 10).unwrap(),
+                },
+            ],
+            nonce_changes: vec![
+                NonceChange {
+                    block_access_index: 1,
+                    new_nonce: 1,
+                },
+            ],
+            ..Default::default()
+        },
+        AccountChanges {
+            address: address!("0x4200000000000000000000000000000000000019"),
+            balance_changes: vec![
+                BalanceChange {
+                    block_access_index: 1,
+                    post_balance: U256::from(111485),
+                },
+            ],
+          ..Default::default()
+        },
+        AccountChanges {
+            address: address!("0xf831de50f3884cf0f8550bb129032a80cb5a26b7"),
+            nonce_changes: vec![
+                NonceChange {
+                    block_access_index: 1,
+                    new_nonce: 1,
+                },
+            ],
+            code_changes: vec![
+                CodeChange {
+                    block_access_index: 1,
+                    new_code: bytes!("0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056"),
+                },
+            ],
+            ..Default::default()
+        },
+    ],
+    min_tx_index: 0,
+    max_tx_index: 1,
+})
+            .test();
+    }
+
+    #[test]
+    fn test_bal_state_root_computation() {
+        let (expected_bundle, _, access_list, _, _) = AccessListTest::new()
+            .with_tx(
+                ALICE.clone(),
+                Some(BOB.address()),
+                U256::ONE,
+                Bytes::default(),
+            )
+            .with_expected(FlashblockAccessList {
                 changes: vec![
                     AccountChanges {
-                        address: *FACTORY,
-                        nonce_changes: vec![NonceChange {
-                            block_access_index: 1,
-                            new_nonce: 1,
-                        }],
-                        ..Default::default()
-                    },
-                    AccountChanges {
-                        address: ALICE.address(),
+                        address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
                         balance_changes: vec![BalanceChange {
-                            block_access_index: 1,
-                            post_balance: U256::from_str_radix("999999999999999888515", 10)
+                            block_access_index: 2,
+                            post_balance: U256::from_str_radix("999999999999999978999", 10)
                                 .unwrap(),
                         }],
                         nonce_changes: vec![NonceChange {
@@ -496,65 +579,34 @@ mod tests {
                             block_access_index: 1,
                             post_balance: U256::from(111485),
                         }],
-                        nonce_changes: vec![NonceChange {
-                            block_access_index: 1,
-                            new_nonce: 0,
-                        }],
-                        code_changes: vec![CodeChange {
-                            block_access_index: 1,
-                            new_code: Bytes::default(),
-                        }],
                         ..Default::default()
                     },
                     AccountChanges {
-                        address: address!("0xf831de50f3884cf0f8550bb129032a80cb5a26b7"),
+                        address: address!("0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"),
                         balance_changes: vec![BalanceChange {
                             block_access_index: 1,
-                            post_balance: U256::ZERO,
-                        }],
-                        nonce_changes: vec![NonceChange {
-                            block_access_index: 1,
-                            new_nonce: 1,
-                        }],
-                        code_changes: vec![CodeChange {
-                            block_access_index: 1,
-                            new_code: SomeContract::BYTECODE.clone(),
+                            post_balance: U256::from(2),
                         }],
                         ..Default::default()
                     },
                 ],
-                max_tx_index: 1,
                 min_tx_index: 0,
+                max_tx_index: 1,
             })
             .test();
-    }
 
-    #[test]
-    fn test_bal_state_root_computation() {
-        // let (bundle_state, outcome, access_list, min_tx_index, max_tx_index) =
-        //     AccessListTest::new()
-        //         .with_tx(
-        //             ALICE.clone(),
-        //             Some(BOB.address()),
-        //             U256::ONE,
-        //             Bytes::default(),
-        //         )
-        //         .with_tx(
-        //             ALICE.clone(),
-        //             Some(BOB.address()),
-        //             U256::ONE,
-        //             Bytes::default(),
-        //         )
-        //         .with_tx(
-        //             ALICE.clone(),
-        //             Some(BOB.address()),
-        //             U256::ONE,
-        //             Bytes::default(),
-        //         )
-        //         .with_expected(Default::default())
-        //         .test();
+        let bundle: HashMap<Address, BundleAccount> = access_list.into();
 
-        // Re-construct the state root both from the created bundle from the executor, and from the converted access list
-        // let constructed_bundl_hash = compute_state_root()
+        for (address, account) in bundle.iter() {
+            let expected = expected_bundle.state.get(address).unwrap();
+            assert_eq!(
+                account.info, expected.info,
+                "Account Info mismatch for account {address:?}"
+            );
+            assert_eq!(
+                account.storage, expected.storage,
+                "Storage mismatch for account {address:?}"
+            );
+        }
     }
 }

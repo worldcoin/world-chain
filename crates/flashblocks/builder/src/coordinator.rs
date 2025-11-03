@@ -297,6 +297,7 @@ where
 
     let before_execution = Instant::now();
 
+    let latest_payload_clone = latest_payload.clone();
     let (execution_result, state_root_result) = if let Some(access_list_data) =
         flashblock.diff().access_list_data.as_ref()
     {
@@ -305,7 +306,6 @@ where
             move || {
                 execute_transactions(
                     transactions_clone.clone(),
-                    Some(access_list_data.access_list_hash),
                     &evm_config,
                     sealed_header.clone(),
                     state_provider_clone.clone(),
@@ -313,6 +313,8 @@ where
                     latest_bundle,
                     execution_context_clone.clone(),
                     chain_spec,
+                    latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
+                    Some(&access_list_data.access_list.clone()),
                 )
             },
             move || {
@@ -328,7 +330,6 @@ where
         info!(target: "flashblocks::state_executor", "executing flashblock without access list");
         let execution_result = execute_transactions(
             transactions_clone.clone(),
-            None,
             &evm_config,
             sealed_header.clone(),
             state_provider_clone.clone(),
@@ -336,6 +337,8 @@ where
             latest_bundle,
             execution_context_clone.clone(),
             chain_spec,
+            latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
+            None,
         )?;
 
         let converted: HashMap<Address, BundleAccount> =
