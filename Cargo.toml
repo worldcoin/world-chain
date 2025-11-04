@@ -185,6 +185,7 @@ alloy-hardforks = { version = "0.3.0", default-features = false }
 # revm
 revm = { version = "29.0.0", default-features = false }
 revm-database = { version = "7.0.5", default-features = false }
+revm-database-interface = { version = "7.0.5", default-features = false }
 revm-interpreter = { version = "25.0.3", default-features = false }
 revm-state = { version = "7.0.5", default-features = false }
 revm-primitives = { version = "20.2.1", default-features = false }

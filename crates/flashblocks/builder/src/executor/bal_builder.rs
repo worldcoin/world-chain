@@ -48,6 +48,7 @@ where
 {
     inner: OpBlockExecutor<Evm, R, Spec>,
     flashblock_access_list: FlashblockAccessListConstruction,
+    block_access_index: Option<BlockAccessIndex>,
     min_tx_index: u64,
 }
 
@@ -67,6 +68,7 @@ where
             inner: executor,
             flashblock_access_list: FlashblockAccessListConstruction::default(),
             min_tx_index: 0,
+            block_access_index: None,
         }
     }
 
@@ -79,6 +81,12 @@ where
     /// Sets the [`FlashblockAccessListConstruction`] for the executor
     pub fn with_access_list(mut self, access_list: FlashblockAccessListConstruction) -> Self {
         self.flashblock_access_list = access_list;
+        self
+    }
+
+    /// Hardcode the [`BlockAccessIndex`] for the executor
+    pub fn with_block_access_index(mut self, index: BlockAccessIndex) -> Self {
+        self.block_access_index = Some(index);
         self
     }
 
@@ -114,7 +122,8 @@ where
 
     /// Returns the current [`BlockAccessIndex`].
     pub fn block_access_index(&self) -> BlockAccessIndex {
-        self.inner.receipts.len() as BlockAccessIndex + 1
+        self.block_access_index
+            .unwrap_or(self.inner.receipts.len() as BlockAccessIndex + 1)
     }
 
     /// Commits state at a given [`BlockAccessIndex`] to the BAL.
@@ -122,7 +131,6 @@ where
     /// State should be cleared between indices to ensure that the [`EvmState`] passed here corresponds to only [`Account`] changes
     /// that have occured in the transaction at [`BlockAccessIndex`].
     pub fn with_state(&mut self, state: &EvmState) -> Result<(), BlockExecutionError> {
-        info!(target: "flashblocks::test", "committing state at block access index {}", self.block_access_index());
         let index = self.block_access_index();
 
         // Update target account if it exists
@@ -174,6 +182,7 @@ where
             flashblock_access_list: access_list,
             min_tx_index,
             mut inner,
+            ..
         } = self;
 
         let balance_increments =

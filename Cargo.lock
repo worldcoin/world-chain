@@ -3739,6 +3739,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",
+ "revm-database-interface",
  "revm-interpreter",
  "serde",
  "serde_json",
