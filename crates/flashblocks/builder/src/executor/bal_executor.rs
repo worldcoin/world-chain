@@ -35,7 +35,7 @@ use tracing::info;
 
 use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::cached_db::TemporalDbFactory;
+use crate::executor::temporal_db::TemporalDbFactory;
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///

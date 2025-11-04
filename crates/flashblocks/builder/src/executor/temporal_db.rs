@@ -1,7 +1,6 @@
 use alloy_primitives::{Address, B256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use revm::{
-    database::AccountStatus,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
     DatabaseRef,
@@ -22,6 +21,7 @@ pub struct TemporalState {
 }
 
 impl TemporalState {
+    /// Initialize or load an account info from the cache or database.
     fn init_or_load<'a, DB: DatabaseRef>(
         &mut self,
         db: &'a DB,
@@ -38,14 +38,6 @@ impl TemporalState {
             }
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CacheAccountInfo {
-    /// Account information and storage, if account exists.
-    pub account: Option<AccountInfo>,
-    /// Account status flags.
-    pub status: AccountStatus,
 }
 
 #[derive(Clone, Debug)]
