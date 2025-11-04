@@ -11,12 +11,9 @@ use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutionError, BlockExecutor};
-use reth_evm::op_revm::{OpSpecId, OpTransaction, OpTransactionError};
-use reth_evm::{
-    block::{CommitChanges, ExecutableTx},
-    Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
-};
+use reth_evm::op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
+use reth_evm::{Database, FromRecoveredTx, FromTxWithEncoded};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
@@ -28,18 +25,17 @@ use reth_primitives::SealedHeader;
 use reth_provider::{BlockExecutionResult, StateProvider};
 use reth_trie_common::updates::TrieUpdates;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-use revm::context::result::{ExecutionResult, ResultAndState};
 use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState, CacheDB, TransitionState};
+use revm::database::{BundleAccount, BundleState, CacheDB};
 use revm::DatabaseRef;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::cached_db::TemporalCachedDbFactory;
+use crate::executor::cached_db::TemporalDbFactory;
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
@@ -68,7 +64,6 @@ where
     DB: Database + DatabaseRef<Error: Send + Sync + 'static> + Send + Sync + 'db,
     E: Evm<
             DB = &'db mut State<DB>,
-            // Tx = OpTransaction<TxEnv>,
             Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
             Spec = OpSpecId,
         > + Send
@@ -106,20 +101,6 @@ where
         self
     }
 
-    fn execute_transaction(
-        self: Arc<Self>,
-        // tx: impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Send + Sync,
-        tx: (),
-    ) -> Result<(), BlockExecutionError> {
-        todo!()
-    }
-
-    fn finish(self) -> Result<(E, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
-        let res = self.inner.finish();
-
-        res
-    }
-
     fn execute_block(
         mut self,
         transactions: impl IntoParallelIterator<Item = OpTransaction<TxEnv>>,
@@ -135,47 +116,20 @@ where
         let (state, env) = self.inner.evm.finish();
         // TODO: may not need this cache
         let cache_db = CacheDB::new(&*state);
-        let temporal_factory = TemporalCachedDbFactory::new(&cache_db, self.flashblock_access_list);
-        // let base_evm = OpEvmFactory::default().create_evm(cache_db, env.clone());
+        let temporal_factory = TemporalDbFactory::new(&cache_db, self.flashblock_access_list);
 
         let res = transactions.into_par_iter().for_each(|tx| {
             let index = todo!();
             let db = temporal_factory.db(index);
             // TODO: we probably can get rid of this cache as well
             let db = CacheDB::new(db);
-            let evm = OpEvmFactory::default().create_evm(db, env.clone());
+            let mut evm = OpEvmFactory::default().create_evm(db, env.clone());
             evm.transact_raw(tx).unwrap();
         });
 
         // self.inner.apply_post_execution_changes()
         todo!()
     }
-}
-
-pub fn transaction_evms<DB>(
-    bal: FlashblockAccessList,
-    db: &DB,
-    evm_env: &EvmEnv<OpSpecId>,
-) -> Vec<impl Evm>
-where
-    DB: DatabaseRef<Error: Send + Sync + 'static> + std::fmt::Debug,
-{
-    let cache_db = CacheDB::new(db);
-    let evm = OpEvmFactory::default().create_evm(cache_db, evm_env.clone());
-
-    let len = (bal.max_tx_index - bal.min_tx_index + 1) as usize;
-    let mut transitions = vec![TransitionState::default(); len];
-    for account in &bal.changes {
-        for slot in &account.storage_changes {
-            for storage in &slot.changes {
-                let transition = &mut transitions[storage.block_access_index as usize];
-                let transition_account = transition.transitions.entry(account.address).or_default();
-                // transition_account.info
-            }
-        }
-    }
-    // transitions
-    todo!()
 }
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]

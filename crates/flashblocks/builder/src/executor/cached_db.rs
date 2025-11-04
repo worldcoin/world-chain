@@ -30,42 +30,18 @@ pub struct CacheAccountInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct TemporalCachedDbFactory<'a, DB: DatabaseRef> {
+pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
     pub db: &'a DB,
     pub cache: TemporalCacheState,
 }
 
-impl<'a, DB: DatabaseRef> TemporalCachedDbFactory<'a, DB> {
+impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
     pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
-        let cache: TemporalCacheState = list.into();
-        TemporalCachedDbFactory { db, cache }
-    }
-
-    pub fn db(&'a self, index: u64) -> TemporalCachedDb<'a, DB> {
-        TemporalCachedDb::new(self.db, &self.cache, index)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct TemporalCachedDb<'a, DB: DatabaseRef> {
-    pub db: &'a DB,
-    pub cache: &'a TemporalCacheState,
-    pub index: u64,
-}
-
-impl<'a, DB: DatabaseRef> TemporalCachedDb<'a, DB> {
-    pub fn new(db: &'a DB, cache: &'a TemporalCacheState, index: u64) -> Self {
-        TemporalCachedDb { db, cache, index }
-    }
-}
-
-impl From<FlashblockAccessList> for TemporalCacheState {
-    fn from(list: FlashblockAccessList) -> Self {
-        let mut state = TemporalCacheState::default();
+        let mut cache = TemporalCacheState::default();
         for change in list.changes {
             for storage_change in change.storage_changes {
                 for slot in storage_change.changes {
-                    let storage_entry = state.account_storage.entry(change.address).or_default();
+                    let storage_entry = cache.account_storage.entry(change.address).or_default();
                     storage_entry.insert(
                         slot.block_access_index,
                         storage_change.slot.into(),
@@ -76,7 +52,7 @@ impl From<FlashblockAccessList> for TemporalCacheState {
             // TODO: We can prewarm these
             // for storage_reads in change.storage_reads {}
             for balance_change in change.balance_changes {
-                match state
+                match cache
                     .account_info
                     .get(balance_change.block_access_index, &change.address)
                 {
@@ -87,11 +63,29 @@ impl From<FlashblockAccessList> for TemporalCacheState {
             for nonce_change in change.nonce_changes {}
             for code_change in change.code_changes {}
         }
-        todo!()
+
+        TemporalDbFactory { db, cache }
+    }
+
+    pub fn db(&'a self, index: u64) -> TemporalDb<'a, DB> {
+        TemporalDb::new(self.db, &self.cache, index)
     }
 }
 
-impl<'a, DB: DatabaseRef> DatabaseRef for TemporalCachedDb<'a, DB> {
+#[derive(Clone, Debug)]
+pub struct TemporalDb<'a, DB: DatabaseRef> {
+    pub db: &'a DB,
+    pub cache: &'a TemporalCacheState,
+    pub index: u64,
+}
+
+impl<'a, DB: DatabaseRef> TemporalDb<'a, DB> {
+    pub fn new(db: &'a DB, cache: &'a TemporalCacheState, index: u64) -> Self {
+        TemporalDb { db, cache, index }
+    }
+}
+
+impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
