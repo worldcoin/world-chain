@@ -36,6 +36,10 @@ pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
 }
 
 impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
+    /// Build a new TemporalDbFactory from a FlashblockAccessList
+    ///
+    /// This will prepopulate the cache with the changes from the access list
+    /// so that TemporalDb instances can be created for specific indices.
     pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
         let mut cache = TemporalCacheState::default();
         for change in list.changes {
@@ -50,15 +54,30 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                 }
             }
             // TODO: We can prewarm these
-            // for storage_reads in change.storage_reads {}
+            for storage_reads in change.storage_reads {}
             for balance_change in change.balance_changes {
-                match cache
+                let mut account = match cache
                     .account_info
                     .get(balance_change.block_access_index, &change.address)
                 {
-                    Some(_) => todo!(),
-                    None => todo!(),
-                }
+                    Some(a) => Some(a.clone()),
+                    None => {
+                        let base = db.basic_ref(change.address).unwrap();
+                        cache.account_info.insert(
+                            0,
+                            change.address,
+                            base.clone().unwrap_or_default(),
+                        );
+                        base
+                    }
+                };
+                let mut account = account.unwrap_or_default();
+                account.balance = balance_change.post_balance;
+                cache.account_info.insert(
+                    balance_change.block_access_index + 1,
+                    change.address,
+                    account,
+                );
             }
             for nonce_change in change.nonce_changes {}
             for code_change in change.code_changes {}
