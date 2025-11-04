@@ -144,7 +144,8 @@ where
             // TODO: we probably can get rid of this cache as well
             let db = CacheDB::new(db);
             let evm = OpEvmFactory::default().create_evm(db, env.clone());
-            evm.transact(tx);
+            let tx_env = tx.to_tx_env();
+            evm.transact_raw(tx_env);
         });
 
         // self.inner.apply_post_execution_changes()
