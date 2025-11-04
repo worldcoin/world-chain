@@ -165,3 +165,397 @@ impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
         self.db.block_hash_ref(number)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    };
+    use alloy_primitives::{address, b256, bytes, U256};
+    use revm::database::{CacheDB, EmptyDB};
+    use revm::primitives::KECCAK_EMPTY;
+
+    #[test]
+    fn test_temporal_state_init_or_load_from_cache() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let account_info = AccountInfo {
+            balance: U256::from(100),
+            nonce: 5,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let db = CacheDB::new(EmptyDB::new());
+        let mut state = TemporalState::default();
+        state.account_info.insert(1, addr, account_info.clone());
+
+        let result = state.init_or_load(&db, addr, 2);
+        assert_eq!(result.balance, U256::from(100));
+        assert_eq!(result.nonce, 5);
+    }
+
+    #[test]
+    fn test_temporal_state_init_or_load_from_db() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let account_info = AccountInfo {
+            balance: U256::from(200),
+            nonce: 10,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(addr, account_info.clone());
+        let mut state = TemporalState::default();
+
+        let result = state.init_or_load(&db, addr, 0);
+        assert_eq!(result.balance, U256::from(200));
+        assert_eq!(result.nonce, 10);
+
+        // Verify it was cached at index 0
+        assert_eq!(
+            state.account_info.get(0, &addr).unwrap().balance,
+            U256::from(200)
+        );
+    }
+
+    #[test]
+    fn test_temporal_state_init_or_load_nonexistent_account() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let db = EmptyDB::new();
+        let mut state = TemporalState::default();
+
+        let result = state.init_or_load(&db, addr, 0);
+        assert_eq!(result.balance, U256::ZERO);
+        assert_eq!(result.nonce, 0);
+    }
+
+    #[test]
+    fn test_temporal_db_factory_with_storage_changes() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+        let value1 = U256::from(100);
+        let value2 = U256::from(200);
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: addr,
+                storage_changes: vec![SlotChanges {
+                    slot,
+                    changes: vec![
+                        StorageChange {
+                            block_access_index: 1,
+                            new_value: value1.into(),
+                        },
+                        StorageChange {
+                            block_access_index: 3,
+                            new_value: value2.into(),
+                        },
+                    ],
+                }],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![],
+                code_changes: vec![],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 5,
+        };
+
+        let db = EmptyDB::new();
+        let factory = TemporalDbFactory::new(&db, access_list);
+
+        // Check storage at different indices
+        let temporal_db_1 = factory.db(1);
+        assert_eq!(
+            temporal_db_1.storage_ref(addr, slot.into()).unwrap(),
+            value1
+        );
+
+        let temporal_db_2 = factory.db(2);
+        assert_eq!(
+            temporal_db_2.storage_ref(addr, slot.into()).unwrap(),
+            value1
+        );
+
+        let temporal_db_3 = factory.db(3);
+        assert_eq!(
+            temporal_db_3.storage_ref(addr, slot.into()).unwrap(),
+            value2
+        );
+
+        let temporal_db_4 = factory.db(4);
+        assert_eq!(
+            temporal_db_4.storage_ref(addr, slot.into()).unwrap(),
+            value2
+        );
+    }
+
+    #[test]
+    fn test_temporal_db_factory_with_balance_changes() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let initial_balance = U256::from(1000);
+        let new_balance = U256::from(500);
+
+        let initial_account = AccountInfo {
+            balance: initial_balance,
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: addr,
+                storage_changes: vec![],
+                storage_reads: vec![],
+                balance_changes: vec![BalanceChange {
+                    block_access_index: 2,
+                    post_balance: new_balance,
+                }],
+                nonce_changes: vec![],
+                code_changes: vec![],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 5,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(addr, initial_account);
+        let factory = TemporalDbFactory::new(&db, access_list);
+
+        // Before the change
+        let temporal_db_1 = factory.db(1);
+        let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_1.balance, initial_balance);
+
+        // At the change index
+        let temporal_db_2 = factory.db(2);
+        let account_2 = temporal_db_2.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_2.balance, initial_balance);
+
+        // After the change
+        let temporal_db_3 = factory.db(3);
+        let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_3.balance, new_balance);
+    }
+
+    #[test]
+    fn test_temporal_db_factory_with_nonce_changes() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let initial_nonce = 5u64;
+        let new_nonce = 10u64;
+
+        let initial_account = AccountInfo {
+            balance: U256::from(1000),
+            nonce: initial_nonce,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: addr,
+                storage_changes: vec![],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 2,
+                    new_nonce,
+                }],
+                code_changes: vec![],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 5,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(addr, initial_account);
+        let factory = TemporalDbFactory::new(&db, access_list);
+
+        // Before the change
+        let temporal_db_1 = factory.db(1);
+        let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_1.nonce, initial_nonce);
+
+        // After the change
+        let temporal_db_3 = factory.db(3);
+        let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_3.nonce, new_nonce);
+    }
+
+    #[test]
+    fn test_temporal_db_factory_with_code_changes() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let new_code = bytes!("60806040");
+        let new_bytecode = Bytecode::new_raw(new_code.clone());
+        let new_code_hash = new_bytecode.hash_slow();
+
+        let initial_account = AccountInfo {
+            balance: U256::from(1000),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: addr,
+                storage_changes: vec![],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![],
+                code_changes: vec![CodeChange {
+                    block_access_index: 2,
+                    new_code: new_code.clone(),
+                }],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 5,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(addr, initial_account);
+        let factory = TemporalDbFactory::new(&db, access_list);
+
+        // Before the change
+        let temporal_db_1 = factory.db(1);
+        let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_1.code_hash, KECCAK_EMPTY);
+
+        // After the change
+        let temporal_db_3 = factory.db(3);
+        let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account_3.code_hash, new_code_hash);
+        assert!(account_3.code.is_some());
+        // Check that the bytecode starts with the expected code
+        let code_ref = account_3.code.as_ref().unwrap();
+        assert!(code_ref.bytecode().starts_with(&new_code));
+    }
+
+    #[test]
+    fn test_temporal_db_factory_with_multiple_changes() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+
+        let initial_account = AccountInfo {
+            balance: U256::from(1000),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: addr,
+                storage_changes: vec![SlotChanges {
+                    slot,
+                    changes: vec![StorageChange {
+                        block_access_index: 1,
+                        new_value: U256::from(100).into(),
+                    }],
+                }],
+                storage_reads: vec![],
+                balance_changes: vec![BalanceChange {
+                    block_access_index: 2,
+                    post_balance: U256::from(500),
+                }],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 3,
+                    new_nonce: 10,
+                }],
+                code_changes: vec![],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 5,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(addr, initial_account);
+        let factory = TemporalDbFactory::new(&db, access_list);
+
+        // At index 4, all changes should be visible
+        let temporal_db = factory.db(4);
+        let account = temporal_db.basic_ref(addr).unwrap().unwrap();
+        assert_eq!(account.balance, U256::from(500));
+        assert_eq!(account.nonce, 10);
+
+        let storage = temporal_db.storage_ref(addr, slot.into()).unwrap();
+        assert_eq!(storage, U256::from(100));
+    }
+
+    #[test]
+    fn test_temporal_db_basic_ref_fallback_to_db() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let other_addr = address!("0000000000000000000000000000000000000002");
+
+        let account_info = AccountInfo {
+            balance: U256::from(999),
+            nonce: 7,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_info(other_addr, account_info.clone());
+        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+
+        let temporal_db = factory.db(0);
+
+        // Address not in cache should fall back to DB
+        let result = temporal_db.basic_ref(other_addr).unwrap().unwrap();
+        assert_eq!(result.balance, U256::from(999));
+        assert_eq!(result.nonce, 7);
+
+        // Address not in cache or DB should return None
+        let result = temporal_db.basic_ref(addr).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_temporal_db_storage_ref_fallback_to_db() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+        let value = U256::from(777);
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_storage(addr, slot.into(), value);
+        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+
+        let temporal_db = factory.db(0);
+        let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
+        assert_eq!(result, value);
+    }
+
+    #[test]
+    fn test_temporal_db_code_by_hash_ref_fallback_to_db() {
+        let code = bytes!("60806040");
+        let mut account = AccountInfo::default().with_code(Bytecode::new_raw(code.clone()));
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_contract(&mut account);
+        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+
+        let temporal_db = factory.db(0);
+        let result = temporal_db.code_by_hash_ref(account.code_hash).unwrap();
+        // Check that the bytecode starts with the expected code
+        assert!(result.bytecode().starts_with(&code));
+    }
+
+    #[test]
+    fn test_temporal_db_storage_ref_no_account_storage() {
+        let addr = address!("0000000000000000000000000000000000000001");
+        let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+        let value = U256::from(555);
+
+        let mut db = CacheDB::new(EmptyDB::new());
+        db.insert_account_storage(addr, slot.into(), value);
+        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+
+        let temporal_db = factory.db(0);
+        // No storage in cache for this address, should fall back to DB
+        let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
+        assert_eq!(result, value);
+    }
+}
