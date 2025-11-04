@@ -10,7 +10,7 @@ use revm::{
 use crate::executor::temporal_map::TemporalMap;
 
 #[derive(Clone, Debug, Default)]
-pub struct TemporalCacheState {
+pub struct TemporalState {
     /// Block state account with account info
     pub account_info: TemporalMap<Address, AccountInfo, u64>,
     /// Block state account with account info
@@ -21,7 +21,7 @@ pub struct TemporalCacheState {
     pub has_state_clear: bool,
 }
 
-impl TemporalCacheState {
+impl TemporalState {
     fn init_or_load<'a, DB: DatabaseRef>(
         &mut self,
         db: &'a DB,
@@ -51,7 +51,7 @@ pub struct CacheAccountInfo {
 #[derive(Clone, Debug)]
 pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
     pub db: &'a DB,
-    pub cache: TemporalCacheState,
+    pub cache: TemporalState,
 }
 
 impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
@@ -60,7 +60,7 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
     /// This will prepopulate the cache with the changes from the access list
     /// so that TemporalDb instances can be created for specific indices.
     pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
-        let mut cache = TemporalCacheState::default();
+        let mut cache = TemporalState::default();
         for change in list.changes {
             for storage_change in change.storage_changes {
                 for slot in storage_change.changes {
@@ -73,7 +73,7 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                 }
             }
             // TODO: We can prewarm these
-            for storage_reads in change.storage_reads {}
+            // for storage_reads in change.storage_reads {}
             for balance_change in change.balance_changes {
                 let mut account =
                     cache.init_or_load(db, change.address, balance_change.block_access_index);
@@ -97,7 +97,9 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             for code_change in change.code_changes {
                 let mut account =
                     cache.init_or_load(db, change.address, code_change.block_access_index);
-                account.code = Some(Bytecode::new_raw(code_change.new_code));
+                let bytecode = Bytecode::new_raw(code_change.new_code);
+                account.code_hash = bytecode.hash_slow();
+                account.code = Some(bytecode);
                 cache.account_info.insert(
                     code_change.block_access_index + 1,
                     change.address,
@@ -117,12 +119,12 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
 #[derive(Clone, Debug)]
 pub struct TemporalDb<'a, DB: DatabaseRef> {
     pub db: &'a DB,
-    pub cache: &'a TemporalCacheState,
+    pub cache: &'a TemporalState,
     pub index: u64,
 }
 
 impl<'a, DB: DatabaseRef> TemporalDb<'a, DB> {
-    pub fn new(db: &'a DB, cache: &'a TemporalCacheState, index: u64) -> Self {
+    pub fn new(db: &'a DB, cache: &'a TemporalState, index: u64) -> Self {
         TemporalDb { db, cache, index }
     }
 }
