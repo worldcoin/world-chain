@@ -1,3 +1,4 @@
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::ops::Bound::{Included, Unbounded};
@@ -23,6 +24,10 @@ where
     /// Insert a value versioned at `index` for `key`.
     pub fn insert(&mut self, index: I, key: K, value: V) {
         self.inner.entry(key).or_default().insert(index, value);
+    }
+
+    pub fn entry(&mut self, index: I, key: K) -> Entry<'_, I, V> {
+        self.inner.entry(key).or_default().entry(index)
     }
 
     /// Get the value for `key` as of `index` (i.e., last set at or before `index`).

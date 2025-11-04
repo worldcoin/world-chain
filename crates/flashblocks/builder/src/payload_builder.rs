@@ -527,7 +527,7 @@ where
         .map_err(PayloadBuilderError::other)?;
 
     let min_tx_index = receipts.len() as u64;
-    
+
     let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_ctx.clone(),

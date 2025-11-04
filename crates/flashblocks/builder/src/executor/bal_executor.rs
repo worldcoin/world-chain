@@ -1,16 +1,17 @@
 use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
 use alloy_eips::Encodable2718;
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory};
+use alloy_primitives::{keccak256, Address, FixedBytes, U256};
 use eyre::eyre::eyre;
-use flashblocks_primitives::access_list::FlashblockAccessList;
+use flashblocks_primitives::access_list::{self, FlashblockAccessList};
 use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
-use reth_evm::block::{BlockExecutionError, BlockExecutor};
+use reth_evm::block::{BlockExecutionError, BlockExecutor, ExecutableTx};
 use reth_evm::op_revm::{OpSpecId, OpTransaction};
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
+use reth_evm::precompiles::PrecompilesMap;
+use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx, ToTxEnv};
 use reth_evm::{Database, FromRecoveredTx, FromTxWithEncoded};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
@@ -27,7 +28,8 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState, CacheDB};
+use revm::database::{BundleAccount, BundleState, Cache, CacheDB, InMemoryDB};
+use revm::inspector::NoOpInspector;
 use revm::DatabaseRef;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -35,7 +37,7 @@ use tracing::info;
 
 use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::temporal_db::TemporalDbFactory;
+use crate::executor::cached_db::{TemporalDb, TemporalDbFactory};
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
@@ -43,12 +45,13 @@ use crate::executor::temporal_db::TemporalDbFactory;
 ///
 /// 'BlockExecutor' trait is not flexible enough for our purposes.
 /// TODO: WIP, currently unused
-pub struct BalBlockExecutor<Evm, R, Spec>
-where
-    R: OpReceiptBuilder,
-{
-    inner: OpBlockExecutor<Evm, R, Spec>,
-    flashblock_access_list: FlashblockAccessList,
+pub struct BalBlockExecutor<E, R, Spec> {
+    spec: Spec,
+    execution_context: OpBlockExecutionCtx,
+    receipt_builder: R,
+    config: OpEvmConfig,
+    access_list: FlashblockAccessList,
+    _marker: std::marker::PhantomData<E>,
 }
 
 pub struct ParallelTxExecutor<Evm, R, Spec>
@@ -61,73 +64,125 @@ where
 
 impl<'db, DB, E, R, Spec> BalBlockExecutor<E, R, Spec>
 where
-    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + Send + Sync + 'db,
-    E: Evm<
-            DB = &'db mut State<DB>,
-            Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
-            Spec = OpSpecId,
-        > + Send
+    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId> + Send + Sync,
+    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + Clone + Send + Sync + 'db,
+    OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>
+        + Clone
+        + Send
         + Sync,
-    R: OpReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt> + Send + Sync,
     Spec: OpHardforks + Clone + Send + Sync,
 {
     /// Creates a new [`FlashblocksBlockExecutor`].
     pub fn new(
-        evm: E,
         ctx: OpBlockExecutionCtx,
         spec: Spec,
         receipt_builder: R,
-        flashblock_access_list: FlashblockAccessList,
+        config: OpEvmConfig,
+        access_list: FlashblockAccessList,
     ) -> Self {
-        let executor = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
-
         Self {
-            inner: executor,
-            flashblock_access_list,
+            spec,
+            execution_context: ctx,
+            receipt_builder,
+            config,
+            access_list,
+            _marker: std::marker::PhantomData,
         }
     }
 
-    /// Extends the [`BundleState`] of the executor with a specified pre-image.
-    ///
-    /// This should be used _only_ when initializing the executor
-    pub fn with_bundle_prestate(mut self, pre_state: BundleState) -> Self {
-        self.inner.evm_mut().db_mut().bundle_state.extend(pre_state);
-        self
-    }
-
-    /// Extends the receipts to reflect the aggregated execution result
-    pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
-        self.inner.receipts.extend_from_slice(&receipts);
-        self
-    }
-
-    fn execute_block(
-        mut self,
-        transactions: impl IntoParallelIterator<Item = (OpTransaction<TxEnv>, u64)>,
-    ) -> Result<
-        BlockExecutionResult<<OpBlockExecutor<E, R, Spec> as BlockExecutor>::Receipt>,
-        BlockExecutionError,
-    >
+    fn verify_block(
+        self,
+        transactions: impl IntoParallelIterator<
+            Item = (
+                impl ExecutableTx<
+                    BalBuilderBlockExecutor<
+                        OpEvm<
+                            &'db mut State<CacheDB<TemporalDb<'db, DB>>>,
+                            NoOpInspector,
+                            PrecompilesMap,
+                        >,
+                        R,
+                        Spec,
+                    >,
+                >,
+                u64,
+            ),
+        >,
+        transactions_length: u64,
+        db: impl StateProvider + Clone,
+    ) -> Result<(), eyre::Report>
     where
         Self: Sized,
     {
-        self.inner.apply_pre_execution_changes()?;
+        let db = StateProviderDatabase::new(db);
+        let db_factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
 
-        let (state, env) = self.inner.evm.finish();
-        // TODO: may not need this cache
-        let cache_db = CacheDB::new(&*state);
-        let temporal_factory = TemporalDbFactory::new(&cache_db, self.flashblock_access_list);
+        let access_lists = transactions
+            .into_par_iter()
+            .map(|(tx, index)| {
+                let temporal_db = db_factory.db(index);
+                let mut state = State::builder()
+                    .with_database_ref(temporal_db)
+                    .with_bundle_update()
+                    .build();
 
-        let res = transactions.into_par_iter().for_each(|(tx, index)| {
-            let db = temporal_factory.db(index);
-            // TODO: we probably can get rid of this cache as well
-            let db = CacheDB::new(db);
-            let mut evm = OpEvmFactory::default().create_evm(db, env.clone());
-            evm.transact_raw(tx).unwrap();
-        });
+                let evm = OpEvmFactory::default()
+                    .create_evm(&mut state, self.config.evm_env(&Header::default()).unwrap());
 
-        // self.inner.apply_post_execution_changes()
-        todo!()
+                let mut executor = BalBuilderBlockExecutor::new(
+                    evm,
+                    self.execution_context.clone(),
+                    self.spec.clone(),
+                    self.receipt_builder.clone(),
+                );
+
+                let gas_used = executor.execute_transaction(tx)?;
+
+                Ok::<(FlashblockAccessListConstruction, u64), BlockExecutionError>((
+                    executor.take_access_list(),
+                    gas_used,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Merge access lists together
+        let merged_access_list = access_lists.into_iter().fold(
+            FlashblockAccessListConstruction::default(),
+            |mut acc, bal| {
+                acc.merge(bal.0);
+                acc
+            },
+        );
+
+        let temporal_db = db_factory.db(transactions_length);
+
+        let mut state = State::builder()
+            .with_database_ref(temporal_db)
+            .with_bundle_update()
+            .build();
+
+        let evm = OpEvmFactory::default()
+            .create_evm(&mut state, self.config.evm_env(&Header::default()).unwrap());
+
+        let executor = BalBuilderBlockExecutor::new(
+            evm,
+            self.execution_context.clone(),
+            self.spec.clone(),
+            self.receipt_builder.clone(),
+        )
+        .with_access_list(merged_access_list); // TODO: Need to aggregate receipts
+
+        let (evm, execution_result, access_list_data, _, _) = executor.finish_with_access_list()?;
+
+        // Verify the hash matches
+        if *access_list_data.access_list_hash != keccak256(alloy_rlp::encode(&self.access_list)) {
+            return Err(eyre!("Access List Hash does not match computed hash"));
+        }
+
+        // TODO: Construct relavant block stuff
+
+        Ok(())
     }
 }
 

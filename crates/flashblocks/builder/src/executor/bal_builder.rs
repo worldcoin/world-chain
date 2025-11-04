@@ -76,6 +76,12 @@ where
         self
     }
 
+    /// Sets the [`FlashblockAccessListConstruction`] for the executor
+    pub fn with_access_list(mut self, access_list: FlashblockAccessListConstruction) -> Self {
+        self.flashblock_access_list = access_list;
+        self
+    }
+
     /// Extends the [`BundleState`] of the executor with a specified pre-image.
     ///
     /// This should be used _only_ when initializing the executor
