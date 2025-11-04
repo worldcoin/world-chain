@@ -4,14 +4,14 @@ use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory};
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
 use eyre::eyre::eyre;
-use flashblocks_primitives::access_list::{self, FlashblockAccessList};
+use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutionError, BlockExecutor, ExecutableTx};
 use reth_evm::op_revm::{OpSpecId, OpTransaction};
 use reth_evm::precompiles::PrecompilesMap;
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx, ToTxEnv};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory};
 use reth_evm::{Database, FromRecoveredTx, FromTxWithEncoded};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
@@ -28,7 +28,7 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState, Cache, CacheDB, InMemoryDB};
+use revm::database::{BundleAccount, BundleState, CacheDB};
 use revm::inspector::NoOpInspector;
 use revm::DatabaseRef;
 use std::collections::{HashMap, HashSet};
@@ -37,7 +37,7 @@ use tracing::info;
 
 use crate::access_list::FlashblockAccessListConstruction;
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::cached_db::{TemporalDb, TemporalDbFactory};
+use crate::executor::temporal_db::{TemporalDb, TemporalDbFactory};
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
