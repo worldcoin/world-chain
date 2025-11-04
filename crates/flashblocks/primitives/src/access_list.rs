@@ -3,6 +3,10 @@ use alloy_eip7928::{
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use rayon::prelude::*;
+use reth::revm::database::EvmStateProvider;
+use reth::revm::db::TransitionState;
+use reth::revm::DatabaseRef;
 use reth::revm::{
     db::{states::StorageSlot, AccountStatus, BundleAccount},
     state::{AccountInfo, Bytecode},
@@ -57,8 +61,30 @@ impl FlashblockAccessList {
         // Rebuild the sorted vector
         self.changes = merged.into_values().collect();
     }
-}
 
+    pub fn transitions(&self) -> Vec<TransitionState> {
+        // (self.max_tx_index as usize..self.min_tx_index as usize + 1)
+        //     .into_par_iter()
+        //     .map(|i| {
+        //         let mut transition = TransitionState::default();
+        //         transition
+        //     })
+        //     .collect()
+        let len = (self.max_tx_index - self.min_tx_index + 1) as usize;
+        let mut transitions = vec![TransitionState::default(); len];
+        for account in &self.changes {
+            for slot in &account.storage_changes {
+                for storage in &slot.changes {
+                    let transition = &mut transitions[storage.block_access_index as usize];
+                    let transition_account =
+                        transition.transitions.entry(account.address).or_default();
+                    // transition_account.info
+                }
+            }
+        }
+        transitions
+    }
+}
 /// Helper function to merge two [`AccountChanges`] preserving lexicographic order.
 fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) {
     let mut storage_map: BTreeMap<B256, BTreeMap<u64, StorageChange>> = BTreeMap::new();

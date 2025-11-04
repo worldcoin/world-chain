@@ -29,6 +29,7 @@ use revm::{
     state::{Account, AccountInfo, EvmState},
     DatabaseCommit,
 };
+use tracing::info;
 
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},
@@ -92,7 +93,6 @@ where
     /// Extends the gas used to reflect the aggregated execution result
     pub fn with_gas_used(mut self, gas_used: u64) -> Self {
         self.inner.gas_used += gas_used;
-        self.inner.gas_used += gas_used;
         self
     }
 
@@ -116,6 +116,7 @@ where
     /// State should be cleared between indices to ensure that the [`EvmState`] passed here corresponds to only [`Account`] changes
     /// that have occured in the transaction at [`BlockAccessIndex`].
     pub fn with_state(&mut self, state: &EvmState) -> Result<(), BlockExecutionError> {
+        info!(target: "flashblocks::test", "committing state at block access index {}", self.block_access_index());
         let index = self.block_access_index();
 
         // Update target account if it exists
@@ -126,7 +127,7 @@ where
                 .database
                 .basic(*address)
                 .ok()
-                .and_then(|acc| acc.map(|a| a))
+                .and_then(|acc| acc)
                 .unwrap_or_default();
 
             self.flashblock_access_list
@@ -139,7 +140,7 @@ where
                 .flashblock_access_list
                 .changes
                 .get(address)
-                .map_or(false, |changes| changes.is_empty())
+                .is_some_and(|changes| changes.is_empty())
             {
                 self.flashblock_access_list.changes.remove(address);
             }
@@ -182,7 +183,7 @@ where
                     .database
                     .basic(*a)
                     .ok()
-                    .and_then(|acc| acc.map(|a| a))
+                    .and_then(|acc| acc)
                     .unwrap_or_default();
 
                 (*a, initial_account)
@@ -281,18 +282,16 @@ where
         }
 
         // Nonce Changes
-        if account.info.nonce != initial_account.nonce {
-            account_changes
-                .nonce_changes
-                .insert(index, account.info.nonce);
-        }
+        account_changes
+            .nonce_changes
+            .insert(index, account.info.nonce);
 
         // Code Changes
         let final_code = account.info.code.as_ref().map(|b| b.to_owned());
         if let Some(final_code) = final_code {
-            if initial_account.code_hash != account.info.code_hash {
-                account_changes.code_changes.insert(index, final_code);
-            }
+            // if initial_account.code_hash != account.info.code_hash {
+            account_changes.code_changes.insert(index, final_code);
+            // }
         }
 
         // Handle Self Destructs explicitly
@@ -346,7 +345,7 @@ where
             .database
             .basic(HISTORY_STORAGE_ADDRESS)
             .ok()
-            .and_then(|acc| acc.map(|a| a))
+            .and_then(|acc| acc)
             .unwrap_or_default();
 
         let result_and_state = transact_blockhashes_contract_call(
@@ -390,7 +389,7 @@ where
             .database
             .basic(BEACON_ROOTS_ADDRESS)
             .ok()
-            .and_then(|acc| acc.map(|a| a))
+            .and_then(|acc| acc)
             .unwrap_or_default();
 
         let result_and_state = transact_beacon_root_contract_call(
@@ -480,7 +479,19 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        // Execute transaction without committing
+        let output = self.execute_transaction_without_commit(&tx)?;
+
+        if !f(&output.result).should_commit() {
+            return Ok(None);
+        }
+
+        // Commit state changes to BAL
+        self.with_state(&output.state)?;
+
+        let gas_used = self.commit_transaction(output, tx)?;
+
+        Ok(Some(gas_used))
     }
 
     fn commit_transaction(

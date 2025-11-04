@@ -24,7 +24,6 @@ use revm::database::states::reverts::Reverts;
 use revm::database::BundleAccount;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tracing::trace;
 
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
 use crate::executor::factory::FlashblocksBlockExecutorFactory;
@@ -199,8 +198,7 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<N>, FlashblockAccessList), BlockExecutionError> {
-        let (evm, result, access_list, min_tx_index, max_tx_index) =
-            self.inner.executor.finish_with_access_list()?;
+        let (evm, result, access_list, _, _) = self.inner.executor.finish_with_access_list()?;
 
         let (db, evm_env) = evm.finish();
 
@@ -225,13 +223,8 @@ where
             .collect();
 
         db.bundle_state.reverts = Reverts::new(vec![flattened]);
-
-        // Write the expected bundle state to a JSON
-        let expected_json = serde_json::to_string_pretty(&db.bundle_state.state)
-            .map_err(BlockExecutionError::other)?;
-        // std::fs::write("expected_bundle_state.json", json).map_err(BlockExecutionError::other)?;
-
-        // calculate the state root``
+        
+        // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
@@ -261,31 +254,6 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list_before = access_list.clone();
-        // TODO: Remove debug traces
-        trace!(target: "test_target", "recorded transitions for tx index range: {} - {}, transactions length {:#?}", min_tx_index, max_tx_index, block.body().transactions().count());
-        trace!(target: "test_target", "finished execution with access list length {:#?}", access_list_before.access_list.changes.len());
-
-        let access_list_after = access_list.access_list;
-        let access_list_bundle: HashMap<Address, BundleAccount> = access_list_after.clone().into();
-
-        // // Write the access list to a JSON
-        let got_json = serde_json::to_string_pretty(&access_list_bundle)
-            .map_err(BlockExecutionError::other)?;
-        // std::fs::write("flashblock_access_list_bundle.json", json)
-        //     .map_err(BlockExecutionError::other)?;
-
-        trace!(target: "test_target", "built final access list length {:#?}", access_list_after.changes.len());
-        let block_number = block.header().number;
-
-        std::fs::write(format!("expected_{}", block_number), expected_json).unwrap();
-
-        std::fs::write(
-            format!("flashblock_access_list_bundle_{}", block_number),
-            got_json,
-        )
-        .unwrap();
-
         Ok((
             BlockBuilderOutcome {
                 execution_result: result,
@@ -293,7 +261,7 @@ where
                 trie_updates,
                 block,
             },
-            access_list_after,
+            access_list.access_list,
         ))
     }
 }
