@@ -1,9 +1,13 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_primitives::{address, Address, Sealed};
 use eyre::eyre::eyre;
+use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth::network::PeersHandleProvider;
+use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
 use reth_e2e_test_utils::{Adapter, NodeHelperType, TmpDB};
@@ -17,7 +21,8 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
-use revm_primitives::U256;
+use revm_primitives::TxKind;
+use revm_primitives::{Bytes, U256};
 use std::{
     collections::BTreeMap,
     ops::Range,
@@ -39,6 +44,40 @@ use world_chain_pool::{
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
+
+// Optimism protocol constants - these addresses are defined by the Optimism specification
+const L1_BLOCK_PREDEPLOY: Address = address!("4200000000000000000000000000000000000015");
+const SYSTEM_DEPOSITOR: Address = address!("DeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001");
+
+fn create_l1_attributes_deposit_tx() -> Bytes {
+    const SELECTOR: [u8; 4] = [0x44, 0x0a, 0x5e, 0x20];
+    let mut calldata = SELECTOR.to_vec();
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
+    calldata.extend_from_slice(&[0u8; 32]);
+
+    let deposit = TxDeposit {
+        source_hash: revm_primitives::B256::ZERO,
+        from: SYSTEM_DEPOSITOR,
+        to: TxKind::Call(L1_BLOCK_PREDEPLOY),
+        mint: 0u128,
+        value: U256::ZERO,
+        gas_limit: 1_000_000,
+        is_system_transaction: true,
+        input: calldata.into(),
+    };
+
+    let sealed_deposit = Sealed::new_unchecked(deposit, revm_primitives::B256::ZERO);
+    let envelope = OpTxEnvelope::Deposit(sealed_deposit);
+    let mut buf = Vec::new();
+    envelope.encode_2718(&mut buf);
+    buf.into()
+}
+
+/// L1 attributes deposit transaction - required as the first transaction in Optimism blocks
+pub static TX_SET_L1_BLOCK: LazyLock<Bytes> = LazyLock::new(create_l1_attributes_deposit_tx);
 
 pub struct WorldChainTestingNodeContext<T: WorldChainTestContextBounds>
 where

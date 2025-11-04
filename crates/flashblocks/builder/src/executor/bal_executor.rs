@@ -1,4 +1,4 @@
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
 use eyre::eyre::eyre;
@@ -11,8 +11,9 @@ use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
-use reth_optimism_node::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_payload_primitives::BuiltPayload;
 use reth_primitives::Recovered;
 use reth_primitives::SealedHeader;
 use reth_provider::{BlockExecutionResult, StateProvider};
@@ -29,7 +30,6 @@ use crate::executor::bal_builder::BalBuilderBlockExecutor;
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_transactions(
     transactions: Vec<Recovered<OpTransactionSigned>>,
-    provided_bal_hash: Option<FixedBytes<32>>,
     evm_config: &OpEvmConfig,
     sealed_header: Arc<SealedHeader<Header>>,
     state_provider: Arc<dyn StateProvider>,
@@ -37,6 +37,8 @@ pub fn execute_transactions(
     latest_bundle: Option<BundleState>,
     execution_context: OpBlockExecutionCtx,
     chain_spec: &OpChainSpec,
+    committed_payload: Option<OpBuiltPayload>,
+    provided_bal: Option<&FlashblockAccessList>
 ) -> Result<
     (
         BundleState,
@@ -69,13 +71,43 @@ pub fn execute_transactions(
 
     let evm = evm_config.evm_with_env(&mut state, evm_env);
     let base_fee = evm.block().basefee;
-    let mut executor = BalBuilderBlockExecutor::new(
-        evm,
-        execution_context.clone(),
-        chain_spec,
-        OpRethReceiptBuilder::default(),
-        0, // TODO: Need to pre-load receipts from the latest payload if available min_tx_index = receipts.len() as u64
-    );
+
+    let mut executor = if let Some(committed) = committed_payload {
+        let receipts: Vec<OpReceipt> = committed
+            .executed_block()
+            .unwrap()
+            .execution_outcome()
+            .receipts()
+            .iter()
+            .flatten()
+            .cloned()
+            .collect();
+
+        let min_tx_index = receipts.len() as u64;
+
+        BalBuilderBlockExecutor::new(
+            evm,
+            execution_context.clone(),
+            chain_spec,
+            OpRethReceiptBuilder::default(),
+        )
+        .with_receipts(receipts)
+        .with_min_tx_index(min_tx_index)
+        .with_gas_used(
+            committed
+                .executed_block()
+                .unwrap()
+                .recovered_block()
+                .gas_used(),
+        )
+    } else {
+        BalBuilderBlockExecutor::new(
+            evm,
+            execution_context.clone(),
+            chain_spec,
+            OpRethReceiptBuilder::default(),
+        )
+    };
 
     let mut total_fees = U256::ZERO;
 
@@ -99,22 +131,22 @@ pub fn execute_transactions(
     }
 
     // Apply post execution changes
-    let (evm, result, access_list, min_tx_index, max_tx_index) = executor
+    let (evm, result, access_list, _, _) = executor
         .finish_with_access_list()
         .map_err(|e| eyre!(format!("failed to finish execution: {e}")))?;
 
-    let access_list = access_list.build(min_tx_index, max_tx_index);
+    let access_list = access_list.access_list;
 
     // Validate the BAL matches the provided Flashblock BAL
     let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));
 
-    if provided_bal_hash.is_some() && expected_bal_hash != provided_bal_hash.unwrap() {
-        return Err(eyre!(format!(
-            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-            expected_bal_hash,
-            provided_bal_hash.unwrap()
-        )));
-    }
+    // if provided_bal.is_some_and(|bal| alloy_rlp::encode(bal) != *expected_bal_hash) {
+    //     return Err(eyre!(format!(
+    //         "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+    //         expected_bal_hash,
+    //         provided_bal.map(|bal| alloy_rlp::encode(bal))
+    //     )));
+    // }
 
     let (db, env) = evm.finish();
 

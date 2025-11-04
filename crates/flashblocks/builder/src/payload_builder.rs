@@ -31,7 +31,7 @@ use reth_evm::{
 };
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives::{NodePrimitives, Recovered};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -396,16 +396,16 @@ where
             .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
             .is_none()
         {
-            // warn!(target: "flashblocks::payload_builder", "payload build cancelled");
-            // if let Some(best_payload) = committed_payload {
-            //     // we can return the previous best payload since we didn't include any new txs
-            //     return Ok((
-            //         BuildOutcomeKind::Freeze(best_payload),
-            //         FlashblockAccessList::default(),
-            //     ));
-            // } else {
-            //     return Err(PayloadBuilderError::MissingPayload);
-            // }
+            warn!(target: "flashblocks::payload_builder", "payload build cancelled");
+            if let Some(best_payload) = committed_payload {
+                // we can return the previous best payload since we didn't include any new txs
+                return Ok((
+                    BuildOutcomeKind::Freeze(best_payload),
+                    FlashblockAccessList::default(),
+                ));
+            } else {
+                return Err(PayloadBuilderError::MissingPayload);
+            }
         }
 
         // check if the new payload is even more valuable
@@ -528,15 +528,15 @@ where
         .map_err(PayloadBuilderError::other)?;
 
     let min_tx_index = receipts.len() as u64;
-
+    
     let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_ctx.clone(),
         ctx.spec().clone(),
         OpRethReceiptBuilder::default(),
-        min_tx_index,
     )
-    .with_receipts(receipts);
+    .with_receipts(receipts)
+    .with_min_tx_index(min_tx_index);
 
     if let Some(cumulative_gas_used) = cumulative_gas_used {
         executor = executor.with_gas_used(cumulative_gas_used)

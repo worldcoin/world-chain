@@ -1,7 +1,6 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
-use alloy_primitives::map::foldhash::HashMap as AlloyHashMap;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
@@ -136,7 +135,7 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
         for account in value.changes.iter() {
             let address = account.address;
 
-            let mut account_storage = AlloyHashMap::default();
+            let mut account_storage: HashMap<U256, StorageSlot> = HashMap::default();
 
             // Aggregate the storage changes. Keep the latest value stored for each storage key.
             // This assumes that the changes are ordered by transaction index.
@@ -189,7 +188,7 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
             let bundle_account = BundleAccount {
                 info: Some(account_info),
                 original_info: None,
-                storage: account_storage,
+                storage: account_storage.into_iter().collect(),
                 status: AccountStatus::Changed,
             };
 

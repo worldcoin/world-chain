@@ -2,12 +2,13 @@ use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use reth::revm::State;
 use reth_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
+    op_revm::OpTransaction,
     EvmFactory,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use revm::database::BundleState;
+use revm::{context::TxEnv, database::BundleState};
 
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
 
@@ -70,13 +71,13 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
     where
         DB: reth_evm::Database + 'a,
         I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
+        OpEvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
     {
         let block_executor = BalBuilderBlockExecutor::new(
             evm,
             ctx,
             self.spec().clone(),
             OpRethReceiptBuilder::default(),
-            0,
         );
 
         if let Some(pre_state) = &self.pre_state {

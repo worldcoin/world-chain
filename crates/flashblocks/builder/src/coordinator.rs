@@ -50,6 +50,7 @@ pub struct FlashblocksExecutionCoordinatorInner {
     flashblocks: Flashblocks,
     /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
+    /// Broadcast channel for built payload events
     payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
 }
 
@@ -296,6 +297,7 @@ where
 
     let before_execution = Instant::now();
 
+    let latest_payload_clone = latest_payload.clone();
     let (execution_result, state_root_result) = if let Some(access_list_data) =
         flashblock.diff().access_list_data.as_ref()
     {
@@ -304,7 +306,6 @@ where
             move || {
                 execute_transactions(
                     transactions_clone.clone(),
-                    Some(access_list_data.access_list_hash),
                     &evm_config,
                     sealed_header.clone(),
                     state_provider_clone.clone(),
@@ -312,6 +313,8 @@ where
                     latest_bundle,
                     execution_context_clone.clone(),
                     chain_spec,
+                    latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
+                    Some(&access_list_data.access_list.clone()),
                 )
             },
             move || {
@@ -327,7 +330,6 @@ where
         info!(target: "flashblocks::state_executor", "executing flashblock without access list");
         let execution_result = execute_transactions(
             transactions_clone.clone(),
-            None,
             &evm_config,
             sealed_header.clone(),
             state_provider_clone.clone(),
@@ -335,11 +337,15 @@ where
             latest_bundle,
             execution_context_clone.clone(),
             chain_spec,
+            latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
+            None,
         )?;
 
         let converted: HashMap<Address, BundleAccount> =
             execution_result.clone().0.state.into_iter().collect();
+
         let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
+
         (execution_result, state_root_result)
     };
 
@@ -409,15 +415,13 @@ where
     );
 
     flashblocks.push(flashblock)?;
+
     // construct the full payload
     *latest_payload = Some((payload.clone(), index));
 
     pending_block.send_replace(payload.executed_block());
 
-    state_executor.broadcast_payload(
-        Events::BuiltPayload(payload.clone()),
-        payload_events.clone(),
-    )?;
+    state_executor.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
 
     Ok(())
 }
