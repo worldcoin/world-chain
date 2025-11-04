@@ -150,7 +150,7 @@ pub fn execute_transactions(
         return Err(eyre!(format!(
             "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
             access_list_data.access_list_hash,
-            provided_bal.map(|bal| alloy_rlp::encode(bal))
+            provided_bal.map(alloy_rlp::encode)
         )));
     }
 

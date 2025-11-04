@@ -127,7 +127,7 @@ where
                 .database
                 .basic(*address)
                 .ok()
-                .and_then(|acc| acc.map(|a| a))
+                .and_then(|acc| acc)
                 .unwrap_or_default();
 
             self.flashblock_access_list
@@ -140,7 +140,7 @@ where
                 .flashblock_access_list
                 .changes
                 .get(address)
-                .map_or(false, |changes| changes.is_empty())
+                .is_some_and(|changes| changes.is_empty())
             {
                 self.flashblock_access_list.changes.remove(address);
             }
@@ -183,7 +183,7 @@ where
                     .database
                     .basic(*a)
                     .ok()
-                    .and_then(|acc| acc.map(|a| a))
+                    .and_then(|acc| acc)
                     .unwrap_or_default();
 
                 (*a, initial_account)
@@ -345,7 +345,7 @@ where
             .database
             .basic(HISTORY_STORAGE_ADDRESS)
             .ok()
-            .and_then(|acc| acc.map(|a| a))
+            .and_then(|acc| acc)
             .unwrap_or_default();
 
         let result_and_state = transact_blockhashes_contract_call(
@@ -389,7 +389,7 @@ where
             .database
             .basic(BEACON_ROOTS_ADDRESS)
             .ok()
-            .and_then(|acc| acc.map(|a| a))
+            .and_then(|acc| acc)
             .unwrap_or_default();
 
         let result_and_state = transact_beacon_root_contract_call(
