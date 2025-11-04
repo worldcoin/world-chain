@@ -249,7 +249,6 @@ where
 
 /// Builds the payload on top of the state.
 fn build<'a, Txs, Ctx, Pool>(
-    // best: Box<dyn Fn(BestTransactionsAttributes) -> Txs + 'a>,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Pool,
     db: impl Database<Error = ProviderError>,
