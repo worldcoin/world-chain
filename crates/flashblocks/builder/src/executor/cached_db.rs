@@ -21,6 +21,25 @@ pub struct TemporalCacheState {
     pub has_state_clear: bool,
 }
 
+impl TemporalCacheState {
+    fn init_or_load<'a, DB: DatabaseRef>(
+        &mut self,
+        db: &'a DB,
+        address: Address,
+        index: u64,
+    ) -> AccountInfo {
+        match self.account_info.get(index, &address) {
+            Some(a) => a.clone(),
+            None => {
+                let base = db.basic_ref(address).unwrap();
+                self.account_info
+                    .insert(0, address, base.clone().unwrap_or_default());
+                base.unwrap_or_default()
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CacheAccountInfo {
     /// Account information and storage, if account exists.
@@ -56,22 +75,8 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             // TODO: We can prewarm these
             for storage_reads in change.storage_reads {}
             for balance_change in change.balance_changes {
-                let mut account = match cache
-                    .account_info
-                    .get(balance_change.block_access_index, &change.address)
-                {
-                    Some(a) => Some(a.clone()),
-                    None => {
-                        let base = db.basic_ref(change.address).unwrap();
-                        cache.account_info.insert(
-                            0,
-                            change.address,
-                            base.clone().unwrap_or_default(),
-                        );
-                        base
-                    }
-                };
-                let mut account = account.unwrap_or_default();
+                let mut account =
+                    cache.init_or_load(db, change.address, balance_change.block_access_index);
                 account.balance = balance_change.post_balance;
                 cache.account_info.insert(
                     balance_change.block_access_index + 1,
@@ -79,8 +84,26 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                     account,
                 );
             }
-            for nonce_change in change.nonce_changes {}
-            for code_change in change.code_changes {}
+            for nonce_change in change.nonce_changes {
+                let mut account =
+                    cache.init_or_load(db, change.address, nonce_change.block_access_index);
+                account.nonce = nonce_change.new_nonce;
+                cache.account_info.insert(
+                    nonce_change.block_access_index + 1,
+                    change.address,
+                    account,
+                );
+            }
+            for code_change in change.code_changes {
+                let mut account =
+                    cache.init_or_load(db, change.address, code_change.block_access_index);
+                account.code = Some(Bytecode::new_raw(code_change.new_code));
+                cache.account_info.insert(
+                    code_change.block_access_index + 1,
+                    change.address,
+                    account,
+                );
+            }
         }
 
         TemporalDbFactory { db, cache }
