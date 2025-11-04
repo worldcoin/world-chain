@@ -1,10 +1,11 @@
 use alloy_primitives::{Address, B256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
+use reth_provider::ProviderError;
 use revm::{
     database::AccountStatus,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
-    DatabaseRef,
+    Database, DatabaseRef,
 };
 
 use crate::executor::temporal_map::TemporalMap;
@@ -119,5 +120,11 @@ impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.db.block_hash_ref(number)
+    }
+}
+
+impl<'a, DB: DatabaseRef> std::fmt::Display for TemporalDb<'a, DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TemporalDb at index {}", self.index)
     }
 }

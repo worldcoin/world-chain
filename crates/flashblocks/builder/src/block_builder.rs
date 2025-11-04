@@ -221,7 +221,7 @@ where
             .collect();
 
         db.bundle_state.reverts = Reverts::new(vec![flattened]);
-        
+
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state

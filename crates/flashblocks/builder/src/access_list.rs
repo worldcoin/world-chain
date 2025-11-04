@@ -31,6 +31,48 @@ impl FlashblockAccessListConstruction {
             changes: DashMap::new(),
         }
     }
+
+    /// Merges another [`FlashblockAccessListConstruction`] into this one
+    pub fn merge(&mut self, other: Self) {
+        for entry in other.changes.into_iter() {
+            let (address, other_account_changes) = entry;
+            self.changes
+                .entry(address)
+                .and_modify(|existing| existing.merge(other_account_changes.clone()))
+                .or_insert(other_account_changes);
+        }
+    }
+
+    /// Consumes the builder and produces a [`FlashblockAccessList`]
+    pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
+        // Sort addresses lexicographically
+        let mut changes: Vec<_> = self
+            .changes
+            .into_par_iter()
+            .map(|(k, v)| v.build(k))
+            .collect();
+
+        changes.par_sort_unstable_by_key(|a| a.address);
+
+        FlashblockAccessList {
+            changes,
+            min_tx_index,
+            max_tx_index,
+        }
+    }
+
+    /// Maps a mutable reference to the [`AccountChangesConstruction`] corresponding to `address` at the given closure.
+    pub fn map_account_change<F>(&self, address: Address, f: F)
+    where
+        F: FnOnce(&mut AccountChangesConstruction),
+    {
+        let mut entry = self
+            .changes
+            .entry(address)
+            .or_insert_with(AccountChangesConstruction::default);
+
+        f(&mut entry);
+    }
 }
 
 /// A convenience builder type for [`AccountChanges`]
@@ -49,6 +91,20 @@ pub struct AccountChangesConstruction {
 }
 
 impl AccountChangesConstruction {
+    /// Merges another [`AccountChangesConstruction`] into this one
+    pub fn merge(&mut self, other: Self) {
+        for (slot, other_tx_map) in other.storage_changes {
+            self.storage_changes
+                .entry(slot)
+                .and_modify(|existing_tx_map| existing_tx_map.extend(other_tx_map.clone()))
+                .or_insert(other_tx_map);
+        }
+        self.storage_reads.extend(other.storage_reads);
+        self.balance_changes.extend(other.balance_changes);
+        self.nonce_changes.extend(other.nonce_changes);
+        self.code_changes.extend(other.code_changes);
+    }
+
     /// Consumes the builder and produces an [`AccountChanges`] for the given address
     ///
     /// Note: This will sort all changes by transaction index, and storage slots by their value.
@@ -132,39 +188,6 @@ impl AccountChangesConstruction {
             && self.balance_changes.is_empty()
             && self.nonce_changes.is_empty()
             && self.code_changes.is_empty()
-    }
-}
-
-impl FlashblockAccessListConstruction {
-    /// Consumes the builder and produces a [`FlashblockAccessList`]
-    pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
-        // Sort addresses lexicographically
-        let mut changes: Vec<_> = self
-            .changes
-            .into_par_iter()
-            .map(|(k, v)| v.build(k))
-            .collect();
-
-        changes.par_sort_unstable_by_key(|a| a.address);
-
-        FlashblockAccessList {
-            changes,
-            min_tx_index,
-            max_tx_index,
-        }
-    }
-
-    /// Maps a mutable reference to the [`AccountChangesConstruction`] corresponding to `address` at the given closure.
-    pub fn map_account_change<F>(&self, address: Address, f: F)
-    where
-        F: FnOnce(&mut AccountChangesConstruction),
-    {
-        let mut entry = self
-            .changes
-            .entry(address)
-            .or_insert_with(AccountChangesConstruction::default);
-
-        f(&mut entry);
     }
 }
 
