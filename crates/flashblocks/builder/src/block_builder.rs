@@ -1,4 +1,5 @@
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_primitives::Address;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::execute::{
@@ -20,7 +21,8 @@ use revm::context::result::ExecutionResult;
 use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
-use std::collections::HashSet;
+use revm::database::BundleAccount;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
