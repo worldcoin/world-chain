@@ -174,6 +174,95 @@ def run(plan, args={}):
         description="Adding trusted peers to the builders",
     )
 
+    # Peer op-node clients together using P2P admin API
+    # Get the three op-node services
+    op_node_1_srv = plan.get_service("op-cl-2151908-1-op-node-op-geth-op-kurtosis")
+    op_node_2_srv = plan.get_service("op-cl-2151908-2-op-node-custom-op-kurtosis")
+    op_node_3_srv = plan.get_service("op-cl-2151908-3-op-node-custom-op-kurtosis")
+
+    # Extract the p2p enode/ENR from each op-node
+    extract_p2p_info_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}',
+        port_id="http",
+        extract={"peer_id": "result.addresses[0]"},
+    )
+
+    op_node_1_p2p = plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-1",
+    )
+
+    op_node_2_p2p = plan.request(
+        service_name="op-cl-2151908-2-op-node-custom-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-2",
+    )
+
+    op_node_3_p2p = plan.request(
+        service_name="op-cl-2151908-3-op-node-custom-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-3",
+    )
+
+    # Connect op-node-2 to op-node-1
+    connect_peer_recipe_2_to_1 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_1_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-1 to op-node-2 (bidirectional for redundancy)
+    connect_peer_recipe_1_to_2 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_2_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-3 to op-node-1
+    connect_peer_recipe_3_to_1 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_1_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-1 to op-node-3 (bidirectional for redundancy)
+    connect_peer_recipe_1_to_3 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_3_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-2-op-node-custom-op-kurtosis",
+        recipe=connect_peer_recipe_2_to_1,
+        description="Connecting op-node-2 to op-node-1",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=connect_peer_recipe_1_to_2,
+        description="Connecting op-node-1 to op-node-2",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-3-op-node-custom-op-kurtosis",
+        recipe=connect_peer_recipe_3_to_1,
+        description="Connecting op-node-3 to op-node-1",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=connect_peer_recipe_1_to_3,
+        description="Connecting op-node-1 to op-node-3",
+    )
+
     tx_proxy_http_url = tx_proxy.launch(
         plan,
         service_name="tx-proxy",

@@ -1,6 +1,6 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_op_evm::OpBlockExecutionCtx;
-use alloy_primitives::{keccak256, Address, FixedBytes, U256};
+use alloy_primitives::{Address, FixedBytes, U256};
 use eyre::eyre::eyre;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::database::StateProviderDatabase;
@@ -24,6 +24,7 @@ use revm::database::states::reverts::Reverts;
 use revm::database::{BundleAccount, BundleState};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tracing::info;
 
 use crate::executor::bal_builder::BalBuilderBlockExecutor;
 
@@ -38,7 +39,7 @@ pub fn execute_transactions(
     execution_context: OpBlockExecutionCtx,
     chain_spec: &OpChainSpec,
     committed_payload: Option<OpBuiltPayload>,
-    provided_bal: Option<&FlashblockAccessList>
+    provided_bal: Option<&FlashblockAccessList>,
 ) -> Result<
     (
         BundleState,
@@ -131,22 +132,27 @@ pub fn execute_transactions(
     }
 
     // Apply post execution changes
-    let (evm, result, access_list, _, _) = executor
+    let (evm, result, access_list_data, _, _) = executor
         .finish_with_access_list()
         .map_err(|e| eyre!(format!("failed to finish execution: {e}")))?;
 
-    let access_list = access_list.access_list;
-
-    // Validate the BAL matches the provided Flashblock BAL
-    let expected_bal_hash = keccak256(alloy_rlp::encode(&access_list));
-
-    // if provided_bal.is_some_and(|bal| alloy_rlp::encode(bal) != *expected_bal_hash) {
-    //     return Err(eyre!(format!(
-    //         "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-    //         expected_bal_hash,
-    //         provided_bal.map(|bal| alloy_rlp::encode(bal))
-    //     )));
-    // }
+    if provided_bal.is_some_and(|bal| alloy_rlp::encode(bal) != *access_list_data.access_list_hash)
+    {
+        info!(
+            "Provided BAL: min_tx_index: {}, max_tx_index: {}",
+            provided_bal.unwrap().min_tx_index,
+            provided_bal.unwrap().max_tx_index
+        );
+        info!(
+            "Computed BAL: min_tx_index: {}, max_tx_index: {}",
+            access_list_data.access_list.min_tx_index, access_list_data.access_list.max_tx_index
+        );
+        return Err(eyre!(format!(
+            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+            access_list_data.access_list_hash,
+            provided_bal.map(|bal| alloy_rlp::encode(bal))
+        )));
+    }
 
     let (db, env) = evm.finish();
 
@@ -175,7 +181,7 @@ pub fn execute_transactions(
     Ok((
         db.bundle_state.clone(),
         result,
-        access_list,
+        access_list_data.access_list,
         env,
         total_fees,
     ))

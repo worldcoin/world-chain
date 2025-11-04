@@ -397,15 +397,15 @@ where
             .is_none()
         {
             warn!(target: "flashblocks::payload_builder", "payload build cancelled");
-            if let Some(best_payload) = committed_payload {
-                // we can return the previous best payload since we didn't include any new txs
-                return Ok((
-                    BuildOutcomeKind::Freeze(best_payload),
-                    FlashblockAccessList::default(),
-                ));
-            } else {
-                return Err(PayloadBuilderError::MissingPayload);
-            }
+            // if let Some(best_payload) = committed_payload {
+            //     // we can return the previous best payload since we didn't include any new txs
+            //     return Ok((
+            //         BuildOutcomeKind::Freeze(best_payload),
+            //         FlashblockAccessList::default(),
+            //     ));
+            // } else {
+            //     return Err(PayloadBuilderError::MissingPayload);
+            // }
         }
 
         // check if the new payload is even more valuable
@@ -528,7 +528,7 @@ where
         .map_err(PayloadBuilderError::other)?;
 
     let min_tx_index = receipts.len() as u64;
-    
+
     let mut executor = BalBuilderBlockExecutor::new(
         evm,
         execution_ctx.clone(),

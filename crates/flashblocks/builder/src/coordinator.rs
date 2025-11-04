@@ -185,8 +185,9 @@ where
     trace!(
         target: "flashblocks::state_executor",
         id = %flashblock.payload_id,
-        diff = %flashblock.diff,
         index = %flashblock.index,
+        min_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.min_tx_index),
+        max_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.max_tx_index),
         "processing flashblock"
     );
 

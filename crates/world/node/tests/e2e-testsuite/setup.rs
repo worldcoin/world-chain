@@ -7,7 +7,6 @@ use reth::api::TreeConfig;
 use reth::args::PayloadBuilderArgs;
 use reth::builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth::network::PeersHandleProvider;
-use reth::payload::{EthPayloadBuilderAttributes, PayloadId};
 use reth::tasks::TaskManager;
 use reth_e2e_test_utils::testsuite::{Environment, NodeClient};
 use reth_e2e_test_utils::{Adapter, NodeHelperType, TmpDB};
