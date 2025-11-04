@@ -22,9 +22,9 @@ pub struct TemporalState {
 
 impl TemporalState {
     /// Initialize or load an account info from the cache or database.
-    fn init_or_load<'a, DB: DatabaseRef>(
+    fn init_or_load<DB: DatabaseRef>(
         &mut self,
-        db: &'a DB,
+        db: &DB,
         address: Address,
         index: u64,
     ) -> AccountInfo {
@@ -165,8 +165,10 @@ mod tests {
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{address, b256, bytes, U256};
-    use revm::database::{CacheDB, EmptyDB};
-    use revm::primitives::KECCAK_EMPTY;
+    use revm::{
+        database::{CacheDB, EmptyDB},
+        primitives::KECCAK_EMPTY,
+    };
 
     #[test]
     fn test_temporal_state_init_or_load_from_cache() {

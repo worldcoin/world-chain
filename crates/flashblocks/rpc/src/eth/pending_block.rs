@@ -2,19 +2,13 @@
 
 use alloy_eips::BlockNumberOrTag;
 use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::OpEthApi;
-use reth_optimism_rpc::OpEthApiError;
-use reth_provider::BlockReader;
-use reth_provider::BlockReaderIdExt;
-use reth_provider::ReceiptProvider;
-use reth_rpc_eth_api::EthApiTypes;
-use reth_rpc_eth_api::FromEvmError;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use reth_provider::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
-    RpcConvert, RpcNodeCore,
+    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::block::BlockAndReceipts;
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use reth_rpc_eth_types::{block::BlockAndReceipts, EthApiError, PendingBlock};
 
 use crate::eth::FlashblocksEthApi;
 

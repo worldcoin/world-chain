@@ -1,10 +1,14 @@
-use crate::external_nullifier::EncodedExternalNullifier;
-use crate::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
+use crate::{
+    date_marker::DateMarker,
+    external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
+};
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use semaphore_rs::packed_proof::PackedProof;
-use semaphore_rs::protocol::{verify_proof, ProofError};
-use semaphore_rs::Field;
+use semaphore_rs::{
+    packed_proof::PackedProof,
+    protocol::{verify_proof, ProofError},
+    Field,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

@@ -1,30 +1,28 @@
 use alloy_op_evm::OpBlockExecutionCtx;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
-use reth_evm::execute::{
-    BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
-};
-use reth_evm::op_revm::{OpHaltReason, OpSpecId, OpTransaction};
-use reth_evm::Evm;
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
-    Database, FromRecoveredTx, FromTxWithEncoded,
+    execute::{
+        BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
+    },
+    op_revm::{OpHaltReason, OpSpecId, OpTransaction},
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::SealedHeader;
-use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
+use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
-use revm::context::result::ExecutionResult;
-use revm::context::TxEnv;
-use revm::database::states::bundle_state::BundleRetention;
-use revm::database::states::reverts::Reverts;
-use std::collections::HashSet;
-use std::sync::Arc;
+use revm::{
+    context::{result::ExecutionResult, TxEnv},
+    database::states::{bundle_state::BundleRetention, reverts::Reverts},
+};
+use std::{collections::HashSet, sync::Arc};
 
-use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::factory::FlashblocksBlockExecutorFactory;
+use crate::executor::{
+    bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
+};
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {

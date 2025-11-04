@@ -209,8 +209,7 @@ mod tests {
     use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
     use op_alloy_network::TxSignerSync;
     use reth::revm::State;
-    use reth_evm::Evm;
-    use reth_evm::{block::BlockExecutor, ConfigureEvm, EvmFactory};
+    use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm, EvmFactory};
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};

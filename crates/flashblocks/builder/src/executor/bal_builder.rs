@@ -29,7 +29,6 @@ use revm::{
     state::{Account, AccountInfo, EvmState},
     DatabaseCommit,
 };
-use tracing::info;
 
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},

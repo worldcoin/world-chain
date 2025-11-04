@@ -3,8 +3,7 @@ use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::Address;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::p2p::AuthorizedPayload;
-use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
@@ -16,19 +15,20 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives::RecoveredBlock;
+use reth_primitives::{transaction::SignedTransaction, RecoveredBlock};
 use reth_provider::{ExecutionOutcome, HeaderProvider, StateProviderFactory};
 use revm::database::BundleAccount;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::broadcast;
-use tokio::time::Instant;
+use std::{collections::HashMap, sync::Arc};
+use tokio::{sync::broadcast, time::Instant};
 use tracing::{error, info, trace};
 
-use crate::assembler::FlashblocksBlockAssembler;
-use crate::executor::bal_executor::{compute_state_root, execute_transactions};
-use crate::executor::factory::FlashblocksBlockExecutorFactory;
+use crate::{
+    assembler::FlashblocksBlockAssembler,
+    executor::{
+        bal_executor::{compute_state_root, execute_transactions},
+        factory::FlashblocksBlockExecutorFactory,
+    },
+};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The current state of all known pre confirmations received over the P2P layer

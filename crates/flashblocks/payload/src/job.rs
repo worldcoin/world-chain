@@ -11,16 +11,17 @@ use flashblocks_builder::{
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList,
+    flashblocks::Flashblock,
     p2p::{Authorization, AuthorizedPayload},
+    primitives::FlashblocksPayloadV1,
 };
-use flashblocks_primitives::{flashblocks::Flashblock, primitives::FlashblocksPayloadV1};
 use std::task::ready;
 
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::network::types::Encodable2718;
 use reth::{
     api::{PayloadBuilderError, PayloadKind},
+    network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
     tasks::TaskSpawner,

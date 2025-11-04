@@ -1,7 +1,8 @@
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
-use std::hash::Hash;
-use std::ops::Bound::{Included, Unbounded};
+use std::{
+    collections::{btree_map::Entry, BTreeMap, HashMap},
+    hash::Hash,
+    ops::Bound::{Included, Unbounded},
+};
 
 /// A map where each key has versions indexed by some ordered index `I`.
 /// `get(index, key)` returns the value last set at or before `index`.

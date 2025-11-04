@@ -1,9 +1,10 @@
 use alloy_consensus::Block;
 use alloy_op_evm::OpBlockExecutionCtx;
 use reth::core::primitives::Receipt;
-use reth_evm::block::BlockExecutionError;
-use reth_evm::block::BlockExecutorFactory;
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
+use reth_evm::{
+    block::{BlockExecutionError, BlockExecutorFactory},
+    execute::{BlockAssembler, BlockAssemblerInput},
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::DepositReceipt;

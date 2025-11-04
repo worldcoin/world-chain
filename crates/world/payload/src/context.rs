@@ -4,30 +4,35 @@ use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
-use flashblocks_builder::traits::context::PayloadBuilderCtx;
-use flashblocks_builder::traits::context_builder::PayloadBuilderCtxBuilder;
+use flashblocks_builder::traits::{
+    context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
+};
 use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
-use reth::api::PayloadBuilderError;
-use reth::chainspec::EthChainSpec;
-use reth::payload::{PayloadBuilderAttributes, PayloadId};
-use reth::revm::cancelled::CancelOnDrop;
-use reth::revm::State;
-use reth::transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth::{
+    api::PayloadBuilderError,
+    chainspec::EthChainSpec,
+    payload::{PayloadBuilderAttributes, PayloadId},
+    revm::{cancelled::CancelOnDrop, State},
+    transaction_pool::{BestTransactionsAttributes, TransactionPool},
+};
 use reth_basic_payload_builder::PayloadConfig;
-use reth_evm::block::{BlockExecutionError, BlockValidationError};
-use reth_evm::execute::{BlockBuilder, BlockExecutor};
-use reth_evm::op_revm::OpSpecId;
-use reth_evm::{ConfigureEvm, Database};
-use reth_evm::{Evm, EvmEnv};
+use reth_evm::{
+    block::{BlockExecutionError, BlockValidationError},
+    execute::{BlockBuilder, BlockExecutor},
+    op_revm::OpSpecId,
+    ConfigureEvm, Database, Evm, EvmEnv,
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::estimated_da_size::DataAvailabilitySized;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    txpool::estimated_da_size::DataAvailabilitySized, OpBuiltPayload, OpEvmConfig,
+    OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
 };
-use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
-use reth_optimism_payload_builder::config::OpDAConfig;
+use reth_optimism_payload_builder::{
+    builder::{ExecutionInfo, OpPayloadBuilderCtx},
+    config::OpDAConfig,
+};
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
@@ -36,13 +41,13 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
-use std::collections::HashSet;
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 use tracing::{error, trace};
 
-use world_chain_pool::bindings::IPBHEntryPoint::spendNullifierHashesCall;
-use world_chain_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
+use world_chain_pool::{
+    bindings::IPBHEntryPoint::spendNullifierHashesCall,
+    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
+};
 use world_chain_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.

@@ -6,29 +6,28 @@ use flashblocks_primitives::p2p::Authorization;
 use futures::StreamExt;
 use op_alloy_consensus::encode_holocene_extra_data;
 use parking_lot::Mutex;
-use reth::chainspec::EthChainSpec;
-use reth::network::{NetworkSyncUpdater, SyncState};
-use reth::primitives::RecoveredBlock;
-use reth_e2e_test_utils::testsuite::actions::Action;
-use reth_e2e_test_utils::transaction::TransactionTestContext;
+use reth::{
+    chainspec::EthChainSpec,
+    network::{NetworkSyncUpdater, SyncState},
+    primitives::RecoveredBlock,
+};
+use reth_e2e_test_utils::{testsuite::actions::Action, transaction::TransactionTestContext};
 use reth_node_api::{Block, PayloadAttributes};
 use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::fixed_bytes;
-use revm_primitives::{Address, Bytes, B256, U256};
-use std::sync::Arc;
-use std::time::Duration;
-use std::vec;
+use revm_primitives::{fixed_bytes, Address, Bytes, B256, U256};
+use std::{sync::Arc, time::Duration, vec};
 use tracing::info;
 use world_chain_test::utils::account;
 
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
-use world_chain_node::context::BasicContext;
-use world_chain_node::context::FlashblocksContext;
-use world_chain_test::node::{raw_pbh_bundle_bytes, tx};
-use world_chain_test::utils::signer;
+use world_chain_node::context::{BasicContext, FlashblocksContext};
+use world_chain_test::{
+    node::{raw_pbh_bundle_bytes, tx},
+    utils::signer,
+};
 
 use crate::setup::{setup, setup_with_tx_peers, CHAIN_SPEC};
 

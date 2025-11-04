@@ -1,49 +1,51 @@
-use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
-use alloy_eips::eip2718::WithEncoded;
-use alloy_eips::eip7685::Requests;
-use alloy_eips::{Decodable2718, Encodable2718};
-use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory};
-use alloy_primitives::{keccak256, Address, FixedBytes, U256};
+use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_eips::Decodable2718;
+use alloy_op_evm::{
+    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory,
+};
+use alloy_primitives::{Address, FixedBytes, U256};
 use eyre::eyre::eyre;
-use flashblocks_primitives::access_list::FlashblockAccessList;
-use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
+use flashblocks_primitives::{
+    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
+};
 use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
-use reth::revm::database::StateProviderDatabase;
-use reth::revm::State;
-use reth_evm::block::{BlockExecutionError, BlockExecutor, ExecutableTx};
-use reth_evm::execute::{BlockBuilderOutcome, ExecutorTx};
-use reth_evm::op_revm::{OpSpecId, OpTransaction};
-use reth_evm::precompiles::PrecompilesMap;
-use reth_evm::{ConfigureEvm, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded};
+use reth::revm::{database::StateProviderDatabase, State};
+use reth_evm::{
+    block::{BlockExecutionError, BlockExecutor},
+    execute::ExecutorTx,
+    op_revm::{OpSpecId, OpTransaction},
+    ConfigureEvm, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpBuiltPayload;
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives::Recovered;
-use reth_primitives::SealedHeader;
-use reth_provider::{BlockExecutionResult, ProviderError, StateProvider};
-use reth_trie_common::updates::TrieUpdates;
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-use revm::context::TxEnv;
-use revm::database::states::bundle_state::BundleRetention;
-use revm::database::states::reverts::Reverts;
-use revm::database::{BundleAccount, BundleState, CacheDB};
-use revm::inspector::NoOpInspector;
-use revm::{Database, DatabaseRef};
+use reth_primitives::{transaction::SignedTransaction, Recovered, SealedHeader};
+use reth_provider::{BlockExecutionResult, StateProvider};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
+use revm::{
+    context::TxEnv,
+    database::{
+        states::{bundle_state::BundleRetention, reverts::Reverts},
+        BundleAccount, BundleState,
+    },
+    Database, DatabaseRef,
+};
 use revm_database_interface::WrapDatabaseRef;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use tracing::{info, warn};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+use tracing::info;
 
-use crate::access_list::{BlockAccessIndex, FlashblockAccessListConstruction};
-use crate::executor::bal_builder::BalBuilderBlockExecutor;
-use crate::executor::temporal_db::{TemporalDb, TemporalDbFactory};
+use crate::{
+    access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
+    executor::{bal_builder::BalBuilderBlockExecutor, temporal_db::TemporalDbFactory},
+};
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
@@ -165,36 +167,28 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let pre_loaded_bundle = if let Some(ref committed) = committed_payload {
-            Some(
+        let pre_loaded_bundle = committed_payload.as_ref().map(|committed| {
+            committed
+                .executed_block()
+                .unwrap()
+                .block
+                .execution_output
+                .bundle
+                .clone()
+        });
+
+        let pre_loaded_receipts: Option<Vec<OpReceipt>> =
+            committed_payload.as_ref().map(|committed| {
                 committed
                     .executed_block()
                     .unwrap()
-                    .block
-                    .execution_output
-                    .bundle
-                    .clone(),
-            )
-        } else {
-            None
-        };
-
-        let pre_loaded_receipts: Option<Vec<OpReceipt>> =
-            if let Some(ref committed) = committed_payload {
-                Some(
-                    committed
-                        .executed_block()
-                        .unwrap()
-                        .execution_outcome()
-                        .receipts()
-                        .iter()
-                        .flatten()
-                        .cloned()
-                        .collect(),
-                )
-            } else {
-                None
-            };
+                    .execution_outcome()
+                    .receipts()
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .collect()
+            });
 
         let mut execution_data = transactions
             .clone()
@@ -521,7 +515,7 @@ pub fn clone_state<DB>(state: &State<Arc<DB>>) -> State<Arc<DB>> {
         database: state.database.clone(),
         transition_state: state.transition_state.clone(),
         bundle_state: state.bundle_state.clone(),
-        use_preloaded_bundle: state.use_preloaded_bundle.clone(),
+        use_preloaded_bundle: state.use_preloaded_bundle,
         block_hashes: state.block_hashes.clone(),
     }
 }

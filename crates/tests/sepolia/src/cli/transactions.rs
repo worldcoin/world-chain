@@ -1,31 +1,34 @@
 use alloy_eips::Encodable2718;
-use alloy_primitives::{address, bytes, fixed_bytes, Address, FixedBytes, B256, U128, U256};
-use alloy_primitives::{Bytes, TxKind};
-use alloy_provider::network::{EthereumWallet, TransactionBuilder};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_primitives::{
+    address, bytes, fixed_bytes, Address, Bytes, FixedBytes, TxKind, B256, U128, U256,
+};
+use alloy_provider::{
+    network::{EthereumWallet, TransactionBuilder},
+    Provider, ProviderBuilder,
+};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{sol, SolCall};
-use alloy_sol_types::{SolInterface, SolValue};
+use alloy_sol_types::{sol, SolCall, SolInterface, SolValue};
 use alloy_transport_http::Http;
 use eyre::eyre::{bail, Context};
 use futures::{stream, StreamExt, TryStreamExt};
 use once_cell::sync::Lazy;
 use rand::Rng;
-use reqwest::header::{HeaderMap, AUTHORIZATION};
-use reqwest::Client;
+use reqwest::{
+    header::{HeaderMap, AUTHORIZATION},
+    Client,
+};
 use reth_rpc_layer::secret_to_bearer_header;
 use semaphore_rs::{hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::task::JoinSet;
-use tokio::time::sleep;
+use std::{borrow::Cow, str::FromStr, sync::Arc, time::Duration};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    task::JoinSet,
+    time::sleep,
+};
 use tracing::{debug, error, info};
 use world_chain_pbh::{
     date_marker::DateMarker,
@@ -33,20 +36,27 @@ use world_chain_pbh::{
     payload::PBHPayload,
 };
 
-use world_chain_test::bindings::IEntryPoint::{PackedUserOperation, UserOpsPerAggregator};
-use world_chain_test::bindings::{IMulticall3, IPBHEntryPoint};
-use world_chain_test::utils::{
-    get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof, RpcGasEstimate,
-    RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+use world_chain_test::{
+    bindings::{
+        IEntryPoint::{PackedUserOperation, UserOpsPerAggregator},
+        IMulticall3, IPBHEntryPoint,
+    },
+    utils::{
+        get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof,
+        RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+    },
+    DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
 };
-use world_chain_test::{DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID};
 
-use crate::cli::transactions::LoadTestContract::LoadTestContractInstance;
-use crate::cli::LoadTestArgs;
-use crate::PBH_SIGNATURE_AGGREGATOR;
+use crate::{
+    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs},
+    PBH_SIGNATURE_AGGREGATOR,
+};
 
-use super::{identities::SerializableIdentity, BundleArgs, TxType};
-use super::{SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs};
+use super::{
+    identities::SerializableIdentity, BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs,
+    StakeAAArgs, TxType,
+};
 use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
 static SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::const_new(150)));

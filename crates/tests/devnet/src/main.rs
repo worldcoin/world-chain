@@ -13,13 +13,10 @@ use std::{
 };
 
 use alloy_network::Network;
-use alloy_provider::network::Ethereum;
-use alloy_provider::RootProvider;
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::{network::Ethereum, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use clap::Parser;
-use eyre::eyre;
-use eyre::Result;
+use eyre::{eyre, Result};
 use fixtures::TransactionFixtures;
 use std::process::Command;
 use tokio::time::sleep;
