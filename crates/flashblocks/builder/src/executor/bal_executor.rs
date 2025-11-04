@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use reth::revm::database::StateProviderDatabase;
 use reth::revm::State;
 use reth_evm::block::{BlockExecutionError, BlockExecutor};
-use reth_evm::op_revm::OpSpecId;
+use reth_evm::op_revm::{OpSpecId, OpTransaction, OpTransactionError};
 use reth_evm::{
     block::{CommitChanges, ExecutableTx},
     Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
@@ -29,6 +29,7 @@ use reth_provider::{BlockExecutionResult, StateProvider};
 use reth_trie_common::updates::TrieUpdates;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use revm::context::result::{ExecutionResult, ResultAndState};
+use revm::context::TxEnv;
 use revm::database::states::bundle_state::BundleRetention;
 use revm::database::states::reverts::Reverts;
 use revm::database::{BundleAccount, BundleState, CacheDB, TransitionState};
@@ -64,9 +65,10 @@ where
 
 impl<'db, DB, E, R, Spec> BalBlockExecutor<E, R, Spec>
 where
-    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + 'db,
+    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + Send + Sync + 'db,
     E: Evm<
             DB = &'db mut State<DB>,
+            // Tx = OpTransaction<TxEnv>,
             Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
             Spec = OpSpecId,
         > + Send
@@ -120,9 +122,7 @@ where
 
     fn execute_block(
         mut self,
-        transactions: impl IntoParallelIterator<
-            Item = impl ExecutableTx<OpBlockExecutor<E, R, Spec>> + Sized + Send + Sync,
-        >,
+        transactions: impl IntoParallelIterator<Item = OpTransaction<TxEnv>>,
     ) -> Result<
         BlockExecutionResult<<OpBlockExecutor<E, R, Spec> as BlockExecutor>::Receipt>,
         BlockExecutionError,
@@ -138,14 +138,13 @@ where
         let temporal_factory = TemporalCachedDbFactory::new(&cache_db, self.flashblock_access_list);
         // let base_evm = OpEvmFactory::default().create_evm(cache_db, env.clone());
 
-        let res = transactions.into_par_iter().try_for_each(|tx| {
+        let res = transactions.into_par_iter().for_each(|tx| {
             let index = todo!();
             let db = temporal_factory.db(index);
             // TODO: we probably can get rid of this cache as well
             let db = CacheDB::new(db);
             let evm = OpEvmFactory::default().create_evm(db, env.clone());
-            let tx_env = tx.to_tx_env();
-            evm.transact_raw(tx_env);
+            evm.transact_raw(tx).unwrap();
         });
 
         // self.inner.apply_post_execution_changes()
