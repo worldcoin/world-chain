@@ -514,7 +514,7 @@ mod tests {
         let value = U256::from(777);
 
         let mut db = CacheDB::new(EmptyDB::new());
-        db.insert_account_storage(addr, slot.into(), value);
+        let _ = db.insert_account_storage(addr, slot.into(), value);
         let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
 
         let temporal_db = factory.db(0);
@@ -544,7 +544,7 @@ mod tests {
         let value = U256::from(555);
 
         let mut db = CacheDB::new(EmptyDB::new());
-        db.insert_account_storage(addr, slot.into(), value);
+        let _ = db.insert_account_storage(addr, slot.into(), value);
         let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
 
         let temporal_db = factory.db(0);

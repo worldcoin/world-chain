@@ -38,9 +38,8 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     assembler::FlashblocksBlockAssembler,
     executor::{
-        bal_builder::BalBuilderBlockExecutor,
-        factory::FlashblocksBlockExecutorFactory,
-        temporal_db::{self, TemporalDbFactory},
+        bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
+        temporal_db::TemporalDbFactory,
     },
 };
 
