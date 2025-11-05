@@ -22,10 +22,11 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    args::RollupArgs, txpool::OpPooledTx, OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpDAConfig,
+    args::RollupArgs, txpool::OpPooledTx, OpAddOns, OpBuiltPayload, OpConsensusBuilder,
     OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder,
     OpNodeTypes, OpPayloadBuilderAttributes, OpPoolBuilder, OpStorage,
 };
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use reth_provider::{
@@ -109,13 +110,8 @@ pub struct FlashblocksNodeBuilder {
     /// Flashblocks Args
     pub flashblocks: FlashblocksArgs,
 
-    /// Data availability configuration for the OP builder.
-    ///
-    /// Used to throttle the size of the data availability payloads (configured by the batcher via
-    /// the `miner_` api).
-    ///
-    /// By default no throttling is applied.
-    pub da_config: OpDAConfig,
+    /// Builder config
+    pub builder_config: OpBuilderConfig,
 }
 
 impl FlashblocksNodeBuilder {
@@ -140,7 +136,7 @@ impl FlashblocksNodeBuilder {
         FlashblocksNode {
             rollup: self.rollup,
             flashblocks: self.flashblocks,
-            da_config: self.da_config,
+            builder_config: self.builder_config,
             flashblocks_state,
             flashblocks_handle,
             to_jobs_generator,
@@ -158,14 +154,7 @@ pub struct FlashblocksNode {
     /// Flashblocks Args
     pub flashblocks: FlashblocksArgs,
 
-    /// Data availability configuration for the OP builder.
-    ///
-    /// Used to throttle the size of the data availability payloads (configured by the batcher via
-    /// the `miner_` api).
-    ///
-    /// By default no throttling is applied.
-    pub da_config: OpDAConfig,
-
+    pub builder_config: OpBuilderConfig,
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
@@ -240,7 +229,7 @@ where
                 FlashblocksPayloadBuilderBuilder::new(
                     OpPayloadBuilderCtxBuilder,
                     self.flashblocks_state.clone(),
-                    self.da_config.clone(),
+                    self.builder_config.clone(),
                 ),
                 self.flashblocks_handle.clone(),
                 self.flashblocks_state.clone(),
@@ -277,7 +266,8 @@ where
 
         OpAddOns::new(
             rpc_add_ons,
-            self.da_config.clone(),
+            self.builder_config.da_config.clone(),
+            self.builder_config.gas_limit_config.clone(),
             self.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),

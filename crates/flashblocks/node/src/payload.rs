@@ -10,7 +10,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
     txpool::OpPooledTx, OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes,
 };
-use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
@@ -20,7 +20,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
-    pub da_config: OpDAConfig,
+    pub builder_config: OpBuilderConfig,
 }
 
 impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
@@ -30,11 +30,11 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub fn new(
         ctx_builder: CtxBuilder,
         flashblocks_state: FlashblocksExecutionCoordinator,
-        da_config: OpDAConfig,
+        builder_config: OpBuilderConfig,
     ) -> Self {
         Self {
             ctx_builder,
-            da_config,
+            builder_config,
             flashblocks_state,
         }
     }
@@ -80,9 +80,7 @@ where
             evm_config,
             pool,
             client: ctx.provider().clone(),
-            config: OpBuilderConfig {
-                da_config: self.da_config,
-            },
+            config: self.builder_config,
             best_transactions: (),
             ctx_builder: self.ctx_builder,
         };

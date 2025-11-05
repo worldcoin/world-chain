@@ -3,7 +3,7 @@ use reth::revm::cancelled::CancelOnDrop;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::ConfigureEvm;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
-use reth_optimism_payload_builder::config::OpDAConfig;
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_primitives::NodePrimitives;
 
 use crate::traits::context::PayloadBuilderCtx;
@@ -84,7 +84,7 @@ pub trait PayloadBuilderCtxBuilder<Provider, EvmConfig: ConfigureEvm, ChainSpec>
         &self,
         provider: Provider,
         evm: EvmConfig,
-        da_config: OpDAConfig,
+        builder_config: OpBuilderConfig,
         config: PayloadConfig<
             OpPayloadBuilderAttributes<OpTxEnvelope>,
             <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,

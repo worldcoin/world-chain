@@ -14,6 +14,7 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
+    config::OpBuilderConfig,
     payload::OpPayloadBuilderAttributes,
 };
 use reth_payload_primitives::BuildNextEnv;
@@ -178,7 +179,7 @@ where
         &self,
         provider: Provider,
         evm: OpEvmConfig,
-        da_config: reth_optimism_node::OpDAConfig,
+        builder_config: OpBuilderConfig,
         config: reth_basic_payload_builder::PayloadConfig<
             OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
             <<OpEvmConfig as ConfigureEvm>::Primitives as reth_node_api::NodePrimitives>::BlockHeader,
@@ -191,7 +192,7 @@ where
     {
         OpPayloadBuilderCtx {
             evm_config: evm,
-            da_config,
+            builder_config,
             chain_spec: provider.chain_spec(),
             config,
             cancel: cancel.clone(),

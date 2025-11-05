@@ -394,7 +394,7 @@ pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     pub best_transactions: Txs,
     /// This data availability configuration specifies constraints for the payload builder
     /// when assembling payloads
-    pub da_config: OpDAConfig,
+    pub builder_config: OpBuilderConfig,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -420,13 +420,13 @@ impl WorldChainPayloadBuilderBuilder {
             pbh_signature_aggregator,
             best_transactions: (),
             builder_private_key,
-            da_config: OpDAConfig::default(),
+            builder_config: OpBuilderConfig::default(),
         }
     }
 
     /// Configure the data availability configuration for the OP payload builder.
     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
-        self.da_config = da_config;
+        self.builder_config.da_config = da_config;
         self
     }
 }
@@ -437,7 +437,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
     pub fn with_transactions<T>(self, best_transactions: T) -> WorldChainPayloadBuilderBuilder<T> {
         let Self {
             compute_pending_block,
-            da_config,
+            builder_config,
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
@@ -447,7 +447,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
 
         WorldChainPayloadBuilderBuilder {
             compute_pending_block,
-            da_config,
+            builder_config,
             verified_blockspace_capacity,
             pbh_entry_point,
             pbh_signature_aggregator,
@@ -488,9 +488,7 @@ where
             pool,
             ctx.provider().clone(),
             evm_config,
-            OpBuilderConfig {
-                da_config: self.da_config.clone(),
-            },
+            self.builder_config.clone(),
             self.compute_pending_block,
             self.verified_blockspace_capacity,
             self.pbh_entry_point,

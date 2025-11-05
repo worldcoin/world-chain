@@ -114,7 +114,7 @@ where
         let ctx = self.ctx_builder.build(
             self.client.clone(),
             self.evm_config.clone(),
-            self.config.da_config.clone(),
+            self.config.clone(),
             config,
             &cancel,
             best_payload.clone(),

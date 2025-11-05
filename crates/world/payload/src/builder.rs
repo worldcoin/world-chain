@@ -195,7 +195,7 @@ where
         let ctx = WorldChainPayloadBuilderCtx {
             inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
-                da_config: self.inner.config.da_config.clone(),
+                builder_config: self.inner.config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel,
@@ -248,7 +248,7 @@ where
         let ctx = WorldChainPayloadBuilderCtx {
             inner: Arc::new(OpPayloadBuilderCtx {
                 evm_config: self.inner.evm_config.clone(),
-                da_config: self.inner.config.da_config.clone(),
+                builder_config: self.inner.config.clone(),
                 chain_spec: self.inner.client.chain_spec(),
                 config,
                 cancel: Default::default(),
