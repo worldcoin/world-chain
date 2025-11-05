@@ -4,8 +4,10 @@ use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::engine::OpEngineApiExt;
 use op_alloy_rpc_types_engine::OpExecutionData;
-use reth::version::version_metadata;
-use reth::{payload::PayloadStore, version::CLIENT_CODE};
+use reth::{
+    payload::PayloadStore,
+    version::{version_metadata, CLIENT_CODE},
+};
 use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };

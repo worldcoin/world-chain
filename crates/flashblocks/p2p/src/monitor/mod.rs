@@ -2,11 +2,15 @@
 use futures::StreamExt;
 use parking_lot::Mutex;
 use reth_ethereum::network::api::PeerId;
-use reth_network::events::{NetworkPeersEvents, PeerEvent};
-use reth_network::{Peers, PeersInfo};
+use reth_network::{
+    events::{NetworkPeersEvents, PeerEvent},
+    Peers, PeersInfo,
+};
 use reth_tasks::TaskExecutor;
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 

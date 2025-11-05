@@ -1,21 +1,25 @@
 //! World Chain transaction pool types
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU16, AtomicU64, Ordering},
+        Arc,
+    },
+};
 
-use super::root::WorldChainRootValidator;
-use super::tx::WorldChainPoolTransaction;
-use crate::bindings::IPBHEntryPoint;
-use crate::bindings::IPBHEntryPoint::PBHPayload;
-use crate::error::WorldChainTransactionPoolError;
-use crate::tx::WorldChainPoolTransactionError;
+use super::{root::WorldChainRootValidator, tx::WorldChainPoolTransaction};
+use crate::{
+    bindings::{IPBHEntryPoint, IPBHEntryPoint::PBHPayload},
+    error::WorldChainTransactionPoolError,
+    tx::WorldChainPoolTransactionError,
+};
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use reth::transaction_pool::validate::ValidTransaction;
 use reth::transaction_pool::{
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
 };
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
@@ -293,26 +297,25 @@ where
 #[cfg(test)]
 pub mod tests {
     use alloy_consensus::{Block, Header};
-    use alloy_primitives::address;
-    use alloy_primitives::Address;
+    use alloy_primitives::{address, Address};
     use alloy_sol_types::SolCall;
-    use reth::transaction_pool::blobstore::InMemoryBlobStore;
-    use reth::transaction_pool::{Pool, TransactionPool, TransactionValidator};
+    use reth::transaction_pool::{
+        blobstore::InMemoryBlobStore, Pool, TransactionPool, TransactionValidator,
+    };
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
-    use world_chain_pbh::date_marker::DateMarker;
-    use world_chain_pbh::external_nullifier::ExternalNullifier;
-    use world_chain_test::utils::{
-        account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE,
+    use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
+    use world_chain_test::{
+        utils::{account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE},
+        PBH_DEV_ENTRYPOINT,
     };
-    use world_chain_test::PBH_DEV_ENTRYPOINT;
 
     /// Devnet World ID for testing
     const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
-    use crate::ordering::WorldChainOrdering;
-    use crate::root::LATEST_ROOT_SLOT;
-    use crate::tx::WorldChainPooledTransaction;
+    use crate::{
+        ordering::WorldChainOrdering, root::LATEST_ROOT_SLOT, tx::WorldChainPooledTransaction,
+    };
     use world_chain_test::mock::{ExtendedAccount, MockEthProvider};
 
     use super::WorldChainTransactionValidator;
@@ -327,8 +330,9 @@ pub mod tests {
         use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
         use crate::root::WorldChainRootValidator;
         use reth_optimism_node::txpool::OpTransactionValidator;
-        use reth_transaction_pool::blobstore::InMemoryBlobStore;
-        use reth_transaction_pool::validate::EthTransactionValidatorBuilder;
+        use reth_transaction_pool::{
+            blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+        };
         use revm_primitives::U256;
 
         let client = MockEthProvider::default();

@@ -4,24 +4,18 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, TxHash, B256};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::OpEthApi;
-use reth_optimism_rpc::OpEthApiError;
+use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::TransactionMeta;
-use reth_provider::ReceiptProvider;
-use reth_provider::TransactionsProvider;
-use reth_provider::{ProviderReceipt, ProviderTx};
-use reth_rpc_eth_api::helpers::LoadPendingBlock;
-use reth_rpc_eth_api::EthApiTypes;
-use reth_rpc_eth_api::FromEthApiError;
-use reth_rpc_eth_api::FromEvmError;
+use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
-    RpcConvert, RpcNodeCore,
+    helpers::{
+        spec::SignersForRpc, EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking,
+    },
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
-use std::future::Future;
-use std::time::Duration;
+use std::{future::Future, time::Duration};
 
 use crate::eth::FlashblocksEthApi;
 

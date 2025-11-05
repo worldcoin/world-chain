@@ -1,36 +1,35 @@
 use alloy_consensus::{Block, Transaction, TxReceipt};
-use alloy_eips::eip2718::WithEncoded;
-use alloy_eips::eip4895::Withdrawals;
-use alloy_eips::{Decodable2718, Encodable2718};
-use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
-use alloy_op_evm::block::OpTxEnv;
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory};
+use alloy_eips::{eip2718::WithEncoded, eip4895::Withdrawals, Decodable2718, Encodable2718};
+use alloy_op_evm::{
+    block::{receipt_builder::OpReceiptBuilder, OpTxEnv},
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::p2p::AuthorizedPayload;
-use flashblocks_primitives::primitives::FlashblocksPayloadV1;
+use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use op_alloy_consensus::{encode_holocene_extra_data, OpTxEnvelope};
 use parking_lot::RwLock;
-use reth::core::primitives::Receipt;
-use reth::payload::EthPayloadBuilderAttributes;
-use reth::revm::cancelled::CancelOnDrop;
-use reth::revm::database::StateProviderDatabase;
-use reth::revm::State;
+use reth::{
+    core::primitives::Receipt,
+    payload::EthPayloadBuilderAttributes,
+    revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, State},
+};
 use reth_basic_payload_builder::{BuildOutcomeKind, PayloadConfig};
 use reth_chain_state::ExecutedBlock;
-use reth_evm::block::{BlockExecutorFactory, BlockExecutorFor};
-use reth_evm::execute::{
-    BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
-    ExecutorTx,
-};
-use reth_evm::op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::{
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx},
-    Database, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
+    block::{
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
+        ExecutableTx,
+    },
+    execute::{
+        BasicBlockBuilder, BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome,
+        ExecutorTx,
+    },
+    op_revm::{OpHaltReason, OpSpecId},
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_evm::{Evm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -41,17 +40,22 @@ use reth_optimism_node::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::BestPayloadTransactions;
-use reth_primitives::{transaction::SignedTransaction, SealedHeader};
-use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
+use reth_primitives::{
+    transaction::SignedTransaction, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
+};
 use reth_provider::{BlockExecutionResult, HeaderProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use revm::context::result::{ExecutionResult, ResultAndState};
-use revm::context::BlockEnv;
-use revm::database::states::bundle_state::BundleRetention;
-use revm::database::states::reverts::Reverts;
-use revm::database::BundleState;
-use std::collections::HashSet;
-use std::sync::Arc;
+use revm::{
+    context::{
+        result::{ExecutionResult, ResultAndState},
+        BlockEnv,
+    },
+    database::{
+        states::{bundle_state::BundleRetention, reverts::Reverts},
+        BundleState,
+    },
+};
+use std::{collections::HashSet, sync::Arc};
 use tokio::sync::broadcast;
 use tracing::{error, trace};
 

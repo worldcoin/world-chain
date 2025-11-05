@@ -16,8 +16,7 @@ use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
 use reth_network::Peers;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, info};
 

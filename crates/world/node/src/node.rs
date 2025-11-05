@@ -1,41 +1,42 @@
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::builder::components::{
-    ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
-};
 use reth::builder::{
+    components::{
+        ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+    },
     BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
 };
 
-use reth::rpc::eth::EthApiTypes;
-use reth::transaction_pool::blobstore::DiskFileBlobStore;
-use reth::transaction_pool::TransactionValidationTaskExecutor;
+use reth::{
+    rpc::eth::EthApiTypes,
+    transaction_pool::{blobstore::DiskFileBlobStore, TransactionValidationTaskExecutor},
+};
 
 use reth_engine_local::LocalPayloadAttributesBuilder;
 
 use reth_evm::ConfigureEvm;
 use reth_node_api::{NodeAddOns, PayloadAttributesBuilder};
-use reth_node_builder::components::{NetworkBuilder, PayloadServiceBuilder};
-use reth_node_builder::rpc::{EngineValidatorAddOn, RethRpcAddOns};
 use reth_node_builder::{
+    components::{NetworkBuilder, PayloadServiceBuilder},
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
     DebugNode, FullNodeComponents, NodeComponents, PayloadTypes, PrimitivesTy, TxTy,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::node::{OpConsensusBuilder, OpExecutorBuilder};
-use reth_optimism_node::txpool::{OpPooledTx, OpTransactionValidator};
 use reth_optimism_node::{
+    node::{OpConsensusBuilder, OpExecutorBuilder},
+    txpool::{OpPooledTx, OpTransactionValidator},
     OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
     OpStorage,
 };
-use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_payload_builder::config::{OpBuilderConfig, OpDAConfig};
+use reth_optimism_payload_builder::{
+    builder::OpPayloadTransactions,
+    config::{OpBuilderConfig, OpDAConfig},
+};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
 
 use reth_provider::{
@@ -47,11 +48,13 @@ use reth_transaction_pool::{BlobStore, TransactionPool};
 use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
 use world_chain_payload::builder::WorldChainPayloadBuilder;
-use world_chain_pool::ordering::WorldChainOrdering;
-use world_chain_pool::root::WorldChainRootValidator;
-use world_chain_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
-use world_chain_pool::validator::WorldChainTransactionValidator;
-use world_chain_pool::WorldChainTransactionPool;
+use world_chain_pool::{
+    ordering::WorldChainOrdering,
+    root::WorldChainRootValidator,
+    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
+    validator::WorldChainTransactionValidator,
+    WorldChainTransactionPool,
+};
 
 /// Context trait for World Chain node implementations.
 ///

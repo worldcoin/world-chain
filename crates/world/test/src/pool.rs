@@ -1,14 +1,17 @@
 use crate::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_transaction_pool::blobstore::InMemoryBlobStore;
-use reth_transaction_pool::validate::EthTransactionValidatorBuilder;
+use reth_transaction_pool::{
+    blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+};
 use revm_primitives::U256;
 
 use crate::mock::{ExtendedAccount, MockEthProvider};
-use world_chain_pool::root::WorldChainRootValidator;
-use world_chain_pool::tx::WorldChainPooledTransaction;
-use world_chain_pool::validator::{
-    WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
+use world_chain_pool::{
+    root::WorldChainRootValidator,
+    tx::WorldChainPooledTransaction,
+    validator::{
+        WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
+    },
 };
 
 pub fn world_chain_validator(

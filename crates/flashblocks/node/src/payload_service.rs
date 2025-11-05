@@ -1,12 +1,13 @@
 use std::time::Duration;
 
-use flashblocks_builder::executor::FlashblocksStateExecutor;
-use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_payload::generator::{
-    FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
+use flashblocks_builder::{
+    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
 };
-use flashblocks_payload::metrics::PayloadBuilderMetrics;
+use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_payload::{
+    generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
+    metrics::PayloadBuilderMetrics,
+};
 use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};

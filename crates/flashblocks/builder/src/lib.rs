@@ -7,8 +7,7 @@ use crate::{
     },
 };
 
-use alloy_consensus::Transaction;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_op_evm::OpEvm;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -19,16 +18,17 @@ use reth::{
     chainspec::EthChainSpec,
     revm::{database::StateProviderDatabase, State},
 };
-use reth_basic_payload_builder::{BuildArguments, BuildOutcome, BuildOutcomeKind};
-use reth_basic_payload_builder::{MissingPayloadBehaviour, PayloadBuilder, PayloadConfig};
+use reth_basic_payload_builder::{
+    BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
+};
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
     ConfigureEvm, Database,
 };
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives::{NodePrimitives, Recovered};
+use reth_primitives::{transaction::SignedTransaction, NodePrimitives, Recovered};
 use tracing::error;
 
 use reth_optimism_chainspec::OpChainSpec;
@@ -37,11 +37,10 @@ use reth_optimism_node::{
     txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
 use reth_optimism_payload_builder::{
-    builder::ExecutionInfo, config::OpBuilderConfig, OpAttributes,
-};
-use reth_optimism_payload_builder::{
-    builder::OpPayloadTransactions,
+    builder::{ExecutionInfo, OpPayloadTransactions},
+    config::OpBuilderConfig,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    OpAttributes,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};

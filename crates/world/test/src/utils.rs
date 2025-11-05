@@ -1,9 +1,9 @@
 use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
-use alloy_primitives::{address, B256, U128, U64, U8};
 use alloy_primitives::{
-    aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes, TxKind, U256,
+    address, aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes,
+    TxKind, B256, U128, U256, U64, U8,
 };
 use alloy_signer::SignerSync;
 use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
@@ -14,19 +14,22 @@ use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives_traits::size::InMemorySize;
-use semaphore_rs::identity::Identity;
-use semaphore_rs::poseidon_tree::LazyPoseidonTree;
-use semaphore_rs::{hash_to_field, Field};
+use semaphore_rs::{hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
 
-use world_chain_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
-use world_chain_pbh::payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH};
+use world_chain_pbh::{
+    external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
+    payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH},
+};
 
-use crate::bindings::IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator};
-use crate::bindings::IPBHEntryPoint::{self, PBHPayload};
-use crate::bindings::{EncodedSafeOpStruct, IMulticall3};
 use crate::{
+    bindings::{
+        EncodedSafeOpStruct,
+        IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator},
+        IMulticall3,
+        IPBHEntryPoint::{self, PBHPayload},
+    },
     DEVNET_ENTRYPOINT, DEV_CHAIN_ID, MNEMONIC, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
     PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES, WC_SEPOLIA_CHAIN_ID,
 };
