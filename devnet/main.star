@@ -186,7 +186,7 @@ def run(plan, args={}):
         content_type="application/json",
         body='{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}',
         port_id="http",
-        extract={"peer_id": "result.addresses[0]"},
+        extract={"peer_id": ".result.addresses[0]"},
     )
 
     op_node_1_p2p = plan.request(

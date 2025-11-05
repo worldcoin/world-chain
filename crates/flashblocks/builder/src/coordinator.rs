@@ -214,48 +214,14 @@ where
 
     let index = flashblock.flashblock().index;
 
-    let transactions = flashblock
-        .diff()
-        .transactions
-        .iter()
-        .map(|b| {
-            let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
-            Ok(tx.try_into_recovered().unwrap())
-        })
-        .collect::<eyre::Result<Vec<_>>>()?;
-
-    let _senders = transactions
-        .clone()
-        .into_iter()
-        .map(|tx| tx.into_parts().1)
-        .collect::<Vec<_>>();
-
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)?
         .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
 
-    // We can now create the block executor, and transform the BAL into the expected hashed post state.
-    //
-    // Transaction Execution, and State Transition can be performed in parellel.
-    // We need to ensure that transaction execution produces the same BAL as provided in the flashblock.
-
-    let provider_clone = provider.clone();
-    let evm_config = evm_config.clone();
-    let base = base.clone();
-
-    let _latest_bundle = latest_payload.as_ref().map(|(p, _)| {
-        p.executed_block()
-            .unwrap() // Safe unwrap
-            .block
-            .execution_output
-            .bundle
-            .clone()
-    });
-
-    let state_provider = Arc::new(provider_clone.state_by_block_hash(sealed_header.hash())?);
+    let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
 
     let sealed_header = Arc::new(
-        provider_clone
+        provider
             .sealed_header_by_hash(base.clone().parent_hash)?
             .ok_or_eyre(format!(
                 "missing sealed header: {}",
@@ -263,39 +229,17 @@ where
             ))?,
     );
 
-    let _attributes = OpNextBlockEnvAttributes {
-        timestamp: base.timestamp,
-        suggested_fee_recipient: base.fee_recipient,
-        prev_randao: base.prev_randao,
-        gas_limit: base.gas_limit,
-        parent_beacon_block_root: Some(base.parent_beacon_block_root),
-        extra_data: base.extra_data.clone(),
-    };
-
-    // Prepare EVM.
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
 
-    let _execution_context_clone = execution_context.clone();
-
-    let _state_provider_clone = state_provider.clone();
-    let _state_provider_clone2 = state_provider.clone();
-
-    let _sealed_header_clone = sealed_header.clone();
-    let _transactions_clone = transactions.clone();
-
-    let _before_execution = Instant::now();
-
-    let _latest_payload_clone = latest_payload.clone();
-
     let block_validator = BalBlockExecutor::<OpRethReceiptBuilder, OpChainSpec>::new(
         execution_context,
         chain_spec.clone(),
         OpRethReceiptBuilder::default(),
-        evm_config,
+        evm_config.clone(),
     );
 
     let payload = if let Some(_access_list_data) = flashblock.diff().access_list_data.as_ref() {

@@ -1,12 +1,10 @@
-use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpEvmFactory};
 use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{eyre, OptionExt};
-use flashblocks_primitives::{
-    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
-};
+use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use reth::revm::{database::StateProviderDatabase, State};
@@ -40,8 +38,9 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     assembler::FlashblocksBlockAssembler,
     executor::{
-        bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
-        temporal_db::TemporalDbFactory,
+        bal_builder::BalBuilderBlockExecutor,
+        factory::FlashblocksBlockExecutorFactory,
+        temporal_db::{self, TemporalDbFactory},
     },
 };
 
@@ -81,7 +80,7 @@ where
     pub(crate) fn verify_block(
         self,
         state_provider: &dyn StateProvider,
-        committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
+        committed_payload: Option<OpBuiltPayload>,
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent_header: &SealedHeader<Header>,
     ) -> Result<
@@ -98,6 +97,7 @@ where
         Self: Sized,
     {
         let db = StateProviderDatabase::new(state_provider);
+
         let expected_access_list_data = diff
             .access_list_data
             .ok_or_eyre("Access list data must be provided on the diff")?;
@@ -175,6 +175,43 @@ where
                     .collect()
             });
 
+        let temporal_db = temporal_db_factory.db(0);
+
+        let mut state = if let Some(ref bundle) = pre_loaded_bundle {
+            State::builder()
+                .with_database_ref(temporal_db)
+                .with_bundle_update()
+                .with_bundle_prestate(bundle.clone())
+                .build()
+        } else {
+            State::builder()
+                .with_database_ref(temporal_db)
+                .with_bundle_update()
+                .build()
+        };
+
+        let evm = OpEvmFactory::default().create_evm(
+            &mut state,
+            self.config
+                .evm_env(&parent_header.header().clone())
+                .unwrap(),
+        );
+
+        let mut executor = BalBuilderBlockExecutor::new(
+            evm,
+            self.execution_context.clone(),
+            self.spec.clone(),
+            self.receipt_builder.clone(),
+        );
+
+        if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
+            executor = executor
+                .with_receipts(pre_loaded_receipts.clone())
+                .with_min_tx_index(pre_loaded_receipts.len() as u64);
+        }
+
+        executor.apply_pre_execution_changes()?;
+
         let mut execution_data = transactions
             .clone()
             .into_par_iter()
@@ -209,7 +246,7 @@ where
 
                 if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
                     executor = executor
-                        .with_receipts(pre_loaded_receipts.clone())
+                        .with_block_access_index(index as BlockAccessIndex)
                         .with_min_tx_index(pre_loaded_receipts.len() as u64);
                 }
 
@@ -235,7 +272,7 @@ where
         execution_data.sort_unstable_by_key(|e| e.0);
 
         // Merge access lists together
-        let (merged_access_list, mut merged_bundle_state, mut merged_execution_result) =
+        let (merged_access_list, merged_bundle_state, mut merged_execution_result) =
             execution_data.into_iter().fold(
                 (
                     FlashblockAccessListConstruction::default(),
@@ -257,27 +294,30 @@ where
                 },
             );
 
-        let temporal_db = temporal_db_factory.db(diff.transactions.len() as u64);
+        let mut curr_access_list = executor.take_access_list();
+        curr_access_list.merge(merged_access_list.clone());
 
-        let mut state = State::builder()
-            .with_database_ref(temporal_db)
-            .with_bundle_update()
-            .build();
+        let pre_execution_bundle = executor.evm_mut().db_mut();
 
-        let evm = OpEvmFactory::default().create_evm(
-            &mut state,
-            self.config
-                .evm_env(&parent_header.header().clone())
-                .unwrap(),
-        );
+        merge_reverts(pre_execution_bundle);
 
-        let executor = BalBuilderBlockExecutor::new(
-            evm,
-            self.execution_context.clone(),
-            self.spec.clone(),
-            self.receipt_builder.clone(),
-        )
-        .with_access_list(merged_access_list); // TODO: Need to aggregate receipts
+        // Pre-pend the merged bundle with the bundle created from the pre-execution changes
+        pre_execution_bundle
+            .bundle_state
+            .extend(merged_bundle_state.clone());
+
+        let mut executor = executor
+            .with_access_list(curr_access_list)
+            .with_block_access_index(transactions.len() as BlockAccessIndex + 1);
+
+        let temporal_db = temporal_db_factory.db(transactions.len() as u64 + 1);
+        executor.evm_mut().db_mut().database.0 = temporal_db;
+
+        if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
+            executor = executor
+                .with_receipts(merged_execution_result.receipts.to_vec())
+                .with_min_tx_index(pre_loaded_receipts.len() as u64);
+        }
 
         let (evm, execution_result, access_list_data, _, _) = executor.finish_with_access_list()?;
 
@@ -288,13 +328,21 @@ where
         let (db, env) = evm.finish();
         merge_reverts(db);
 
-        merged_bundle_state.extend(db.bundle_state.clone());
-
         // Verify the hash matches
         let expected_hash = expected_access_list_data.access_list_hash;
         let computed_hash = access_list_data.access_list_hash;
 
         if expected_hash != computed_hash {
+            std::fs::write(
+                format!("expected_{}", parent_header.number()),
+                serde_json::to_string_pretty(&expected_access_list_data.access_list).unwrap(),
+            )?;
+
+            std::fs::write(
+                format!("computed_{}", parent_header.number()),
+                serde_json::to_string_pretty(&access_list_data.access_list).unwrap(),
+            )?;
+
             return Err(eyre!(format!(
                 "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
                 expected_hash, computed_hash
@@ -302,7 +350,7 @@ where
         }
 
         Ok((
-            merged_bundle_state,
+            db.take_bundle(),
             merged_execution_result,
             env,
             transactions.into_iter().map(|(tx, _)| tx).collect(),
