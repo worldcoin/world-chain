@@ -21,9 +21,13 @@ use reth_evm::{
 use reth_optimism_forks::OpHardforks;
 use reth_provider::BlockExecutionResult;
 use revm::{
-    DatabaseCommit, context::{
-        Block, TxEnv, result::{ExecResultAndState, ExecutionResult, ResultAndState}
-    }, database::BundleState, state::{Account, AccountInfo, EvmState}
+    context::{
+        result::{ExecResultAndState, ExecutionResult, ResultAndState},
+        Block, TxEnv,
+    },
+    database::BundleState,
+    state::{Account, AccountInfo, EvmState},
+    DatabaseCommit,
 };
 
 use crate::{
@@ -249,7 +253,7 @@ where
             receipts: inner.receipts,
             requests: Default::default(),
             gas_used,
-            blob_gas_used: 0
+            blob_gas_used: 0,
         };
 
         Ok((
