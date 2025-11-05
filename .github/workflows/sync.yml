@@ -29,7 +29,7 @@ jobs:
       matrix:
         chain:
           - build: install
-            bin: world-chain-builder
+            bin: world-chain
             features: jemalloc
             chain: base
             tip: "0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7"
