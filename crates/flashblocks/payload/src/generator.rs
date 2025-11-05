@@ -25,8 +25,7 @@ use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFacto
 use tokio::runtime::Handle;
 use tracing::debug;
 
-use crate::job::FlashblocksPayloadJob;
-use crate::metrics::PayloadBuilderMetrics;
+use crate::{job::FlashblocksPayloadJob, metrics::PayloadBuilderMetrics};
 use flashblocks_builder::{
     executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
 };

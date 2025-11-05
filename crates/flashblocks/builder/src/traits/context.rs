@@ -1,20 +1,21 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
 use op_alloy_consensus::EIP1559ParamError;
-use reth::builder::PayloadBuilderError;
-use reth::payload::PayloadId;
-use reth::revm::State;
+use reth::{builder::PayloadBuilderError, payload::PayloadId, revm::State};
 use reth_chainspec::EthereumHardforks;
-use reth_evm::block::BlockExecutor;
-use reth_evm::op_revm::OpSpecId;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm};
-use reth_evm::{Evm, EvmEnv};
+use reth_evm::{
+    block::BlockExecutor, execute::BlockBuilder, op_revm::OpSpecId, ConfigureEvm, Evm, EvmEnv,
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
-use reth_optimism_node::OpEvmConfig;
-use reth_optimism_payload_builder::builder::{ExecutionInfo, OpPayloadBuilderCtx};
-use reth_optimism_payload_builder::payload::OpPayloadBuilderAttributes;
+use reth_optimism_node::{
+    txpool::{OpPooledTransaction, OpPooledTx},
+    OpEvmConfig,
+};
+use reth_optimism_payload_builder::{
+    builder::{ExecutionInfo, OpPayloadBuilderCtx},
+    payload::OpPayloadBuilderAttributes,
+};
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};

@@ -1,19 +1,19 @@
-use crate::primitives::FlashblocksPayloadV1;
-use crate::primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1};
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use crate::primitives::{
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+};
 use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
+    EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::merge::BEACON_NONCE;
-use alloy_eips::Decodable2718;
-use alloy_eips::Encodable2718;
+use alloy_eips::{merge::BEACON_NONCE, Decodable2718, Encodable2718};
 use alloy_primitives::{FixedBytes, U256};
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
-use reth::api::Block as _;
-use reth::api::BlockBody as _;
-use reth::payload::PayloadBuilderAttributes;
+use reth::{
+    api::{Block as _, BlockBody as _},
+    payload::PayloadBuilderAttributes,
+};
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;

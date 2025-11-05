@@ -1,15 +1,14 @@
 use alloy_consensus::TxEnvelope;
 use alloy_rlp::Decodable;
 use clap::Parser;
-use cli::inclusion_proof_source::InclusionProofSourceVariant;
-use cli::{Cmd, Opt};
-use semaphore_rs::identity::Identity;
-use semaphore_rs::poseidon_tree::Proof;
-use semaphore_rs::{hash_to_field, Field};
+use cli::{inclusion_proof_source::InclusionProofSourceVariant, Cmd, Opt};
+use semaphore_rs::{hash_to_field, identity::Identity, poseidon_tree::Proof, Field};
 use serde::{Deserialize, Serialize};
-use world_chain_pbh::date_marker::DateMarker;
-use world_chain_pbh::external_nullifier::{EncodedExternalNullifier, ExternalNullifier};
-use world_chain_pbh::payload::PBHPayload;
+use world_chain_pbh::{
+    date_marker::DateMarker,
+    external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
+    payload::PBHPayload,
+};
 
 mod cli;
 

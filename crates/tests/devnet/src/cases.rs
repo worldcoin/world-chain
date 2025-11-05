@@ -1,29 +1,22 @@
-use std::borrow::Cow;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
+use std::{
+    borrow::Cow,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use alloy_network::Network;
-use alloy_network::ReceiptResponse;
-use alloy_primitives::hex;
-use alloy_primitives::Bytes;
-use alloy_primitives::B256;
-use alloy_provider::PendingTransactionBuilder;
-use alloy_provider::Provider;
+use alloy_network::{Network, ReceiptResponse};
+use alloy_primitives::{hex, Bytes, B256};
+use alloy_provider::{PendingTransactionBuilder, Provider};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use eyre::eyre::Result;
-use futures::stream;
-use futures::StreamExt;
-use futures::TryStreamExt;
-use tokio::time::interval;
-use tokio::time::sleep;
-use tracing::debug;
-use tracing::info;
-use world_chain_test::bindings::IEntryPoint::PackedUserOperation;
-use world_chain_test::utils::RpcUserOperationByHash;
-use world_chain_test::utils::RpcUserOperationV0_7;
-use world_chain_test::DEVNET_ENTRYPOINT;
-use world_chain_test::PBH_DEV_SIGNATURE_AGGREGATOR;
+use futures::{stream, StreamExt, TryStreamExt};
+use tokio::time::{interval, sleep};
+use tracing::{debug, info};
+use world_chain_test::{
+    bindings::IEntryPoint::PackedUserOperation,
+    utils::{RpcUserOperationByHash, RpcUserOperationV0_7},
+    DEVNET_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+};
 
 use crate::run_command;
 

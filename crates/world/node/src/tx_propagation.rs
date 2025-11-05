@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use reth_eth_wire_types::primitives::NetworkPrimitives;
-use reth_network::transactions::config::TransactionPropagationPolicy;
-use reth_network::transactions::PeerMetadata;
+use reth_network::transactions::{config::TransactionPropagationPolicy, PeerMetadata};
 use reth_network_peers::PeerId;
 
 /// Transaction propagation policy for World Chain that restricts propagation to a specific peer list.
