@@ -161,7 +161,7 @@ where
                     tx_peers,
                     ..
                 },
-            da_config,
+            builder_config,
         }) = self.clone();
 
         let RollupArgs {
@@ -190,7 +190,7 @@ where
                     pbh.signature_aggregator,
                     builder.private_key,
                 )
-                .with_da_config(da_config),
+                .with_da_config(builder_config.da_config),
             ))
             .network(network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -199,7 +199,7 @@ where
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
             .with_sequencer(self.0.args.rollup.sequencer.clone())
-            .with_da_config(self.0.da_config.clone())
+            .with_da_config(self.0.builder_config.da_config.clone())
             .build()
     }
 
@@ -253,7 +253,7 @@ where
                             tx_peers,
                             ..
                         },
-                    da_config,
+                    builder_config,
                 },
             components_context,
         } = self.clone();
@@ -299,7 +299,7 @@ where
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,
                     components_context.flashblocks_state.clone(),
-                    da_config,
+                    builder_config,
                 ),
                 components_context.flashblocks_handle.clone(),
                 components_context.flashblocks_state.clone(),
@@ -336,7 +336,8 @@ where
 
         OpAddOns::new(
             rpc_add_ons,
-            self.config.da_config.clone(),
+            self.config.builder_config.da_config.clone(),
+            self.config.builder_config.gas_limit_config.clone(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
@@ -388,7 +389,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let flashblocks_state = FlashblocksStateExecutor::new(
             flashblocks_handle.clone(),
-            value.da_config.clone(),
+            value.builder_config.clone(),
             pending_block,
         );
 

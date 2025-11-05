@@ -70,7 +70,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// Node client.
     pub client: Client,
     /// Settings for the builder, e.g. DA settings.
-    pub config: OpBuilderConfig,
+    pub builder_config: OpBuilderConfig,
     /// Iterator over best transactions from the pool.
     pub best_transactions: Txs,
     /// Context builder for the payload.
@@ -116,7 +116,7 @@ where
         let ctx = self.ctx_builder.build(
             self.client.clone(),
             self.evm_config.clone(),
-            self.config.da_config.clone(),
+            self.builder_config.clone(),
             config,
             &cancel,
             best_payload.clone(),

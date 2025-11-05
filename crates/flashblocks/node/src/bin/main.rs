@@ -29,7 +29,7 @@ pub fn main() {
             let node = FlashblocksNodeBuilder {
                 rollup: args.rollup_args.clone(),
                 flashblocks: args.flashblock_args,
-                da_config: Default::default(),
+                builder_config: Default::default(),
             }
             .build();
 

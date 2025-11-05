@@ -102,7 +102,7 @@ impl WorldChainArgs {
 
         Ok(WorldChainNodeConfig {
             args: self,
-            da_config: Default::default(),
+            builder_config: Default::default(),
         })
     }
 }

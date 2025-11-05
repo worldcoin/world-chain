@@ -168,7 +168,7 @@ async fn setup_node_extended_cfg(
             flashblocks_interval: 200,
             recommit_interval: 200,
         },
-        da_config: Default::default(),
+        builder_config: Default::default(),
     }
     .build();
 
