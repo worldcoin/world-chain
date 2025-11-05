@@ -8,7 +8,7 @@ use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use reth::revm::{database::StateProviderDatabase, State};
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor},
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilderOutcome, ExecutorTx},
@@ -155,7 +155,6 @@ where
             committed
                 .executed_block()
                 .unwrap()
-                .block
                 .execution_output
                 .bundle
                 .clone()
@@ -280,6 +279,7 @@ where
                         receipts: vec![],
                         gas_used: 0,
                         requests: Default::default(),
+                        blob_gas_used: 0,
                     },
                 ),
                 |(mut access_list_acc, mut bundle_acc, mut results_acc),
@@ -430,20 +430,18 @@ where
         );
 
         // create the executed block data
-        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(outcome.block),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(outcome.hashed_state),
-            },
-            trie: ExecutedTrieUpdates::Present(Arc::new(outcome.trie_updates)),
+        let executed_block = ExecutedBlock {
+            recovered_block: Arc::new(outcome.block),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(outcome.hashed_state),
+            trie_updates: Arc::new(outcome.trie_updates),
         };
 
         Ok(OpBuiltPayload::new(
             payload_id,
             sealed_block,
             U256::ZERO, // TODO: FIXME:
-            Some(executed),
+            Some(executed_block),
         ))
     }
 

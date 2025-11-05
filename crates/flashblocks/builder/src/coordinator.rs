@@ -1,22 +1,20 @@
-use alloy_eips::Decodable2718;
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
-use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::transaction::SignedTransaction;
+
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::sync::Arc;
-use tokio::{sync::broadcast, time::Instant};
+use tokio::sync::broadcast;
 use tracing::{error, trace};
 
 use crate::executor::bal_executor::BalBlockExecutor;
@@ -32,7 +30,7 @@ use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 pub struct FlashblocksExecutionCoordinator {
     inner: Arc<RwLock<FlashblocksExecutionCoordinatorInner>>,
     p2p_handle: FlashblocksHandle,
-    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,9 +49,7 @@ impl FlashblocksExecutionCoordinator {
     /// This function spawn a task that handles updates. It should only be called once.
     pub fn new(
         p2p_handle: FlashblocksHandle,
-        pending_block: tokio::sync::watch::Sender<
-            Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
-        >,
+        pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
     ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksExecutionCoordinatorInner {
             flashblocks: Default::default(),
@@ -137,7 +133,7 @@ impl FlashblocksExecutionCoordinator {
     /// Returns a receiver for the pending block.
     pub fn pending_block(
         &self,
-    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>> {
+    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>> {
         self.pending_block.subscribe()
     }
 
@@ -167,7 +163,7 @@ fn process_flashblock<Provider>(
     state_executor: &FlashblocksExecutionCoordinator,
     chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
-    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
     Provider:

@@ -106,7 +106,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             > + 'a,
         PayloadBuilderError,
@@ -148,7 +148,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
         >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;
 
@@ -283,7 +283,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     ) -> Result<
         impl BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
             > + 'a,
         PayloadBuilderError,
     >

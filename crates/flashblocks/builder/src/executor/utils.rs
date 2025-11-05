@@ -10,7 +10,7 @@ use reth_evm::{
 };
 use reth_optimism_forks::OpHardforks;
 use revm::{
-    context::result::ResultAndState,
+    context::{result::ResultAndState, Block},
     state::{Account, AccountInfo, Bytecode},
     Database, DatabaseCommit,
 };
@@ -41,7 +41,7 @@ pub(crate) fn transact_beacon_root_contract_call<Halt>(
     parent_beacon_block_root: Option<B256>,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !spec.is_cancun_active_at_timestamp(evm.block().timestamp.saturating_to()) {
+    if !spec.is_cancun_active_at_timestamp(evm.block().timestamp().saturating_to()) {
         return Ok(None);
     }
 
@@ -50,7 +50,7 @@ pub(crate) fn transact_beacon_root_contract_call<Halt>(
 
     // if the block number is zero (genesis block) then the parent beacon block root must
     // be 0x0 and no system transaction may occur as per EIP-4788
-    if evm.block().number.is_zero() {
+    if evm.block().number().is_zero() {
         if !parent_beacon_block_root.is_zero() {
             return Err(
                 BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
@@ -98,13 +98,13 @@ pub(crate) fn transact_blockhashes_contract_call<Halt>(
     parent_block_hash: B256,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !spec.is_prague_active_at_timestamp(evm.block().timestamp.saturating_to()) {
+    if !spec.is_prague_active_at_timestamp(evm.block().timestamp().saturating_to()) {
         return Ok(None);
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
-    if evm.block().number.is_zero() {
+    if evm.block().number().is_zero() {
         return Ok(None);
     }
 

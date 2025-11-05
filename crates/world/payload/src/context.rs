@@ -39,6 +39,7 @@ use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
+use revm::context::BlockEnv;
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
@@ -152,7 +153,7 @@ where
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
             > + 'a,
         PayloadBuilderError,
@@ -242,7 +243,7 @@ where
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
         >,
         Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
@@ -266,6 +267,7 @@ where
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
+                None, // TODO: related to Jovian
             ) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
@@ -447,7 +449,7 @@ where
         + Sync
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
         + Clone,
-    EVM: Evm<DB = DB>,
+    EVM: Evm<DB = DB, BlockEnv = BlockEnv>,
     DB: revm::Database,
     <DB as revm::Database>::Error: Send + Sync + 'static,
 {

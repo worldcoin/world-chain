@@ -15,6 +15,7 @@ reth-chainspec.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
+reth-trie-common.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-util.workspace = true
 reth-evm.workspace = true
@@ -24,7 +25,6 @@ reth-rpc-eth-types.workspace = true
 reth-storage-api.workspace = true
 reth-node-builder.workspace = true
 reth-tasks.workspace = true
-reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true

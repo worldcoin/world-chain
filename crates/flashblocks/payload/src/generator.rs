@@ -17,7 +17,7 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::{access_list::FlashblockAccessList, p2p::Authorization};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
@@ -211,15 +211,22 @@ where
             .start_publishing(authorization)
             .map_err(PayloadBuilderError::other)?;
 
+        // Extract pre-built payload from the p2p handler and the latest flashblock index if available
+        let (pre_state, index, access_list) = maybe_pre_state
+            .map(|(pre_state, index, access_list)| (Some(pre_state), index, access_list))
+            .unwrap_or((None, 0, None));
+
         let mut job = FlashblocksPayloadJob {
             config,
             executor: self.executor.clone(),
             deadline,
-            committed_payload: None,
+            committed_payload: pre_state.clone(),
             flashblock_interval: self.config.interval,
             flashblock_deadline,
             recommit_interval,
-            best_payload: (PayloadState::Missing, None),
+            best_payload: pre_state
+                .map(|p| (PayloadState::Frozen(p), access_list))
+                .unwrap_or((PayloadState::Missing, None)),
             pending_block: None,
             cached_reads,
             payload_task_guard,
@@ -228,8 +235,7 @@ where
             authorization,
             p2p_handler: self.p2p_handler.clone(),
             flashblocks_state: self.flashblocks_state.clone(),
-            pre_built_payload: maybe_pre_state,
-            block_index: 0,
+            block_index: index,
         };
 
         // start the first job right away
@@ -271,7 +277,10 @@ where
     fn check_for_pre_state(
         &self,
         attributes: &<Builder as PayloadBuilder>::Attributes,
-    ) -> Result<Option<Builder::BuiltPayload>, PayloadBuilderError> {
+    ) -> Result<
+        Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
+        PayloadBuilderError,
+    > {
         // check for any pending pre state received over p2p
         let flashblocks = self.flashblocks_state.flashblocks();
 
@@ -295,11 +304,18 @@ where
             let payload = OpBuiltPayload::new(
                 attributes.payload_id(),
                 Arc::new(sealed),
-                flashblock.flashblock.metadata.fees,
+                flashblock.flashblock().metadata.fees,
                 None,
             );
-
-            return Ok(Some(payload));
+            return Ok(Some((
+                payload,
+                flashblock.flashblock().index,
+                flashblock
+                    .diff()
+                    .access_list_data
+                    .as_ref()
+                    .map(|d| d.access_list.clone()),
+            )));
         }
 
         Ok(None)

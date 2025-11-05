@@ -21,13 +21,9 @@ use reth_evm::{
 use reth_optimism_forks::OpHardforks;
 use reth_provider::BlockExecutionResult;
 use revm::{
-    context::{
-        result::{ExecResultAndState, ExecutionResult, ResultAndState},
-        TxEnv,
-    },
-    database::BundleState,
-    state::{Account, AccountInfo, EvmState},
-    DatabaseCommit,
+    DatabaseCommit, context::{
+        Block, TxEnv, result::{ExecResultAndState, ExecutionResult, ResultAndState}
+    }, database::BundleState, state::{Account, AccountInfo, EvmState}
 };
 
 use crate::{
@@ -253,6 +249,7 @@ where
             receipts: inner.receipts,
             requests: Default::default(),
             gas_used,
+            blob_gas_used: 0
         };
 
         Ok((
@@ -345,7 +342,7 @@ where
         let state_clear_flag = self
             .inner
             .spec
-            .is_spurious_dragon_active_at_block(self.inner.evm.block().number.saturating_to());
+            .is_spurious_dragon_active_at_block(self.inner.evm.block().number().saturating_to());
 
         self.inner
             .evm
@@ -445,7 +442,7 @@ where
         // the above check for empty blocks will never be hit on OP chains.
         let result = ensure_create2_deployer(
             &self.inner.spec,
-            self.inner.evm.block().timestamp.saturating_to(),
+            self.inner.evm.block().timestamp().saturating_to(),
             self.inner.evm.db_mut(),
         )
         .map_err(BlockExecutionError::other)?;

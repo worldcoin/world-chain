@@ -15,7 +15,7 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{
-    context::{result::ExecutionResult, TxEnv},
+    context::{result::ExecutionResult, BlockEnv, TxEnv},
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
 use std::{collections::HashSet, sync::Arc};
@@ -70,6 +70,7 @@ where
         Tx = OpTransaction<TxEnv>,
         Spec = OpSpecId,
         HaltReason = OpHaltReason,
+        BlockEnv = BlockEnv,
     >,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
@@ -185,6 +186,7 @@ where
         Tx = OpTransaction<TxEnv>,
         Spec = OpSpecId,
         HaltReason = OpHaltReason,
+        BlockEnv = BlockEnv,
     >,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
