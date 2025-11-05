@@ -27,9 +27,9 @@ use reth_primitives::{transaction::SignedTransaction, Recovered, RecoveredBlock,
 use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
 use revm::database::{
-        states::{bundle_state::BundleRetention, reverts::Reverts},
-        BundleAccount, BundleState,
-    };
+    states::{bundle_state::BundleRetention, reverts::Reverts},
+    BundleAccount, BundleState,
+};
 use revm_database_interface::WrapDatabaseRef;
 use std::{
     collections::{HashMap, HashSet},
@@ -98,7 +98,12 @@ where
         Self: Sized,
     {
         let db = StateProviderDatabase::new(state_provider);
-        let temporal_db_factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+        let expected_access_list_data = diff
+            .access_list_data
+            .ok_or_eyre("Access list data must be provided on the diff")?;
+
+        let temporal_db_factory =
+            TemporalDbFactory::new(&db, expected_access_list_data.access_list.clone());
 
         let merge_reverts = |db: &mut State<WrapDatabaseRef<_>>| {
             // merge changes into the db
@@ -286,16 +291,14 @@ where
         merged_bundle_state.extend(db.bundle_state.clone());
 
         // Verify the hash matches
-        if let Some(expected_data) = diff.access_list_data {
-            let expected_hash = expected_data.access_list_hash;
-            let computed_hash = access_list_data.access_list_hash;
+        let expected_hash = expected_access_list_data.access_list_hash;
+        let computed_hash = access_list_data.access_list_hash;
 
-            if expected_hash != computed_hash {
-                return Err(eyre!(format!(
-                    "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-                    expected_hash, computed_hash
-                )));
-            }
+        if expected_hash != computed_hash {
+            return Err(eyre!(format!(
+                "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
+                expected_hash, computed_hash
+            )));
         }
 
         Ok((
