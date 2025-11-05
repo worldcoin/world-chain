@@ -20,8 +20,10 @@ Verified [World ID](https://world.org/world-id) holders receive priority access 
 
 📖 [**PBH Specification**](specs/pbh/overview.md) | [**Architecture**](specs/pbh/architecture.md) | [**Transaction Lifecycle**](docs/pbh_tx_lifecycle.md)
 
-### Flashblocks
+### P2P Flashblocks
 A high-speed execution lane that gives builders low-latency settlement for experiences like gaming, social, and real-time commerce. Flashblocks provides sub-second confirmation times for time-sensitive applications.
+
+We use a home baked p2p flashblocks distribution mechanism by adding an additional `rlpx` sub protocol to the exisiting `devp2p` layer.
 
 📦 [**Flashblocks Implementation**](crates/flashblocks)
 
