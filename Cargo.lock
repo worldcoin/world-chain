@@ -3898,7 +3898,6 @@ dependencies = [
  "color-eyre",
  "ed25519-dalek",
  "op-alloy-consensus",
- "rayon",
  "reth",
  "reth-basic-payload-builder",
  "reth-optimism-node",

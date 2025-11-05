@@ -3,12 +3,9 @@ use alloy_eip7928::{
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use rayon::prelude::*;
 use reth::revm::{
-    database::EvmStateProvider,
     db::{states::StorageSlot, AccountStatus, BundleAccount, TransitionState},
     state::{AccountInfo, Bytecode},
-    DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

@@ -8,7 +8,6 @@ use reth::{
     args::PayloadBuilderArgs,
     builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
-    payload::{EthPayloadBuilderAttributes, PayloadId},
     tasks::TaskManager,
 };
 use reth_e2e_test_utils::{

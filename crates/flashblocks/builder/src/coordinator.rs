@@ -1,34 +1,25 @@
 use alloy_eips::Decodable2718;
 use alloy_op_evm::OpBlockExecutionCtx;
-use alloy_primitives::Address;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use op_alloy_consensus::OpTxEnvelope;
 use parking_lot::RwLock;
-use reth_chain_state::{ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{transaction::SignedTransaction, RecoveredBlock};
-use reth_provider::{ExecutionOutcome, HeaderProvider, StateProviderFactory};
-use revm::database::BundleAccount;
-use std::{collections::HashMap, sync::Arc};
+use reth_primitives::transaction::SignedTransaction;
+use reth_provider::{HeaderProvider, StateProviderFactory};
+use std::sync::Arc;
 use tokio::{sync::broadcast, time::Instant};
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
-use crate::{
-    assembler::FlashblocksBlockAssembler,
-    executor::{
-        bal_executor::{compute_state_root, execute_transactions},
-        factory::FlashblocksBlockExecutorFactory,
-    },
-};
+use crate::executor::bal_executor::BalBlockExecutor;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The current state of all known pre confirmations received over the P2P layer
@@ -99,7 +90,7 @@ impl FlashblocksExecutionCoordinator {
                         provider,
                         &evm_config,
                         &this,
-                        &chain_spec,
+                        chain_spec.clone(),
                         flashblock,
                         pending_block.clone(),
                     ) {
@@ -174,7 +165,7 @@ fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
     state_executor: &FlashblocksExecutionCoordinator,
-    chain_spec: &OpChainSpec,
+    chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>>,
 ) -> eyre::Result<()>
@@ -233,7 +224,7 @@ where
         })
         .collect::<eyre::Result<Vec<_>>>()?;
 
-    let senders = transactions
+    let _senders = transactions
         .clone()
         .into_iter()
         .map(|tx| tx.into_parts().1)
@@ -252,7 +243,7 @@ where
     let evm_config = evm_config.clone();
     let base = base.clone();
 
-    let latest_bundle = latest_payload.as_ref().map(|(p, _)| {
+    let _latest_bundle = latest_payload.as_ref().map(|(p, _)| {
         p.executed_block()
             .unwrap() // Safe unwrap
             .block
@@ -272,7 +263,7 @@ where
             ))?,
     );
 
-    let attributes = OpNextBlockEnvAttributes {
+    let _attributes = OpNextBlockEnvAttributes {
         timestamp: base.timestamp,
         suggested_fee_recipient: base.fee_recipient,
         prev_randao: base.prev_randao,
@@ -288,132 +279,37 @@ where
         extra_data: base.extra_data.clone(),
     };
 
-    let execution_context_clone = execution_context.clone();
+    let _execution_context_clone = execution_context.clone();
 
-    let state_provider_clone = state_provider.clone();
-    let state_provider_clone2 = state_provider.clone();
+    let _state_provider_clone = state_provider.clone();
+    let _state_provider_clone2 = state_provider.clone();
 
-    let sealed_header_clone = sealed_header.clone();
-    let transactions_clone = transactions.clone();
+    let _sealed_header_clone = sealed_header.clone();
+    let _transactions_clone = transactions.clone();
 
-    let before_execution = Instant::now();
+    let _before_execution = Instant::now();
 
-    let latest_payload_clone = latest_payload.clone();
-    let (execution_result, state_root_result) = if let Some(access_list_data) =
-        flashblock.diff().access_list_data.as_ref()
-    {
-        info!(target: "flashblocks::state_executor", "executing flashblock with access list");
-        let (execution_result, state_root_result) = rayon::join(
-            move || {
-                execute_transactions(
-                    transactions_clone.clone(),
-                    &evm_config,
-                    sealed_header.clone(),
-                    state_provider_clone.clone(),
-                    &attributes,
-                    latest_bundle,
-                    execution_context_clone.clone(),
-                    chain_spec,
-                    latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
-                    Some(&access_list_data.access_list.clone()),
-                )
-            },
-            move || {
-                let optimistic_bundle: HashMap<Address, BundleAccount> =
-                    access_list_data.access_list.clone().into();
+    let _latest_payload_clone = latest_payload.clone();
 
-                compute_state_root(state_provider_clone2.clone(), &optimistic_bundle)
-            },
-        );
+    let block_validator = BalBlockExecutor::<OpRethReceiptBuilder, OpChainSpec>::new(
+        execution_context,
+        chain_spec.clone(),
+        OpRethReceiptBuilder::default(),
+        evm_config,
+    );
 
-        (execution_result?, state_root_result?)
-    } else {
-        info!(target: "flashblocks::state_executor", "executing flashblock without access list");
-        let execution_result = execute_transactions(
-            transactions_clone.clone(),
-            &evm_config,
-            sealed_header.clone(),
-            state_provider_clone.clone(),
-            &attributes,
-            latest_bundle,
-            execution_context_clone.clone(),
+    let payload = if let Some(_access_list_data) = flashblock.diff().access_list_data.as_ref() {
+        block_validator.validate_and_execute_diff_parallel(
+            state_provider,
+            latest_payload.as_ref().map(|(p, _)| p.clone()),
+            flashblock.diff().clone(),
+            &sealed_header,
             chain_spec,
-            latest_payload_clone.as_ref().map(|(p, _)| p.clone()),
-            None,
-        )?;
-
-        let converted: HashMap<Address, BundleAccount> =
-            execution_result.clone().0.state.into_iter().collect();
-
-        let state_root_result = compute_state_root(state_provider_clone2.clone(), &converted)?;
-
-        (execution_result, state_root_result)
+            *flashblock.payload_id(),
+        )?
+    } else {
+        todo!()
     };
-
-    let elapsed = before_execution.elapsed().as_millis();
-    tracing::info!(target: "flashblocks::state_executor", "time taken to get here: {:?}, bal enabled: {}", elapsed, flashblock.diff().access_list_data.is_some());
-
-    let (bundle_state, block_execution_result, _access_list, evm_env, total_fees) =
-        execution_result;
-
-    let (state_root, trie_updates, hashed_state) = state_root_result;
-
-    assert_eq!(
-        state_root,
-        flashblock.diff().state_root,
-        "Computed state root does not match state root provided in flashblock"
-    );
-
-    let block_assembler = FlashblocksBlockAssembler::new(Arc::new(chain_spec.clone()));
-
-    let block = block_assembler.assemble_block(BlockAssemblerInput::<
-        '_,
-        '_,
-        FlashblocksBlockExecutorFactory,
-    >::new(
-        evm_env,
-        execution_context.clone(),
-        &sealed_header_clone.clone(),
-        transactions
-            .into_iter()
-            .map(|tx| tx.into_parts().0)
-            .collect(),
-        &block_execution_result,
-        &bundle_state,
-        &state_provider,
-        state_root,
-    ))?;
-
-    let block = RecoveredBlock::new_unhashed(block, senders);
-    let sealed_block = Arc::new(block.sealed_block().clone());
-
-    let recovered_block = Arc::new(block);
-
-    trace!(target: "flashblocks::state_executor", hash = %recovered_block.hash(), "setting latest payload");
-
-    let execution_outcome = ExecutionOutcome::new(
-        bundle_state.clone(),
-        vec![block_execution_result.receipts],
-        0,
-        vec![block_execution_result.requests],
-    );
-
-    let executed_block = ExecutedBlockWithTrieUpdates::new(
-        recovered_block,
-        Arc::new(execution_outcome),
-        Arc::new(hashed_state),
-        ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
-    );
-
-    let payload = OpBuiltPayload::new(
-        *flashblock.payload_id(),
-        sealed_block,
-        latest_payload
-            .as_ref()
-            .map(|p| p.0.fees() + total_fees)
-            .unwrap_or(total_fees),
-        Some(executed_block),
-    );
 
     flashblocks.push(flashblock)?;
 

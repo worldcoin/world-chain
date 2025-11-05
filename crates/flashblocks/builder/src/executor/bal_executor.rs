@@ -1,50 +1,48 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
-use alloy_op_evm::{
-    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory,
-};
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpEvmFactory};
 use alloy_primitives::{Address, FixedBytes, U256};
-use eyre::eyre::eyre;
+use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::{eyre, OptionExt};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use reth::revm::{database::StateProviderDatabase, State};
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_evm::{
     block::{BlockExecutionError, BlockExecutor},
-    execute::ExecutorTx,
-    op_revm::{OpSpecId, OpTransaction},
-    ConfigureEvm, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    execute::{BlockAssembler, BlockAssemblerInput, BlockBuilderOutcome, ExecutorTx},
+    op_revm::OpSpecId,
+    ConfigureEvm, Evm, EvmEnv, EvmFactory,
 };
-use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpBuiltPayload;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::{transaction::SignedTransaction, Recovered, SealedHeader};
-use reth_provider::{BlockExecutionResult, StateProvider};
+use reth_primitives::{transaction::SignedTransaction, Recovered, RecoveredBlock, SealedHeader};
+use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
-use revm::{
-    context::TxEnv,
-    database::{
+use revm::database::{
         states::{bundle_state::BundleRetention, reverts::Reverts},
         BundleAccount, BundleState,
-    },
-    Database, DatabaseRef,
-};
+    };
 use revm_database_interface::WrapDatabaseRef;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tracing::info;
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
-    executor::{bal_builder::BalBuilderBlockExecutor, temporal_db::TemporalDbFactory},
+    assembler::FlashblocksBlockAssembler,
+    executor::{
+        bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
+        temporal_db::TemporalDbFactory,
+    },
 };
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
@@ -53,52 +51,34 @@ use crate::{
 ///
 /// 'BlockExecutor' trait is not flexible enough for our purposes.
 /// TODO: WIP, currently unused
-pub struct BalBlockExecutor<E, R, Spec> {
-    spec: Spec,
+pub struct BalBlockExecutor<R, Spec> {
+    spec: Arc<Spec>,
     execution_context: OpBlockExecutionCtx,
     receipt_builder: R,
     config: OpEvmConfig,
-    access_list: FlashblockAccessList,
-    _marker: std::marker::PhantomData<E>,
 }
 
-pub struct ParallelTxExecutor<Evm, R, Spec>
+impl<R, Spec> BalBlockExecutor<R, Spec>
 where
-    R: OpReceiptBuilder,
-{
-    inner: OpBlockExecutor<Evm, R, Spec>,
-    flashblock_access_list: FlashblockAccessListConstruction,
-}
-
-impl<'db, DB, E, R, Spec> BalBlockExecutor<E, R, Spec>
-where
-    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId> + Send + Sync,
-    DB: Database + DatabaseRef<Error: Send + Sync + 'static> + Clone + Send + Sync + 'db,
-    OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     R: OpReceiptBuilder<Transaction = OpTxEnvelope, Receipt = OpReceipt> + Clone + Send + Sync,
     Spec: OpHardforks + Clone + Send + Sync,
 {
     /// Creates a new [`FlashblocksBlockExecutor`].
     pub fn new(
         ctx: OpBlockExecutionCtx,
-        spec: Spec,
+        spec: Arc<Spec>,
         receipt_builder: R,
         config: OpEvmConfig,
-        access_list: FlashblockAccessList,
     ) -> Self {
         Self {
             spec,
             execution_context: ctx,
             receipt_builder,
             config,
-            access_list,
-            _marker: std::marker::PhantomData,
         }
     }
     /// Verifies and executes a given [`ExecutionPayloadFlashblockDeltaV1`] on top of an option [`OpBuiltPayload`].
-    ///
-    ///
-    pub fn verify_block(
+    pub(crate) fn verify_block(
         self,
         state_provider: &dyn StateProvider,
         committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
@@ -109,7 +89,7 @@ where
             BundleState,
             BlockExecutionResult<R::Receipt>,
             EvmEnv<OpSpecId>,
-            Vec<OpTxEnvelope>,
+            Vec<Recovered<OpTransactionSigned>>,
             OpBlockExecutionCtx,
         ),
         eyre::Report,
@@ -322,178 +302,118 @@ where
             merged_bundle_state,
             merged_execution_result,
             env,
-            transactions
-                .iter()
-                .map(|(tx, _)| tx.inner().clone())
-                .collect(),
+            transactions.into_iter().map(|(tx, _)| tx).collect(),
             self.execution_context,
         ))
 
         // Compute the [`BlockExecutionOutcome`]
     }
-}
 
-#[expect(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn execute_transactions(
-    transactions: Vec<Recovered<OpTransactionSigned>>,
-    evm_config: &OpEvmConfig,
-    sealed_header: Arc<SealedHeader<Header>>,
-    state_provider: Arc<dyn StateProvider>,
-    attributes: &OpNextBlockEnvAttributes,
-    latest_bundle: Option<BundleState>,
-    execution_context: OpBlockExecutionCtx,
-    chain_spec: &OpChainSpec,
-    committed_payload: Option<OpBuiltPayload>,
-    provided_bal: Option<&FlashblockAccessList>,
-) -> Result<
-    (
-        BundleState,
-        BlockExecutionResult<OpReceipt>,
-        FlashblockAccessList,
-        EvmEnv<OpSpecId>,
-        U256,
-    ),
-    eyre::Report,
-> {
-    // Prepare EVM environment.
-    let evm_env = evm_config
-        .next_evm_env(sealed_header.clone().header(), attributes)
-        .map_err(PayloadBuilderError::other)?;
+    /// Executes a [`ExecutionPayloadFlashblockDeltaV1`] on top of an optional [`OpBuiltPayload`].
+    /// And computes the resulting [`OpBuiltPayload`].
+    ///
+    /// # Errors
+    ///     If the provided BAL passed in the `diff` does not match the computed BAL from execution.
+    pub fn validate_and_execute_diff_parallel(
+        self,
+        state_provider: Arc<impl StateProvider>,
+        committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
+        diff: ExecutionPayloadFlashblockDeltaV1,
+        parent_header: &SealedHeader<Header>,
+        chain_spec: Arc<OpChainSpec>,
+        payload_id: PayloadId,
+    ) -> Result<OpBuiltPayload, eyre::Report> {
+        let bundle: HashMap<Address, BundleAccount> = diff
+            .clone()
+            .access_list_data
+            .ok_or_eyre("Access list data must be provided on the diff")?
+            .access_list
+            .into();
 
-    let state = StateProviderDatabase::new(&state_provider);
-
-    let mut state = if let Some(ref bundle) = latest_bundle {
-        State::builder()
-            .with_database(state)
-            .with_bundle_prestate(bundle.clone())
-            .with_bundle_update()
-            .build()
-    } else {
-        State::builder()
-            .with_database(state)
-            .with_bundle_update()
-            .build()
-    };
-
-    let evm = evm_config.evm_with_env(&mut state, evm_env);
-    let base_fee = evm.block().basefee;
-
-    let mut executor = if let Some(committed) = committed_payload {
-        let receipts: Vec<OpReceipt> = committed
-            .executed_block()
-            .unwrap()
-            .execution_outcome()
-            .receipts()
-            .iter()
-            .flatten()
-            .cloned()
-            .collect();
-
-        let min_tx_index = receipts.len() as u64;
-
-        BalBuilderBlockExecutor::new(
-            evm,
-            execution_context.clone(),
-            chain_spec,
-            OpRethReceiptBuilder::default(),
-        )
-        .with_receipts(receipts)
-        .with_min_tx_index(min_tx_index)
-        .with_gas_used(
-            committed
-                .executed_block()
-                .unwrap()
-                .recovered_block()
-                .gas_used(),
-        )
-    } else {
-        BalBuilderBlockExecutor::new(
-            evm,
-            execution_context.clone(),
-            chain_spec,
-            OpRethReceiptBuilder::default(),
-        )
-    };
-
-    let mut total_fees = U256::ZERO;
-
-    if latest_bundle.is_none() {
-        executor
-            .apply_pre_execution_changes()
-            .map_err(|e| eyre!(format!("failed to apply pre-execution changes: {e}")))?;
-    }
-
-    for transaction in transactions.iter() {
-        let gas_used = executor
-            .execute_transaction(transaction)
-            .map_err(|e| eyre!(format!("failed to execute transaction: {e}")))?;
-
-        if !transaction.is_deposit() {
-            let miner_fee = transaction
-                .effective_tip_per_gas(base_fee)
-                .expect("fee is always valid; execution succeeded");
-            total_fees += U256::from(miner_fee) * U256::from(gas_used);
-        }
-    }
-
-    // Apply post execution changes
-    let (evm, result, access_list_data, _, _) = executor
-        .finish_with_access_list()
-        .map_err(|e| eyre!(format!("failed to finish execution: {e}")))?;
-
-    if provided_bal.is_some_and(|bal| alloy_rlp::encode(bal) != *access_list_data.access_list_hash)
-    {
-        info!(
-            "Provided BAL: min_tx_index: {}, max_tx_index: {}",
-            provided_bal.unwrap().min_tx_index,
-            provided_bal.unwrap().max_tx_index
+        let (r_0, r_1) = rayon::join(
+            || {
+                self.verify_block(
+                    state_provider.as_ref(),
+                    committed_payload,
+                    diff,
+                    parent_header,
+                )
+            },
+            || compute_state_root(state_provider.clone(), &bundle),
         );
-        info!(
-            "Computed BAL: min_tx_index: {}, max_tx_index: {}",
-            access_list_data.access_list.min_tx_index, access_list_data.access_list.max_tx_index
+
+        let (bundle_state, execution_result, evm_env, transactions, execution_context) = r_0?;
+        let (state_root, trie_updates, hashed_state) = r_1?;
+
+        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let assembler = FlashblocksBlockAssembler::new(chain_spec);
+
+        let block = assembler.assemble_block(BlockAssemblerInput::<
+            FlashblocksBlockExecutorFactory,
+        >::new(
+            evm_env,
+            execution_context,
+            parent_header,
+            transactions,
+            &execution_result,
+            &bundle_state,
+            &state_provider.clone(),
+            state_root,
+        ))?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        // Construct the built payload
+        let outcome = BlockBuilderOutcome::<OpPrimitives> {
+            execution_result,
+            hashed_state,
+            trie_updates,
+            block,
+        };
+
+        let sealed_block = Arc::new(outcome.block.sealed_block().clone());
+
+        let execution_outcome = ExecutionOutcome::new(
+            bundle_state,
+            vec![outcome.execution_result.receipts.clone()],
+            outcome.block.number(),
+            Vec::new(),
         );
-        return Err(eyre!(format!(
-            "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-            access_list_data.access_list_hash,
-            provided_bal.map(alloy_rlp::encode)
-        )));
+
+        // create the executed block data
+        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(outcome.block),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(outcome.hashed_state),
+            },
+            trie: ExecutedTrieUpdates::Present(Arc::new(outcome.trie_updates)),
+        };
+
+        Ok(OpBuiltPayload::new(
+            payload_id,
+            sealed_block,
+            U256::ZERO, // TODO: FIXME:
+            Some(executed),
+        ))
     }
 
-    let (db, env) = evm.finish();
-
-    // merge changes into the db
-    db.merge_transitions(BundleRetention::Reverts);
-
-    // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-    // which represent a single atomic state transition. therefore reverts should have length 1
-    // we only retain the first occurance of a revert for any given account.
-    let flattened = db
-        .bundle_state
-        .reverts
-        .iter()
-        .flatten()
-        .scan(HashSet::new(), |visited, (acc, revert)| {
-            if visited.insert(acc) {
-                Some((*acc, revert.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    db.bundle_state.reverts = Reverts::new(vec![flattened]);
-
-    Ok((
-        db.bundle_state.clone(),
-        result,
-        access_list_data.access_list,
-        env,
-        total_fees,
-    ))
+    pub fn validate_and_execute_diff_linear(
+        self,
+        _state_provider: Arc<impl StateProvider>,
+        _committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
+        _diff: ExecutionPayloadFlashblockDeltaV1,
+        _parent_header: &SealedHeader<Header>,
+        _chain_spec: Arc<OpChainSpec>,
+        _payload_id: PayloadId,
+    ) -> Result<OpBuiltPayload, eyre::Report> {
+        todo!()
+    }
 }
 
 pub fn compute_state_root(
-    state_provider: Arc<Box<dyn StateProvider>>,
+    state_provider: Arc<impl StateProvider>,
     bundle: &HashMap<Address, BundleAccount>,
 ) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), eyre::Report> {
     let bundle_state: HashMap<&Address, &BundleAccount> = bundle.iter().collect();
