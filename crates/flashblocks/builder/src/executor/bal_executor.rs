@@ -356,8 +356,6 @@ where
             transactions.into_iter().map(|(tx, _)| tx).collect(),
             self.execution_context,
         ))
-
-        // Compute the [`BlockExecutionOutcome`]
     }
 
     /// Executes a [`ExecutionPayloadFlashblockDeltaV1`] on top of an optional [`OpBuiltPayload`].

@@ -1,6 +1,55 @@
 {
   "changes": [
     {
+      "address": "0x0000f90827f1c53a10cb7a02335b175320002935",
+      "storageChanges": [
+        {
+          "slot": "0x0000000000000000000000000000000000000000000000000000000000000063",
+          "changes": [
+            {
+              "blockAccessIndex": "0x0",
+              "newValue": "0xede7e4af1aec7fbf67b359141cc57e1295f343f1ef38728804626f35e418b32a"
+            }
+          ]
+        }
+      ],
+      "storageReads": [],
+      "balanceChanges": [],
+      "nonceChanges": [
+        {
+          "blockAccessIndex": "0x0",
+          "newNonce": "0x1"
+        }
+      ],
+      "codeChanges": [
+        {
+          "blockAccessIndex": "0x0",
+          "newCode": "0x3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500"
+        }
+      ]
+    },
+    {
+      "address": "0x000f3df6d732807ef1319fb7b8bb8522d0beac02",
+      "storageChanges": [],
+      "storageReads": [
+        "0x00000000000000000000000000000000000000000000000000000000000008ff",
+        "0x00000000000000000000000000000000000000000000000000000000000028fe"
+      ],
+      "balanceChanges": [],
+      "nonceChanges": [
+        {
+          "blockAccessIndex": "0x0",
+          "newNonce": "0x1"
+        }
+      ],
+      "codeChanges": [
+        {
+          "blockAccessIndex": "0x0",
+          "newCode": "0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500"
+        }
+      ]
+    },
+    {
       "address": "0x4200000000000000000000000000000000000015",
       "storageChanges": [
         {
@@ -8,7 +57,7 @@
           "changes": [
             {
               "blockAccessIndex": "0x1",
-              "newValue": "0x0000000000000000000000000000000000000558000c5fc50000000000000001"
+              "newValue": "0x0000000000000000000000000000000000000558000c5fc50000000000000004"
             }
           ]
         }
@@ -62,7 +111,7 @@
       "nonceChanges": [
         {
           "blockAccessIndex": "0x1",
-          "newNonce": "0x24"
+          "newNonce": "0x65"
         }
       ],
       "codeChanges": [
