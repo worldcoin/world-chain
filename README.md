@@ -23,7 +23,7 @@ Verified [World ID](https://world.org/world-id) holders receive priority access 
 ### P2P Flashblocks
 A high-speed execution lane that gives builders low-latency settlement for experiences like gaming, social, and real-time commerce. Flashblocks provides sub-second confirmation times for time-sensitive applications.
 
-We use a home baked p2p flashblocks distribution mechanism by adding an additional `rlpx` sub protocol to the exisiting `devp2p` layer.
+We use a home baked p2p flashblocks distribution mechanism by adding an additional `rlpx` sub protocol to the exisiting `devp2p` layer. Read more [here!](specs/flashblocks_p2p.md)
 
 📦 [**Flashblocks Implementation**](crates/flashblocks)
 
