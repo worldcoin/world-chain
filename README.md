@@ -18,7 +18,7 @@ Verified [World ID](https://world.org/world-id) holders receive priority access 
 - [Semaphore ZK proofs](crates/world/pbh/src/payload.rs) for privacy-preserving verification
 - Reserved blockspace capacity ensures network accessibility
 
-📖 [**PBH Specification**](specs/pbh/overview.md) | [**Architecture**](specs/pbh/architecture.md) | [**Transaction Lifecycle**](docs/pbh_tx_lifecycle.md)
+📖 [**PBH Specification**](specs/pbh/overview.md) | [**Architecture**](specs/pbh/architecture.md)
 
 ### P2P Flashblocks
 A high-speed execution lane that gives builders low-latency settlement for experiences like gaming, social, and real-time commerce. Flashblocks provides sub-second confirmation times for time-sensitive applications.
