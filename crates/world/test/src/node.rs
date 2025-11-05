@@ -60,7 +60,8 @@ use world_chain_pool::{
 use flashblocks_primitives::ed25519_dalek::SigningKey;
 use rand::Rng as _;
 use reth_network_peers::PeerId;
-use reth_optimism_node::OpDAConfig;
+
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 
 use world_chain_node::{
     args::{BuilderArgs, PbhArgs, WorldChainArgs},
@@ -112,7 +113,7 @@ pub fn test_config_with_peers_and_gossip(
             flashblocks: Some(flashblocks),
             tx_peers,
         },
-        da_config: OpDAConfig::default(),
+        builder_config: OpBuilderConfig::default(),
     }
 }
 

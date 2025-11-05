@@ -35,9 +35,10 @@ use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpBlockAssembler, OpBuiltPayload, OpDAConfig, OpEngineTypes, OpEvmConfig,
-    OpPayloadBuilderAttributes, OpRethReceiptBuilder,
+    OpBlockAssembler, OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpRethReceiptBuilder,
 };
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::BestPayloadTransactions;
 use reth_primitives::{
@@ -455,7 +456,7 @@ where
 pub struct FlashblocksStateExecutor {
     inner: Arc<RwLock<FlashblocksStateExecutorInner>>,
     p2p_handle: FlashblocksHandle,
-    da_config: OpDAConfig,
+    builder_config: OpBuilderConfig,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 }
 
@@ -474,7 +475,7 @@ impl FlashblocksStateExecutor {
     /// This function spawn a task that handles updates. It should only be called once.
     pub fn new(
         p2p_handle: FlashblocksHandle,
-        da_config: OpDAConfig,
+        builder_config: OpBuilderConfig,
         pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
     ) -> Self {
         let inner = Arc::new(RwLock::new(FlashblocksStateExecutorInner {
@@ -486,7 +487,7 @@ impl FlashblocksStateExecutor {
         Self {
             inner,
             p2p_handle,
-            da_config,
+            builder_config,
             pending_block,
         }
     }
@@ -688,7 +689,7 @@ where
     let builder_ctx = payload_builder_ctx_builder.build(
         provider.clone(),
         evm_config.clone(),
-        state_executor.da_config.clone(),
+        state_executor.builder_config.clone(),
         config,
         &cancel,
         latest_payload.as_ref().map(|p| p.0.clone()),

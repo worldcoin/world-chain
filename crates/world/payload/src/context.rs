@@ -31,7 +31,7 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
-    config::OpDAConfig,
+    config::OpBuilderConfig,
 };
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
@@ -249,8 +249,8 @@ where
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
-        let block_da_limit = self.inner.da_config.max_da_block_size();
-        let tx_da_limit = self.inner.da_config.max_da_tx_size();
+        let block_da_limit = self.inner.builder_config.da_config.max_da_block_size();
+        let tx_da_limit = self.inner.builder_config.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee;
 
         let mut invalid_txs = vec![];
@@ -397,7 +397,7 @@ where
         &self,
         provider: Provider,
         evm_config: OpEvmConfig,
-        da_config: OpDAConfig,
+        builder_config: OpBuilderConfig,
         config: PayloadConfig<
             OpPayloadBuilderAttributes<
                 <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
@@ -412,7 +412,7 @@ where
     {
         let inner = OpPayloadBuilderCtx {
             evm_config,
-            da_config,
+            builder_config,
             chain_spec: provider.chain_spec(),
             config,
             cancel: cancel.clone(),
