@@ -1,10 +1,12 @@
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpEvmFactory};
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{eyre, OptionExt};
-use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
+use flashblocks_primitives::{
+    access_list::FlashblockAccessListData, primitives::ExecutionPayloadFlashblockDeltaV1,
+};
 use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use reth::revm::{database::StateProviderDatabase, State};
@@ -13,7 +15,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor},
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilderOutcome, ExecutorTx},
     op_revm::OpSpecId,
-    ConfigureEvm, Evm, EvmEnv, EvmFactory,
+    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpEvmConfig;
@@ -24,11 +26,12 @@ use reth_payload_primitives::BuiltPayload;
 use reth_primitives::{transaction::SignedTransaction, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
-use revm::database::{
-    states::{bundle_state::BundleRetention, reverts::Reverts},
-    BundleAccount, BundleState, TransitionState,
+use revm::{
+    database::{
+        states::{bundle_state::BundleRetention, reverts::Reverts},
+        BundleAccount, BundleState, TransitionState,
+    },
 };
-use revm_database_interface::WrapDatabaseRef;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -75,6 +78,7 @@ where
             config,
         }
     }
+
     /// Verifies and executes a given [`ExecutionPayloadFlashblockDeltaV1`] on top of an option [`OpBuiltPayload`].
     pub(crate) fn verify_block(
         self,
@@ -104,67 +108,95 @@ where
         let temporal_db_factory =
             TemporalDbFactory::new(&db, expected_access_list_data.access_list.clone());
 
-        let merge_reverts = |db: &mut State<WrapDatabaseRef<_>>| {
-            // merge changes into the db
-            db.merge_transitions(BundleRetention::Reverts);
+        // Decode and recover transactions
+        let transactions = Self::decode_transactions(
+            &diff.transactions,
+            committed_payload
+                .as_ref()
+                .map_or(0, |p| p.block().transaction_count() as BlockAccessIndex + 1),
+        )?;
 
-            // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-            // which represent a single atomic state transition. therefore reverts should have length 1
-            // we only retain the first occurance of a revert for any given account.
-            let flattened = db
-                .bundle_state
-                .reverts
-                .iter()
-                .flatten()
-                .scan(HashSet::new(), |visited, (acc, revert)| {
-                    if visited.insert(acc) {
-                        Some((*acc, revert.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        // Extract pre-loaded state from committed payload
+        let (pre_loaded_bundle, pre_loaded_receipts) =
+            Self::extract_committed_state(&committed_payload);
 
-            db.bundle_state.reverts = Reverts::new(vec![flattened]);
-        };
+        // Execute transactions in parallel
+        let execution_data = self.execute_transactions_parallel(
+            &transactions,
+            &temporal_db_factory,
+            &pre_loaded_bundle,
+            &pre_loaded_receipts,
+            parent_header,
+        )?;
 
-        // Accumulate the transactions to execute
-        let transactions = diff
-            .transactions
-            .clone()
-            .into_iter()
+        // Merge execution results
+        let (merged_access_list, merged_transitions, merged_execution_result) =
+            Self::merge_execution_data(execution_data);
+
+        let execution_context = self.execution_context.clone();
+
+        // Finalize execution with merged results
+        let (bundle_state, env, execution_result, access_list_data) = self.finalize_execution(
+            pre_loaded_bundle,
+            pre_loaded_receipts,
+            merged_access_list,
+            merged_transitions,
+            merged_execution_result,
+            parent_header,
+            db.clone(),
+        )?;
+
+        // Verify access list hash
+        Self::verify_access_list_hash(
+            &expected_access_list_data,
+            &access_list_data,
+            parent_header.number(),
+        )?;
+
+        Ok((
+            bundle_state,
+            execution_result,
+            env,
+            transactions.into_iter().map(|(tx, _)| tx).collect(),
+            execution_context,
+        ))
+    }
+
+    /// Decodes transactions from raw bytes and recovers signer addresses.
+    fn decode_transactions(
+        encoded_transactions: &[Bytes],
+        start_index: BlockAccessIndex,
+    ) -> Result<Vec<(Recovered<OpTransactionSigned>, BlockAccessIndex)>, eyre::Report> {
+        encoded_transactions
+            .iter()
             .enumerate()
             .map(|(i, tx)| {
                 let tx_envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
-                    .map_err(|e| eyre!(format!("failed to decode transaction: {e}")))?;
+                    .map_err(|e| eyre!("failed to decode transaction: {e}"))?;
 
                 let recovered = tx_envelope.try_clone_into_recovered().map_err(|e| {
-                    eyre!(format!(
-                        "failed to recover transaction from signed envelope: {e}"
-                    ))
+                    eyre!("failed to recover transaction from signed envelope: {e}")
                 })?;
 
-                Ok::<(Recovered<OpTransactionSigned>, BlockAccessIndex), eyre::Report>((
-                    recovered,
-                    i as BlockAccessIndex,
-                ))
+                Ok((recovered, start_index + i as BlockAccessIndex))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect()
+    }
 
-        let pre_loaded_bundle = committed_payload.as_ref().map(|committed| {
-            committed
-                .executed_block()
-                .unwrap()
-                .execution_output
-                .bundle
-                .clone()
-        });
+    /// Extracts pre-loaded bundle and receipts from committed payload.
+    fn extract_committed_state(
+        committed_payload: &Option<OpBuiltPayload>,
+    ) -> (Option<BundleState>, Option<Vec<OpReceipt>>) {
+        let bundle = committed_payload
+            .as_ref()
+            .and_then(|p| p.executed_block())
+            .map(|block| block.execution_output.bundle.clone());
 
-        let pre_loaded_receipts: Option<Vec<OpReceipt>> =
-            committed_payload.as_ref().map(|committed| {
-                committed
-                    .executed_block()
-                    .unwrap()
+        let receipts = committed_payload
+            .as_ref()
+            .and_then(|p| p.executed_block())
+            .map(|block| {
+                block
                     .execution_outcome()
                     .receipts()
                     .iter()
@@ -173,23 +205,42 @@ where
                     .collect()
             });
 
-        let mut execution_data = transactions
-            .clone()
-            .into_par_iter()
+        (bundle, receipts)
+    }
+
+    /// Executes transactions in parallel and returns execution data.
+    fn execute_transactions_parallel(
+        &self,
+        transactions: &[(Recovered<OpTransactionSigned>, BlockAccessIndex)],
+        temporal_db_factory: &TemporalDbFactory<StateProviderDatabase<&dyn StateProvider>>,
+        pre_loaded_bundle: &Option<BundleState>,
+        pre_loaded_receipts: &Option<Vec<OpReceipt>>,
+        parent_header: &SealedHeader<Header>,
+    ) -> Result<
+        Vec<(
+            BlockAccessIndex,
+            FlashblockAccessListConstruction,
+            Option<TransitionState>,
+            BlockExecutionResult<R::Receipt>,
+        )>,
+        eyre::Report,
+    > {
+        let evm_env = self
+            .config
+            .evm_env(parent_header.header())
+            .map_err(|e| eyre!("failed to create EVM environment: {e}"))?;
+
+        let mut execution_data: Vec<_> = transactions
+            .par_iter()
             .map(|(tx, index)| {
-                let temporal_db = temporal_db_factory.db(index as u64);
+                let temporal_db = temporal_db_factory.db(*index as u64);
                 let mut state = State::builder()
                     .with_database_ref(temporal_db)
-                    .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default().clone())
+                    .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default())
                     .with_bundle_update()
                     .build();
 
-                let evm = OpEvmFactory::default().create_evm(
-                    &mut state,
-                    self.config
-                        .evm_env(&parent_header.header().clone())
-                        .unwrap(),
-                );
+                let evm = OpEvmFactory::default().create_evm(&mut state, evm_env.clone());
 
                 let mut executor = BalBuilderBlockExecutor::new(
                     evm,
@@ -198,75 +249,103 @@ where
                     self.receipt_builder.clone(),
                 );
 
-                if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
+                if let Some(receipts) = pre_loaded_receipts {
                     executor = executor
-                        .with_block_access_index(index as BlockAccessIndex)
-                        .with_min_tx_index(pre_loaded_receipts.len() as u64);
+                        .with_block_access_index(*index)
+                        .with_min_tx_index(receipts.len() as u64);
                 }
 
-                let _ = executor.execute_transaction(tx.as_executable())?;
+                executor.execute_transaction(tx.as_executable())?;
 
                 let access_list = executor.take_access_list();
                 let (evm, result) = executor.finish()?;
                 let (db, _) = evm.finish();
 
-                Ok::<
-                    (
-                        BlockAccessIndex,
-                        FlashblockAccessListConstruction,
-                        Option<TransitionState>,
-                        BlockExecutionResult<<R as OpReceiptBuilder>::Receipt>,
-                    ),
-                    BlockExecutionError,
-                >((index, access_list, db.transition_state.take(), result))
+                Ok::<_, BlockExecutionError>((
+                    *index,
+                    access_list,
+                    db.transition_state.take(),
+                    result,
+                ))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
 
         // Sort by ascending index
-        execution_data.sort_unstable_by_key(|e| e.0);
+        execution_data.sort_unstable_by_key(|(index, ..)| *index);
 
-        // Merge access lists together
-        let (merged_access_list, merged_transitions, merged_execution_result) =
-            execution_data.into_iter().fold(
-                (
-                    FlashblockAccessListConstruction::default(),
-                    TransitionState::default(),
-                    BlockExecutionResult::<R::Receipt> {
-                        receipts: vec![],
-                        gas_used: 0,
-                        requests: Default::default(),
-                        blob_gas_used: 0,
-                    },
-                ),
-                |(mut access_list_acc, mut transition_state_acc, mut results_acc),
-                 (_, access_list, transition_state, result)| {
-                    access_list_acc.merge(access_list);
-                    if let Some(transition_state) = transition_state {
-                        transition_state_acc
-                            .add_transitions(transition_state.transitions.into_iter().collect());
-                    }
-                    results_acc.gas_used += result.gas_used;
-                    results_acc.receipts.extend_from_slice(&result.receipts);
+        Ok(execution_data)
+    }
 
-                    (access_list_acc, transition_state_acc, results_acc)
+    /// Merges execution data from parallel execution.
+    fn merge_execution_data(
+        execution_data: Vec<(
+            BlockAccessIndex,
+            FlashblockAccessListConstruction,
+            Option<TransitionState>,
+            BlockExecutionResult<R::Receipt>,
+        )>,
+    ) -> (
+        FlashblockAccessListConstruction,
+        TransitionState,
+        BlockExecutionResult<R::Receipt>,
+    ) {
+        execution_data.into_iter().fold(
+            (
+                FlashblockAccessListConstruction::default(),
+                TransitionState::default(),
+                BlockExecutionResult {
+                    receipts: vec![],
+                    gas_used: 0,
+                    requests: Default::default(),
+                    blob_gas_used: 0,
                 },
-            );
+            ),
+            |(mut access_list_acc, mut transition_state_acc, mut results_acc),
+             (_, access_list, transition_state, result)| {
+                access_list_acc.merge(access_list);
+                if let Some(state) = transition_state {
+                    transition_state_acc.add_transitions(state.transitions.into_iter().collect());
+                }
+                results_acc.gas_used += result.gas_used;
+                results_acc.receipts.extend(result.receipts);
 
-        let db = temporal_db_factory.db(0);
+                (access_list_acc, transition_state_acc, results_acc)
+            },
+        )
+    }
+
+    /// Finalizes execution with merged results and returns final state.
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_execution<'a>(
+        self,
+        pre_loaded_bundle: Option<BundleState>,
+        pre_loaded_receipts: Option<Vec<OpReceipt>>,
+        merged_access_list: FlashblockAccessListConstruction,
+        merged_transitions: TransitionState,
+        merged_execution_result: BlockExecutionResult<R::Receipt>,
+        parent_header: &SealedHeader<Header>,
+        db: StateProviderDatabase<&'a dyn StateProvider>,
+    ) -> Result<
+        (
+            BundleState,
+            EvmEnv<OpSpecId>,
+            BlockExecutionResult<R::Receipt>,
+            FlashblockAccessListData,
+        ),
+        eyre::Report,
+    > {
+        let evm_env = self
+            .config
+            .evm_env(parent_header.header())
+            .map_err(|e| eyre!("failed to create EVM environment: {e}"))?;
 
         let mut state = State::builder()
-            .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default().clone())
-            .with_database_ref(db)
+            .with_database(db)
             .with_bundle_update()
             .build();
 
         let mut executor = BalBuilderBlockExecutor::new(
-            OpEvmFactory::default().create_evm(
-                &mut state,
-                self.config
-                    .evm_env(&parent_header.header().clone())
-                    .unwrap(),
-            ),
+            OpEvmFactory::default().create_evm(&mut state, evm_env),
             self.execution_context.clone(),
             self.spec.clone(),
             self.receipt_builder.clone(),
@@ -274,59 +353,87 @@ where
         .with_access_list(merged_access_list)
         .with_block_access_index(0);
 
-        let _ = executor.apply_pre_execution_changes()?;
-
-        if let Some(mut pre_loaded_receipts) = pre_loaded_receipts {
-            let length = pre_loaded_receipts.len();
-            pre_loaded_receipts.extend_from_slice(&merged_execution_result.receipts);
-            executor = executor
-                .with_receipts(pre_loaded_receipts.clone())
-                .with_min_tx_index(length as u64);
+        // if this is the first execution, apply pre-execution changes
+        if pre_loaded_receipts.is_none() {
+            executor.apply_pre_execution_changes()?;
         }
 
-        executor = executor.with_block_access_index(
-            transactions.len() as BlockAccessIndex
-                + merged_execution_result.receipts.len() as BlockAccessIndex
-                + 1,
-        );
+        if let Some(mut receipts) = pre_loaded_receipts {
+            // first tx index after pre-loaded receipts
+            let receipts_len = receipts.len();
+            // append executed receipts to pre-loaded receipts
+            receipts.extend(merged_execution_result.clone().receipts);
+            executor = executor
+                .with_receipts(receipts)
+                .with_min_tx_index(receipts_len as u64);
+        }
 
-        if let Some(ref mut transitions) = executor.evm_mut().db_mut().transition_state {
+        // total ordering block index of post_execution_changes
+        let next_index = merged_execution_result.receipts.len() as BlockAccessIndex + 1;
+
+        executor = executor.with_block_access_index(next_index);
+
+        if let Some(transitions) = executor.evm_mut().db_mut().transition_state.as_mut() {
+            // merge ordered transitions from transaction execution on top of either
+            // pre-loaded transitions or pre-execution transitions
             transitions.add_transitions(merged_transitions.transitions.into_iter().collect());
         }
 
         let (evm, execution_result, access_list_data, _, _) = executor.finish_with_access_list()?;
+        let (mut db, env) = evm.finish();
 
-        let (db, env) = evm.finish();
-        merge_reverts(db);
+        Self::merge_reverts(&mut db);
 
-        // Verify the hash matches
-        let expected_hash = expected_access_list_data.access_list_hash;
-        let computed_hash = access_list_data.access_list_hash;
+        Ok((db.take_bundle(), env, execution_result, access_list_data))
+    }
 
-        if expected_hash != computed_hash {
-            std::fs::write(
-                format!("expected_{}", parent_header.number()),
-                serde_json::to_string_pretty(&expected_access_list_data.access_list).unwrap(),
-            )?;
+    /// Merges and flattens reverts in the database state.
+    fn merge_reverts(db: &mut State<impl Database>) {
+        // Merge changes into the db
+        db.merge_transitions(BundleRetention::Reverts);
 
-            std::fs::write(
-                format!("computed_{}", parent_header.number()),
-                serde_json::to_string_pretty(&access_list_data.access_list).unwrap(),
-            )?;
+        // Flatten reverts into a single vector. The bundle is reused across multiple payloads
+        // which represent a single atomic state transition, so reverts should have length 1.
+        // We only retain the first occurrence of a revert for any given account.
+        let flattened = db
+            .bundle_state
+            .reverts
+            .iter()
+            .flatten()
+            .scan(HashSet::new(), |visited, (acc, revert)| {
+                visited.insert(acc).then(|| (*acc, revert.clone()))
+            })
+            .collect();
 
-            return Err(eyre!(format!(
-                "Access List Hash does not match computed hash - expected {:#?} got {:#?}",
-                expected_hash, computed_hash
-            )));
+        db.bundle_state.reverts = Reverts::new(vec![flattened]);
+    }
+
+    /// Verifies that the computed access list hash matches the expected hash.
+    fn verify_access_list_hash(
+        expected: &FlashblockAccessListData,
+        computed: &FlashblockAccessListData,
+        block_number: u64,
+    ) -> Result<(), eyre::Report> {
+        if expected.access_list_hash != computed.access_list_hash {
+            use std::io::Write;
+            let _ =
+                std::fs::File::create(format!("expected_{block_number}.json")).and_then(|mut f| {
+                    f.write_all(serde_json::to_string_pretty(&expected.access_list)?.as_bytes())
+                });
+
+            let _ =
+                std::fs::File::create(format!("computed_{block_number}.json")).and_then(|mut f| {
+                    f.write_all(serde_json::to_string_pretty(&computed.access_list)?.as_bytes())
+                });
+
+            return Err(eyre!(
+                "Access list hash mismatch - expected {:#?}, got {:#?}",
+                expected.access_list_hash,
+                computed.access_list_hash
+            ));
         }
 
-        Ok((
-            db.take_bundle(),
-            execution_result,
-            env,
-            transactions.into_iter().map(|(tx, _)| tx).collect(),
-            self.execution_context,
-        ))
+        Ok(())
     }
 
     /// Executes a [`ExecutionPayloadFlashblockDeltaV1`] on top of an optional [`OpBuiltPayload`].

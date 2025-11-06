@@ -1,6 +1,6 @@
 use alloy_evm::revm::database::State;
 use alloy_op_evm::OpBlockExecutionCtx;
-use eyre::eyre::{eyre, OptionExt as _};
+use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
@@ -214,12 +214,14 @@ where
 
     let index = flashblock.flashblock().index;
 
-    let sealed_header = provider
-        .sealed_header_by_hash(base.parent_hash)?
-        .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
+    let sealed_header = loop {
+        match provider.sealed_header_by_hash(base.parent_hash) {
+            Ok(Some(header)) => break header,
+            _ => {}
+        }
+    };
 
-    let state_provider: Arc<dyn StateProvider> =
-        provider.state_by_block_hash(sealed_header.hash())?.into();
+    let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
 
     let sealed_header = Arc::new(
         provider
