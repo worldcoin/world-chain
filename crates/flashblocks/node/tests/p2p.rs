@@ -167,6 +167,7 @@ async fn setup_node_extended_cfg(
             spoof_authorizer: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: true,
         },
         builder_config: Default::default(),
     }

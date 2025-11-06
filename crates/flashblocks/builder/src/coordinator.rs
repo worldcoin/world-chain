@@ -1,10 +1,13 @@
+use alloy_evm::revm::database::State;
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::OptionExt as _;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use parking_lot::RwLock;
+use reth::revm::database::StateProviderDatabase;
 use reth_chain_state::ExecutedBlock;
+use reth_evm::{ConfigureEvm, EvmFactory};
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -12,7 +15,7 @@ use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
 
-use reth_provider::{HeaderProvider, StateProviderFactory};
+use reth_provider::{HeaderProvider, StateProvider, StateProviderFactory};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, trace};
@@ -160,7 +163,7 @@ impl FlashblocksExecutionCoordinator {
 fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
-    state_executor: &FlashblocksExecutionCoordinator,
+    coordinator: &FlashblocksExecutionCoordinator,
     chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
@@ -182,7 +185,7 @@ where
         ref mut flashblocks,
         ref mut latest_payload,
         ref mut payload_events,
-    } = *state_executor.inner.write();
+    } = *coordinator.inner.write();
 
     let flashblock = Flashblock { flashblock };
 
@@ -214,7 +217,8 @@ where
         .sealed_header_by_hash(base.parent_hash)?
         .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
 
-    let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
+    let state_provider: Arc<dyn StateProvider> =
+        provider.state_by_block_hash(sealed_header.hash())?.into();
 
     let sealed_header = Arc::new(
         provider
@@ -225,20 +229,55 @@ where
             ))?,
     );
 
+    // let attributes = OpPayloadBuilderAttributes {
+    //     payload_attributes: eth_attrs,
+    //     no_tx_pool: true,
+    //     transactions: transactions.clone(),
+    //     gas_limit: None,
+    //     eip_1559_params: Some(eip1559[1..=8].try_into()?),
+    //     min_base_fee: None,
+    // };
+    //
+    // let sealed_header = provider
+    //     .sealed_header_by_hash(base.parent_hash)?
+    //     .ok_or_eyre(format!("missing sealed header: {}", base.parent_hash))?;
+    //
+    // let state_provider = provider.state_by_block_hash(base.parent_hash)?;
+    //
+    // let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+    // let builder_ctx = payload_builder_ctx_builder.build(
+    //     provider.clone(),
+    //     evm_config.clone(),
+    //     state_executor.builder_config.clone(),
+    //     config,
+    //     &cancel,
+    //     latest_payload.as_ref().map(|p| p.0.clone()),
+    // );
+    //
+    // let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+    // let db = StateProviderDatabase::new(&state_provider);
+    //
+    // let outcome = FlashblockBuilder::new(best).build(
+    //     pool.clone(),
+    //     db,
+    //     &state_provider,
+    //     &builder_ctx,
+    //     latest_payload.as_ref().map(|p| p.0.clone()),
+    // )?;
+
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
 
-    let block_validator = BalBlockExecutor::<OpRethReceiptBuilder, OpChainSpec>::new(
-        execution_context,
-        chain_spec.clone(),
-        OpRethReceiptBuilder::default(),
-        evm_config.clone(),
-    );
-
-    let payload = if let Some(_access_list_data) = flashblock.diff().access_list_data.as_ref() {
+    let payload = if flashblock.diff().access_list_data.is_some() {
+        let block_validator = BalBlockExecutor::<OpRethReceiptBuilder, OpChainSpec>::new(
+            chain_spec.clone(),
+            OpRethReceiptBuilder::default(),
+            execution_context,
+            evm_config.clone(),
+        );
         block_validator.validate_and_execute_diff_parallel(
             state_provider,
             latest_payload.as_ref().map(|(p, _)| p.clone()),
@@ -248,7 +287,15 @@ where
             *flashblock.payload_id(),
         )?
     } else {
-        todo!()
+        let db = StateProviderDatabase::new(state_provider);
+        let mut state = State::builder().with_database(db).build();
+        let env = evm_config.evm_env(sealed_header.header())?;
+        let evm = evm_config
+            .executor_factory
+            .evm_factory()
+            .create_evm(&mut state, env);
+        let executor = evm_config.create_executor(evm, execution_context);
+        executor.execute
     };
 
     flashblocks.push(flashblock)?;
@@ -258,7 +305,7 @@ where
 
     pending_block.send_replace(payload.executed_block());
 
-    state_executor.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
+    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
 
     Ok(())
 }

@@ -51,8 +51,8 @@ use crate::{
 /// TODO: WIP, currently unused
 pub struct BalBlockExecutor<R, Spec> {
     spec: Arc<Spec>,
-    execution_context: OpBlockExecutionCtx,
     receipt_builder: R,
+    execution_context: OpBlockExecutionCtx,
     config: OpEvmConfig,
 }
 
@@ -63,14 +63,14 @@ where
 {
     /// Creates a new [`FlashblocksBlockExecutor`].
     pub fn new(
-        ctx: OpBlockExecutionCtx,
         spec: Arc<Spec>,
         receipt_builder: R,
+        execution_context: OpBlockExecutionCtx,
         config: OpEvmConfig,
     ) -> Self {
         Self {
             spec,
-            execution_context: ctx,
+            execution_context,
             receipt_builder,
             config,
         }
@@ -364,7 +364,7 @@ where
     ///     If the provided BAL passed in the `diff` does not match the computed BAL from execution.
     pub fn validate_and_execute_diff_parallel(
         self,
-        state_provider: Arc<impl StateProvider>,
+        state_provider: Arc<dyn StateProvider>,
         committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent_header: &SealedHeader<Header>,
@@ -459,7 +459,7 @@ where
 }
 
 pub fn compute_state_root(
-    state_provider: Arc<impl StateProvider>,
+    state_provider: Arc<dyn StateProvider>,
     bundle: &HashMap<Address, BundleAccount>,
 ) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), eyre::Report> {
     let bundle_state: HashMap<&Address, &BundleAccount> = bundle.iter().collect();
