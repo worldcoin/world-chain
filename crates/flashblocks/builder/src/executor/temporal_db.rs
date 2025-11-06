@@ -58,7 +58,7 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                 for slot in storage_change.changes {
                     let storage_entry = cache.account_storage.entry(change.address).or_default();
                     storage_entry.insert(
-                        slot.block_access_index,
+                        slot.block_access_index + 1,
                         storage_change.slot.into(),
                         slot.new_value.into(),
                     );

@@ -26,7 +26,7 @@ use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
 use revm::database::{
     states::{bundle_state::BundleRetention, reverts::Reverts},
-    BundleAccount, BundleState,
+    BundleAccount, BundleState, TransitionState,
 };
 use revm_database_interface::WrapDatabaseRef;
 use std::{
@@ -173,60 +173,16 @@ where
                     .collect()
             });
 
-        let temporal_db = temporal_db_factory.db(0);
-
-        let mut state = if let Some(ref bundle) = pre_loaded_bundle {
-            State::builder()
-                .with_database_ref(temporal_db)
-                .with_bundle_update()
-                .with_bundle_prestate(bundle.clone())
-                .build()
-        } else {
-            State::builder()
-                .with_database_ref(temporal_db)
-                .with_bundle_update()
-                .build()
-        };
-
-        let evm = OpEvmFactory::default().create_evm(
-            &mut state,
-            self.config
-                .evm_env(&parent_header.header().clone())
-                .unwrap(),
-        );
-
-        let mut executor = BalBuilderBlockExecutor::new(
-            evm,
-            self.execution_context.clone(),
-            self.spec.clone(),
-            self.receipt_builder.clone(),
-        );
-
-        if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
-            executor = executor
-                .with_receipts(pre_loaded_receipts.clone())
-                .with_min_tx_index(pre_loaded_receipts.len() as u64);
-        }
-
-        executor.apply_pre_execution_changes()?;
-
         let mut execution_data = transactions
             .clone()
             .into_par_iter()
             .map(|(tx, index)| {
                 let temporal_db = temporal_db_factory.db(index as u64);
-                let mut state = if let Some(pre_loaded_bundle) = &pre_loaded_bundle {
-                    State::builder()
-                        .with_database_ref(temporal_db)
-                        .with_bundle_update()
-                        .with_bundle_prestate(pre_loaded_bundle.clone())
-                        .build()
-                } else {
-                    State::builder()
-                        .with_database_ref(temporal_db)
-                        .with_bundle_update()
-                        .build()
-                };
+                let mut state = State::builder()
+                    .with_database_ref(temporal_db)
+                    .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default().clone())
+                    .with_bundle_update()
+                    .build();
 
                 let evm = OpEvmFactory::default().create_evm(
                     &mut state,
@@ -253,28 +209,28 @@ where
                 let access_list = executor.take_access_list();
                 let (evm, result) = executor.finish()?;
                 let (db, _) = evm.finish();
-                merge_reverts(db);
 
                 Ok::<
                     (
                         BlockAccessIndex,
                         FlashblockAccessListConstruction,
-                        BundleState,
+                        Option<TransitionState>,
                         BlockExecutionResult<<R as OpReceiptBuilder>::Receipt>,
                     ),
                     BlockExecutionError,
-                >((index, access_list, db.bundle_state.clone(), result))
+                >((index, access_list, db.transition_state.take(), result))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Sort by ascending index
         execution_data.sort_unstable_by_key(|e| e.0);
 
         // Merge access lists together
-        let (merged_access_list, merged_bundle_state, mut merged_execution_result) =
+        let (merged_access_list, merged_transitions, merged_execution_result) =
             execution_data.into_iter().fold(
                 (
                     FlashblockAccessListConstruction::default(),
-                    BundleState::default(),
+                    TransitionState::default(),
                     BlockExecutionResult::<R::Receipt> {
                         receipts: vec![],
                         gas_used: 0,
@@ -282,47 +238,63 @@ where
                         blob_gas_used: 0,
                     },
                 ),
-                |(mut access_list_acc, mut bundle_acc, mut results_acc),
-                 (_, access_list, bundle_state, result)| {
+                |(mut access_list_acc, mut transition_state_acc, mut results_acc),
+                 (_, access_list, transition_state, result)| {
                     access_list_acc.merge(access_list);
-                    bundle_acc.extend(bundle_state);
+                    if let Some(transition_state) = transition_state {
+                        transition_state_acc
+                            .add_transitions(transition_state.transitions.into_iter().collect());
+                    }
                     results_acc.gas_used += result.gas_used;
                     results_acc.receipts.extend_from_slice(&result.receipts);
 
-                    (access_list_acc, bundle_acc, results_acc)
+                    (access_list_acc, transition_state_acc, results_acc)
                 },
             );
 
-        let mut curr_access_list = executor.take_access_list();
-        curr_access_list.merge(merged_access_list.clone());
+        let db = temporal_db_factory.db(0);
 
-        let pre_execution_bundle = executor.evm_mut().db_mut();
+        let mut state = State::builder()
+            .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default().clone())
+            .with_database_ref(db)
+            .with_bundle_update()
+            .build();
 
-        merge_reverts(pre_execution_bundle);
+        let mut executor = BalBuilderBlockExecutor::new(
+            OpEvmFactory::default().create_evm(
+                &mut state,
+                self.config
+                    .evm_env(&parent_header.header().clone())
+                    .unwrap(),
+            ),
+            self.execution_context.clone(),
+            self.spec.clone(),
+            self.receipt_builder.clone(),
+        )
+        .with_access_list(merged_access_list)
+        .with_block_access_index(0);
 
-        // Pre-pend the merged bundle with the bundle created from the pre-execution changes
-        pre_execution_bundle
-            .bundle_state
-            .extend(merged_bundle_state.clone());
+        let _ = executor.apply_pre_execution_changes()?;
 
-        let mut executor = executor
-            .with_access_list(curr_access_list)
-            .with_block_access_index(transactions.len() as BlockAccessIndex + 1);
-
-        let temporal_db = temporal_db_factory.db(transactions.len() as u64 + 1);
-        executor.evm_mut().db_mut().database.0 = temporal_db;
-
-        if let Some(pre_loaded_receipts) = &pre_loaded_receipts {
+        if let Some(mut pre_loaded_receipts) = pre_loaded_receipts {
+            let length = pre_loaded_receipts.len();
+            pre_loaded_receipts.extend_from_slice(&merged_execution_result.receipts);
             executor = executor
-                .with_receipts(merged_execution_result.receipts.to_vec())
-                .with_min_tx_index(pre_loaded_receipts.len() as u64);
+                .with_receipts(pre_loaded_receipts.clone())
+                .with_min_tx_index(length as u64);
+        }
+
+        executor = executor.with_block_access_index(
+            transactions.len() as BlockAccessIndex
+                + merged_execution_result.receipts.len() as BlockAccessIndex
+                + 1,
+        );
+
+        if let Some(ref mut transitions) = executor.evm_mut().db_mut().transition_state {
+            transitions.add_transitions(merged_transitions.transitions.into_iter().collect());
         }
 
         let (evm, execution_result, access_list_data, _, _) = executor.finish_with_access_list()?;
-
-        merged_execution_result
-            .receipts
-            .extend_from_slice(&execution_result.receipts);
 
         let (db, env) = evm.finish();
         merge_reverts(db);
@@ -350,7 +322,7 @@ where
 
         Ok((
             db.take_bundle(),
-            merged_execution_result,
+            execution_result,
             env,
             transactions.into_iter().map(|(tx, _)| tx).collect(),
             self.execution_context,
