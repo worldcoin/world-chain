@@ -1,6 +1,6 @@
 use alloy_evm::revm::database::State;
 use alloy_op_evm::OpBlockExecutionCtx;
-use eyre::eyre::OptionExt as _;
+use eyre::eyre::{OptionExt as _, eyre};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
