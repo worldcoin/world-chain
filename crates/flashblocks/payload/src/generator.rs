@@ -17,7 +17,7 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::{access_list::FlashblockAccessList, p2p::Authorization};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
@@ -27,7 +27,7 @@ use tracing::debug;
 
 use crate::{job::FlashblocksPayloadJob, metrics::PayloadBuilderMetrics};
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_primitives::flashblocks::Flashblock;
 
@@ -50,7 +50,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: FlashblocksStateExecutor,
+    flashblocks_state: FlashblocksExecutionCoordinator,
     /// Metrics for tracking job generator operations and errors
     metrics: PayloadBuilderMetrics,
 }
@@ -66,7 +66,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {
@@ -212,9 +212,9 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         // Extract pre-built payload from the p2p handler and the latest flashblock index if available
-        let (pre_state, index) = maybe_pre_state
-            .map(|(pre_state, index)| (Some(pre_state), index))
-            .unwrap_or((None, 0));
+        let (pre_state, index, access_list) = maybe_pre_state
+            .map(|(pre_state, index, access_list)| (Some(pre_state), index, access_list))
+            .unwrap_or((None, 0, None));
 
         let mut job = FlashblocksPayloadJob {
             config,
@@ -225,8 +225,8 @@ where
             flashblock_deadline,
             recommit_interval,
             best_payload: pre_state
-                .map(PayloadState::Frozen)
-                .unwrap_or(PayloadState::Missing),
+                .map(|p| (PayloadState::Frozen(p), access_list))
+                .unwrap_or((PayloadState::Missing, None)),
             pending_block: None,
             cached_reads,
             payload_task_guard,
@@ -277,34 +277,45 @@ where
     fn check_for_pre_state(
         &self,
         attributes: &<Builder as PayloadBuilder>::Attributes,
-    ) -> Result<Option<(Builder::BuiltPayload, u64)>, PayloadBuilderError> {
+    ) -> Result<
+        Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
+        PayloadBuilderError,
+    > {
         // check for any pending pre state received over p2p
         let flashblocks = self.flashblocks_state.flashblocks();
 
-        let block = Flashblock::reduce(flashblocks);
-        if let Some(flashblock) = block {
-            if *flashblock.payload_id() == attributes.payload_id().0 {
-                // If we have a pre-confirmed state, we can use it to build the payload
-                debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
+        let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
+            PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
+        })?;
 
-                let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                    flashblock.clone().try_into().map_err(|_| {
-                        PayloadBuilderError::Other(
-                            eyre!("Failed to convert flashblock to recovered block").into(),
-                        )
-                    })?;
+        if *flashblock.payload_id() == attributes.payload_id() {
+            // If we have a pre-confirmed state, we can use it to build the payload
+            debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
 
-                let sealed = block.into_sealed_block();
+            let block: RecoveredBlock<Block<OpTxEnvelope>> =
+                flashblock.clone().try_into().map_err(|_| {
+                    PayloadBuilderError::Other(
+                        eyre!("Failed to convert flashblock to recovered block").into(),
+                    )
+                })?;
 
-                let payload = OpBuiltPayload::new(
-                    attributes.payload_id(),
-                    Arc::new(sealed),
-                    flashblock.flashblock().metadata.fees,
-                    None,
-                );
+            let sealed = block.into_sealed_block();
 
-                return Ok(Some((payload, flashblock.flashblock().index)));
-            }
+            let payload = OpBuiltPayload::new(
+                attributes.payload_id(),
+                Arc::new(sealed),
+                flashblock.flashblock().metadata.fees,
+                None,
+            );
+            return Ok(Some((
+                payload,
+                flashblock.flashblock().index,
+                flashblock
+                    .diff()
+                    .access_list_data
+                    .as_ref()
+                    .map(|d| d.access_list.clone()),
+            )));
         }
 
         Ok(None)

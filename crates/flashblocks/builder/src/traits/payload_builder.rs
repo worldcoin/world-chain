@@ -1,3 +1,4 @@
+use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder};
 use reth_node_api::PayloadBuilderError;
 
@@ -13,10 +14,10 @@ pub trait FlashblockPayloadBuilder: PayloadBuilder + Send + Sync + Clone {
     ///
     /// # Returns
     ///
-    /// A `Result` indicating the build outcome or an error.
+    /// A `Result` indicating the build outcome, and block access list or an error.
     fn try_build_with_precommit(
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
         committed_payload: Option<Self::BuiltPayload>,
-    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError>;
+    ) -> Result<(BuildOutcome<Self::BuiltPayload>, FlashblockAccessList), PayloadBuilderError>;
 }

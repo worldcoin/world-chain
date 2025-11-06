@@ -246,7 +246,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
         },
-        transactions: None,
+        transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),

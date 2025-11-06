@@ -73,6 +73,18 @@ pub struct FlashblocksArgs {
         requires = "builder_sk"
     )]
     pub recommit_interval: u64,
+
+    /// Enables flashblocks access list support.
+    ///
+    /// Will create access lists when building flashblocks payloads.
+    /// and will use access lists for parallel transaction execution when verifying
+    /// flashblocks payloads.
+    #[arg(
+        long = "flashblocks.access_list",
+        env = "FLASHBLOCKS_ACCESS_LIST",
+        default_value_t = false
+    )]
+    pub access_list: bool,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -105,12 +117,14 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             recommit_interval: 200,
             flashblocks_interval: 200,
+            access_list: true,
         };
 
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
             "--flashblocks.spoof_authorizer",
+            "--flashblocks.access_list",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.interval",
@@ -131,6 +145,7 @@ mod tests {
             builder_sk: None,
             recommit_interval: 200,
             flashblocks_interval: 200,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([

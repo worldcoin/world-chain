@@ -1,7 +1,7 @@
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor,
+    coordinator::FlashblocksExecutionCoordinator,
+    payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
-    FlashblocksPayloadBuilder,
 };
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::{components::PayloadBuilderBuilder, BuilderContext, FullNodeTypes};
@@ -19,7 +19,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub builder_config: OpBuilderConfig,
 }
 
@@ -29,7 +29,7 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: FlashblocksStateExecutor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         builder_config: OpBuilderConfig,
     ) -> Self {
         Self {
@@ -74,18 +74,13 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state.launch::<_, _, _>(
-            ctx,
-            pool.clone(),
-            self.ctx_builder.clone(),
-            evm_config.clone(),
-        );
+        self.flashblocks_state.launch::<_>(ctx, evm_config.clone());
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
             pool,
             client: ctx.provider().clone(),
-            builder_config: self.builder_config,
+            config: self.builder_config,
             best_transactions: (),
             ctx_builder: self.ctx_builder,
         };

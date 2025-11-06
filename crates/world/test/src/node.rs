@@ -98,6 +98,7 @@ pub fn test_config_with_peers_and_gossip(
         builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
         recommit_interval: 50,
         flashblocks_interval: 200,
+        access_list: true,
     };
 
     let rollup = RollupArgs {

@@ -167,6 +167,7 @@ async fn setup_node_extended_cfg(
             spoof_authorizer: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: true,
         },
         builder_config: Default::default(),
     }
@@ -233,8 +234,8 @@ fn base_payload(
             extra_data: Bytes::new(),
             base_fee_per_gas: U256::ZERO,
         }),
-        diff: ExecutionPayloadFlashblockDeltaV1::default(),
         metadata: FlashblockMetadata::default(),
+        diff: ExecutionPayloadFlashblockDeltaV1::default(),
     }
 }
 
@@ -256,6 +257,7 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
+            access_list_data: Default::default(),
         },
         metadata: FlashblockMetadata::default(),
     }
