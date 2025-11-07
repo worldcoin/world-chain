@@ -57,6 +57,9 @@ pub struct LoadTestArgs {
     /// The path to a json holding information pertaining to the Safes, and Module
     #[clap(long, env = "CONFIG_PATH", default_value = "load_test_config.json")]
     pub config_path: String,
+    /// The path to a json holding information about an Identity.
+    #[clap(long, env = "IDENTITY_PATH")]
+    pub identity_path: String,
     #[clap(long, env = "TRANSACTION_COUNT", default_value_t = 1)]
     pub transaction_count: usize,
     /// Specifies the tx type you want to test.

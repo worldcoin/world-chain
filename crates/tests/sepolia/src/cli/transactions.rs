@@ -149,6 +149,7 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
         let sequencer_url = args.sequencer_url.clone();
         let load_test_contract = load_test_contract.clone();
         let semaphore = SEMAPHORE.clone();
+        let identity_path = args.identity_path.clone();
 
         joinset.spawn(async move {
             let _permit = semaphore.acquire_owned().await?;
@@ -160,6 +161,7 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
                 args.tx_type,
                 load_test_contract,
                 args.transaction_count,
+                identity_path,
                 provider.clone(),
                 index,
             )
@@ -192,6 +194,7 @@ pub async fn send_user_operations(
     tx_type: TestTxType,
     load_test_contract: Arc<LoadTestContractInstance<Arc<impl Provider>>>,
     transaction_count: usize,
+    identity_path: String,
     provider: Arc<impl Provider>,
     index: usize,
 ) -> eyre::Result<()> {
@@ -211,18 +214,9 @@ pub async fn send_user_operations(
             calldata
         }
         TestTxType::Ec => {
-            let trapdoor = Field::from_str_radix(
-                "8f0b53f775304f7afad5be77ddeede2979b66254520e030b46cc9b82e9a3166",
-                16,
-            )?;
-            let nullifier = Field::from_str_radix(
-                "bc0b83abede657790e96d22fd1817a19d0fea9994f723bfaef88cb3c06d6fe9",
-                16,
-            )?;
-            let identity = Identity {
-                trapdoor,
-                nullifier,
-            };
+            let ser_identity: SerializableIdentity =
+                serde_json::from_reader(std::fs::File::open(identity_path)?)?;
+            let identity = ser_identity.into();
             let inclusion_proof = fetch_inclusion_proof(&sequencer_url, &identity).await?;
             let date = chrono::Utc::now().naive_utc().date();
             let date_marker = DateMarker::from(date);
