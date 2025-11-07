@@ -49,12 +49,7 @@ use world_chain_test::{
 };
 
 use crate::{
-    cli::{
-        transactions::{
-            LoadTestContract::LoadTestContractInstance, WorldIDBridge::verifyProofCall,
-        },
-        LoadTestArgs, TestTxType,
-    },
+    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs, TestTxType},
     PBH_SIGNATURE_AGGREGATOR,
 };
 
@@ -66,9 +61,9 @@ use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity
 
 static SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::const_new(150)));
 
-/// OpWorldID contract address on World Chain Sepolia.
-static OP_WORLD_ID: Lazy<Address> =
-    Lazy::new(|| address!("E177F37AF0A862A02edFEa4F59C02668E9d0aAA4"));
+/// Semaphore Verifier contract address on World Chain Sepolia.
+static SEMAPHORE_VERIFIER: Lazy<Address> =
+    Lazy::new(|| address!("06A98d3b319506af1E8B1b9eb7362b61f563B3cb"));
 
 sol! {
     #[sol(rpc, bytecode = "0x6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
@@ -97,13 +92,10 @@ sol! {
 }
 
 sol! {
-    contract WorldIDBridge {
+    contract SemaphoreVerifier {
         function verifyProof(
-            uint256 root,
-            uint256 signalHash,
-            uint256 nullifierHash,
-            uint256 externalNullifierHash,
-            uint256[8] calldata proof
+            uint256[8] calldata proof,
+            uint256[4] calldata input
         ) public view virtual;
     }
 }
@@ -243,20 +235,15 @@ pub async fn send_user_operations(
             let p6 = proof.0 .2 .0;
             let p7 = proof.0 .2 .1;
             let proof = [p0, p1, p2, p3, p4, p5, p6, p7];
+            let input = [root, nullifier_hash, signal_hash, external_nullifier_hash];
 
-            let calldata: Bytes = verifyProofCall {
-                root,
-                signalHash: signal_hash,
-                nullifierHash: nullifier_hash,
-                externalNullifierHash: external_nullifier_hash,
-                proof,
-            }
-            .abi_encode()
-            .into();
+            let calldata: Bytes = SemaphoreVerifier::verifyProofCall { proof, input }
+                .abi_encode()
+                .into();
 
             // empty calldata
             let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-                to: *OP_WORLD_ID,
+                to: *SEMAPHORE_VERIFIER,
                 value: U256::ZERO,
                 data: calldata,
                 operation: 0,
@@ -829,17 +816,20 @@ async fn send_uo_task_inner(
             .call()
     };
 
+    info!("we're done simulating");
+
     // we don't need PBH Signature Aggregator address here because we're not
     // sending PBH payloads --> we put `None`
     let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), None).into();
 
-    let hash: B256 = provider
+    let maybe_hash: Result<B256, _> = provider
         .raw_request(
             Cow::Borrowed("eth_sendUserOperation"),
             (rpc_uo, DEVNET_ENTRYPOINT),
         )
-        .await
-        .context("Failed to send User Operation")?;
+        .await;
+    info!("{:?}", maybe_hash);
+    let hash = maybe_hash.context("Failed to send User Operation")?;
 
     debug!(target: "load_test","Sent UO {hash:?}, waiting for inclusion...");
 
@@ -872,6 +862,7 @@ async fn estimate_uo_gas(
     provider: impl Provider,
     puo: &RpcPartialUserOperation,
 ) -> eyre::Result<(FixedBytes<32>, FixedBytes<32>, U128)> {
+    info!("before estimating");
     let resp: RpcGasEstimate = provider
         .raw_request(
             Cow::Borrowed("eth_estimateUserOperationGas"),
@@ -879,7 +870,7 @@ async fn estimate_uo_gas(
         )
         .await?;
 
-    debug!("Estimated gas: {resp:?}");
+    info!("Estimated gas: {resp:?}");
 
     let base_fee = provider
         .get_fee_history(1, BlockNumberOrTag::Latest, &[])
@@ -894,7 +885,10 @@ async fn estimate_uo_gas(
     let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
     let fees = concat_u128_be(priority_fee, max_fee);
 
-    let account_gas_limits = concat_u128_be(resp.verification_gas_limit, resp.call_gas_limit);
+    let account_gas_limits = concat_u128_be(
+        resp.verification_gas_limit * U128::from(2),
+        resp.call_gas_limit * U128::from(2),
+    );
 
     Ok((
         account_gas_limits.into(),
