@@ -816,20 +816,17 @@ async fn send_uo_task_inner(
             .call()
     };
 
-    info!("we're done simulating");
-
     // we don't need PBH Signature Aggregator address here because we're not
     // sending PBH payloads --> we put `None`
     let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), None).into();
 
-    let maybe_hash: Result<B256, _> = provider
+    let hash: B256 = provider
         .raw_request(
             Cow::Borrowed("eth_sendUserOperation"),
             (rpc_uo, DEVNET_ENTRYPOINT),
         )
-        .await;
-    info!("{:?}", maybe_hash);
-    let hash = maybe_hash.context("Failed to send User Operation")?;
+        .await
+        .context("Failed to send User Operation")?;
 
     debug!(target: "load_test","Sent UO {hash:?}, waiting for inclusion...");
 
@@ -862,7 +859,6 @@ async fn estimate_uo_gas(
     provider: impl Provider,
     puo: &RpcPartialUserOperation,
 ) -> eyre::Result<(FixedBytes<32>, FixedBytes<32>, U128)> {
-    info!("before estimating");
     let resp: RpcGasEstimate = provider
         .raw_request(
             Cow::Borrowed("eth_estimateUserOperationGas"),
@@ -870,7 +866,7 @@ async fn estimate_uo_gas(
         )
         .await?;
 
-    info!("Estimated gas: {resp:?}");
+    debug!(target: "load_test", ?resp);
 
     let base_fee = provider
         .get_fee_history(1, BlockNumberOrTag::Latest, &[])
@@ -885,10 +881,7 @@ async fn estimate_uo_gas(
     let max_fee = U128::from(base_fee * 2) + priority_fee * U128::from(3) / U128::from(2);
     let fees = concat_u128_be(priority_fee, max_fee);
 
-    let account_gas_limits = concat_u128_be(
-        resp.verification_gas_limit * U128::from(2),
-        resp.call_gas_limit * U128::from(2),
-    );
+    let account_gas_limits = concat_u128_be(resp.verification_gas_limit, resp.call_gas_limit);
 
     Ok((
         account_gas_limits.into(),
