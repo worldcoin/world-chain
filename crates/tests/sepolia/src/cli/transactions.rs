@@ -21,7 +21,7 @@ use reqwest::{
     Client,
 };
 use reth_rpc_layer::secret_to_bearer_header;
-use semaphore_rs::{hash_to_field, identity::Identity};
+use semaphore_rs::{hash_to_field, identity::Identity, Field};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -49,7 +49,12 @@ use world_chain_test::{
 };
 
 use crate::{
-    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs},
+    cli::{
+        transactions::{
+            LoadTestContract::LoadTestContractInstance, WorldIDBridge::verifyProofCall,
+        },
+        LoadTestArgs, TestTxType,
+    },
     PBH_SIGNATURE_AGGREGATOR,
 };
 
@@ -84,6 +89,18 @@ sol! {
 
     contract Safe {
         function executeUserOp(address to, uint256 value, bytes calldata data, uint8 operation) external;
+    }
+}
+
+sol! {
+    contract WorldIDBridge {
+        function verifyProof(
+            uint256 root,
+            uint256 signalHash,
+            uint256 nullifierHash,
+            uint256 externalNullifierHash,
+            uint256[8] calldata proof
+        ) public view virtual;
     }
 }
 
@@ -125,6 +142,7 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
 
         let provider = provider.clone();
         let signer = signer.clone();
+        let sequencer_url = args.sequencer_url.clone();
         let load_test_contract = load_test_contract.clone();
         let semaphore = SEMAPHORE.clone();
 
@@ -134,6 +152,8 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
                 safe,
                 config.module,
                 signer,
+                sequencer_url,
+                args.tx_type,
                 load_test_contract,
                 args.transaction_count,
                 provider.clone(),
@@ -164,22 +184,90 @@ pub async fn send_user_operations(
     safe: Address,
     module: Address,
     signer: PrivateKeySigner,
+    sequencer_url: String,
+    tx_type: TestTxType,
     load_test_contract: Arc<LoadTestContractInstance<Arc<impl Provider>>>,
     transaction_count: usize,
     provider: Arc<impl Provider>,
     index: usize,
 ) -> eyre::Result<()> {
-    let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
+    let calldata = match tx_type {
+        TestTxType::Sstore => {
+            let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
 
-    // empty calldata
-    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-        to: *load_test_contract.address(),
-        value: U256::ZERO,
-        data: calldata,
-        operation: 0,
-    })
-    .abi_encode()
-    .into();
+            // empty calldata
+            let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+                to: *load_test_contract.address(),
+                value: U256::ZERO,
+                data: calldata,
+                operation: 0,
+            })
+            .abi_encode()
+            .into();
+            calldata
+        }
+        TestTxType::Ec => {
+            let trapdoor = Field::from_str_radix(
+                "8f0b53f775304f7afad5be77ddeede2979b66254520e030b46cc9b82e9a3166",
+                16,
+            )?;
+            let nullifier = Field::from_str_radix(
+                "bc0b83abede657790e96d22fd1817a19d0fea9994f723bfaef88cb3c06d6fe9",
+                16,
+            )?;
+            let identity = Identity {
+                trapdoor,
+                nullifier,
+            };
+            let inclusion_proof = fetch_inclusion_proof(&sequencer_url, &identity).await?;
+            let date = chrono::Utc::now().naive_utc().date();
+            let date_marker = DateMarker::from(date);
+            let nonce = 0;
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, nonce);
+            let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
+            let root = inclusion_proof.root;
+            let signal_hash = Field::random();
+            let nullifier_hash =
+                semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+            let semaphore_proof = semaphore_rs::protocol::generate_proof(
+                &identity,
+                &inclusion_proof.proof,
+                external_nullifier_hash,
+                signal_hash,
+            )?;
+            let proof = world_chain_pbh::payload::Proof(semaphore_proof);
+            let p0 = proof.0 .0 .0;
+            let p1 = proof.0 .0 .1;
+            let p2 = proof.0 .1 .0[0];
+            let p3 = proof.0 .1 .0[1];
+            let p4 = proof.0 .1 .1[0];
+            let p5 = proof.0 .1 .1[1];
+            let p6 = proof.0 .2 .0;
+            let p7 = proof.0 .2 .1;
+            let proof = [p0, p1, p2, p3, p4, p5, p6, p7];
+
+            let calldata: Bytes = verifyProofCall {
+                root,
+                signalHash: signal_hash,
+                nullifierHash: nullifier_hash,
+                externalNullifierHash: external_nullifier_hash,
+                proof,
+            }
+            .abi_encode()
+            .into();
+
+            // empty calldata
+            let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+                to: *load_test_contract.address(),
+                value: U256::ZERO,
+                data: calldata,
+                operation: 0,
+            })
+            .abi_encode()
+            .into();
+            calldata
+        }
+    };
 
     for i in 0..transaction_count {
         let now = std::time::Instant::now();

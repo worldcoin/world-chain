@@ -11,9 +11,11 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# workspace
 world-chain-test.workspace = true
 world-chain-pbh.workspace = true
 
+# alloy
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-signer.workspace = true
@@ -25,7 +27,10 @@ alloy-transport-http.workspace = true
 alloy-rpc-client.workspace = true
 alloy-contract.workspace = true
 
+# reth
 reth-rpc-layer.workspace = true
+
+# misc
 chrono.workspace = true
 reqwest.workspace = true
 semaphore-rs.workspace = true
