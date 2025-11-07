@@ -66,6 +66,10 @@ use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity
 
 static SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::const_new(150)));
 
+/// OpWorldID contract address on World Chain Sepolia.
+static OP_WORLD_ID: Lazy<Address> =
+    Lazy::new(|| address!("E177F37AF0A862A02edFEa4F59C02668E9d0aAA4"));
+
 sol! {
     #[sol(rpc, bytecode = "0x6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
     contract LoadTestContract {
@@ -258,7 +262,7 @@ pub async fn send_user_operations(
 
             // empty calldata
             let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-                to: *load_test_contract.address(),
+                to: *OP_WORLD_ID,
                 value: U256::ZERO,
                 data: calldata,
                 operation: 0,
