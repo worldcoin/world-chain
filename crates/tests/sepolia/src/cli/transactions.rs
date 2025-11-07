@@ -49,7 +49,7 @@ use world_chain_test::{
 };
 
 use crate::{
-    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs, TestTxType},
+    cli::{LoadTestArgs, TestTxType},
     PBH_SIGNATURE_AGGREGATOR,
 };
 
@@ -115,6 +115,21 @@ pub struct LoadTestConfig {
     pub owner_private_key: String,
 }
 
+/// Load test parameters.
+#[derive(Debug)]
+pub struct LoadTestParams {
+    /// The url of the singup sequencer.
+    pub sequencer_url: String,
+    /// The tx type you wanna run in the load test.
+    pub tx_type: TestTxType,
+    /// The created address of the load test contract.
+    pub load_test_contract: Address,
+    /// The amounf of transactions you want to send.
+    pub tx_count: usize,
+    /// The path to the identity .json file.
+    pub identity_path: String,
+}
+
 pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
     let config: LoadTestConfig = serde_json::from_reader(std::fs::File::open(&args.config_path)?)?;
 
@@ -142,22 +157,18 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
         let load_test_contract = load_test_contract.clone();
         let semaphore = SEMAPHORE.clone();
         let identity_path = args.identity_path.clone();
+        let params = LoadTestParams {
+            sequencer_url,
+            tx_type: args.tx_type,
+            load_test_contract: *load_test_contract.address(),
+            tx_count: args.transaction_count,
+            identity_path,
+        };
 
         joinset.spawn(async move {
             let _permit = semaphore.acquire_owned().await?;
-            send_user_operations(
-                safe,
-                config.module,
-                signer,
-                sequencer_url,
-                args.tx_type,
-                load_test_contract,
-                args.transaction_count,
-                identity_path,
-                provider.clone(),
-                index,
-            )
-            .await?;
+            send_user_operations(safe, config.module, signer, params, provider.clone(), index)
+                .await?;
 
             Ok::<(), eyre::Report>(())
         });
@@ -182,21 +193,17 @@ pub async fn send_user_operations(
     safe: Address,
     module: Address,
     signer: PrivateKeySigner,
-    sequencer_url: String,
-    tx_type: TestTxType,
-    load_test_contract: Arc<LoadTestContractInstance<Arc<impl Provider>>>,
-    transaction_count: usize,
-    identity_path: String,
+    params: LoadTestParams,
     provider: Arc<impl Provider>,
     index: usize,
 ) -> eyre::Result<()> {
-    let calldata = match tx_type {
+    let calldata = match params.tx_type {
         TestTxType::Sstore => {
             let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
 
             // empty calldata
             let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-                to: *load_test_contract.address(),
+                to: params.load_test_contract,
                 value: U256::ZERO,
                 data: calldata,
                 operation: 0,
@@ -207,9 +214,9 @@ pub async fn send_user_operations(
         }
         TestTxType::Ec => {
             let ser_identity: SerializableIdentity =
-                serde_json::from_reader(std::fs::File::open(identity_path)?)?;
+                serde_json::from_reader(std::fs::File::open(params.identity_path)?)?;
             let identity = ser_identity.into();
-            let inclusion_proof = fetch_inclusion_proof(&sequencer_url, &identity).await?;
+            let inclusion_proof = fetch_inclusion_proof(&params.sequencer_url, &identity).await?;
             let date = chrono::Utc::now().naive_utc().date();
             let date_marker = DateMarker::from(date);
             let nonce = 0;
@@ -254,7 +261,7 @@ pub async fn send_user_operations(
         }
     };
 
-    for i in 0..transaction_count {
+    for i in 0..params.tx_count {
         let now = std::time::Instant::now();
         send_uo_task_inner(
             provider.clone(),
@@ -272,7 +279,7 @@ pub async fn send_user_operations(
             ?safe,
             safe_index = %index,
             transaction_index = %i,
-            total = %transaction_count,
+            total = %params.tx_count,
             millis_ellapsed = ?now.elapsed().as_millis(),
             "User Operation Filled",
         );

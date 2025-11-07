@@ -58,7 +58,7 @@ pub struct LoadTestArgs {
     #[clap(long, env = "CONFIG_PATH", default_value = "load_test_config.json")]
     pub config_path: String,
     /// The path to a json holding information about an Identity.
-    #[clap(long, env = "IDENTITY_PATH")]
+    #[clap(long, env = "IDENTITY_PATH", default_value = "load_test_identity.json")]
     pub identity_path: String,
     #[clap(long, env = "TRANSACTION_COUNT", default_value_t = 1)]
     pub transaction_count: usize,
