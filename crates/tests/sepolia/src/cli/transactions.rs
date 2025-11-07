@@ -216,7 +216,7 @@ pub async fn send_user_operations(
             let external_nullifier = ExternalNullifier::with_date_marker(date_marker, nonce);
             let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
             let root = inclusion_proof.root;
-            let signal_hash = Field::random();
+            let signal_hash = Field::ZERO;
             let nullifier_hash =
                 semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
             let semaphore_proof = semaphore_rs::protocol::generate_proof(
