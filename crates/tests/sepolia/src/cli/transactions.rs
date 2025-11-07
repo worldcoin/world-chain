@@ -835,7 +835,9 @@ async fn send_uo_task_inner(
             .call()
     };
 
-    let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), Some(PBH_SIGNATURE_AGGREGATOR)).into();
+    // we don't need PBH Signature Aggregator address here because we're not
+    // sending PBH payloads --> we put `None`
+    let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), None).into();
 
     let hash: B256 = provider
         .raw_request(
