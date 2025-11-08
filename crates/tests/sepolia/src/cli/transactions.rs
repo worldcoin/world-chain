@@ -21,7 +21,7 @@ use reqwest::{
     Client,
 };
 use reth_rpc_layer::secret_to_bearer_header;
-use semaphore_rs::{hash_to_field, identity::Identity};
+use semaphore_rs::{hash_to_field, identity::Identity, Field};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -49,7 +49,7 @@ use world_chain_test::{
 };
 
 use crate::{
-    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs},
+    cli::{LoadTestArgs, TestTxType},
     PBH_SIGNATURE_AGGREGATOR,
 };
 
@@ -60,6 +60,10 @@ use super::{
 use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
 static SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::const_new(150)));
+
+/// Semaphore Verifier contract address on World Chain Sepolia.
+static SEMAPHORE_VERIFIER: Lazy<Address> =
+    Lazy::new(|| address!("06A98d3b319506af1E8B1b9eb7362b61f563B3cb"));
 
 sol! {
     #[sol(rpc, bytecode = "0x6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
@@ -87,6 +91,15 @@ sol! {
     }
 }
 
+sol! {
+    contract SemaphoreVerifier {
+        function verifyProof(
+            uint256[8] calldata proof,
+            uint256[4] calldata input
+        ) public view virtual;
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bundle {
     pub pbh_transactions: Vec<Bytes>,
@@ -100,6 +113,21 @@ pub struct LoadTestConfig {
     pub safes: Vec<Address>,
     #[serde(rename = "ownerPrivateKey")]
     pub owner_private_key: String,
+}
+
+/// Load test parameters.
+#[derive(Debug)]
+pub struct LoadTestParams {
+    /// The url of the singup sequencer.
+    pub sequencer_url: String,
+    /// The tx type you wanna run in the load test.
+    pub tx_type: TestTxType,
+    /// The created address of the load test contract.
+    pub load_test_contract: Address,
+    /// The amounf of transactions you want to send.
+    pub tx_count: usize,
+    /// The path to the identity .json file.
+    pub identity_path: String,
 }
 
 pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
@@ -125,21 +153,22 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
 
         let provider = provider.clone();
         let signer = signer.clone();
+        let sequencer_url = args.signup_sequencer_url.clone();
         let load_test_contract = load_test_contract.clone();
         let semaphore = SEMAPHORE.clone();
+        let identity_path = args.identity_path.clone();
+        let params = LoadTestParams {
+            sequencer_url,
+            tx_type: args.tx_type,
+            load_test_contract: *load_test_contract.address(),
+            tx_count: args.transaction_count,
+            identity_path,
+        };
 
         joinset.spawn(async move {
             let _permit = semaphore.acquire_owned().await?;
-            send_user_operations(
-                safe,
-                config.module,
-                signer,
-                load_test_contract,
-                args.transaction_count,
-                provider.clone(),
-                index,
-            )
-            .await?;
+            send_user_operations(safe, config.module, signer, params, provider.clone(), index)
+                .await?;
 
             Ok::<(), eyre::Report>(())
         });
@@ -164,24 +193,75 @@ pub async fn send_user_operations(
     safe: Address,
     module: Address,
     signer: PrivateKeySigner,
-    load_test_contract: Arc<LoadTestContractInstance<Arc<impl Provider>>>,
-    transaction_count: usize,
+    params: LoadTestParams,
     provider: Arc<impl Provider>,
     index: usize,
 ) -> eyre::Result<()> {
-    let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
+    let calldata = match params.tx_type {
+        TestTxType::Sstore => {
+            let calldata = LoadTestContract::sstoreCall::SELECTOR.into();
 
-    // empty calldata
-    let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
-        to: *load_test_contract.address(),
-        value: U256::ZERO,
-        data: calldata,
-        operation: 0,
-    })
-    .abi_encode()
-    .into();
+            // empty calldata
+            let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+                to: params.load_test_contract,
+                value: U256::ZERO,
+                data: calldata,
+                operation: 0,
+            })
+            .abi_encode()
+            .into();
+            calldata
+        }
+        TestTxType::Ec => {
+            let ser_identity: SerializableIdentity =
+                serde_json::from_reader(std::fs::File::open(params.identity_path)?)?;
+            let identity = ser_identity.into();
+            let inclusion_proof = fetch_inclusion_proof(&params.sequencer_url, &identity).await?;
+            let date = chrono::Utc::now().naive_utc().date();
+            let date_marker = DateMarker::from(date);
+            let nonce = 0;
+            let external_nullifier = ExternalNullifier::with_date_marker(date_marker, nonce);
+            let external_nullifier_hash = EncodedExternalNullifier::from(external_nullifier).0;
+            let root = inclusion_proof.root;
+            let signal_hash = Field::ZERO;
+            let nullifier_hash =
+                semaphore_rs::protocol::generate_nullifier_hash(&identity, external_nullifier_hash);
+            let semaphore_proof = semaphore_rs::protocol::generate_proof(
+                &identity,
+                &inclusion_proof.proof,
+                external_nullifier_hash,
+                signal_hash,
+            )?;
+            let proof = world_chain_pbh::payload::Proof(semaphore_proof);
+            let p0 = proof.0 .0 .0;
+            let p1 = proof.0 .0 .1;
+            let p2 = proof.0 .1 .0[0];
+            let p3 = proof.0 .1 .0[1];
+            let p4 = proof.0 .1 .1[0];
+            let p5 = proof.0 .1 .1[1];
+            let p6 = proof.0 .2 .0;
+            let p7 = proof.0 .2 .1;
+            let proof = [p0, p1, p2, p3, p4, p5, p6, p7];
+            let input = [root, nullifier_hash, signal_hash, external_nullifier_hash];
 
-    for i in 0..transaction_count {
+            let calldata: Bytes = SemaphoreVerifier::verifyProofCall { proof, input }
+                .abi_encode()
+                .into();
+
+            // empty calldata
+            let calldata: Bytes = Safe::SafeCalls::executeUserOp(Safe::executeUserOpCall {
+                to: *SEMAPHORE_VERIFIER,
+                value: U256::ZERO,
+                data: calldata,
+                operation: 0,
+            })
+            .abi_encode()
+            .into();
+            calldata
+        }
+    };
+
+    for i in 0..params.tx_count {
         let now = std::time::Instant::now();
         send_uo_task_inner(
             provider.clone(),
@@ -199,7 +279,7 @@ pub async fn send_user_operations(
             ?safe,
             safe_index = %index,
             transaction_index = %i,
-            total = %transaction_count,
+            total = %params.tx_count,
             millis_ellapsed = ?now.elapsed().as_millis(),
             "User Operation Filled",
         );
@@ -743,7 +823,9 @@ async fn send_uo_task_inner(
             .call()
     };
 
-    let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), Some(PBH_SIGNATURE_AGGREGATOR)).into();
+    // we don't need PBH Signature Aggregator address here because we're not
+    // sending PBH payloads --> we put `None`
+    let rpc_uo: RpcUserOperationV0_7 = (uo.clone(), None).into();
 
     let hash: B256 = provider
         .raw_request(
@@ -791,7 +873,7 @@ async fn estimate_uo_gas(
         )
         .await?;
 
-    debug!("Estimated gas: {resp:?}");
+    debug!(target: "load_test", ?resp);
 
     let base_fee = provider
         .get_fee_history(1, BlockNumberOrTag::Latest, &[])
