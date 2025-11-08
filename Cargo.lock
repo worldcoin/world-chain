@@ -3744,7 +3744,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flashblocks-builder"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3798,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-cli"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "clap",
  "color-eyre",
@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-node"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3879,7 +3879,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-p2p"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
@@ -3907,7 +3907,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-payload"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-primitives 1.4.1",
  "color-eyre",
@@ -3931,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-primitives"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3958,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "flashblocks-rpc"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -12266,7 +12266,7 @@ dependencies = [
 
 [[package]]
 name = "tests-devnet"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-network",
  "alloy-primitives 1.4.1",
@@ -12291,7 +12291,7 @@ dependencies = [
 
 [[package]]
 name = "tests-sepolia"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-contract",
  "alloy-eips",
@@ -14089,7 +14089,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "world-chain"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14145,7 +14145,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-node"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14219,7 +14219,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-payload"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14259,7 +14259,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pbh"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
@@ -14277,7 +14277,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pool"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14313,7 +14313,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-rpc"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14334,7 +14334,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-test"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
