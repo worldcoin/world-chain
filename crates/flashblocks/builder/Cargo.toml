@@ -75,9 +75,12 @@ eyre.workspace = true
 rayon.workspace = true
 dashmap.workspace = true
 lazy_static.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 alloy-sol-types.workspace = true
 revm-interpreter.workspace = true
 alloy-signer-local.workspace = true
 reth-tracing.workspace = true
+reth-trie.workspace = true
+reth-storage-api.workspace = true

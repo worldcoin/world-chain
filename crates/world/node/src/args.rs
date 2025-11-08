@@ -211,6 +211,7 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: true,
         };
 
         let args = CommandParser::parse_from([
@@ -237,6 +238,7 @@ mod tests {
             builder_sk: None,
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: true,
         };
 
         let args = CommandParser::parse_from([

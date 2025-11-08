@@ -20,26 +20,6 @@ pub struct TemporalState {
     pub has_state_clear: bool,
 }
 
-impl TemporalState {
-    /// Initialize or load an account info from the cache or database.
-    fn init_or_load<DB: DatabaseRef>(
-        &mut self,
-        db: &DB,
-        address: Address,
-        index: u64,
-    ) -> AccountInfo {
-        match self.account_info.get(index, &address) {
-            Some(a) => a.clone(),
-            None => {
-                let base = db.basic_ref(address).unwrap();
-                self.account_info
-                    .insert(0, address, base.clone().unwrap_or_default());
-                base.unwrap_or_default()
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
     pub db: &'a DB,
@@ -53,6 +33,7 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
     /// so that TemporalDb instances can be created for specific indices.
     pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
         let mut cache = TemporalState::default();
+
         for change in list.changes {
             for storage_change in change.storage_changes {
                 for slot in storage_change.changes {
@@ -67,35 +48,33 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             // TODO: We can prewarm these
             // for storage_reads in change.storage_reads {}
             for balance_change in change.balance_changes {
-                let mut account =
-                    cache.init_or_load(db, change.address, balance_change.block_access_index);
-                account.balance = balance_change.post_balance;
-                cache.account_info.insert(
-                    balance_change.block_access_index + 1,
-                    change.address,
-                    account,
-                );
+                cache
+                    .account_info
+                    .entry(balance_change.block_access_index + 1, change.address)
+                    .and_modify(|acc| acc.balance = balance_change.post_balance)
+                    .or_insert(AccountInfo {
+                        balance: balance_change.post_balance,
+                        ..Default::default()
+                    });
             }
+
             for nonce_change in change.nonce_changes {
-                let mut account =
-                    cache.init_or_load(db, change.address, nonce_change.block_access_index);
-                account.nonce = nonce_change.new_nonce;
-                cache.account_info.insert(
-                    nonce_change.block_access_index + 1,
-                    change.address,
-                    account,
-                );
+                cache
+                    .account_info
+                    .entry(nonce_change.block_access_index + 1, change.address)
+                    .and_modify(|acc| acc.nonce = nonce_change.new_nonce)
+                    .or_insert(AccountInfo {
+                        nonce: nonce_change.new_nonce,
+                        ..Default::default()
+                    });
             }
+
             for code_change in change.code_changes {
-                let mut account =
-                    cache.init_or_load(db, change.address, code_change.block_access_index);
-                let bytecode = Bytecode::new_raw(code_change.new_code);
-                account.code_hash = bytecode.hash_slow();
-                account.code = Some(bytecode);
-                cache.account_info.insert(
+                let bytecode = Bytecode::new_raw(code_change.new_code.clone());
+                cache.contracts.insert(
                     code_change.block_access_index + 1,
-                    change.address,
-                    account,
+                    bytecode.hash_slow(),
+                    bytecode,
                 );
             }
         }
@@ -125,8 +104,8 @@ impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        match self.cache.account_info.get(self.index, &address) {
-            Some(acc) => Ok(Some(acc.clone())),
+        match self.cache.account_info.get_with_index(self.index, &address) {
+            Some((_, acc)) => Ok(Some(acc.clone())),
             None => self.db.basic_ref(address),
         }
     }
@@ -171,61 +150,6 @@ mod tests {
     };
 
     #[test]
-    fn test_temporal_state_init_or_load_from_cache() {
-        let addr = address!("0000000000000000000000000000000000000001");
-        let account_info = AccountInfo {
-            balance: U256::from(100),
-            nonce: 5,
-            code_hash: KECCAK_EMPTY,
-            code: None,
-        };
-
-        let db = CacheDB::new(EmptyDB::new());
-        let mut state = TemporalState::default();
-        state.account_info.insert(1, addr, account_info.clone());
-
-        let result = state.init_or_load(&db, addr, 2);
-        assert_eq!(result.balance, U256::from(100));
-        assert_eq!(result.nonce, 5);
-    }
-
-    #[test]
-    fn test_temporal_state_init_or_load_from_db() {
-        let addr = address!("0000000000000000000000000000000000000001");
-        let account_info = AccountInfo {
-            balance: U256::from(200),
-            nonce: 10,
-            code_hash: KECCAK_EMPTY,
-            code: None,
-        };
-
-        let mut db = CacheDB::new(EmptyDB::new());
-        db.insert_account_info(addr, account_info.clone());
-        let mut state = TemporalState::default();
-
-        let result = state.init_or_load(&db, addr, 0);
-        assert_eq!(result.balance, U256::from(200));
-        assert_eq!(result.nonce, 10);
-
-        // Verify it was cached at index 0
-        assert_eq!(
-            state.account_info.get(0, &addr).unwrap().balance,
-            U256::from(200)
-        );
-    }
-
-    #[test]
-    fn test_temporal_state_init_or_load_nonexistent_account() {
-        let addr = address!("0000000000000000000000000000000000000001");
-        let db = EmptyDB::new();
-        let mut state = TemporalState::default();
-
-        let result = state.init_or_load(&db, addr, 0);
-        assert_eq!(result.balance, U256::ZERO);
-        assert_eq!(result.nonce, 0);
-    }
-
-    #[test]
     fn test_temporal_db_factory_with_storage_changes() {
         let addr = address!("0000000000000000000000000000000000000001");
         let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
@@ -262,10 +186,7 @@ mod tests {
 
         // Check storage at different indices
         let temporal_db_1 = factory.db(1);
-        assert_eq!(
-            temporal_db_1.storage_ref(addr, slot.into()).unwrap(),
-            value1
-        );
+        assert_eq!(temporal_db_1.storage_ref(addr, slot.into()).unwrap(), 0);
 
         let temporal_db_2 = factory.db(2);
         assert_eq!(
@@ -276,7 +197,7 @@ mod tests {
         let temporal_db_3 = factory.db(3);
         assert_eq!(
             temporal_db_3.storage_ref(addr, slot.into()).unwrap(),
-            value2
+            value1
         );
 
         let temporal_db_4 = factory.db(4);

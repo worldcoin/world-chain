@@ -391,7 +391,7 @@ mod tests {
             let mut executor = BalBuilderBlockExecutor::new(
                 evm,
                 ctx,
-                CHAIN_SPEC.clone(),
+                CHAIN_SPEC.clone().into(),
                 OpRethReceiptBuilder::default(),
             );
 

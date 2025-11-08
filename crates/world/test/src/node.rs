@@ -64,18 +64,19 @@ use reth_network_peers::PeerId;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 
 use world_chain_node::{
-    args::{BuilderArgs, PbhArgs, WorldChainArgs},
+    args::{BuilderArgs, NodeContextType, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };
 
-pub fn test_config() -> WorldChainNodeConfig {
-    test_config_with_peers_and_gossip(None, false)
+pub fn test_config(context: NodeContextType) -> WorldChainNodeConfig {
+    test_config_with_peers_and_gossip(None, false, context)
 }
 
 /// Creates a test config with optional transaction propagation peers and gossip control
 pub fn test_config_with_peers_and_gossip(
     tx_peers: Option<Vec<PeerId>>,
     disable_txpool_gossip: bool,
+    context: NodeContextType,
 ) -> WorldChainNodeConfig {
     use reth_optimism_node::args::RollupArgs;
 
@@ -111,7 +112,11 @@ pub fn test_config_with_peers_and_gossip(
             rollup,
             builder,
             pbh,
-            flashblocks: Some(flashblocks),
+            flashblocks: if matches!(context, NodeContextType::Flashblocks) {
+                Some(flashblocks)
+            } else {
+                None
+            },
             tx_peers,
         },
         builder_config: OpBuilderConfig::default(),

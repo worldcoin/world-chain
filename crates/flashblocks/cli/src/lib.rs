@@ -82,7 +82,7 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.access_list",
         env = "FLASHBLOCKS_ACCESS_LIST",
-        default_value_t = false
+        default_value_t = true
     )]
     pub access_list: bool,
 }

@@ -76,7 +76,7 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
         let block_executor = BalBuilderBlockExecutor::new(
             evm,
             ctx,
-            self.spec().clone(),
+            self.spec().clone().into(),
             OpRethReceiptBuilder::default(),
         );
 

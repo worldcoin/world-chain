@@ -10,6 +10,7 @@ use reth::{
     chainspec::EthChainSpec,
     network::{NetworkSyncUpdater, SyncState},
     primitives::RecoveredBlock,
+    rpc::eth::EthApiServer,
 };
 use reth_e2e_test_utils::{testsuite::actions::Action, transaction::TransactionTestContext};
 use reth_node_api::{Block, PayloadAttributes};
@@ -197,21 +198,6 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let node = &mut nodes[0];
 
-    for i in 0..10 {
-        let tx = TransactionTestContext::transfer_tx(
-            node.node.inner.chain_spec().chain_id(),
-            signer(i as u32),
-        )
-        .await;
-        let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
-        let tx: Bytes = envelope.encoded_2718().into();
-
-        let _ = tokio::join!(
-            node.node.rpc.inject_tx(tx.clone()),
-            basic_worldchain_node.node.rpc.inject_tx(tx)
-        );
-    }
-
     let ext_context = node.ext_context.clone();
     let block_hash = node.node.block_hash(0);
 
@@ -238,6 +224,14 @@ async fn test_flashblocks() -> eyre::Result<()> {
         .as_secs();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let eip1559 = encode_holocene_extra_data(
+        Default::default(),
+        node.node
+            .inner
+            .chain_spec()
+            .base_fee_params_at_timestamp(timestamp),
+    )?;
+
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp,
@@ -248,7 +242,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         },
         transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
         no_tx_pool: Some(false),
-        eip_1559_params: Some(b64!("0000000800000008")),
+        eip_1559_params: Some(eip1559[1..=8].try_into()?),
         gas_limit: Some(30_000_000),
         min_base_fee: None,
     };
@@ -280,6 +274,21 @@ async fn test_flashblocks() -> eyre::Result<()> {
         tx,
     )
     .await;
+
+    for i in 0..10 {
+        let tx = TransactionTestContext::transfer_tx(
+            node.node.inner.chain_spec().chain_id(),
+            signer(i as u32),
+        )
+        .await;
+        let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
+        let tx: Bytes = envelope.encoded_2718().into();
+
+        let _ = tokio::join!(
+            node.node.rpc.inject_tx(tx.clone()),
+            basic_worldchain_node.node.rpc.inject_tx(tx)
+        );
+    }
 
     flashblocks_action.execute(&mut flashblocks_env).await?;
 
@@ -388,7 +397,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .unwrap()
         .as_secs();
 
-    let (sender, _) = tokio::sync::mpsc::channel(1);
+    let (sender, mut block_rx) = tokio::sync::mpsc::channel(1);
 
     let eip1559 = encode_holocene_extra_data(
         Default::default(),
@@ -423,6 +432,20 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
 
+    let mut hashes = vec![];
+    for i in 1..20 {
+        let mock_tx = TransactionTestContext::transfer_tx(
+            nodes[0].node.inner.chain_spec().chain_id(),
+            signer(i),
+        )
+        .await;
+
+        let raw_tx: Bytes = mock_tx.encoded_2718().into();
+
+        let hash = nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
+        hashes.push(hash);
+    }
+
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
         vec![],
@@ -431,7 +454,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         authorization_generator,
         std::time::Duration::from_millis(2000),
         true,
-        false,
+        true,
         sender,
     )
     .await;
@@ -439,12 +462,14 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
     let transaction_receipt =
-        crate::actions::EthGetTransactionReceipt::new(*mock_tx.hash(), vec![0, 1, 2], 240, tx);
+        crate::actions::EthGetTransactionReceipt::new(hashes, vec![0, 1, 2], 240, tx);
 
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
     action.execute(&mut env).await?;
 
-    let receipts = rx.recv().await.expect("should receive receipts");
+    let mined_block = block_rx.recv().await.expect("should receive mined block");
+    let receipts: Vec<Vec<_>> = rx.recv().await.expect("should receive receipts");
+
     info!("Receipts: {:?}", receipts);
 
     assert_eq!(
@@ -455,28 +480,51 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
 
     for (idx, receipt_opt) in receipts.iter().enumerate() {
         assert!(
-            receipt_opt.is_some(),
+            receipt_opt.iter().all(|r| r.is_some()),
             "Node {} should return a receipt",
             idx
         );
     }
 
-    let receipts: Vec<_> = receipts.into_iter().map(|r| r.unwrap()).collect();
+    let receipts: Vec<Vec<_>> = receipts
+        .into_iter()
+        .map(|r| r.iter().map(|r| r.clone().unwrap()).collect())
+        .collect();
 
-    for (idx, receipt) in receipts.iter().enumerate() {
-        assert!(
-            receipt.inner.inner.status(),
-            "Transaction should succeed on node {}",
-            idx
-        );
-    }
+    let first_node_receipts = &receipts[0];
 
-    for (idx, receipt) in receipts.iter().enumerate().skip(1) {
+    for (_, receipts) in receipts.iter().enumerate().skip(1) {
         assert_eq!(
-            receipt, &receipts[0],
-            "Node {} receipt doesn't match node 0",
-            idx
+            receipts.len() + 2,
+            mined_block
+                .execution_payload
+                .payload_inner
+                .payload_inner
+                .transactions
+                .len(),
+            "Receipt count should match transaction count"
         );
+
+        for (tx_idx, receipt) in receipts.iter().enumerate() {
+            let block_hash = mined_block
+                .execution_payload
+                .payload_inner
+                .payload_inner
+                .block_hash;
+
+            assert_eq!(
+                receipt.inner.block_hash,
+                Some(block_hash),
+                "Receipt block hash should match mined block hash"
+            );
+
+            assert_eq!(
+                receipt, &first_node_receipts[tx_idx],
+                "Receipts should match across nodes"
+            );
+        }
+
+        assert_eq!(receipts.len(), first_node_receipts.len())
     }
 
     Ok(())
@@ -631,7 +679,18 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     };
 
     let (sender, _) = tokio::sync::mpsc::channel(1);
-
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let eip1559 = encode_holocene_extra_data(
+        Default::default(),
+        nodes[0]
+            .node
+            .inner
+            .chain_spec()
+            .base_fee_params_at_timestamp(timestamp),
+    )?;
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp: 1756929279,
@@ -642,7 +701,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         },
         transactions: Some(vec![]),
         no_tx_pool: Some(false),
-        eip_1559_params: Some(b64!("0000000800000008")),
+        eip_1559_params: Some(eip1559[1..=8].try_into()?),
         gas_limit: Some(30_000_000),
         min_base_fee: None,
     };

@@ -289,7 +289,7 @@ def get_config(
 
     env_vars[
         "RUST_LOG"
-    ] = "info,payload_builder=trace,engine::persistence=trace,flashblocks::state_executor=trace"
+    ] = "info,payload_builder=trace,engine::persistence=trace,flashblocks=trace"
     env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,

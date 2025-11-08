@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::{
-    args::WorldChainArgs,
+    args::{NodeContextType, WorldChainArgs},
     config::WorldChainNodeConfig,
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
@@ -127,6 +127,12 @@ impl From<WorldChainNodeConfig> for BasicContext {
     }
 }
 
+impl From<BasicContext> for NodeContextType {
+    fn from(_val: BasicContext) -> Self {
+        NodeContextType::Basic
+    }
+}
+
 impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeContext<N>
     for BasicContext
 where
@@ -210,6 +216,12 @@ where
 pub struct FlashblocksContext {
     config: WorldChainNodeConfig,
     components_context: FlashblocksComponentsContext,
+}
+
+impl From<FlashblocksContext> for NodeContextType {
+    fn from(_val: FlashblocksContext) -> Self {
+        NodeContextType::Flashblocks
+    }
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>

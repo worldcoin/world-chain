@@ -1,25 +1,21 @@
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpEvmFactory};
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{eyre, OptionExt};
-use flashblocks_primitives::{
-    access_list::FlashblockAccessListData, primitives::ExecutionPayloadFlashblockDeltaV1,
-};
+use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
-use rayon::prelude::*;
 use reth::revm::{database::StateProviderDatabase, State};
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
-    block::{BlockExecutionError, BlockExecutor},
-    execute::{BlockAssembler, BlockAssemblerInput, BlockBuilderOutcome, ExecutorTx},
-    op_revm::OpSpecId,
-    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory,
+    block::BlockExecutionError,
+    execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
+    op_revm::{OpSpecId, OpTransaction},
+    ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_forks::OpHardforks;
+use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
@@ -27,24 +23,198 @@ use reth_primitives::{transaction::SignedTransaction, Recovered, RecoveredBlock,
 use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
 use revm::{
-    database::{
-        states::{bundle_state::BundleRetention, reverts::Reverts},
-        BundleAccount, BundleState, TransitionState,
-    },
+    context::{BlockEnv, TxEnv},
+    database::{BundleAccount, BundleState},
+    inspector::NoOpInspector,
+    DatabaseRef,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use revm_database_interface::WrapDatabaseRef;
+use std::{collections::HashMap, sync::Arc};
+use tracing::error;
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     assembler::FlashblocksBlockAssembler,
+    block_builder::FlashblocksBlockBuilder,
     executor::{
         bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
-        temporal_db::TemporalDbFactory,
+        BalExecutorError, BalValidationError,
     },
 };
+
+pub struct CommittedState<R: OpReceiptBuilder = OpRethReceiptBuilder> {
+    pub gas_used: u64,
+    pub fees: U256,
+    pub bundle: BundleState,
+    pub receipts: Vec<(BlockAccessIndex, R::Receipt)>,
+    pub transactions: Vec<(BlockAccessIndex, Recovered<R::Transaction>)>,
+}
+
+impl<R: OpReceiptBuilder> CommittedState<R> {
+    pub fn take_bundle(&mut self) -> BundleState {
+        core::mem::take(&mut self.bundle)
+    }
+
+    pub fn start_tx_index(&self) -> BlockAccessIndex {
+        self.transactions.len() as BlockAccessIndex + 1
+    }
+
+    pub fn min_access_index(&self) -> BlockAccessIndex {
+        if self.start_tx_index() == 1 {
+            0
+        } else {
+            self.start_tx_index()
+        }
+    }
+}
+
+impl<R: OpReceiptBuilder + Default> Default for CommittedState<R> {
+    fn default() -> Self {
+        Self {
+            gas_used: 0,
+            fees: U256::ZERO,
+            bundle: BundleState::default(),
+            receipts: vec![],
+            transactions: vec![],
+        }
+    }
+}
+
+pub struct BalExecutionState<R: OpReceiptBuilder> {
+    pub committed_state: CommittedState<R>,
+    pub transactions: Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>,
+    pub evm_env: EvmEnvFor<OpEvmConfig>,
+    pub evm_config: OpEvmConfig,
+    pub execution_context: OpBlockExecutionCtx,
+    pub executor_transactions: Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>,
+}
+
+impl<R> BalExecutionState<R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+{
+    pub fn new_bal_execution_state(
+        committed_state: CommittedState<R>,
+        evm_env: EvmEnvFor<OpEvmConfig>,
+        evm_config: OpEvmConfig,
+        execution_context: OpBlockExecutionCtx,
+        diff: ExecutionPayloadFlashblockDeltaV1,
+    ) -> Result<BalExecutionState<R>, BalExecutorError> {
+        let transactions: Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)> =
+            BalBlockValidator::<R>::decode_transactions(
+                &diff.transactions,
+                committed_state.start_tx_index(),
+            )?;
+
+        Ok(BalExecutionState {
+            committed_state,
+            transactions: Vec::new(),
+            evm_env,
+            evm_config,
+            execution_context,
+            executor_transactions: transactions,
+        })
+    }
+
+    pub fn all_transactions_iter(&self) -> impl Iterator<Item = Recovered<OpTransactionSigned>> {
+        let mut all_transactions = self.committed_state.transactions.clone();
+        all_transactions.extend(self.executor_transactions.clone());
+        all_transactions.into_iter().map(|(_, tx)| tx)
+    }
+
+    pub fn executor_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = &'_ Recovered<OpTransactionSigned>> {
+        self.executor_transactions.iter().map(|(_, tx)| tx)
+    }
+
+    pub fn committed_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = &'_ Recovered<OpTransactionSigned>> {
+        self.committed_state.transactions.iter().map(|(_, tx)| tx)
+    }
+}
+
+impl<'a, R> BalExecutionState<R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+    EvmFactoryFor<OpEvmConfig>:
+        EvmFactory<Spec = OpSpecId, Tx = OpTransaction<TxEnv>, BlockEnv = BlockEnv>,
+{
+    pub fn basic_executor<DB: Database + Send + Sync>(
+        &mut self,
+        spec: Arc<OpChainSpec>,
+        receipt_builder: R,
+        state: &'a mut State<DB>,
+    ) -> BalBuilderBlockExecutor<EvmFor<OpEvmConfig, &'a mut State<DB>, NoOpInspector>, R> {
+        let starting_tx_index = self.committed_state.transactions.len() as BlockAccessIndex + 1;
+
+        let min_access_index = if starting_tx_index == 1 {
+            0
+        } else {
+            starting_tx_index
+        };
+
+        let evm = self
+            .evm_config
+            .evm_factory()
+            .create_evm(state, self.evm_env.clone());
+
+        let receipts: Vec<_> = self
+            .committed_state
+            .receipts
+            .iter()
+            .cloned()
+            .map(|(_, r)| r)
+            .collect();
+
+        self.executor_at_index(
+            spec,
+            receipt_builder,
+            evm,
+            starting_tx_index,
+            FlashblockAccessListConstruction::default(),
+        )
+        .with_min_tx_index(min_access_index)
+        .with_receipts(receipts)
+        .with_gas_used(self.committed_state.gas_used)
+    }
+
+    pub fn executor_at_index<DB: Database + Send + Sync + 'a>(
+        &self,
+        spec: Arc<OpChainSpec>,
+        receipt_builder: R,
+        evm: EvmFor<OpEvmConfig<Arc<OpChainSpec>>, &'a mut State<DB>, NoOpInspector>,
+        index: BlockAccessIndex,
+        access_list: FlashblockAccessListConstruction,
+    ) -> BalBuilderBlockExecutor<
+        EvmFor<OpEvmConfig<Arc<OpChainSpec>>, &'a mut State<DB>, NoOpInspector>,
+        R,
+    > {
+        BalBuilderBlockExecutor::new(evm, self.execution_context.clone(), spec, receipt_builder)
+            .with_block_access_index(index)
+            .with_access_list(access_list)
+    }
+
+    pub fn state_for_db<DB: Database + Send + Sync + 'a>(&self, db: DB) -> State<DB> {
+        State::builder()
+            .with_database(db)
+            .with_bundle_prestate(self.committed_state.bundle.clone())
+            .with_bundle_update()
+            .build()
+    }
+
+    pub fn state_for_ref_db<DB: DatabaseRef + Send + Sync + 'a>(
+        &self,
+        db: DB,
+    ) -> State<WrapDatabaseRef<DB>> {
+        State::builder()
+            .with_database_ref(db)
+            .with_bundle_prestate(self.committed_state.bundle.clone())
+            .with_bundle_update()
+            .build()
+    }
+}
 
 /// A Block Executor for Optimism that can load pre state from previous flashblocks
 ///
@@ -52,40 +222,52 @@ use crate::{
 ///
 /// 'BlockExecutor' trait is not flexible enough for our purposes.
 /// TODO: WIP, currently unused
-pub struct BalBlockExecutor<R, Spec> {
-    spec: Arc<Spec>,
+pub struct BalBlockValidator<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
+    execution_state: BalExecutionState<R>,
+    chain_spec: Arc<OpChainSpec>,
     receipt_builder: R,
-    execution_context: OpBlockExecutionCtx,
-    config: OpEvmConfig,
 }
 
-impl<R, Spec> BalBlockExecutor<R, Spec>
+impl<R> BalBlockValidator<R>
 where
-    R: OpReceiptBuilder<Transaction = OpTxEnvelope, Receipt = OpReceipt> + Clone + Send + Sync,
-    Spec: OpHardforks + Clone + Send + Sync,
+    R: OpReceiptBuilder<Transaction = OpTxEnvelope, Receipt = OpReceipt> + Default,
 {
     /// Creates a new [`FlashblocksBlockExecutor`].
     pub fn new(
-        spec: Arc<Spec>,
-        receipt_builder: R,
+        spec: Arc<OpChainSpec>,
         execution_context: OpBlockExecutionCtx,
-        config: OpEvmConfig,
-    ) -> Self {
-        Self {
-            spec,
+        committed_payload: Option<OpBuiltPayload>,
+        evm_env: EvmEnv<OpSpecId>,
+        evm_config: OpEvmConfig,
+        receipt_builder: R,
+        diff: ExecutionPayloadFlashblockDeltaV1,
+    ) -> Result<Self, BalExecutorError> {
+        let state = if let Some(payload) = committed_payload {
+            CommittedState::<R>::try_from(payload)?
+        } else {
+            CommittedState::<R>::default()
+        };
+
+        let bal_execution_state = BalExecutionState::new_bal_execution_state(
+            state,
+            evm_env,
+            evm_config,
             execution_context,
+            diff,
+        )?;
+
+        Ok(Self {
+            execution_state: bal_execution_state,
+            chain_spec: spec,
             receipt_builder,
-            config,
-        }
+        })
     }
 
     /// Verifies and executes a given [`ExecutionPayloadFlashblockDeltaV1`] on top of an option [`OpBuiltPayload`].
     pub(crate) fn verify_block(
-        self,
-        state_provider: &dyn StateProvider,
-        committed_payload: Option<OpBuiltPayload>,
+        &mut self,
+        state_provider: impl StateProvider + Clone + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
-        parent_header: &SealedHeader<Header>,
     ) -> Result<
         (
             BundleState,
@@ -93,11 +275,13 @@ where
             EvmEnv<OpSpecId>,
             Vec<Recovered<OpTransactionSigned>>,
             OpBlockExecutionCtx,
+            u128,
         ),
-        eyre::Report,
+        BalExecutorError,
     >
     where
         Self: Sized,
+        R: Clone + Send + Sync + 'static,
     {
         let db = StateProviderDatabase::new(state_provider);
 
@@ -105,68 +289,34 @@ where
             .access_list_data
             .ok_or_eyre("Access list data must be provided on the diff")?;
 
-        let temporal_db_factory =
-            TemporalDbFactory::new(&db, expected_access_list_data.access_list.clone());
+        let mut state = self.execution_state.state_for_db(db);
 
-        // Decode and recover transactions
-        let transactions = Self::decode_transactions(
-            &diff.transactions,
-            committed_payload
-                .as_ref()
-                .map_or(0, |p| p.block().transaction_count() as BlockAccessIndex + 1),
-        )?;
+        let chain_spec = self.chain_spec.clone();
+        let receipt_builder = self.receipt_builder.clone();
 
-        // Extract pre-loaded state from committed payload
-        let (pre_loaded_bundle, pre_loaded_receipts) =
-            Self::extract_committed_state(&committed_payload);
+        let executor = self
+            .execution_state
+            .basic_executor(chain_spec, receipt_builder, &mut state);
 
-        // Execute transactions in parallel
-        let execution_data = self.execute_transactions_parallel(
-            &transactions,
-            &temporal_db_factory,
-            &pre_loaded_bundle,
-            &pre_loaded_receipts,
-            parent_header,
-        )?;
-
-        // Merge execution results
-        let (merged_access_list, merged_transitions, merged_execution_result) =
-            Self::merge_execution_data(execution_data);
-
-        let execution_context = self.execution_context.clone();
-
-        // Finalize execution with merged results
-        let (bundle_state, env, execution_result, access_list_data) = self.finalize_execution(
-            pre_loaded_bundle,
-            pre_loaded_receipts,
-            merged_access_list,
-            merged_transitions,
-            merged_execution_result,
-            parent_header,
-            db.clone(),
-        )?;
-
-        // Verify access list hash
-        Self::verify_access_list_hash(
-            &expected_access_list_data,
-            &access_list_data,
-            parent_header.number(),
-        )?;
+        let executor_state = Arc::new(&self.execution_state);
+        let (bundle, result, env, context, fees) =
+            executor.execute_block_parallel(executor_state, expected_access_list_data)?;
 
         Ok((
-            bundle_state,
-            execution_result,
+            bundle,
+            result,
             env,
-            transactions.into_iter().map(|(tx, _)| tx).collect(),
-            execution_context,
+            self.execution_state.all_transactions_iter().collect(),
+            context,
+            fees,
         ))
     }
 
     /// Decodes transactions from raw bytes and recovers signer addresses.
-    fn decode_transactions(
+    pub fn decode_transactions(
         encoded_transactions: &[Bytes],
         start_index: BlockAccessIndex,
-    ) -> Result<Vec<(Recovered<OpTransactionSigned>, BlockAccessIndex)>, eyre::Report> {
+    ) -> Result<Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>, BalExecutorError> {
         encoded_transactions
             .iter()
             .enumerate()
@@ -178,262 +328,9 @@ where
                     eyre!("failed to recover transaction from signed envelope: {e}")
                 })?;
 
-                Ok((recovered, start_index + i as BlockAccessIndex))
+                Ok((start_index + i as BlockAccessIndex, recovered))
             })
             .collect()
-    }
-
-    /// Extracts pre-loaded bundle and receipts from committed payload.
-    fn extract_committed_state(
-        committed_payload: &Option<OpBuiltPayload>,
-    ) -> (Option<BundleState>, Option<Vec<OpReceipt>>) {
-        let bundle = committed_payload
-            .as_ref()
-            .and_then(|p| p.executed_block())
-            .map(|block| block.execution_output.bundle.clone());
-
-        let receipts = committed_payload
-            .as_ref()
-            .and_then(|p| p.executed_block())
-            .map(|block| {
-                block
-                    .execution_outcome()
-                    .receipts()
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .collect()
-            });
-
-        (bundle, receipts)
-    }
-
-    /// Executes transactions in parallel and returns execution data.
-    fn execute_transactions_parallel(
-        &self,
-        transactions: &[(Recovered<OpTransactionSigned>, BlockAccessIndex)],
-        temporal_db_factory: &TemporalDbFactory<StateProviderDatabase<&dyn StateProvider>>,
-        pre_loaded_bundle: &Option<BundleState>,
-        pre_loaded_receipts: &Option<Vec<OpReceipt>>,
-        parent_header: &SealedHeader<Header>,
-    ) -> Result<
-        Vec<(
-            BlockAccessIndex,
-            FlashblockAccessListConstruction,
-            Option<TransitionState>,
-            BlockExecutionResult<R::Receipt>,
-        )>,
-        eyre::Report,
-    > {
-        let evm_env = self
-            .config
-            .evm_env(parent_header.header())
-            .map_err(|e| eyre!("failed to create EVM environment: {e}"))?;
-
-        let mut execution_data: Vec<_> = transactions
-            .par_iter()
-            .map(|(tx, index)| {
-                let temporal_db = temporal_db_factory.db(*index as u64);
-                let mut state = State::builder()
-                    .with_database_ref(temporal_db)
-                    .with_bundle_prestate(pre_loaded_bundle.clone().unwrap_or_default())
-                    .with_bundle_update()
-                    .build();
-
-                let evm = OpEvmFactory::default().create_evm(&mut state, evm_env.clone());
-
-                let mut executor = BalBuilderBlockExecutor::new(
-                    evm,
-                    self.execution_context.clone(),
-                    self.spec.clone(),
-                    self.receipt_builder.clone(),
-                );
-
-                if let Some(receipts) = pre_loaded_receipts {
-                    executor = executor
-                        .with_block_access_index(*index)
-                        .with_min_tx_index(receipts.len() as u64);
-                }
-
-                executor.execute_transaction(tx.as_executable())?;
-
-                let access_list = executor.take_access_list();
-                let (evm, result) = executor.finish()?;
-                let (db, _) = evm.finish();
-
-                Ok::<_, BlockExecutionError>((
-                    *index,
-                    access_list,
-                    db.transition_state.take(),
-                    result,
-                ))
-            })
-            .collect::<Result<_, _>>()?;
-
-        // Sort by ascending index
-        execution_data.sort_unstable_by_key(|(index, ..)| *index);
-
-        Ok(execution_data)
-    }
-
-    /// Merges execution data from parallel execution.
-    fn merge_execution_data(
-        execution_data: Vec<(
-            BlockAccessIndex,
-            FlashblockAccessListConstruction,
-            Option<TransitionState>,
-            BlockExecutionResult<R::Receipt>,
-        )>,
-    ) -> (
-        FlashblockAccessListConstruction,
-        TransitionState,
-        BlockExecutionResult<R::Receipt>,
-    ) {
-        execution_data.into_iter().fold(
-            (
-                FlashblockAccessListConstruction::default(),
-                TransitionState::default(),
-                BlockExecutionResult {
-                    receipts: vec![],
-                    gas_used: 0,
-                    requests: Default::default(),
-                    blob_gas_used: 0,
-                },
-            ),
-            |(mut access_list_acc, mut transition_state_acc, mut results_acc),
-             (_, access_list, transition_state, result)| {
-                access_list_acc.merge(access_list);
-                if let Some(state) = transition_state {
-                    transition_state_acc.add_transitions(state.transitions.into_iter().collect());
-                }
-                results_acc.gas_used += result.gas_used;
-                results_acc.receipts.extend(result.receipts);
-
-                (access_list_acc, transition_state_acc, results_acc)
-            },
-        )
-    }
-
-    /// Finalizes execution with merged results and returns final state.
-    #[allow(clippy::too_many_arguments)]
-    fn finalize_execution<'a>(
-        self,
-        pre_loaded_bundle: Option<BundleState>,
-        pre_loaded_receipts: Option<Vec<OpReceipt>>,
-        merged_access_list: FlashblockAccessListConstruction,
-        merged_transitions: TransitionState,
-        merged_execution_result: BlockExecutionResult<R::Receipt>,
-        parent_header: &SealedHeader<Header>,
-        db: StateProviderDatabase<&'a dyn StateProvider>,
-    ) -> Result<
-        (
-            BundleState,
-            EvmEnv<OpSpecId>,
-            BlockExecutionResult<R::Receipt>,
-            FlashblockAccessListData,
-        ),
-        eyre::Report,
-    > {
-        let evm_env = self
-            .config
-            .evm_env(parent_header.header())
-            .map_err(|e| eyre!("failed to create EVM environment: {e}"))?;
-
-        let mut state = State::builder()
-            .with_database(db)
-            .with_bundle_update()
-            .build();
-
-        let mut executor = BalBuilderBlockExecutor::new(
-            OpEvmFactory::default().create_evm(&mut state, evm_env),
-            self.execution_context.clone(),
-            self.spec.clone(),
-            self.receipt_builder.clone(),
-        )
-        .with_access_list(merged_access_list)
-        .with_block_access_index(0);
-
-        // if this is the first execution, apply pre-execution changes
-        if pre_loaded_receipts.is_none() {
-            executor.apply_pre_execution_changes()?;
-        }
-
-        if let Some(mut receipts) = pre_loaded_receipts {
-            // first tx index after pre-loaded receipts
-            let receipts_len = receipts.len();
-            // append executed receipts to pre-loaded receipts
-            receipts.extend(merged_execution_result.clone().receipts);
-            executor = executor
-                .with_receipts(receipts)
-                .with_min_tx_index(receipts_len as u64);
-        }
-
-        // total ordering block index of post_execution_changes
-        let next_index = merged_execution_result.receipts.len() as BlockAccessIndex + 1;
-
-        executor = executor.with_block_access_index(next_index);
-
-        if let Some(transitions) = executor.evm_mut().db_mut().transition_state.as_mut() {
-            // merge ordered transitions from transaction execution on top of either
-            // pre-loaded transitions or pre-execution transitions
-            transitions.add_transitions(merged_transitions.transitions.into_iter().collect());
-        }
-
-        let (evm, execution_result, access_list_data, _, _) = executor.finish_with_access_list()?;
-        let (mut db, env) = evm.finish();
-
-        Self::merge_reverts(&mut db);
-
-        Ok((db.take_bundle(), env, execution_result, access_list_data))
-    }
-
-    /// Merges and flattens reverts in the database state.
-    fn merge_reverts(db: &mut State<impl Database>) {
-        // Merge changes into the db
-        db.merge_transitions(BundleRetention::Reverts);
-
-        // Flatten reverts into a single vector. The bundle is reused across multiple payloads
-        // which represent a single atomic state transition, so reverts should have length 1.
-        // We only retain the first occurrence of a revert for any given account.
-        let flattened = db
-            .bundle_state
-            .reverts
-            .iter()
-            .flatten()
-            .scan(HashSet::new(), |visited, (acc, revert)| {
-                visited.insert(acc).then(|| (*acc, revert.clone()))
-            })
-            .collect();
-
-        db.bundle_state.reverts = Reverts::new(vec![flattened]);
-    }
-
-    /// Verifies that the computed access list hash matches the expected hash.
-    fn verify_access_list_hash(
-        expected: &FlashblockAccessListData,
-        computed: &FlashblockAccessListData,
-        block_number: u64,
-    ) -> Result<(), eyre::Report> {
-        if expected.access_list_hash != computed.access_list_hash {
-            use std::io::Write;
-            let _ =
-                std::fs::File::create(format!("expected_{block_number}.json")).and_then(|mut f| {
-                    f.write_all(serde_json::to_string_pretty(&expected.access_list)?.as_bytes())
-                });
-
-            let _ =
-                std::fs::File::create(format!("computed_{block_number}.json")).and_then(|mut f| {
-                    f.write_all(serde_json::to_string_pretty(&computed.access_list)?.as_bytes())
-                });
-
-            return Err(eyre!(
-                "Access list hash mismatch - expected {:#?}, got {:#?}",
-                expected.access_list_hash,
-                computed.access_list_hash
-            ));
-        }
-
-        Ok(())
     }
 
     /// Executes a [`ExecutionPayloadFlashblockDeltaV1`] on top of an optional [`OpBuiltPayload`].
@@ -442,39 +339,47 @@ where
     /// # Errors
     ///     If the provided BAL passed in the `diff` does not match the computed BAL from execution.
     pub fn validate_and_execute_diff_parallel(
-        self,
+        mut self,
         state_provider: Arc<dyn StateProvider>,
-        committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent_header: &SealedHeader<Header>,
-        chain_spec: Arc<OpChainSpec>,
         payload_id: PayloadId,
-    ) -> Result<OpBuiltPayload, eyre::Report> {
+    ) -> Result<OpBuiltPayload, BalExecutorError>
+    where
+        R: Clone + Send + Sync + 'static,
+    {
         let bundle: HashMap<Address, BundleAccount> = diff
             .clone()
             .access_list_data
-            .ok_or_eyre("Access list data must be provided on the diff")?
+            .ok_or(BalExecutorError::MissingBlockAccessList)?
             .access_list
             .into();
 
         let (r_0, r_1) = rayon::join(
-            || {
-                self.verify_block(
-                    state_provider.as_ref(),
-                    committed_payload,
-                    diff,
-                    parent_header,
-                )
-            },
+            || self.verify_block(state_provider.clone(), diff.clone()),
             || compute_state_root(state_provider.clone(), &bundle),
         );
 
-        let (bundle_state, execution_result, evm_env, transactions, execution_context) = r_0?;
+        let (bundle_state, execution_result, evm_env, transactions, execution_context, fees) = r_0?;
         let (state_root, trie_updates, hashed_state) = r_1?;
 
-        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        if state_root != diff.state_root {
+            error!(
+                target: "flashblocks::bal_executor",
+                expected = %diff.state_root,
+                got = %state_root,
+                "State root mismatch after executing flashblock delta"
+            );
 
-        let assembler = FlashblocksBlockAssembler::new(chain_spec);
+            return Err(BalValidationError::StateRootMismatch {
+                expected: diff.state_root,
+                got: state_root,
+            }
+            .into());
+        }
+
+        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        let assembler = FlashblocksBlockAssembler::new(self.chain_spec.clone());
 
         let block = assembler.assemble_block(BlockAssemblerInput::<
             FlashblocksBlockExecutorFactory,
@@ -490,6 +395,17 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
+
+        assert_eq!(
+            block.sealed_block().receipts_root(),
+            diff.receipts_root,
+            "Receipts root mismatch after assembling block from execution result"
+        );
+        assert_eq!(
+            block.sealed_block().hash(),
+            diff.block_hash,
+            "Block hash mismatch after assembling block from execution result"
+        );
 
         // Construct the built payload
         let outcome = BlockBuilderOutcome::<OpPrimitives> {
@@ -519,28 +435,104 @@ where
         Ok(OpBuiltPayload::new(
             payload_id,
             sealed_block,
-            U256::ZERO, // TODO: FIXME:
+            self.execution_state.committed_state.fees + U256::from(fees),
             Some(executed_block),
         ))
     }
 
     pub fn validate_and_execute_diff_linear(
-        self,
-        _state_provider: Arc<impl StateProvider>,
-        _committed_payload: Option<OpBuiltPayload>, // TODO: Pre-Load the bundle with this bundle.
-        _diff: ExecutionPayloadFlashblockDeltaV1,
-        _parent_header: &SealedHeader<Header>,
-        _chain_spec: Arc<OpChainSpec>,
-        _payload_id: PayloadId,
-    ) -> Result<OpBuiltPayload, eyre::Report> {
-        todo!()
+        mut self,
+        state_provider: Arc<impl StateProvider + 'static>,
+        parent_header: &SealedHeader<Header>,
+        payload_id: PayloadId,
+    ) -> Result<OpBuiltPayload, BalExecutorError>
+    where
+        R: Clone,
+    {
+        let db = StateProviderDatabase::new(state_provider.clone());
+        let executor_transactions = self.execution_state.executor_transactions.clone();
+        let mut state = self.execution_state.state_for_db(db);
+
+        let chain_spec = self.chain_spec.clone();
+        let receipt_builder = self.receipt_builder.clone();
+
+        let executor =
+            self.execution_state
+                .basic_executor(chain_spec.clone(), receipt_builder, &mut state);
+
+        let mut block_builder = FlashblocksBlockBuilder::new(
+            self.execution_state.execution_context.clone(),
+            parent_header,
+            executor,
+            self.execution_state
+                .committed_transactions_iter()
+                .cloned()
+                .collect(),
+            chain_spec.clone(),
+        );
+
+        if self.execution_state.committed_state.min_access_index() == 0 {
+            block_builder.apply_pre_execution_changes()?;
+        }
+
+        let mut cumulative_fees = self.execution_state.committed_state.fees;
+
+        for transaction in executor_transactions {
+            let (_, tx) = transaction;
+            let is_deposit = tx.is_deposit();
+            let gas_used = block_builder.execute_transaction(tx.clone())?;
+
+            if !is_deposit {
+                let miner_fee = &tx
+                    .effective_tip_per_gas(self.execution_state.evm_env.block_env().basefee)
+                    .expect("fee is always valid; execution succeeded");
+                cumulative_fees += U256::from(*miner_fee) * U256::from(gas_used);
+            }
+        }
+
+        let build_outcome: BlockBuilderOutcome<OpPrimitives> =
+            block_builder.finish(state_provider.clone())?;
+
+        // 7. Seal the block
+        let BlockBuilderOutcome {
+            execution_result,
+            block,
+            hashed_state,
+            trie_updates,
+        } = build_outcome;
+
+        let sealed_block = Arc::new(block.sealed_block().clone());
+
+        let execution_outcome = ExecutionOutcome::new(
+            state.take_bundle(),
+            vec![execution_result.receipts.clone()],
+            block.number(),
+            Vec::new(),
+        );
+
+        // create the executed block data
+        let executed_block = ExecutedBlock {
+            recovered_block: Arc::new(block),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
+        };
+
+        let payload = OpBuiltPayload::new(
+            payload_id,
+            sealed_block,
+            cumulative_fees,
+            Some(executed_block),
+        );
+
+        Ok(payload)
     }
 }
 
 pub fn compute_state_root(
     state_provider: Arc<dyn StateProvider>,
     bundle: &HashMap<Address, BundleAccount>,
-) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), eyre::Report> {
+) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), BlockExecutionError> {
     let bundle_state: HashMap<&Address, &BundleAccount> = bundle.iter().collect();
 
     // compute hashed post state
@@ -554,13 +546,44 @@ pub fn compute_state_root(
     Ok((state_root, trie_updates, hashed_state))
 }
 
-pub fn clone_state<DB>(state: &State<Arc<DB>>) -> State<Arc<DB>> {
-    State {
-        cache: state.cache.clone(),
-        database: state.database.clone(),
-        transition_state: state.transition_state.clone(),
-        bundle_state: state.bundle_state.clone(),
-        use_preloaded_bundle: state.use_preloaded_bundle,
-        block_hashes: state.block_hashes.clone(),
+impl<R> TryFrom<OpBuiltPayload> for CommittedState<R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+{
+    type Error = BalExecutorError;
+
+    fn try_from(value: OpBuiltPayload) -> Result<Self, Self::Error> {
+        let executed_block = value
+            .executed_block()
+            .ok_or(BalExecutorError::MissingExecutedBlock)?;
+
+        let gas_used = executed_block.recovered_block().gas_used();
+        let bundle = core::mem::take(&mut executed_block.execution_output.bundle.clone());
+        let fees = value.fees();
+
+        let transactions: Vec<_> = executed_block
+            .recovered_block()
+            .clone_transactions_recovered()
+            .enumerate()
+            .map(|(index, tx)| (index as BlockAccessIndex, tx))
+            .collect();
+
+        let receipts: Vec<_> = executed_block
+            .execution_outcome()
+            .receipts()
+            .iter()
+            .flatten()
+            .cloned()
+            .enumerate()
+            .map(|(index, r)| (index as BlockAccessIndex, r))
+            .collect();
+
+        Ok(Self {
+            transactions,
+            receipts,
+            gas_used,
+            fees,
+            bundle,
+        })
     }
 }

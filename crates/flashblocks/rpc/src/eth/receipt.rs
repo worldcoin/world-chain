@@ -13,6 +13,7 @@ use reth_rpc_eth_api::{
     EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::EthApiError;
+use tracing::trace;
 
 use crate::eth::FlashblocksEthApi;
 
@@ -73,10 +74,19 @@ where
         let tx = tx
             .try_into_recovered_unchecked()
             .map_err(Self::Error::from_eth_err)?;
+        let hash = tx.hash();
+        trace!(
+            target: "flashblocks",
+            tx_hash = ?hash,
+            tx_index = meta.index,
+            gas_used = ?gas_used,
+            receipt_gas_used = ?receipt.cumulative_gas_used(),
+            "Building receipt for tx",
+        );
 
         let input = ConvertReceiptInput {
             tx: tx.as_recovered_ref(),
-            gas_used: receipt.cumulative_gas_used() - gas_used,
+            gas_used: receipt.cumulative_gas_used().saturating_sub(gas_used),
             receipt,
             next_log_index,
             meta,
