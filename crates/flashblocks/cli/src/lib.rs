@@ -145,7 +145,7 @@ mod tests {
             builder_sk: None,
             recommit_interval: 200,
             flashblocks_interval: 200,
-            access_list: false,
+            access_list: true,
         };
 
         let args = CommandParser::parse_from([
