@@ -153,7 +153,7 @@ pub async fn load_test(args: LoadTestArgs) -> eyre::Result<()> {
 
         let provider = provider.clone();
         let signer = signer.clone();
-        let sequencer_url = args.sequencer_url.clone();
+        let sequencer_url = args.signup_sequencer_url.clone();
         let load_test_contract = load_test_contract.clone();
         let semaphore = SEMAPHORE.clone();
         let identity_path = args.identity_path.clone();

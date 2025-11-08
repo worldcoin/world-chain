@@ -53,7 +53,7 @@ pub struct LoadTestArgs {
         short,
         default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
     )]
-    pub sequencer_url: String,
+    pub signup_sequencer_url: String,
     /// The path to a json holding information pertaining to the Safes, and Module
     #[clap(long, env = "CONFIG_PATH", default_value = "load_test_config.json")]
     pub config_path: String,
