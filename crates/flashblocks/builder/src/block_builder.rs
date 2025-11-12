@@ -1,4 +1,5 @@
-use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_consensus::{Block, Header};
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::{
@@ -10,7 +11,7 @@ use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpBlockAssembler, OpRethReceiptBuilder};
+use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
@@ -25,22 +26,22 @@ use crate::executor::{
 };
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
-pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm> {
+pub struct FlashblocksBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
         FlashblocksBlockExecutorFactory,
-        BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        BalBuilderBlockExecutor<Evm, R>,
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
 }
 
-impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
+impl<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, R, N, Evm> {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: BalBuilderBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        executor: BalBuilderBlockExecutor<Evm, R>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
     ) -> Self {
@@ -56,14 +57,14 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     }
 }
 
-impl<'a, DB, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, N, E>
+impl<'a, DB, R, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
         Receipt = OpReceipt,
         SignedTx = OpTransactionSigned,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
+        Block = Block<OpTransactionSigned>,
+        BlockHeader = Header,
     >,
     E: Evm<
         DB = &'a mut State<DB>,
@@ -72,11 +73,12 @@ where
         HaltReason = OpHaltReason,
         BlockEnv = BlockEnv,
     >,
+    R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = N;
-    type Executor = BalBuilderBlockExecutor<E, OpRethReceiptBuilder, OpChainSpec>;
+    type Executor = BalBuilderBlockExecutor<E, R>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -172,7 +174,7 @@ where
     }
 }
 
-impl<'a, DB, N, E> FlashblocksBlockBuilder<'a, N, E>
+impl<'a, DB, R, N, E> FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
@@ -188,6 +190,7 @@ where
         HaltReason = OpHaltReason,
         BlockEnv = BlockEnv,
     >,
+    R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {

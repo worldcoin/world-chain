@@ -250,7 +250,7 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
 /// - All flashblocks have the same payload ID
 /// - Flashblocks have contiguous indices starting from 0
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Flashblocks(Vec<Flashblock>);
+pub struct Flashblocks(pub Vec<Flashblock>);
 
 impl Default for Flashblocks {
     fn default() -> Self {

@@ -25,7 +25,10 @@ use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFacto
 use tokio::runtime::Handle;
 use tracing::debug;
 
-use crate::{job::FlashblocksPayloadJob, metrics::PayloadBuilderMetrics};
+use crate::{
+    job::{CommittedPayloadState, FlashblocksPayloadJob},
+    metrics::PayloadBuilderMetrics,
+};
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
@@ -216,17 +219,34 @@ where
             .map(|(pre_state, index, access_list)| (Some(pre_state), index, access_list))
             .unwrap_or((None, 0, None));
 
+        let committed_payload =
+            if let (Some(pre_state), Some(access_list)) = (pre_state, access_list) {
+                CommittedPayloadState::from((PayloadState::Frozen(pre_state), access_list))
+            } else {
+                CommittedPayloadState::Empty
+            };
+
+        let best_payload = if committed_payload.is_frozen() {
+            (
+                PayloadState::Frozen(committed_payload.take_payload().unwrap()),
+                committed_payload
+                    .access_list()
+                    .cloned()
+                    .map(|a| a.access_list),
+            )
+        } else {
+            (PayloadState::Missing, None)
+        };
+
         let mut job = FlashblocksPayloadJob {
             config,
             executor: self.executor.clone(),
             deadline,
-            committed_payload: pre_state.clone(),
+            committed_payload,
             flashblock_interval: self.config.interval,
             flashblock_deadline,
             recommit_interval,
-            best_payload: pre_state
-                .map(|p| (PayloadState::Frozen(p), access_list))
-                .unwrap_or((PayloadState::Missing, None)),
+            best_payload,
             pending_block: None,
             cached_reads,
             payload_task_guard,

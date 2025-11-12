@@ -5,12 +5,13 @@ use std::{
     time::Duration,
 };
 
+use alloy_primitives::{keccak256, ruint::aliases::U256, B256};
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
-    access_list::FlashblockAccessList,
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
     flashblocks::Flashblock,
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
@@ -20,7 +21,7 @@ use std::task::ready;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
-    api::{PayloadBuilderError, PayloadKind},
+    api::{BuiltPayload, PayloadBuilderError, PayloadKind},
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -97,6 +98,138 @@ impl<P> Future for FlashblocksPendingPayload<P> {
     }
 }
 
+pub enum CommittedPayloadState<P> {
+    Frozen {
+        payload: P,
+        access_list: FlashblockAccessListData,
+    },
+    Best {
+        payload: P,
+        access_list: FlashblockAccessListData,
+    },
+    Empty,
+}
+
+impl<P: BuiltPayload> CommittedPayloadState<P> {
+    pub fn payload(&self) -> Option<&P> {
+        match self {
+            CommittedPayloadState::Frozen { payload, .. } => Some(payload),
+            CommittedPayloadState::Best { payload, .. } => Some(payload),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+
+    pub fn block_hash(&self) -> Option<B256> {
+        match self {
+            CommittedPayloadState::Frozen { payload, .. } => Some(payload.block().hash()),
+            CommittedPayloadState::Best { payload, .. } => Some(payload.block().hash()),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        matches!(self, CommittedPayloadState::Frozen { .. })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, CommittedPayloadState::Empty)
+    }
+
+    pub fn fees(&self) -> Option<U256> {
+        match self {
+            CommittedPayloadState::Frozen { payload, .. } => Some(payload.fees()),
+            CommittedPayloadState::Best { payload, .. } => Some(payload.fees()),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+
+    pub fn access_list(&self) -> Option<&FlashblockAccessListData> {
+        match self {
+            CommittedPayloadState::Frozen { access_list, .. } => Some(access_list),
+            CommittedPayloadState::Best { access_list, .. } => Some(access_list),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+
+    pub fn take_access_list(&mut self) -> Option<FlashblockAccessListData> {
+        match self {
+            CommittedPayloadState::Frozen { access_list, .. } => Some(FlashblockAccessListData {
+                access_list_hash: access_list.access_list_hash,
+                access_list: core::mem::take(&mut access_list.access_list),
+            }),
+            CommittedPayloadState::Best { access_list, .. } => Some(FlashblockAccessListData {
+                access_list_hash: access_list.access_list_hash,
+                access_list: core::mem::take(&mut access_list.access_list),
+            }),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+
+    pub fn take_payload(&self) -> Option<P>
+    where
+        P: Clone,
+    {
+        match self {
+            CommittedPayloadState::Frozen { payload, .. }
+            | CommittedPayloadState::Best { payload, .. } => Some(payload.clone()),
+            CommittedPayloadState::Empty => None,
+        }
+    }
+}
+
+impl<P: Clone> Clone for CommittedPayloadState<P> {
+    fn clone(&self) -> Self {
+        match self {
+            CommittedPayloadState::Frozen {
+                payload,
+                access_list,
+            } => CommittedPayloadState::Frozen {
+                payload: payload.clone(),
+                access_list: FlashblockAccessListData {
+                    access_list_hash: access_list.access_list_hash,
+                    access_list: access_list.access_list.clone(),
+                },
+            },
+            CommittedPayloadState::Best {
+                payload,
+                access_list,
+            } => CommittedPayloadState::Best {
+                payload: payload.clone(),
+                access_list: FlashblockAccessListData {
+                    access_list_hash: access_list.access_list_hash,
+                    access_list: access_list.access_list.clone(),
+                },
+            },
+            CommittedPayloadState::Empty => CommittedPayloadState::Empty,
+        }
+    }
+}
+
+impl<P> From<(PayloadState<P>, FlashblockAccessList)> for CommittedPayloadState<P>
+where
+    P: Clone,
+{
+    fn from((state, access_list): (PayloadState<P>, FlashblockAccessList)) -> Self {
+        let access_list_data = FlashblockAccessListData {
+            access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
+            access_list,
+        };
+        match state {
+            PayloadState::Frozen(payload) => CommittedPayloadState::Frozen {
+                payload: payload.clone(),
+                access_list: access_list_data,
+            },
+            PayloadState::Best(payload) => CommittedPayloadState::Best {
+                payload: payload.clone(),
+                access_list: access_list_data,
+            },
+            PayloadState::Missing => {
+                panic!("Cannot convert Missing payload state to CommittedPayloadState")
+            }
+        }
+    }
+}
+
 /// A payload job that continuously spawns new build tasks at regular intervals, each building on top of the previous `best_payload`.
 ///
 /// This type is a [`PayloadJob`] and [`Future`] that terminates when the deadline is reached or
@@ -121,7 +254,7 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     ),
     /// The best payload that has been committed, and published to the network.
     /// This payload is a pre-commitment to all future payloads.
-    pub(crate) committed_payload: Option<Builder::BuiltPayload>,
+    pub(crate) committed_payload: CommittedPayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pub(crate) pending_block: Option<FlashblocksPendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -194,7 +327,7 @@ where
                 best_payload,
             };
 
-            let result = builder.try_build_with_precommit(args, committed_payload);
+            let result = builder.try_build_with_precommit(args, committed_payload.payload());
             let _ = tx.send(result);
         }));
 
@@ -211,7 +344,7 @@ where
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
         access_list: FlashblockAccessList,
-        prev: &Option<OpBuiltPayload<OpPrimitives>>,
+        prev: Option<&OpBuiltPayload<OpPrimitives>>,
     ) -> eyre::Result<()> {
         let offset = prev
             .as_ref()
@@ -349,21 +482,33 @@ where
 
                 trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "committing to best payload");
 
-                // publish the new payload to the p2p network
-                if let Err(err) =
-                    this.publish_payload(&payload, access_list, &this.committed_payload)
+                if this
+                    .committed_payload
+                    .payload()
+                    .is_none_or(|p| p.block().hash() != payload.block().hash())
                 {
-                    this.metrics.inc_p2p_publishing_errors();
-                    error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
-                } else {
-                    trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
+                    trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, skipping publish");
+
+                    // publish the new payload to the p2p network
+                    if let Err(err) = this.publish_payload(
+                        &payload,
+                        access_list.clone(),
+                        this.committed_payload.payload(),
+                    ) {
+                        this.metrics.inc_p2p_publishing_errors();
+                        error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
+                    } else {
+                        trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
+                    }
+
+                    // commit to the best payload
+                    this.committed_payload =
+                        CommittedPayloadState::from((this.best_payload.0.clone(), access_list));
+
+                    // increment the pre-confirmation index
+                    this.block_index += 1;
                 }
 
-                // commit to the best payload
-                this.committed_payload = Some(payload.clone());
-
-                // increment the pre-confirmation index
-                this.block_index += 1;
                 this.spawn_build_job();
                 this.recommit_interval.reset();
 
@@ -381,9 +526,14 @@ where
                         payload,
                         cached_reads,
                     } => {
-                        this.best_payload =
-                            (PayloadState::Best(payload.clone()), Some(access_list));
-                        this.cached_reads = Some(cached_reads);
+                        if this
+                            .committed_payload
+                            .payload()
+                            .is_none_or(|p| p.block().hash() != payload.block().hash())
+                        {
+                            this.cached_reads = Some(cached_reads);
+                            this.best_payload = (PayloadState::Best(payload), Some(access_list));
+                        }
                     }
                     BuildOutcome::Freeze(payload) => {
                         trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
@@ -456,7 +606,7 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        if let Some(payload) = &self.committed_payload {
+        if let Some(payload) = self.committed_payload.payload() {
             trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), value = %payload.fees(), "returning best payload");
             Ok(payload.clone())
         } else {
@@ -480,15 +630,17 @@ where
         &mut self,
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        if self.committed_payload.is_none() && self.pending_block.is_none() {
+        if self.committed_payload.is_empty() && self.pending_block.is_none() {
+            trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet and no active build job, spawning new build job");
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
         }
 
-        let maybe_better = self.pending_block.take();
+        let maybe_better: Option<FlashblocksPendingPayload<OpBuiltPayload>> =
+            self.pending_block.take();
         let mut empty_payload = None;
 
-        if self.committed_payload.is_none() {
+        if self.committed_payload.is_empty() {
             debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
@@ -532,7 +684,7 @@ where
         }
 
         let fut = ResolveBestPayload {
-            best_payload: self.committed_payload.clone(),
+            best_payload: self.committed_payload.take_payload(),
             maybe_better: maybe_better.map(Into::into),
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };

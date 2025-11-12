@@ -18,6 +18,6 @@ pub trait FlashblockPayloadBuilder: PayloadBuilder + Send + Sync + Clone {
     fn try_build_with_precommit(
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-        committed_payload: Option<Self::BuiltPayload>,
+        committed_payload: Option<&Self::BuiltPayload>,
     ) -> Result<(BuildOutcome<Self::BuiltPayload>, FlashblockAccessList), PayloadBuilderError>;
 }

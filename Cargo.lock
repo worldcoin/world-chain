@@ -3831,12 +3831,14 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie",
  "reth-trie-common",
  "revm",
  "revm-database-interface",
  "revm-interpreter",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]
@@ -3955,6 +3957,7 @@ name = "flashblocks-payload"
 version = "1.9.0"
 dependencies = [
  "alloy-primitives 1.4.1",
+ "alloy-rlp",
  "color-eyre",
  "flashblocks-builder",
  "flashblocks-p2p",

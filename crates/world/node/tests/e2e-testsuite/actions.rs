@@ -639,22 +639,22 @@ where
 #[derive(Debug)]
 pub struct EthGetTransactionReceipt {
     /// The transaction hash the receipt will be fetched for.
-    pub hash: B256,
+    pub hash: Vec<B256>,
     /// The node index's to query the receipt for.
     pub node_idxs: Vec<usize>,
     /// Duration in milliseconds of backoff before fetching the receipt
     pub backoff: u64,
     /// Tx sender for receipt results
-    pub tx: tokio::sync::mpsc::Sender<Vec<Option<OpTransactionReceipt>>>,
+    pub tx: tokio::sync::mpsc::Sender<Vec<Vec<Option<OpTransactionReceipt>>>>,
 }
 
 impl EthGetTransactionReceipt {
     /// Creates a new `EthGetTransactionReceipt` action.
     pub fn new(
-        hash: B256,
+        hash: Vec<B256>,
         node_idxs: Vec<usize>,
         backoff: u64,
-        tx: tokio::sync::mpsc::Sender<Vec<Option<OpTransactionReceipt>>>,
+        tx: tokio::sync::mpsc::Sender<Vec<Vec<Option<OpTransactionReceipt>>>>,
     ) -> Self {
         Self {
             hash,
@@ -674,19 +674,26 @@ impl Action<OpEngineTypes> for EthGetTransactionReceipt {
             tokio::time::sleep(Duration::from_millis(self.backoff)).await;
 
             let mut receipts = vec![];
+
             for node_idx in &self.node_idxs {
                 let rpc_client = env.node_clients[*node_idx].rpc.clone();
-                let receipt: Option<OpTransactionReceipt> =
-                    EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        alloy_rpc_types_eth::Block,
-                        OpTransactionReceipt,
-                        Header,
-                        TransactionSigned,
-                    >::transaction_receipt(&rpc_client, self.hash)
-                    .await?;
-                receipts.push(receipt);
+                let mut receipts_inner = vec![];
+                for hash in &self.hash {
+                    let receipt: Option<OpTransactionReceipt> =
+                        EthApiClient::<
+                            TransactionRequest,
+                            Transaction,
+                            alloy_rpc_types_eth::Block,
+                            OpTransactionReceipt,
+                            Header,
+                            TransactionSigned,
+                        >::transaction_receipt(&rpc_client, *hash)
+                        .await?;
+
+                    receipts_inner.push(receipt);
+                }
+
+                receipts.push(receipts_inner);
             }
 
             self.tx

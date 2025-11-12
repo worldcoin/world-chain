@@ -1,5 +1,5 @@
 use crate::{
-    executor::bal_builder::BalBuilderBlockExecutor,
+    executor::bal_executor::{BalExecutionState, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -8,15 +8,15 @@ use crate::{
 };
 
 use crate::block_builder::FlashblocksBlockBuilder;
-use alloy_consensus::{BlockHeader, Header, Transaction};
-use alloy_op_evm::OpEvm;
-use alloy_primitives::U256;
-use alloy_rlp::Encodable;
-use eyre::eyre::eyre;
-use flashblocks_primitives::access_list::FlashblockAccessList;
+use alloy_consensus::{BlockHeader, Header};
+
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpEvm};
+use flashblocks_primitives::{
+    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
+};
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
-    api::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError},
+    api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
     revm::{database::StateProviderDatabase, State},
 };
@@ -30,8 +30,8 @@ use reth_evm::{
     precompiles::PrecompilesMap,
     ConfigureEvm, Database,
 };
-use reth_primitives::{transaction::SignedTransaction, NodePrimitives, Recovered};
-use tracing::{error, info, warn};
+use reth_primitives::NodePrimitives;
+use tracing::{info, warn};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -42,7 +42,6 @@ use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
     config::OpBuilderConfig,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
-    OpAttributes,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
@@ -50,11 +49,10 @@ use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
 };
 
-use reth::api::BlockBody;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::ContextTr, database::BundleState, inspector::NoOpInspector};
+use revm::{context::ContextTr, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span, trace};
+use tracing::{debug, span};
 
 /// Flashblocks Paylod builder
 ///
@@ -99,7 +97,7 @@ where
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
-        committed_payload: Option<OpBuiltPayload>,
+        committed_payload: Option<&OpBuiltPayload>,
     ) -> Result<(BuildOutcome<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
@@ -227,7 +225,7 @@ where
             <Self as PayloadBuilder>::Attributes,
             <Self as PayloadBuilder>::BuiltPayload,
         >,
-        committed_payload: Option<<Self as PayloadBuilder>::BuiltPayload>,
+        committed_payload: Option<&<Self as PayloadBuilder>::BuiltPayload>,
     ) -> Result<
         (
             BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>,
@@ -250,10 +248,10 @@ where
 fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Pool,
-    db: impl Database<Error = ProviderError>,
+    db: impl Database<Error = ProviderError> + Send + Sync + 'a,
     state_provider: impl StateProvider,
     ctx: &Ctx,
-    committed_payload: Option<OpBuiltPayload>,
+    committed_payload: Option<&OpBuiltPayload>,
 ) -> Result<(BuildOutcomeKind<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
 where
     Pool: TransactionPool,
@@ -276,59 +274,64 @@ where
     debug!(target: "flashblocks::payload_builder", "building new payload");
 
     // 1. Prepare the db
-    let (bundle, receipts, transactions, gas_used, fees) = if let Some(payload) = &committed_payload
-    {
-        // if we have a best payload we will always have a bundle
-        let execution_result = &payload
-            .executed_block()
-            .ok_or(PayloadBuilderError::MissingPayload)?
-            .execution_output;
+    let committed_state = committed_payload
+        .cloned()
+        .map(CommittedState::<OpRethReceiptBuilder>::try_from)
+        .transpose()
+        .map_err(PayloadBuilderError::other)?
+        .unwrap_or_default();
 
-        let receipts = execution_result
-            .receipts
-            .iter()
-            .flatten()
-            .cloned()
-            .collect();
-
-        let transactions = payload
-            .block()
-            .body()
-            .transactions_iter()
-            .cloned()
-            .map(|tx| {
-                tx.try_into_recovered()
-                    .map_err(|_| PayloadBuilderError::Other(eyre!("tx recovery failed").into()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        trace!(target: "flashblocks::payload_builder", "using best payload");
-
-        (
-            execution_result.bundle.clone(),
-            receipts,
-            transactions,
-            Some(payload.block().gas_used()),
-            payload.fees(),
-        )
-    } else {
-        (BundleState::default(), vec![], vec![], None, U256::ZERO)
+    let attributes = OpNextBlockEnvAttributes {
+        timestamp: ctx.attributes().timestamp(),
+        suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
+        prev_randao: ctx.attributes().prev_randao(),
+        gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
+        parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
+        extra_data: if ctx
+            .spec()
+            .is_holocene_active_at_timestamp(ctx.attributes().timestamp())
+        {
+            ctx.attributes()
+                .get_holocene_extra_data(
+                    ctx.spec()
+                        .base_fee_params_at_timestamp(ctx.attributes().timestamp()),
+                )
+                .map_err(PayloadBuilderError::other)?
+        } else {
+            Default::default()
+        },
     };
+
+    // Prepare EVM environment.
+    let evm_env = ctx
+        .evm_config()
+        .next_evm_env(ctx.parent(), &attributes)
+        .map_err(PayloadBuilderError::other)?;
+
+    let execution_conext = ctx
+        .evm_config()
+        .context_for_next_block(ctx.parent(), attributes)
+        .map_err(PayloadBuilderError::other)?;
+
+    let mut execution_state = BalExecutionState::new_bal_execution_state(
+        committed_state,
+        evm_env,
+        ctx.evm_config().clone(),
+        execution_conext,
+        ExecutionPayloadFlashblockDeltaV1::default(),
+    )
+    .map_err(PayloadBuilderError::other)?;
 
     let gas_limit = ctx
         .attributes()
         .gas_limit
         .unwrap_or(ctx.parent().gas_limit)
-        .saturating_sub(gas_used.unwrap_or(0));
+        .saturating_sub(execution_state.committed_state.gas_used);
 
-    let mut state = State::builder()
-        .with_database(db)
-        .with_bundle_prestate(bundle)
-        .with_bundle_update()
-        .build();
+    let mut state = execution_state.state_for_db(db);
 
     // 2. Create the block builder
-    let mut builder = block_builder(&mut state, transactions.clone(), receipts, gas_used, ctx)?;
+    let mut builder = block_builder(&mut state, &mut execution_state, ctx)?;
 
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
     // will already be in the [`BundleState`] at this point if the `best_payload` is set.
@@ -340,55 +343,19 @@ where
         ctx.execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?
     } else {
-        // bundle is non-empty - execute any transactions from the attributes that do not exist on the `best_payload`
-        let unexecuted_txs: Vec<Recovered<OpTxEnvelope>> = ctx
-            .attributes()
-            .sequencer_transactions()
-            .iter()
-            .filter_map(|attr_tx| {
-                let tx_hash = attr_tx.1.hash();
-                if !transactions.iter().any(|tx| *tx.hash() == *tx_hash) {
-                    Some(attr_tx.1.clone().try_into_recovered().map_err(|_| {
-                        PayloadBuilderError::Other(eyre!("tx recovery failed").into())
-                    }))
-                } else {
-                    None
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut execution_info = ExecutionInfo::default();
-        let base_fee = builder.evm_mut().block().basefee;
-
-        for tx in unexecuted_txs {
-            match builder.execute_transaction(tx.clone()) {
-                Ok(gas_used) => {
-                    execution_info.cumulative_gas_used += gas_used;
-                    execution_info.cumulative_da_bytes_used += tx.length() as u64;
-
-                    if !tx.is_deposit() {
-                        let miner_fee = tx
-                            .effective_tip_per_gas(base_fee)
-                            .expect("fee is always valid; execution succeeded");
-                        execution_info.total_fees += U256::from(miner_fee) * U256::from(gas_used);
-                    }
-                }
-
-                Err(e) => {
-                    error!(target: "flashblocks::payload_builder", %e, "spend nullifiers transaction failed")
-                }
-            }
-        }
-
-        execution_info
+        ExecutionInfo::default()
     };
 
     // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
     // flashblocks
     if !ctx.attributes().no_tx_pool {
         let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-        let mut best_txns = BestPayloadTxns::new(best_txs)
-            .with_prev(transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>());
+        let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(
+            execution_state
+                .executor_transactions_iter()
+                .map(|tx| *tx.hash())
+                .collect(),
+        );
 
         if ctx
             .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
@@ -398,7 +365,7 @@ where
             if let Some(best_payload) = committed_payload {
                 // we can return the previous best payload since we didn't include any new txs
                 return Ok((
-                    BuildOutcomeKind::Freeze(best_payload),
+                    BuildOutcomeKind::Freeze(best_payload.clone()),
                     FlashblockAccessList::default(),
                 ));
             } else {
@@ -420,7 +387,7 @@ where
 
     // 6. Build the block
     let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
-    info!(target: "test_target", "built new payload with {} transactions, {:#?}", build_outcome.block.body().transactions().count(), access_list.changes.len());
+    info!(target: "test_target", "built new payload with {} transactions, receipts {:#?}", build_outcome.block.body().transactions().count(), build_outcome.execution_result.receipts.len());
 
     // 7. Seal the block
     let BlockBuilderOutcome {
@@ -450,7 +417,7 @@ where
     let payload = OpBuiltPayload::new(
         ctx.payload_id(),
         sealed_block,
-        info.total_fees + fees,
+        info.total_fees + execution_state.committed_state.fees,
         Some(executed_block),
     );
 
@@ -466,14 +433,12 @@ where
 }
 
 #[expect(clippy::type_complexity)]
-fn block_builder<'a, Ctx, DB, N, Tx>(
-    db: &'a mut State<DB>,
-    transactions: Vec<Recovered<N::SignedTx>>,
-    receipts: Vec<N::Receipt>,
-    cumulative_gas_used: Option<u64>,
+fn block_builder<'a, Ctx, DB, R, N, Tx>(
+    state: &'a mut State<DB>,
+    execution_state: &mut BalExecutionState<R>,
     ctx: &'a Ctx,
 ) -> Result<
-    FlashblocksBlockBuilder<'a, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+    FlashblocksBlockBuilder<'a, R, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where
@@ -482,67 +447,26 @@ where
         Block = alloy_consensus::Block<OpTransactionSigned>,
         BlockHeader = alloy_consensus::Header,
         Receipt = OpReceipt,
+        SignedTx = OpTransactionSigned,
     >,
-    DB: reth_evm::Database + 'a,
-    DB::Error: Send + Sync + 'static,
+    DB: reth_evm::Database + Send + Sync + 'a,
+    DB::Error: Send + Sync + 'a,
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
-    let attributes = OpNextBlockEnvAttributes {
-        timestamp: ctx.attributes().timestamp(),
-        suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
-        prev_randao: ctx.attributes().prev_randao(),
-        gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
-        parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
-        extra_data: if ctx
-            .spec()
-            .is_holocene_active_at_timestamp(ctx.attributes().timestamp())
-        {
-            ctx.attributes()
-                .get_holocene_extra_data(
-                    ctx.spec()
-                        .base_fee_params_at_timestamp(ctx.attributes().timestamp()),
-                )
-                .map_err(PayloadBuilderError::other)?
-        } else {
-            Default::default()
-        },
-    };
-
-    // Prepare EVM environment.
-    let evm_env = ctx
-        .evm_config()
-        .next_evm_env(ctx.parent(), &attributes)
-        .map_err(PayloadBuilderError::other)?;
-
-    // Prepare EVM.
-    let evm = ctx.evm_config().evm_with_env(db, evm_env);
-
-    // Prepare block execution context.
-    let execution_ctx = ctx
-        .evm_config()
-        .context_for_next_block(ctx.parent(), attributes)
-        .map_err(PayloadBuilderError::other)?;
-
-    let min_tx_index = receipts.len() as u64;
-
-    let mut executor = BalBuilderBlockExecutor::new(
-        evm,
-        execution_ctx.clone(),
-        ctx.spec().clone(),
-        OpRethReceiptBuilder::default(),
-    )
-    .with_receipts(receipts)
-    .with_min_tx_index(min_tx_index);
-
-    if let Some(cumulative_gas_used) = cumulative_gas_used {
-        executor = executor.with_gas_used(cumulative_gas_used)
-    }
+    let executor = execution_state.basic_executor(ctx.spec().clone().into(), R::default(), state);
+    let committed_transactions = execution_state
+        .committed_state
+        .transactions
+        .iter()
+        .map(|(_, tx)| tx.clone())
+        .collect::<Vec<_>>();
 
     Ok(FlashblocksBlockBuilder::new(
-        execution_ctx,
+        execution_state.execution_context.clone(),
         ctx.parent(),
         executor,
-        transactions,
+        committed_transactions,
         Arc::new(ctx.spec().clone()),
     ))
 }

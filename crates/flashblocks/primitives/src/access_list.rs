@@ -5,6 +5,7 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
     db::{states::StorageSlot, AccountStatus, BundleAccount, TransitionState},
+    primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
 use serde::{Deserialize, Serialize};
@@ -207,6 +208,11 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
                 code: Some(Bytecode::new_raw(latest_code_changes.clone())),
             };
 
+            let is_empty = latest_balance_change.is_zero()
+                && latest_nonce_change == 0
+                && code_hash == KECCAK_EMPTY
+                && account_info.code == Some(Bytecode::default());
+
             let bundle_account = BundleAccount {
                 info: Some(account_info),
                 original_info: None,
@@ -214,8 +220,10 @@ impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
                 status: AccountStatus::Changed,
             };
 
-            // Insert or update the account in the resulting map.
-            result.insert(address, bundle_account);
+            if !is_empty || !bundle_account.storage.is_empty() {
+                // Insert or update the account in the resulting map.
+                result.insert(address, bundle_account);
+            }
         }
 
         result

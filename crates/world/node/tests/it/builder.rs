@@ -4,6 +4,7 @@ use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
 use world_chain_node::{
+    args::NodeContextType,
     context::{BasicContext, FlashblocksContext},
     node::WorldChainNode,
 };
@@ -14,7 +15,7 @@ fn test_basic_flashblocks_setup() {
     // parse CLI -> config
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
-    let node = WorldChainNode::<FlashblocksContext>::new(test_config());
+    let node = WorldChainNode::<FlashblocksContext>::new(test_config(NodeContextType::Flashblocks));
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types_and_provider::<WorldChainNode<FlashblocksContext>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<FlashblocksContext>, _>>>()
@@ -43,7 +44,7 @@ fn test_basic_setup() {
     // parse CLI -> config
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
-    let node = WorldChainNode::<BasicContext>::new(test_config());
+    let node = WorldChainNode::<BasicContext>::new(test_config(NodeContextType::Basic));
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types_and_provider::<WorldChainNode<BasicContext>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<BasicContext>, _>>>()
