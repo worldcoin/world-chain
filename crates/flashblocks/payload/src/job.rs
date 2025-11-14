@@ -487,6 +487,7 @@ where
                     .payload()
                     .is_none_or(|p| p.block().hash() != payload.block().hash())
                 {
+                    // Q: I don't think this trace log is correct, am I right?
                     trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, skipping publish");
 
                     // publish the new payload to the p2p network
@@ -532,6 +533,8 @@ where
                             .is_none_or(|p| p.block().hash() != payload.block().hash())
                         {
                             this.cached_reads = Some(cached_reads);
+                            // Q: why we don't check if `this.best_payload` contains a `PayloadState::Freeze`?
+                            // Shouldn't we update the `best_paylaod` only if it's not frozen?
                             this.best_payload = (PayloadState::Best(payload), Some(access_list));
                         }
                     }

@@ -482,6 +482,8 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                     authorization,
                     ..
                 } => {
+                    // Q: is this comment correct? It seems a copy paste from the `handle_start_publish` fn
+                    // but the context here is different.
                     // We are currently waiting to build, but someone else is requesting to build
                     // This could happen during a double failover.
                     // We have a potential race condition here so we'll just wait for the

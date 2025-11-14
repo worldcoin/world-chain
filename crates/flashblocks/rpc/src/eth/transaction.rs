@@ -66,6 +66,7 @@ where
             let pending_block = this.local_pending_block().await?;
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
                 if let Some(pos) = block
+                    // we may probably not clone here, even though it's an arc, so it's a cheap clone
                     .clone()
                     .body()
                     .transactions_iter()

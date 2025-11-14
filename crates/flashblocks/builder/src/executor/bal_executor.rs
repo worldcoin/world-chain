@@ -15,7 +15,7 @@ use reth_evm::{
     ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
@@ -357,6 +357,10 @@ where
 
         let (r_0, r_1) = rayon::join(
             || self.verify_block(state_provider.clone(), diff.clone()),
+            // Q: the compute state root fn only takes in input the bundle to compute the state root
+            // but it doesn't take the bundle state originated by the `verify_block` fn...
+            // so we're only checking that the BAL has been computed correctly, but we're not ensuring
+            // that the state root of the flashblock is the same as the one contained in the BAL / diff
             || compute_state_root(state_provider.clone(), &bundle),
         );
 

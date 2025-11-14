@@ -320,6 +320,7 @@ where
                 Duration::from_millis(flashblocks_args.recommit_interval),
             ))
             .network(fb_network_builder)
+            // Q: we can definitely remove the following line. It's a duplicate, see above!
             .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }

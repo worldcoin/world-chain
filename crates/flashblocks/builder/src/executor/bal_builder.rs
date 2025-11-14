@@ -295,6 +295,10 @@ where
             access_list,
         };
 
+        // Q: the inner.finish() fn repeats the increment balances and call state hook with changes due to
+        // balance increments, is it correct to do it twice?
+        // - one above in this fn
+        // - and one in the inner.finish() fn
         let (e, res) = inner.finish()?;
 
         Ok((e, res, data, min_tx_index.into(), block_access_index.into()))

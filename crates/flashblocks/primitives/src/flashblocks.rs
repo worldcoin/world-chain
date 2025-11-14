@@ -155,6 +155,8 @@ impl Flashblock {
 }
 
 impl Flashblock {
+    // Q: I'd add a doc comment to this function, explaining that it takes a list of flashblocks
+    // in input and returns a single flashblock that contains data included in all flashblocks in the list.
     pub fn reduce(flashblocks: Flashblocks) -> eyre::Result<Flashblock> {
         let mut iter = flashblocks.0.into_iter();
         let mut acc = iter.next().ok_or(eyre!("flashblocks is empty"))?.flashblock;
