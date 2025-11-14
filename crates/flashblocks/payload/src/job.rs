@@ -18,7 +18,7 @@ use flashblocks_primitives::{
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
-    api::{PayloadBuilderError, PayloadKind},
+    api::{BlockBody, PayloadBuilderError, PayloadKind},
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -151,11 +151,23 @@ where
         payload: &OpBuiltPayload<OpPrimitives>,
         prev: &Option<OpBuiltPayload<OpPrimitives>>,
     ) -> eyre::Result<()> {
-        let offset = prev
+        let tx_offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
+        let withdrawals_offset = prev.as_ref().map_or(0, |p| {
+            p.block()
+                .body()
+                .withdrawals()
+                .map_or(0, |withdrawals| withdrawals.len())
+        });
 
-        let flashblock = Flashblock::new(payload, self.config.clone(), self.block_index, offset);
+        let flashblock = Flashblock::new(
+            payload,
+            self.config.clone(),
+            self.block_index,
+            tx_offset,
+            withdrawals_offset,
+        );
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
         let authorized_payload = self.authorization_for(flashblock.into_flashblock())?;

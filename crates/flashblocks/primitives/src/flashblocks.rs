@@ -32,6 +32,7 @@ impl Flashblock {
         config: PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
         index: u64,
         transactions_offset: usize,
+        withdrawal_offset: usize,
     ) -> Self {
         let block = payload.block();
         let fees = payload.fees();
@@ -74,7 +75,7 @@ impl Flashblock {
                 withdrawals
                     .into_iter()
                     .cloned()
-                    .skip(transactions_offset)
+                    .skip(withdrawal_offset)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
