@@ -155,6 +155,8 @@ impl Flashblock {
                 acc.base = next.flashblock.base;
             }
 
+            acc.index = next.flashblock.index;
+
             acc.metadata.fees = next.flashblock.metadata.fees;
             acc.metadata.flashblock_timestamp = next.flashblock.metadata.flashblock_timestamp;
 
