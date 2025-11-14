@@ -447,10 +447,10 @@ where
             }
 
             // check if the new payload is even more valuable
-            if !ctx.is_better_payload(info.total_fees) {
+            if !ctx.is_better_payload(info.total_fees + fees) {
                 // can skip building the block
                 return Ok(BuildOutcomeKind::Aborted {
-                    fees: info.total_fees,
+                    fees: info.total_fees + fees,
                 });
             }
         }
