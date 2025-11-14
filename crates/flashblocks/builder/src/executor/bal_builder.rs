@@ -345,6 +345,8 @@ where
         }
 
         // Nonce Changes
+        // Q: why we don't check if account.info.nonce != initial_account.nonce
+        // and only updates account_changes.nonce_changes if they're different?
         account_changes
             .nonce_changes
             .insert(index, account.info.nonce);

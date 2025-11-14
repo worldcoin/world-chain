@@ -532,6 +532,8 @@ where
                             .is_none_or(|p| p.block().hash() != payload.block().hash())
                         {
                             this.cached_reads = Some(cached_reads);
+                            // Q: why we don't check if `this.best_payload` contains a `PayloadState::Freeze`?
+                            // Shouldn't we update the `best_paylaod` only if it's not frozen?
                             this.best_payload = (PayloadState::Best(payload), Some(access_list));
                         }
                     }

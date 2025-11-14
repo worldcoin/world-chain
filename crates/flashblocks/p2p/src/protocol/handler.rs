@@ -455,6 +455,11 @@ impl FlashblocksHandle {
             .into_iter()
             .map_while(|x| x);
 
+        // Q: I don't really get why we need both flashblock_tx and the state.flashblocks.
+        // they basically "hold" the same data, with the difference of course that the former is a channel.
+        // And since here we're chaining them together into a single future, then what's the real need
+        // for the flashblock_tx channel?
+
         let receiver = self.ctx.flashblock_tx.subscribe();
 
         let current = stream::iter(flashblocks);
@@ -574,6 +579,7 @@ impl FlashblocksP2PCtx {
                 .expect("time went backwards");
 
             // Broadcast any flashblocks in the cache that are in order
+            // Q: is it possible that this while loop is executed more than once?
             while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
                 // Publish the flashblock
                 debug!(

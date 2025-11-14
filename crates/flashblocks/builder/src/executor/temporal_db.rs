@@ -39,6 +39,11 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                 for slot in storage_change.changes {
                     let storage_entry = cache.account_storage.entry(change.address).or_default();
                     storage_entry.insert(
+                        // Q: is the +1 due to the fact that alloy starts from 0 while we start from 1
+                        // (excluding pre execution changes that have index = 0)
+                        // ANSWER: the +1 is because we're creating a `TemporalState` that
+                        // will act as db. So we're essentially saying that tx `block_access_index + 1`
+                        // will need to use as storage value the value that has been updated during the previous tx
                         slot.block_access_index + 1,
                         storage_change.slot.into(),
                         slot.new_value.into(),
