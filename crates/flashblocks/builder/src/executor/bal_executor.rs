@@ -283,7 +283,7 @@ where
         Self: Sized,
         R: Clone + Send + Sync + 'static,
     {
-        let db = StateProviderDatabase::new(state_provider);
+        let db = StateProviderDatabase::new(state_provider.clone());
 
         let expected_access_list_data = diff
             .access_list_data
@@ -291,16 +291,19 @@ where
 
         let mut state = self.execution_state.state_for_db(db);
 
-        let chain_spec = self.chain_spec.clone();
-        let receipt_builder = self.receipt_builder.clone();
-
-        let executor = self
-            .execution_state
-            .basic_executor(chain_spec, receipt_builder, &mut state);
+        let executor = self.execution_state.basic_executor(
+            self.chain_spec.clone(),
+            self.receipt_builder.clone(),
+            &mut state,
+        );
 
         let executor_state = Arc::new(&self.execution_state);
-        let (bundle, result, env, context, fees) =
-            executor.execute_block_parallel(executor_state, expected_access_list_data)?;
+
+        let (bundle, result, env, context, fees) = executor.execute_block_parallel(
+            executor_state,
+            expected_access_list_data,
+            state_provider,
+        )?;
 
         Ok((
             bundle,

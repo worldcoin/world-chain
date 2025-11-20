@@ -59,7 +59,11 @@ mod tests {
     use flashblocks_primitives::access_list::FlashblockAccessListData;
     use reth::revm::State;
 
-    use revm::{database::InMemoryDB, primitives::KECCAK_EMPTY, DatabaseRef};
+    use revm::{
+        database::{BundleState, InMemoryDB},
+        primitives::KECCAK_EMPTY,
+        DatabaseRef,
+    };
     use serde_json::json;
 
     use crate::executor::temporal_db::TemporalDbFactory;
@@ -1063,7 +1067,8 @@ mod tests {
         let access_list = serde_json::from_value::<FlashblockAccessListData>(access_list).unwrap();
         let database = InMemoryDB::default();
 
-        let database = TemporalDbFactory::new(&database, access_list.access_list.clone());
+        let bundle = BundleState::default();
+        let database = TemporalDbFactory::new(&database, access_list.access_list.clone(), &bundle);
 
         // Test at block access index 3 - should see values < 3 (i.e., indices 0, 1, 2)
         let db = database.db(3);

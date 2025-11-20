@@ -8,7 +8,7 @@ use alloy_op_evm::{
 use alloy_primitives::{keccak256, Address};
 use flashblocks_primitives::access_list::FlashblockAccessListData;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::revm::State;
+use reth::revm::{database::StateProviderDatabase, State};
 
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
@@ -22,7 +22,7 @@ use reth_evm::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_provider::BlockExecutionResult;
+use reth_provider::{BlockExecutionResult, ProviderError, StateProvider};
 use revm::{
     context::{
         result::{ExecResultAndState, ExecutionResult, ResultAndState},
@@ -32,6 +32,7 @@ use revm::{
     state::{Account, AccountInfo, EvmState},
     DatabaseCommit, DatabaseRef,
 };
+use revm_database_interface::WrapDatabaseRef;
 
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},
@@ -158,6 +159,10 @@ where
     /// Returns a reference to [`FlashblockAccessListConstruction`].
     pub fn access_list(&self) -> &FlashblockAccessListConstruction {
         &self.flashblock_access_list
+    }
+
+    pub fn access_list_mut(&mut self) -> &mut FlashblockAccessListConstruction {
+        &mut self.flashblock_access_list
     }
 
     /// Takes ownership of the [`FlashblockAccessListConstruction`]
@@ -377,6 +382,7 @@ where
         mut self,
         execution_state: Arc<&BalExecutionState<R>>,
         expected_access_list: FlashblockAccessListData,
+        state_provider: impl StateProvider + Clone + 'static,
     ) -> Result<
         (
             BundleState,
@@ -395,16 +401,16 @@ where
             self.apply_pre_execution_changes()?;
         }
 
-        let mut present_access_list = self.take_access_list();
         let present_gas_used = self.inner.gas_used;
-        let (db, env) = self.inner.evm.finish();
 
-        let database = db.database.clone();
-        let present_bundle = db.take_bundle();
+        let database = Arc::new(StateProviderDatabase::new(state_provider));
+        let bundle_state = self.evm().db().bundle_state.clone();
 
-        let mut present_receipts = core::mem::take(&mut self.inner.receipts);
-        let temporal_db_factory =
-            TemporalDbFactory::new(&database, expected_access_list.access_list.clone());
+        let temporal_db_factory = TemporalDbFactory::new(
+            &database,
+            expected_access_list.access_list.clone(),
+            &bundle_state,
+        );
 
         let context = self.inner.ctx.clone();
         let receipt_builder = self.inner.receipt_builder.clone();
@@ -419,10 +425,8 @@ where
             index: BlockAccessIndex,
         }
 
-        let execution_state_arc = Arc::new(execution_state);
-        let execution_transactions = execution_state_arc.executor_transactions.clone();
-
-        let base_fee = env.block_env().basefee;
+        let execution_transactions = execution_state.executor_transactions.clone();
+        let base_fee = execution_state.evm_env.block_env().basefee;
 
         let mut results: Vec<_> = execution_transactions
             .into_par_iter()
@@ -431,13 +435,13 @@ where
 
                 let mut state = State::builder()
                     .with_database_ref(temporal_db)
-                    .with_bundle_prestate(present_bundle.clone())
                     .with_bundle_update()
                     .build();
 
-                let evm = OpEvmFactory::default().create_evm(&mut state, env.clone());
+                let evm =
+                    OpEvmFactory::default().create_evm(&mut state, execution_state.evm_env.clone());
 
-                let mut executor = execution_state_arc.executor_at_index(
+                let mut executor = execution_state.executor_at_index(
                     self.inner.spec.clone(),
                     receipt_builder.clone(),
                     evm,
@@ -495,39 +499,42 @@ where
             },
         );
 
+        let database = self.evm_mut().db_mut();
+
         // Apply merged transitions to the main executor
-        db.apply_transition(merged_result.transitions.into_iter().collect());
+        database.apply_transition(merged_result.transitions.into_iter().collect());
+
         let ref_db = temporal_db_factory.db(merged_result.index as u64 + 1);
 
         let mut state = State::builder()
             .with_database_ref(ref_db)
-            .with_bundle_prestate(present_bundle)
             .with_bundle_update()
             .build();
 
         state.apply_transition(
-            db.transition_state
+            database
+                .transition_state
                 .take()
                 .map(|t| t.transitions.into_iter().collect())
                 .unwrap_or_default(),
         );
 
-        present_receipts.extend_from_slice(&merged_result.receipts);
-        present_access_list.merge(merged_result.access_list);
+        // update the database ref
+        // database = &mut state;
+        // TODO: Override state
 
-        let executor = BalBuilderBlockExecutor::new(
-            OpEvmFactory::default().create_evm(&mut state, env),
-            self.inner.ctx,
-            self.inner.spec,
-            self.inner.receipt_builder,
-        )
-        .with_access_list(present_access_list)
-        .with_receipts(present_receipts)
-        .with_block_access_index(merged_result.index + 1)
-        .with_gas_used(merged_result.gas_used);
+        self.inner
+            .receipts
+            .extend_from_slice(&merged_result.receipts);
+
+        self.access_list_mut().merge(merged_result.access_list);
+
+        let this = self
+            .with_block_access_index(merged_result.index + 1)
+            .with_gas_used(merged_result.gas_used);
 
         let (evm, result, access_list, _min_tx_index, _max_tx_index) =
-            executor.finish_with_access_list()?;
+            this.finish_with_access_list()?;
 
         if access_list.access_list_hash != expected_access_list.access_list_hash {
             std::fs::write(
