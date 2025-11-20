@@ -66,7 +66,6 @@ where
             let pending_block = this.local_pending_block().await?;
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
                 if let Some(pos) = block
-                    .clone()
                     .body()
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)

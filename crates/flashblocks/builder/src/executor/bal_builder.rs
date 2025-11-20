@@ -1,11 +1,11 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{Header, Transaction, TxReceipt};
 use alloy_eips::{eip2935::HISTORY_STORAGE_ADDRESS, eip4788::BEACON_ROOTS_ADDRESS, Encodable2718};
 use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory,
 };
-use alloy_primitives::{keccak256, Address, U256};
+use alloy_primitives::{keccak256, Address};
 use flashblocks_primitives::access_list::FlashblockAccessListData;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth::revm::State;
@@ -294,8 +294,21 @@ where
             access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
             access_list,
         };
+        let legacy_gas_used = inner
+            .receipts
+            .last()
+            .map(|r| r.cumulative_gas_used())
+            .unwrap_or_default();
 
-        let (e, res) = inner.finish()?;
+        let (e, res) = (
+            inner.evm,
+            BlockExecutionResult {
+                receipts: inner.receipts,
+                requests: Default::default(),
+                gas_used: legacy_gas_used,
+                blob_gas_used: inner.da_footprint_used,
+            },
+        );
 
         Ok((e, res, data, min_tx_index.into(), block_access_index.into()))
     }

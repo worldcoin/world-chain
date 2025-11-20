@@ -15,7 +15,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 
 use crate::executor::bal_executor::BalBlockValidator;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -181,7 +181,7 @@ where
     let FlashblocksExecutionCoordinatorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        ref mut payload_events,
+        payload_events: _,
     } = *coordinator.inner.write();
 
     let flashblock = Flashblock { flashblock };

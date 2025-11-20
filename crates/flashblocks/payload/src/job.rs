@@ -487,7 +487,7 @@ where
                     .payload()
                     .is_none_or(|p| p.block().hash() != payload.block().hash())
                 {
-                    trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, skipping publish");
+                    trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, publishing payload");
 
                     // publish the new payload to the p2p network
                     if let Err(err) = this.publish_payload(

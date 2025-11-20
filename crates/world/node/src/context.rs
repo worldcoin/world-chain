@@ -320,7 +320,6 @@ where
                 Duration::from_millis(flashblocks_args.recommit_interval),
             ))
             .network(fb_network_builder)
-            .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 
