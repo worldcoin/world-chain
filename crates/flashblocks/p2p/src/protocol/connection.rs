@@ -482,12 +482,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                     authorization,
                     ..
                 } => {
-                    // Q: is this comment correct? It seems a copy paste from the `handle_start_publish` fn
-                    // but the context here is different.
-                    // We are currently waiting to build, but someone else is requesting to build
-                    // This could happen during a double failover.
-                    // We have a potential race condition here so we'll just wait for the
-                    // build request override to kick in next block.
+                    // We are currently waiting to build, and someone else is requesting to stop building.
                     tracing::info!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,

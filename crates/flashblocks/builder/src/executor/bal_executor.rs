@@ -356,15 +356,11 @@ where
             .into();
 
         let (r_0, r_1) = rayon::join(
+            // Inside `self.verify_block` we assert that the block access list produced by this BalBlockValidator
+            // matches the expected list embedded in `diff`. If they differ we return a BalExecutorError, ensuring
+            // that the expected list is safe to feed into `compute_state_root` and will yield the same state root
+            // as the one derived from the executor-built block.
             || self.verify_block(state_provider.clone(), diff.clone()),
-            // Q: the compute state root fn only takes in input the bundle to compute the state root
-            // but it doesn't take the bundle state originated by the `verify_block` fn...
-            // so we're only checking that the BAL has been computed correctly, but we're not ensuring
-            // that the state root of the flashblock is the same as the one contained in the BAL / diff
-            // ANSWER: inside `self.verify_block` we assert that the block access list created by the executor
-            // and the expected one must match. If they don't match, we return an error. By doing it,
-            // we ensure that the two BALs are equal, so we can use the expected one to compute the state root,
-            // as it'll be the same state root computed from the block computed by the executor.
             || compute_state_root(state_provider.clone(), &bundle),
         );
 

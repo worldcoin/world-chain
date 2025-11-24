@@ -447,6 +447,8 @@ impl FlashblocksHandle {
     /// The stream will continue to yield flashblocks for consecutive payloads as well, so
     /// consumers should take care to handle the stream appropriately.
     pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
+        // Seed the stream with already-buffered contiguous flashblocks, then rely on the broadcast
+        // channel for future ones so ordering stays strict even if inserts arrive out of order.
         let flashblocks = self
             .state
             .lock()
@@ -454,11 +456,6 @@ impl FlashblocksHandle {
             .clone()
             .into_iter()
             .map_while(|x| x);
-
-        // Q: I don't really get why we need both flashblock_tx and the state.flashblocks.
-        // they basically "hold" the same data, with the difference of course that the former is a channel.
-        // And since here we're chaining them together into a single future, then what's the real need
-        // for the flashblock_tx channel?
 
         let receiver = self.ctx.flashblock_tx.subscribe();
 
@@ -579,7 +576,6 @@ impl FlashblocksP2PCtx {
                 .expect("time went backwards");
 
             // Broadcast any flashblocks in the cache that are in order
-            // Q: is it possible that this while loop is executed more than once?
             while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
                 // Publish the flashblock
                 debug!(
