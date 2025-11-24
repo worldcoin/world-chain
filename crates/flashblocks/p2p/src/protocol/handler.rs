@@ -447,6 +447,8 @@ impl FlashblocksHandle {
     /// The stream will continue to yield flashblocks for consecutive payloads as well, so
     /// consumers should take care to handle the stream appropriately.
     pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
+        // Seed the stream with already-buffered contiguous flashblocks, then rely on the broadcast
+        // channel for future ones so ordering stays strict even if inserts arrive out of order.
         let flashblocks = self
             .state
             .lock()

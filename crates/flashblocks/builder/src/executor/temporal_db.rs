@@ -39,6 +39,10 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
                 for slot in storage_change.changes {
                     let storage_entry = cache.account_storage.entry(change.address).or_default();
                     storage_entry.insert(
+                        // We add 1 to the index because this `TemporalState` acts as the DB,
+                        // meaning tx `block_access_index + 1` must read the storage value written
+                        // by the previous transactions, not itself.
+                        // The same reasoning applies to below indexes.
                         slot.block_access_index + 1,
                         storage_change.slot.into(),
                         slot.new_value.into(),
