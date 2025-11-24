@@ -13,7 +13,7 @@ use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_provider::{HeaderProvider, StateProviderFactory};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use tracing::{error, trace};
 
@@ -211,14 +211,18 @@ where
         flashblocks.base()
     };
 
+    let timeout = Duration::from_secs(2);
+    let now = std::time::Instant::now();
     let sealed_header = loop {
         match provider.sealed_header_by_hash(base.parent_hash) {
             Ok(Some(header)) => break header,
             _ => {
-                trace!(
-                    parent_hash = %base.parent_hash,
-                    "waiting for parent sealed header to be available"
-                );
+                if now.elapsed() > timeout {
+                    return Err(eyre::eyre::eyre!(
+                        "timed out waiting for parent header {}",
+                        base.parent_hash
+                    ));
+                }
             }
         }
     };

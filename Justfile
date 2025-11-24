@@ -5,13 +5,14 @@ default:
     @just --list
 
 # Spawns the devnet
-devnet-up: deploy-devnet deploy-contracts
+devnet-up build_image="true": (deploy-devnet build_image) deploy-contracts
 
-deploy-devnet: build
-  @just ./devnet/devnet-up
+deploy-devnet build_image:
+    if {{ build_image }}; then just build; fi
+    @just ./devnet/devnet-up
 
 build:
-  docker buildx build -t world-chain:latest .
+    docker buildx build -t world-chain:latest .
 
 deploy-contracts:
   @just ./contracts/deploy-contracts
@@ -20,8 +21,8 @@ deploy-contracts:
 devnet-down:
   @just ./devnet/devnet-down
 
-test: 
-  cargo nextest run --workspace
+test *args='': 
+  cargo nextest run --workspace $@
 
 # Formats the whole workspace
 fmt: devnet-fmt contracts-fmt fmt-fix fmt-check

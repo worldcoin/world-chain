@@ -683,6 +683,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    
     let eip1559 = encode_holocene_extra_data(
         Default::default(),
         nodes[0]
@@ -691,6 +692,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
             .chain_spec()
             .base_fee_params_at_timestamp(timestamp),
     )?;
+
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp: 1756929279,
@@ -722,7 +724,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
     let pending_hash =
-        fixed_bytes!("f8e1bed42c0ef37d2452900e0fcdd638b857136651c91dd2f6492ceb56b44923");
+        fixed_bytes!("0x080d3c4547e6f4133dfe28bfd35511e16add1778a8904dd6f65a30c79803c635");
 
     let eth_block_by_hash = crate::actions::EthGetBlockByHash::new(pending_hash, vec![0], 230, tx);
     let mut action = crate::actions::EthApiAction::new(mine_block, eth_block_by_hash);

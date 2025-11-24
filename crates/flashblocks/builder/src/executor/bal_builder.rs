@@ -32,7 +32,6 @@ use revm::{
     state::{Account, AccountInfo, EvmState},
     DatabaseCommit, DatabaseRef,
 };
-use revm_database_interface::WrapDatabaseRef;
 
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},
