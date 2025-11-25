@@ -615,7 +615,7 @@ where
     let FlashblocksStateExecutorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        ref mut payload_events,
+        ..
     } = *state_executor.inner.write();
 
     let flashblock = Flashblock { flashblock };
