@@ -31,10 +31,10 @@ jobs:
           - build: install
             bin: world-chain
             features: jemalloc
-            chain: base
-            tip: "0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7"
+            chain: worldchain
+            tip: "0x836c22335a115e76cb023f53de6fa7e17fc1c5bf3c207bae288084dba5343913"
             block: 10000
-            unwind-target: "0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de"
+            unwind-target: "0x1d96529e90b51b2184c7f4905d9a0df6668147ab10c7c08204802be2a9deee38"
         # TODO: Add World Chain Mainnet
     steps:
       - uses: actions/checkout@v4
@@ -51,11 +51,7 @@ jobs:
             --chain ${{ matrix.chain.chain }} \
             --debug.tip ${{ matrix.chain.tip }} \
             --debug.max-block ${{ matrix.chain.block }} \
-            --debug.terminate \
-            --builder.pbh_entrypoint 0x7a2088a1bFc9d81c55368AE168C2C02570cB814F \
-            --builder.signature_aggregator 0x09635F643e140090A9A8Dcd712eD6285858ceBef \
-            --builder.private_key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-            --builder.world_id 0x5FbDB2315678afecb367f032d93F642f64180aa3
+            --debug.terminate
 
       - name: Verify the target block hash
         run: |

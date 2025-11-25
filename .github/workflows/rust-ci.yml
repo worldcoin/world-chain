@@ -15,7 +15,7 @@ env:
 
 jobs:
   cargo-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-32core
     steps:
       - uses: actions/checkout@v5
       - uses: taiki-e/install-action@just
