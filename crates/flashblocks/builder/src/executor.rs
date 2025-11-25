@@ -723,10 +723,10 @@ where
     *latest_payload = Some((payload.clone(), index));
     pending_block.send_replace(payload.executed_block());
 
-    state_executor.broadcast_payload(
-        Events::BuiltPayload(payload.clone()),
-        payload_events.clone(),
-    )?;
+    // state_executor.broadcast_payload(
+    //     Events::BuiltPayload(payload.clone()),
+    //     payload_events.clone(),
+    // )?;
 
     Ok(())
 }
