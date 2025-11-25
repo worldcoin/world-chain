@@ -6,6 +6,8 @@ use std::{
 };
 
 use alloy_primitives::{keccak256, ruint::aliases::U256, B256};
+#[cfg(test)]
+use alloy_primitives::{map::HashMap, Address};
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
@@ -16,12 +18,18 @@ use flashblocks_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
 };
+#[cfg(test)]
+use reth::{
+    payload::PayloadId,
+    revm::db::{BundleAccount, BundleState},
+};
 use std::task::ready;
 
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BuiltPayload, PayloadBuilderError, PayloadKind},
+    core::primitives::AlloyBlockHeader,
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -41,6 +49,9 @@ use tokio::{
 use tracing::{debug, error, info, span, trace};
 
 use crate::metrics::PayloadBuilderMetrics;
+
+#[cfg(feature = "test")]
+use flashblocks_builder::test::BlockContext;
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
@@ -350,6 +361,22 @@ where
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
+        #[cfg(test)]
+        self.record_block_context(
+            payload.block().number(),
+            self.block_index,
+            Some(BlockContext {
+                bundle: payload
+                    .executed_block()
+                    .unwrap()
+                    .execution_output
+                    .bundle
+                    .state
+                    .clone(),
+                access_list: access_list.clone(),
+            }),
+        );
+
         let flashblock = Flashblock::new(
             payload,
             &self.config,
@@ -392,6 +419,13 @@ where
 
         self.metrics
             .record_payload_metrics(payload_bytes as u64, gas_used, tx_count);
+    }
+
+    #[cfg(feature = "test")]
+    pub fn record_block_context(&self, number: u64, index: u64, executed: Option<BlockContext>) {
+        use flashblocks_builder::test::record_executed;
+
+        record_executed(number, index, executed);
     }
 }
 

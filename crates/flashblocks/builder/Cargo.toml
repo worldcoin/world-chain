@@ -84,3 +84,6 @@ alloy-signer-local.workspace = true
 reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-storage-api.workspace = true
+
+[features]
+test = []

@@ -1,13 +1,25 @@
+use alloy_consensus::Header;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, TxSignerSync};
 use alloy_primitives::{address, Address, Sealed};
+use alloy_rpc_types::TransactionRequest;
 use eyre::eyre::eyre;
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth::{
     api::TreeConfig,
     args::PayloadBuilderArgs,
     builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
+    chainspec::EthChainSpec,
     network::PeersHandleProvider,
+    rpc::{
+        api::{
+            eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
+            EthApiClient,
+        },
+        compat::RpcConverter,
+        eth::EthApiTypes,
+    },
     tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
@@ -15,25 +27,32 @@ use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
 };
 use reth_node_api::{
-    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes,
+    BlockTy, FullNodeComponents, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadTypes,
 };
 use reth_node_builder::{
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    NodeComponents, NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcRegistry},
+    AddOns, NodeComponents, NodeComponentsBuilder,
 };
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_node::OpEngineTypes;
-use reth_optimism_primitives::OpPrimitives;
-use reth_provider::providers::{BlockchainProvider, ChainStorage};
+use reth_optimism_node::{OpEngineTypes, OpNode};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_rpc::{eth::ext::OpEthExtApi, OpEthApi};
+use reth_primitives::EthereumHardforks;
+use reth_provider::{
+    providers::{BlockchainProvider, ChainStorage},
+    BlockReader,
+};
 use revm_primitives::{Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
+    num,
     ops::Range,
     sync::{Arc, LazyLock},
     time::Duration,
 };
-use tracing::span;
+use tracing::{error, info, span, trace};
 use world_chain_node::{
     args::NodeContextType,
     context::FlashblocksContext,
@@ -41,8 +60,8 @@ use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
 };
 use world_chain_test::{
-    node::test_config_with_peers_and_gossip,
-    utils::{account, tree_root},
+    node::{test_config_with_peers_and_gossip, tx},
+    utils::{account, signer, tree_root},
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT,
 };
 
@@ -118,6 +137,7 @@ pub async fn setup<T>(
     Vec<WorldChainTestingNodeContext<T>>,
     TaskManager,
     Environment<OpEngineTypes>,
+    TxSpammer,
 )>
 where
     T: WorldChainTestContextBounds,
@@ -137,6 +157,7 @@ pub async fn setup_with_tx_peers<T>(
     Vec<WorldChainTestingNodeContext<T>>,
     TaskManager,
     Environment<OpEngineTypes>,
+    TxSpammer,
 )>
 where
     T: WorldChainTestContextBounds,
@@ -175,6 +196,8 @@ where
     let mut environment = Environment::default();
     let mut node_contexts =
         Vec::<WorldChainTestingNodeContext<T>>::with_capacity(num_nodes as usize);
+
+    let mut spammer = TxSpammer::new(10);
 
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
@@ -269,14 +292,16 @@ where
         let rpc = node
             .rpc_client()
             .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
+
         let auth = node.auth_server_handle();
         let url = node.rpc_url();
-        environment
-            .node_clients
-            .push(NodeClient::new(rpc, auth, url));
+        let client = NodeClient::new(rpc, auth, url);
+        environment.node_clients.push(client.clone());
+
+        spammer.add_rpc(client);
     }
 
-    Ok((0..5, node_contexts, tasks, environment))
+    Ok((0..5, node_contexts, tasks, environment, spammer))
 }
 
 pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
@@ -308,6 +333,86 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
         .ecotone_activated()
         .build()
 });
+
+#[derive(Debug)]
+pub struct TxSpammer {
+    pub rpc: Vec<NodeClient<OpEngineTypes>>,
+}
+
+impl TxSpammer {
+    pub fn new(tps: u64) -> Self {
+        Self { rpc: Vec::new() }
+    }
+
+    pub fn add_rpc(&mut self, rpc: NodeClient<OpEngineTypes>) {
+        self.rpc.push(rpc);
+    }
+
+    pub async fn spawn(self, tps: u64) {
+        tokio::spawn(async move {
+            let mut nonce = 0;
+
+            loop {
+                let clients = self.rpc.clone();
+                let num_txs = tps / 20;
+
+                let txs = (0..20)
+                    .map(|i| async move {
+                        let signer = EthereumWallet::new(signer(i as u32));
+                        let mut txs = Vec::with_capacity(num_txs as usize + 1);
+
+                        for i in 0..num_txs {
+                            let tx = tx(
+                                CHAIN_SPEC.chain_id(),
+                                None,
+                                nonce + i,
+                                Address::ZERO,
+                                21_000,
+                            );
+
+                            let signed =
+                                <TransactionRequest as TransactionBuilder<Ethereum>>::build(
+                                    tx, &signer,
+                                )
+                                .await
+                                .unwrap();
+
+                            let raw: Bytes = signed.encoded_2718().into();
+                            txs.push(raw);
+                        }
+
+                        txs
+                    })
+                    .collect::<Vec<_>>();
+
+                let txs = futures::future::join_all(txs).await;
+
+                for client in clients {
+                    for tx in txs.iter().flatten() {
+                        let _hash = EthApiClient::<
+                            TransactionRequest,
+                            OpTransactionSigned,
+                            alloy_consensus::Block<OpTransactionSigned>,
+                            OpReceipt,
+                            Header,
+                            Bytes,
+                        >::send_raw_transaction(
+                            &client.rpc, tx.clone()
+                        )
+                        .await
+                        .inspect_err(|e| error!("Error sending transaction: {:?}", e));
+                    }
+                }
+
+                nonce += num_txs;
+
+                info!("Submitted {} transactions", num_txs * 20);
+
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+    }
+}
 
 /// Consolidated trait bound for WorldChainNode testing context
 pub trait WorldChainTestContextBounds:

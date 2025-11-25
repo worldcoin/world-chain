@@ -620,7 +620,7 @@ mod tests {
             })
             .test();
 
-        let bundle: HashMap<Address, BundleAccount> = access_list.into();
+        let bundle: alloy_primitives::map::HashMap<Address, BundleAccount> = access_list.into();
 
         for (address, account) in bundle.iter() {
             let expected = expected_bundle.state.get(address).unwrap();

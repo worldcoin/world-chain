@@ -4,7 +4,9 @@ use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx
 use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{eyre, OptionExt};
-use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
+use flashblocks_primitives::{
+    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
+};
 use op_alloy_consensus::OpTxEnvelope;
 use reth::revm::{database::StateProviderDatabase, State};
 use reth_chain_state::ExecutedBlock;
@@ -276,6 +278,7 @@ where
             Vec<Recovered<OpTransactionSigned>>,
             OpBlockExecutionCtx,
             u128,
+            FlashblockAccessList,
         ),
         BalExecutorError,
     >
@@ -299,7 +302,7 @@ where
 
         let executor_state = Arc::new(&self.execution_state);
 
-        let (bundle, result, env, context, fees) = executor.execute_block_parallel(
+        let (bundle, result, env, context, fees, access_list) = executor.execute_block_parallel(
             executor_state,
             expected_access_list_data,
             state_provider,
@@ -312,6 +315,7 @@ where
             self.execution_state.all_transactions_iter().collect(),
             context,
             fees,
+            access_list,
         ))
     }
 
@@ -345,26 +349,40 @@ where
         mut self,
         state_provider: Arc<dyn StateProvider>,
         diff: ExecutionPayloadFlashblockDeltaV1,
+        bundle: alloy_primitives::map::HashMap<Address, BundleAccount>,
         parent_header: &SealedHeader<Header>,
         payload_id: PayloadId,
+        index: u64,
     ) -> Result<OpBuiltPayload, BalExecutorError>
     where
         R: Clone + Send + Sync + 'static,
     {
-        let bundle: HashMap<Address, BundleAccount> = diff
-            .clone()
-            .access_list_data
-            .ok_or(BalExecutorError::MissingBlockAccessList)?
-            .access_list
-            .into();
-
         let (r_0, r_1) = rayon::join(
             || self.verify_block(state_provider.clone(), diff.clone()),
             || compute_state_root(state_provider.clone(), &bundle),
         );
 
-        let (bundle_state, execution_result, evm_env, transactions, execution_context, fees) = r_0?;
+        let (
+            bundle_state,
+            execution_result,
+            evm_env,
+            transactions,
+            execution_context,
+            fees,
+            access_list,
+        ) = r_0?;
+
         let (state_root, trie_updates, hashed_state) = r_1?;
+
+        #[cfg(feature = "test")]
+        crate::test::record_computed(
+            parent_header.number() + 1,
+            index,
+            Some(crate::test::BlockContext {
+                bundle,
+                access_list: access_list.clone(),
+            }),
+        );
 
         if state_root != diff.state_root {
             error!(
@@ -534,10 +552,8 @@ where
 
 pub fn compute_state_root(
     state_provider: Arc<dyn StateProvider>,
-    bundle: &HashMap<Address, BundleAccount>,
+    bundle_state: &alloy_primitives::map::HashMap<Address, BundleAccount>,
 ) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), BlockExecutionError> {
-    let bundle_state: HashMap<&Address, &BundleAccount> = bundle.iter().collect();
-
     // compute hashed post state
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
 

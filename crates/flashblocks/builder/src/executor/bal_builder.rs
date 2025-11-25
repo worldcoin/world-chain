@@ -6,7 +6,7 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory,
 };
 use alloy_primitives::{keccak256, Address};
-use flashblocks_primitives::access_list::FlashblockAccessListData;
+use flashblocks_primitives::access_list::{FlashblockAccessList, FlashblockAccessListData};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth::revm::{database::StateProviderDatabase, State};
 
@@ -205,14 +205,14 @@ where
                 });
 
             // Remove empty account changes
-            if self
-                .flashblock_access_list
-                .changes
-                .get(address)
-                .is_some_and(|changes| changes.is_empty())
-            {
-                self.flashblock_access_list.changes.remove(address);
-            }
+            // if self
+            //     .flashblock_access_list
+            //     .changes
+            //     .get(address)
+            //     .is_some_and(|changes| changes.is_empty())
+            // {
+            //     self.flashblock_access_list.changes.remove(address);
+            // }
         }
 
         Ok(())
@@ -389,6 +389,7 @@ where
             EvmEnv<OpSpecId>,
             OpBlockExecutionCtx,
             u128,
+            FlashblockAccessList,
         ),
         BalExecutorError,
     >
@@ -536,18 +537,6 @@ where
             this.finish_with_access_list()?;
 
         if access_list.access_list_hash != expected_access_list.access_list_hash {
-            std::fs::write(
-                "computed_access_list.json",
-                serde_json::to_string_pretty(&access_list.access_list).unwrap(),
-            )
-            .unwrap();
-
-            std::fs::write(
-                "expected_access_list.json",
-                serde_json::to_string_pretty(&expected_access_list.access_list).unwrap(),
-            )
-            .unwrap();
-
             return Err(BalValidationError::AccessListHashMismatch {
                 expected: expected_access_list.access_list_hash,
                 got: access_list.access_list_hash,
@@ -557,7 +546,14 @@ where
 
         let (db, env) = evm.finish();
 
-        Ok((db.take_bundle(), result, env, context, merged_result.fees))
+        Ok((
+            db.take_bundle(),
+            result,
+            env,
+            context,
+            merged_result.fees,
+            access_list.access_list,
+        ))
     }
 }
 

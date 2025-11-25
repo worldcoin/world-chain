@@ -22,7 +22,7 @@ devnet-down:
   @just ./devnet/devnet-down
 
 test *args='': 
-  cargo nextest run --workspace $@
+  RUST_LOG="info,flashblocks=trace" cargo nextest run --workspace $@
 
 # Formats the whole workspace
 fmt: devnet-fmt contracts-fmt fmt-fix fmt-check

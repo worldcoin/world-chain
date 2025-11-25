@@ -1,6 +1,9 @@
+use alloy_eips::merge;
 use alloy_op_evm::OpBlockExecutionCtx;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
+use flashblocks_primitives::{
+    access_list::FlashblockAccessList, p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1,
+};
 use futures::StreamExt as _;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
@@ -14,7 +17,7 @@ use reth_optimism_primitives::OpPrimitives;
 
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::broadcast;
+use tokio::{runtime::Handle, sync::broadcast};
 use tracing::{error, trace};
 
 use crate::executor::bal_executor::BalBlockValidator;
@@ -203,12 +206,40 @@ where
 
     // If for whatever reason we are not processing flashblocks in order
     // we will error and return here.
-    let base = if flashblocks.is_new_payload(&flashblock)? {
+    let (base, merged_bundle) = if flashblocks.is_new_payload(&flashblock)? {
         *latest_payload = None;
         // safe unwrap from check in is_new_payload
-        flashblock.base().unwrap()
+        (
+            flashblock.base().unwrap(),
+            flashblock
+                .diff()
+                .access_list_data
+                .as_ref()
+                .map(|a| a.access_list.clone()),
+        )
     } else {
-        flashblocks.base()
+        let merged_list = if let Some(latest) = &flashblock.flashblock.diff.access_list_data {
+            let mut merged = flashblocks.0.iter().fold(FlashblockAccessList::default(), {
+                |mut acc, fb| {
+                    acc.extend(
+                        &fb.flashblock
+                            .diff
+                            .access_list_data
+                            .as_ref()
+                            .unwrap()
+                            .access_list,
+                    );
+                    acc
+                }
+            });
+
+            merged.extend(&latest.access_list);
+            Some(merged)
+        } else {
+            None
+        };
+
+        (flashblocks.base(), merged_list)
     };
 
     let timeout = Duration::from_secs(2);
@@ -260,8 +291,10 @@ where
         block_validator.validate_and_execute_diff_parallel(
             state_provider.clone(),
             diff.clone(),
+            merged_bundle.unwrap().into(),
             &sealed_header,
             *flashblock.payload_id(),
+            index,
         )?
     } else {
         block_validator.validate_and_execute_diff_linear(
