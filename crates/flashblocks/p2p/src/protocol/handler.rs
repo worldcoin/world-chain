@@ -285,11 +285,13 @@ impl FlashblocksHandle {
     /// This is never guaranteed to return.
     pub async fn await_clearance(&self) {
         let mut status = self.state.lock().publishing_status.subscribe();
+
         // Safe to unwrap becuase self holds a sender.
         status
             .wait_for(|status| matches!(status, PublishingStatus::Publishing { .. }))
             .await
             .unwrap();
+
     }
 
     /// Initiates flashblock publishing for a new block.

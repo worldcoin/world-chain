@@ -361,7 +361,7 @@ where
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
 
-        #[cfg(test)]
+        #[cfg(any(feature = "test"))]
         self.record_block_context(
             payload.block().number(),
             self.block_index,
@@ -664,6 +664,7 @@ where
         &mut self,
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), ?kind, "resolving payload job");
         if self.committed_payload.is_empty() && self.pending_block.is_none() {
             trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet and no active build job, spawning new build job");
             // ensure we have a job scheduled if we don't have a best payload yet and none is active

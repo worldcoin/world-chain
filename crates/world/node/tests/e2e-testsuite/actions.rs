@@ -1,21 +1,44 @@
 #![allow(dead_code)]
-use alloy_eips::BlockId;
-use alloy_rpc_types::{Header, Transaction, TransactionRequest};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
-use eyre::eyre::{eyre, Result};
+use alloy_eips::{BlockId, BlockNumberOrTag, eip1559};
+use alloy_rpc_types::{Block, Header, Transaction, TransactionRequest};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+};
+use eyre::eyre::{Result, eyre};
 use flashblocks_primitives::p2p::Authorization;
-use flashblocks_rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
+use flashblocks_rpc::{
+    engine::{FlashblocksEngineApiExtClient, OpEngineApiExt},
+    op::OpApiExtClient,
+};
 use futures::future::BoxFuture;
+use op_alloy_consensus::encode_holocene_extra_data;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
-use reth::rpc::api::{EngineApiClient, EthApiClient};
-use reth_e2e_test_utils::testsuite::{actions::Action, Environment};
+use reth::rpc::{
+    api::{EngineApiClient, EthApiClient},
+    eth::EthApi,
+};
+use reth_e2e_test_utils::testsuite::{
+    BlockInfo, Environment,
+    actions::{
+        Action, GenerateNextPayload, Sequence, UpdateBlockInfo, ValidateFork,
+        expect_fcu_not_syncing_or_accepted, fork, validate_fcu_response,
+    },
+};
+use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
+use reth_optimism_primitives::OpReceipt;
 use reth_primitives::TransactionSigned;
-use revm_primitives::{Address, Bytes, B256, U256};
-use std::{fmt::Debug, marker::PhantomData, time::Duration};
+use revm_primitives::{Address, B256, Bytes, FixedBytes, U256};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, error, info};
+
+use crate::setup::{CHAIN_SPEC, TX_SET_L1_BLOCK};
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
@@ -170,7 +193,7 @@ where
                         return Err(eyre!(
                             "Payload status not valid: {:?}",
                             fcu_result.payload_status
-                        ))
+                        ));
                     }
                 }
             };
@@ -202,19 +225,10 @@ impl Action<OpEngineTypes> for PickNextFlashblocksProducer {
                 return Err(eyre!("No node clients available"));
             }
 
-            let latest_info = env
-                .current_block_info()
-                .ok_or_else(|| eyre!("No latest block information available"))?;
-
             // simple round-robin selection based on next block number
-            let next_producer_idx = ((latest_info.number + 1) % num_clients as u64) as usize;
+            let next_producer_idx = env.last_producer_idx;
 
-            env.last_producer_idx = Some(next_producer_idx);
-            debug!(
-                "Selected node {} as the next flashblocks producer for block {}",
-                next_producer_idx,
-                latest_info.number + 1
-            );
+            env.last_producer_idx = next_producer_idx;
 
             Ok(())
         })
@@ -256,9 +270,17 @@ where
                 .current_block_info()
                 .ok_or_else(|| eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
-            let timestamp =
-                env.active_node_state()?.latest_header_time + env.block_timestamp_increment;
 
+            let timestamp = SystemTime::UNIX_EPOCH
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs()
+                + env.block_timestamp_increment;
+
+            let eip1559 = encode_holocene_extra_data(
+                Default::default(),
+                CHAIN_SPEC.base_fee_params_at_timestamp(timestamp),
+            )?;
             let payload_attributes = OpPayloadAttributes {
                 payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
                     timestamp,
@@ -269,7 +291,7 @@ where
                 },
                 transactions: None,
                 no_tx_pool: Some(false),
-                eip_1559_params: Some(alloy_primitives::b64!("0000000800000008")),
+                eip_1559_params: Some(eip1559[1..=8].try_into()?),
                 gas_limit: Some(30_000_000),
                 min_base_fee: None,
             };
@@ -284,122 +306,6 @@ where
                 block_number + 1
             );
             Ok(())
-        })
-    }
-}
-
-/// Action that generates the next payload using flashblocks fork choice update
-#[derive(Debug)]
-pub struct GenerateNextFlashblocksPayload<F>
-where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    /// Authorization generator function
-    pub authorization_generator: F,
-    /// Tracks function type
-    _phantom: PhantomData<F>,
-}
-
-impl<F> GenerateNextFlashblocksPayload<F>
-where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    /// Create a new action with authorization generator
-    pub fn new(authorization_generator: F) -> Self {
-        Self {
-            authorization_generator,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<F> Action<OpEngineTypes> for GenerateNextFlashblocksPayload<F>
-where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut reth_e2e_test_utils::testsuite::Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let latest_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre!("No latest block information available"))?;
-
-            let parent_hash = latest_block.hash;
-            debug!("Latest block hash: {parent_hash}");
-
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
-
-            let base_payload_attributes = env
-                .active_node_state()?
-                .payload_attributes
-                .get(&(latest_block.number + 1))
-                .cloned()
-                .ok_or_else(|| eyre!("No payload attributes found for next block"))?;
-
-            let payload_attributes = OpPayloadAttributes {
-                payload_attributes: base_payload_attributes,
-                transactions: None,
-                no_tx_pool: Some(false),
-                eip_1559_params: Some(alloy_primitives::b64!("0000000800000008")),
-                gas_limit: Some(30_000_000),
-                min_base_fee: None,
-            };
-
-            let authorization = (self.authorization_generator)(payload_attributes.clone());
-
-            let producer_idx = env
-                .last_producer_idx
-                .ok_or_else(|| eyre!("No block producer selected"))?;
-
-            let fcu_result =
-                FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
-                    &env.node_clients[producer_idx].engine.http_client(),
-                    fork_choice_state,
-                    Some(payload_attributes.clone()),
-                    Some(authorization),
-                )
-                .await?;
-
-            debug!("Flashblocks FCU result: {:?}", fcu_result);
-
-            // Check if we got a valid payload ID
-            let payload_id = if let Some(payload_id) = fcu_result.payload_id {
-                debug!("Received flashblocks payload ID: {:?}", payload_id);
-                payload_id
-            } else {
-                debug!("No payload ID returned from flashblocks forkchoiceUpdated");
-                return Err(eyre!(
-                    "No payload ID returned from flashblocks forkchoiceUpdated"
-                ));
-            };
-
-            // Validate the FCU status
-            match fcu_result.payload_status.status {
-                PayloadStatusEnum::Valid => {
-                    env.active_node_state_mut()?.next_payload_id = Some(payload_id);
-
-                    // Store the payload attributes that were used
-                    env.active_node_state_mut()?
-                        .payload_id_history
-                        .insert(latest_block.number + 1, payload_id);
-
-                    debug!(
-                        "Flashblocks payload generation successful for block {}",
-                        latest_block.number + 1
-                    );
-                    Ok(())
-                }
-                _ => Err(eyre!(
-                    "Flashblocks payload status not valid: {:?}",
-                    fcu_result.payload_status
-                )),
-            }
         })
     }
 }
@@ -430,16 +336,12 @@ impl Action<OpEngineTypes> for RetrieveFlashblocksPayload {
                 .next_payload_id
                 .ok_or_else(|| eyre!("No payload ID available"))?;
 
-            let producer_idx = env
-                .last_producer_idx
-                .ok_or_else(|| eyre!("No block producer selected"))?;
-
             // Wait for payload to be built
             sleep(Duration::from_millis(2000)).await;
 
             let built_payload_envelope =
                 reth::rpc::api::EngineApiClient::<OpEngineTypes>::get_payload_v3(
-                    &env.node_clients[producer_idx].engine.http_client(),
+                    &env.node_clients[0].engine.http_client(),
                     payload_id,
                 )
                 .await?;
@@ -495,8 +397,7 @@ impl Action<OpEngineTypes> for UpdateBlockInfoToFlashblocksPayload {
             env.active_node_state_mut()?
                 .latest_fork_choice_state
                 .head_block_hash = block_hash;
-
-            debug!(
+            info!(
                 "Updated environment to newly produced flashblocks block {} (hash: {})",
                 block_number, block_hash
             );
@@ -510,76 +411,450 @@ impl Action<OpEngineTypes> for UpdateBlockInfoToFlashblocksPayload {
 #[derive(Debug)]
 pub struct ProduceBlocksWithFlashblocks<F>
 where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    F: Fn(OpPayloadAttributes, FixedBytes<32>) -> Authorization + Clone + Send + Sync + 'static,
 {
     /// Number of blocks to produce
     pub num_blocks: u64,
     /// Authorization generator function
     pub authorization_generator: F,
-    /// Tracks function type
-    _phantom: PhantomData<F>,
 }
 
 impl<F> ProduceBlocksWithFlashblocks<F>
 where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    F: Fn(OpPayloadAttributes, FixedBytes<32>) -> Authorization + Clone + Send + Sync + 'static,
 {
     /// Create a new `ProduceBlocksWithFlashblocks` action
     pub fn new(num_blocks: u64, authorization_generator: F) -> Self {
         Self {
             num_blocks,
             authorization_generator,
-            _phantom: PhantomData,
         }
+    }
+}
+
+/// Store payload attributes for the next block.
+#[derive(Debug)]
+pub struct GeneratePayloadAttributes(u64);
+
+impl Default for GeneratePayloadAttributes {
+    fn default() -> Self {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+
+        Self(now)
+    }
+}
+impl Action<OpEngineTypes> for GeneratePayloadAttributes {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let latest_block = env
+                .current_block_info()
+                .ok_or_else(|| eyre!("No latest block information available"))?;
+
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs()
+                + env.block_timestamp_increment;
+                
+            let latest_block = latest_block.number;
+
+            info!(
+                "Generating payload attributes for next block... {} -> {}",
+                latest_block, timestamp
+            );
+
+            let payload_attributes = PayloadAttributes {
+                timestamp,
+                prev_randao: B256::random(),
+                suggested_fee_recipient: alloy_primitives::Address::random(),
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            };
+
+            env.active_node_state_mut()?
+                .payload_attributes
+                .insert(latest_block + 1, payload_attributes);
+
+            Ok(())
+        })
     }
 }
 
 impl<F> Action<OpEngineTypes> for ProduceBlocksWithFlashblocks<F>
 where
-    F: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    F: Fn(OpPayloadAttributes, FixedBytes<32>) -> Authorization + Clone + Send + Sync + 'static,
 {
     fn execute<'a>(
         &'a mut self,
-        env: &'a mut reth_e2e_test_utils::testsuite::Environment<OpEngineTypes>,
+        env: &'a mut Environment<OpEngineTypes>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            for block_idx in 0..self.num_blocks {
+            // Remember the active node to ensure all blocks are produced on the same node
+            let producer_idx = 0;
+
+            for _ in 0..self.num_blocks {
+                // Ensure we always use the same producer
+                env.last_producer_idx = Some(producer_idx);
+
+                // create a sequence that produces blocks and sends only to active node
+                let mut sequence = Sequence::new(vec![
+                    // Skip PickNextBlockProducer to maintain the same producer
+                    Box::new(GeneratePayloadAttributes::default()),
+                    Box::new(GenerateNextFlashblocksPayload {
+                        authorization_generator: self.authorization_generator.clone(),
+                    }),
+                    Box::new(MakeCanonical::default()),
+                ]);
+
+                sequence.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Action that makes the current latest block canonical by broadcasting a forkchoice update
+#[derive(Debug, Default)]
+pub struct MakeCanonical;
+
+impl Action<OpEngineTypes> for MakeCanonical {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Original broadcast behavior
+            let mut actions: Vec<Box<dyn Action<OpEngineTypes>>> = vec![
+                Box::new(BroadcastLatestForkchoice::default()),
+                Box::new(UpdateBlockInfo::default()),
+            ];
+
+            // if we're on a fork, validate it now that it's canonical
+            if let Ok(active_state) = env.active_node_state()
+                && let Some(fork_base) = active_state.current_fork_base
+            {
                 debug!(
-                    "Producing flashblocks block {}/{}",
-                    block_idx + 1,
-                    self.num_blocks
+                    "MakeCanonical: Adding fork validation from base block {}",
+                    fork_base
                 );
-
-                // Pick the next block producer
-                let mut pick_producer = PickNextFlashblocksProducer::new();
-                pick_producer.execute(env).await?;
-
-                // Generate payload attributes
-                let mut generate_attrs =
-                    GenerateFlashblocksPayloadAttributes::new(self.authorization_generator.clone());
-                generate_attrs.execute(env).await?;
-
-                // Generate the next payload using flashblocks
-                let mut generate_payload =
-                    GenerateNextFlashblocksPayload::new(self.authorization_generator.clone());
-                generate_payload.execute(env).await?;
-
-                // Retrieve the built payload
-                let mut retrieve_payload = RetrieveFlashblocksPayload::new();
-                retrieve_payload.execute(env).await?;
-
-                // Update block info to the latest payload
-                let mut update_block_info = UpdateBlockInfoToFlashblocksPayload::new();
-                update_block_info.execute(env).await?;
-
-                debug!(
-                    "Successfully produced flashblocks block {}/{}",
-                    block_idx + 1,
-                    self.num_blocks
-                );
+                actions.push(Box::new(ValidateFork::new(fork_base)));
+                // clear the fork base since we're now canonical
+                env.active_node_state_mut()?.current_fork_base = None;
             }
 
-            debug!("Completed producing {} flashblocks blocks", self.num_blocks);
+            let mut sequence = Sequence::new(actions);
+            sequence.execute(env).await
+        })
+    }
+}
+
+/// Action that broadcasts the latest fork choice state to all clients
+#[derive(Debug, Default)]
+pub struct BroadcastLatestForkchoice {}
+
+impl Action<OpEngineTypes> for BroadcastLatestForkchoice {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            if env.node_clients.is_empty() {
+                return Err(eyre!("No node clients available"));
+            }
+
+            // use the hash of the newly executed payload if available
+            let head_hash = env
+                .current_block_info()
+                .ok_or_else(|| eyre!("No current block info available"))?
+                .hash;
+
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: head_hash,
+                safe_block_hash: head_hash,
+                finalized_block_hash: head_hash,
+            };
+            debug!(
+                "Broadcasting forkchoice update to {} clients. Head: {:?}",
+                env.node_clients.len(),
+                fork_choice_state.head_block_hash
+            );
+
+            for (idx, client) in env.node_clients.iter().enumerate() {
+                match EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                    &client.engine.http_client(),
+                    fork_choice_state,
+                    None,
+                )
+                .await
+                {
+                    Ok(resp) => {
+                        debug!(
+                            "Client {}: Forkchoice update status: {:?}",
+                            idx, resp.payload_status.status
+                        );
+                        // validate that the forkchoice update was accepted
+                        validate_fcu_response(&resp, &format!("Client {idx}"))?;
+                    }
+                    Err(err) => {
+                        return Err(eyre!(
+                            "Client {}: Failed to broadcast forkchoice: {:?}",
+                            idx,
+                            err
+                        ));
+                    }
+                }
+            }
+            debug!("Forkchoice update broadcasted successfully");
+            Ok(())
+        })
+    }
+}
+
+/// Action that updates environment state using the locally produced payload.
+///
+/// This uses the execution payload stored in the environment rather than querying RPC,
+/// making it more efficient and reliable during block production. Preferred over
+/// `UpdateBlockInfo` when we have just produced a block and have the payload available.
+#[derive(Debug, Default)]
+pub struct UpdateBlockInfoToLatestPayload {}
+
+impl Action<OpEngineTypes> for UpdateBlockInfoToLatestPayload {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            info!("Updating environment to latest produced payload...");
+            let payload_envelope = env
+                .active_node_state()?
+                .latest_payload_envelope
+                .as_ref()
+                .ok_or_else(|| eyre!("No execution payload envelope available"))?;
+
+            let execution_payload = &payload_envelope.execution_payload;
+
+            let block_hash = execution_payload.payload_inner.payload_inner.block_hash;
+            let block_number = execution_payload.payload_inner.payload_inner.block_number;
+            let block_timestamp = execution_payload.payload_inner.payload_inner.timestamp;
+
+            // update environment with the new block information from the payload
+            env.set_current_block_info(BlockInfo {
+                hash: block_hash,
+                number: block_number,
+                timestamp: block_timestamp,
+            })?;
+
+            env.active_node_state_mut()?.latest_header_time = block_timestamp;
+            env.active_node_state_mut()?
+                .latest_fork_choice_state
+                .head_block_hash = block_hash;
+
+            info!(
+                "Updated environment to newly produced block {} (hash: {})",
+                block_number, block_hash
+            );
+
+            Ok(())
+        })
+    }
+}
+
+// /// Action that broadcasts the next new payload
+// #[derive(Debug, Default)]
+// pub struct BroadcastNextNewPayload;
+
+// impl Action<OpEngineTypes> for BroadcastNextNewPayload {
+//     fn execute<'a>(
+//         &'a mut self,
+//         env: &'a mut Environment<OpEngineTypes>,
+//     ) -> BoxFuture<'a, Result<()>> {
+//         Box::pin(async move {
+//             info!("Broadcasting next new payload...");
+//             // Get the next new payload to broadcast
+//             let next_new_payload = env
+//                 .active_node_state()?
+//                 .latest_payload_built
+//                 .as_ref()
+//                 .ok_or_else(|| eyre!("No next built payload found"))
+//                 .inspect_err(|e| error!("{e}"))?;
+
+//             let parent_beacon_block_root = next_new_payload
+//                 .parent_beacon_block_root
+//                 .ok_or_else(|| eyre!("No parent beacon block root for next new payload"))
+//                 .inspect_err(|e| error!("{e}"))?;
+
+//             let payload_envelope = env
+//                 .active_node_state()?
+//                 .latest_payload_envelope
+//                 .as_ref()
+//                 .ok_or_else(|| eyre!("No execution payload envelope available"))
+//                 .inspect_err(|e| error!("{e}"))?;
+
+//             let execution_payload_envelope: OpExecutionPayloadEnvelopeV3 = payload_envelope.clone();
+//             let execution_payload = execution_payload_envelope.execution_payload;
+
+//             // Loop through all clients and broadcast the next new payload
+//             let mut broadcast_results = Vec::new();
+
+//             for (idx, client) in env.node_clients.iter().enumerate() {
+//                 let engine = client.engine.http_client();
+
+//                 // Broadcast the execution payload
+//                 let result = EngineApiClient::<OpEngineTypes>::new_payload_v3(
+//                     &engine,
+//                     execution_payload.clone(),
+//                     vec![],
+//                     parent_beacon_block_root,
+//                 )
+//                 .await?;
+
+//                 broadcast_results.push((idx, result.status.clone()));
+
+//                 info!(
+//                     "Node {}: new_payload broadcast status: {:?}",
+//                     idx, result.status
+//                 );
+//             }
+
+//             // Update the executed payload state after broadcasting to all nodes
+//             env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload.clone());
+
+//             info!("Broadcast complete. Results: {:?}", broadcast_results);
+
+//             Ok(())
+//         })
+//     }
+// }
+
+/// Action that generates the next payload
+#[derive(Debug, Default)]
+pub struct GenerateNextFlashblocksPayload<F>
+where
+    F: Fn(OpPayloadAttributes, FixedBytes<32>) -> Authorization + Clone + Send + Sync + 'static,
+{
+    /// Authorization generator function
+    pub authorization_generator: F,
+}
+
+impl<F> Action<OpEngineTypes> for GenerateNextFlashblocksPayload<F>
+where
+    F: Fn(OpPayloadAttributes, FixedBytes<32>) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let latest_block = env
+                .current_block_info()
+                .ok_or_else(|| eyre!("No latest block information available"))?;
+
+            let parent_hash = latest_block.hash;
+            info!("Latest block hash: {parent_hash}");
+
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: parent_hash,
+            };
+
+            let payload_attributes = env
+                .active_node_state()?
+                .payload_attributes
+                .get(&(latest_block.number + 1))
+                .cloned()
+                .ok_or_else(|| eyre!("No payload attributes found for next block"))?;
+
+            let eip1559 = encode_holocene_extra_data(
+                Default::default(),
+                CHAIN_SPEC.base_fee_params_at_timestamp(payload_attributes.timestamp),
+            )?;
+
+            info!(
+                "Generating next flashblocks payload for block {} with attributes: {:?}",
+                latest_block.number + 1,
+                payload_attributes
+            );
+            // Compose a Mine Block action with an eth_getTransactionReceipt action
+            let attributes = OpPayloadAttributes {
+                payload_attributes,
+                transactions: Some(vec![]),
+                no_tx_pool: Some(false),
+                eip_1559_params: Some(eip1559[1..=8].try_into()?),
+                gas_limit: Some(30_000_000),
+                min_base_fee: None,
+            };
+
+            let producer_idx = env
+                .last_producer_idx
+                .ok_or_else(|| eyre!("No producer index set in environment"))?;
+
+            info!("Using producer index: {producer_idx}");
+            let fcu_result =
+                FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
+                    &env.node_clients[producer_idx].engine.http_client(),
+                    fork_choice_state,
+                    Some(attributes.clone()),
+                    Some((self.authorization_generator)(
+                        attributes.clone(),
+                        parent_hash,
+                    )),
+                )
+                .await?;
+
+            info!("FCU result: {:?}", fcu_result);
+
+            // validate the FCU status before proceeding
+            // Note: In the context of GenerateNextPayload, Syncing usually means the engine
+            // doesn't have the requested head block, which should be an error
+            expect_fcu_not_syncing_or_accepted(&fcu_result, "GenerateNextPayload")
+                .inspect_err(|e| error!("{e}"))?;
+
+            let payload_id = fcu_result
+                .payload_id
+                .ok_or_else(|| eyre!("No payload ID returned from forkchoiceUpdated"))?;
+
+            env.active_node_state_mut()?.next_payload_id = Some(payload_id);
+
+            info!("Got payload ID: {payload_id}, Producer Index: {producer_idx}");
+
+            let built_payload_envelope = EngineApiClient::<OpEngineTypes>::get_payload_v3(
+                &env.node_clients[producer_idx].engine.http_client(),
+                payload_id,
+            )
+            .await?;
+
+            info!(
+                "Built payload envelope for block {}: {:?}",
+                latest_block.number + 1,
+                built_payload_envelope
+            );
+            // Store the payload attributes that were used to generate this payload
+            let built_payload = attributes.clone();
+
+            info!(
+                "Built payload for block {}: {:?}",
+                latest_block.number + 1,
+                built_payload_envelope
+            );
+
+            env.active_node_state_mut()?
+                .payload_id_history
+                .insert(latest_block.number + 1, payload_id);
+            env.active_node_state_mut()?.latest_payload_built =
+                Some(built_payload.payload_attributes);
+            env.active_node_state_mut()?.latest_payload_envelope = Some(built_payload_envelope);
+
+            info!(
+                "Generated next flashblocks payload for block {}",
+                latest_block.number + 1
+            );
             Ok(())
         })
     }

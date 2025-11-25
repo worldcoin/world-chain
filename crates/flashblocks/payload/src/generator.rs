@@ -23,7 +23,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use tokio::runtime::Handle;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     job::{CommittedPayloadState, FlashblocksPayloadJob},
@@ -186,7 +186,7 @@ where
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
-
+   
         let maybe_pre_state = self
             .check_for_pre_state(&config.attributes)
             .inspect_err(|_| {
@@ -196,11 +196,21 @@ where
         let payload_id = config.attributes.payload_id();
         let mut authorization = self.authorizations.clone();
         let pending = async move {
+            info!(
+                target: "flashblocks::payload_builder",
+                payload_id = %payload_id,
+                "Waiting for authorization for payload",
+            );
             let _ = authorization
                 .wait_for(|a| a.is_some_and(|auth| auth.payload_id == payload_id))
                 .await
                 .is_ok();
 
+            info!(
+                target: "flashblocks::payload_builder",
+                payload_id = %payload_id,
+                "Received authorization for payload",
+            );
             authorization.borrow().unwrap()
         };
 

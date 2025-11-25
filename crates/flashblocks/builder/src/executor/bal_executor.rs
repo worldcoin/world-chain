@@ -374,7 +374,7 @@ where
 
         let (state_root, trie_updates, hashed_state) = r_1?;
 
-        #[cfg(feature = "test")]
+        #[cfg(any(feature = "test", test))]
         crate::test::record_computed(
             parent_header.number() + 1,
             index,

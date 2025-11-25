@@ -2,7 +2,7 @@ use alloy_consensus::Header;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, TxSignerSync};
-use alloy_primitives::{address, Address, Sealed};
+use alloy_primitives::{Address, Sealed, address};
 use alloy_rpc_types::TransactionRequest;
 use eyre::eyre::eyre;
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
@@ -14,8 +14,8 @@ use reth::{
     network::PeersHandleProvider,
     rpc::{
         api::{
-            eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
             EthApiClient,
+            eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
         },
         compat::RpcConverter,
         eth::EthApiTypes,
@@ -23,26 +23,27 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
-    testsuite::{Environment, NodeClient},
     Adapter, NodeHelperType, TmpDB,
+    testsuite::{BlockInfo, Environment, NodeClient, NodeState},
 };
+use reth_evm::env;
 use reth_node_api::{
     BlockTy, FullNodeComponents, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
     NodeTypesWithDBAdapter, PayloadTypes,
 };
 use reth_node_builder::{
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcRegistry},
     AddOns, NodeComponents, NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcRegistry},
 };
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::{OpEngineTypes, OpNode};
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_optimism_rpc::{eth::ext::OpEthExtApi, OpEthApi};
+use reth_optimism_rpc::{OpEthApi, eth::ext::OpEthExtApi};
 use reth_primitives::EthereumHardforks;
 use reth_provider::{
-    providers::{BlockchainProvider, ChainStorage},
     BlockReader,
+    providers::{BlockchainProvider, ChainStorage},
 };
 use revm_primitives::{Bytes, TxKind, U256};
 use std::{
@@ -54,21 +55,21 @@ use std::{
 };
 use tracing::{error, info, span, trace};
 use world_chain_node::{
+    FlashblocksOpApi, OpApiExtServer,
     args::NodeContextType,
     context::FlashblocksContext,
     node::{WorldChainNode, WorldChainNodeContext},
-    FlashblocksOpApi, OpApiExtServer,
 };
 use world_chain_test::{
+    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT,
     node::{test_config_with_peers_and_gossip, tx},
     utils::{account, signer, tree_root},
-    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT,
 };
 
 use world_chain_pool::{
+    BasicWorldChainPool,
     root::LATEST_ROOT_SLOT,
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
-    BasicWorldChainPool,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
@@ -163,7 +164,9 @@ where
     T: WorldChainTestContextBounds,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
-    std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
+    unsafe {
+        std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
+    }
     let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
     let tasks = TaskManager::current();
@@ -178,10 +181,10 @@ where
                 .with_http(),
         )
         .with_payload_builder(PayloadBuilderArgs {
-            deadline: Duration::from_millis(4000),
-            max_payload_tasks: 1,
-            gas_limit: Some(25_000_000),
-            interval: Duration::from_millis(200),
+            deadline: Duration::from_secs(12),
+            max_payload_tasks: 50,
+            gas_limit: Some(30_000_000),
+            interval: Duration::from_millis(10),
             ..Default::default()
         })
         .with_unused_ports();
@@ -194,6 +197,8 @@ where
     node_config.network.addr = [127, 0, 0, 1].into();
 
     let mut environment = Environment::default();
+    environment.block_timestamp_increment = 12;
+
     let mut node_contexts =
         Vec::<WorldChainTestingNodeContext<T>>::with_capacity(num_nodes as usize);
 
@@ -296,7 +301,18 @@ where
         let auth = node.auth_server_handle();
         let url = node.rpc_url();
         let client = NodeClient::new(rpc, auth, url);
+
         environment.node_clients.push(client.clone());
+
+        let node_state = NodeState {
+            current_block_info: Some(BlockInfo {
+                hash: node.inner.chain_spec().sealed_genesis_header().hash(),
+                timestamp: node.inner.chain_spec().sealed_genesis_header().timestamp,
+                number: node.inner.chain_spec().sealed_genesis_header().number,
+            }),
+            ..Default::default()
+        };
+        environment.node_states.push(node_state);
 
         spammer.add_rpc(client);
     }
@@ -511,50 +527,50 @@ where
 impl<T> WorldChainTestContextBounds for T
 where
     T: WorldChainNodeContext<
-        FullNodeTypesAdapter<
-            WorldChainNode<T>,
-            TmpDB,
-            BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
-        >,
-        AddOns: NodeAddOns<
-            Adapter<
-                WorldChainNode<Self>,
-                BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
-            >,
-        > + RethRpcAddOns<
-            Adapter<
-                WorldChainNode<Self>,
-                BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
-            >,
-        > + EngineValidatorAddOn<
-            Adapter<
-                WorldChainNode<Self>,
-                BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
-            >,
-        >,
-        ComponentsBuilder: NodeComponentsBuilder<
             FullNodeTypesAdapter<
                 WorldChainNode<T>,
                 TmpDB,
                 BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
             >,
-            Components: NodeComponents<
+            AddOns: NodeAddOns<
+                Adapter<
+                    WorldChainNode<Self>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
+                >,
+            > + RethRpcAddOns<
+                Adapter<
+                    WorldChainNode<Self>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
+                >,
+            > + EngineValidatorAddOn<
+                Adapter<
+                    WorldChainNode<Self>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<Self>, TmpDB>>,
+                >,
+            >,
+            ComponentsBuilder: NodeComponentsBuilder<
                 FullNodeTypesAdapter<
                     WorldChainNode<T>,
                     TmpDB,
                     BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
                 >,
-                Network: PeersHandleProvider,
-                Pool = BasicWorldChainPool<
+                Components: NodeComponents<
                     FullNodeTypesAdapter<
                         WorldChainNode<T>,
                         TmpDB,
                         BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
                     >,
+                    Network: PeersHandleProvider,
+                    Pool = BasicWorldChainPool<
+                        FullNodeTypesAdapter<
+                            WorldChainNode<T>,
+                            TmpDB,
+                            BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
+                        >,
+                    >,
                 >,
             >,
         >,
-    >,
     WorldChainNode<T>: NodeTypes<
             Primitives = OpPrimitives,
             ChainSpec = OpChainSpec,

@@ -30,7 +30,10 @@ use world_chain_test::{
     utils::signer,
 };
 
-use crate::setup::{setup, setup_with_tx_peers, CHAIN_SPEC};
+use crate::{
+    actions::ProduceBlocksWithFlashblocks,
+    setup::{setup, setup_with_tx_peers, CHAIN_SPEC},
+};
 
 #[tokio::test]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
@@ -748,20 +751,18 @@ async fn test_flashblocks_bal_with_spammer() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
 
-    tokio::spawn(async move { spammer.spawn(60).await });
+    tokio::spawn(async move { spammer.spawn(20).await });
 
     let ext_context = nodes[0].ext_context.clone();
 
-    let block_hash = nodes[0].node.block_hash(0);
-
     let builder_sk = ext_context.flashblocks_handle.builder_sk().unwrap().clone();
 
-    let authorization_generator = move |attrs: OpPayloadAttributes| {
+    let authorization_generator = move |attrs: OpPayloadAttributes, hash| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
 
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
+        let payload_id = payload_id_optimism(&hash, &attrs, 3);
 
         Authorization::new(
             payload_id,
@@ -771,58 +772,9 @@ async fn test_flashblocks_bal_with_spammer() -> eyre::Result<()> {
         )
     };
 
-    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        nodes[0]
-            .node
-            .inner
-            .chain_spec()
-            .base_fee_params_at_timestamp(timestamp),
-    )?;
-
-    let attributes = OpPayloadAttributes {
-        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-            timestamp: 1756929279,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: Address::ZERO,
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
-        no_tx_pool: Some(false),
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    };
-
-    let mut action = crate::actions::AssertMineBlock::new(
-        0,
-        vec![],
-        Some(B256::ZERO),
-        attributes,
-        authorization_generator,
-        std::time::Duration::from_millis(2000),
-        true,
-        true,
-        sender,
-    )
-    .await;
+    let mut action = crate::actions::ProduceBlocksWithFlashblocks::new(10, authorization_generator);
 
     action.execute(&mut env).await?;
-
-    let execution_payload = rx.recv().await.expect("should receive payload");
-
-    info!(
-        "Mined block with flashblocks BAL: {:?}",
-        execution_payload.execution_payload
-    );
 
     Ok(())
 }
