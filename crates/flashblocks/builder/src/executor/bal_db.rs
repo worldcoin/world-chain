@@ -16,11 +16,11 @@ use crate::access_list::FlashblockAccessListConstruction;
 #[derive(Clone, Debug)]
 pub struct BalBuilderDb<DB> {
     /// The underlying database.
-    pub db: DB,
+    db: DB,
     /// The Flashblock Access List under construction.
-    pub access_list: FlashblockAccessListConstruction,
+    access_list: FlashblockAccessListConstruction,
     /// The current transaction index within the overall block.
-    pub index: u16,
+    index: u16,
 }
 
 impl<DB> BalBuilderDb<DB> {
@@ -71,6 +71,10 @@ impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
     /// TODO: we are currently performing a blocking read, then a blocking write for each operation here.
     /// This can be optimized writing immediately, then reading asynchronously and building the
     /// access list.
+    ///
+    /// Ideally we want a read only save point at each transaction boundary, so that we can assess
+    /// the changes made asynchronously and update the access list accordingly. We could use something similar to
+    /// the temporal DB for this, or we could somehow snapshot the DB at each transaction boundary.
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
