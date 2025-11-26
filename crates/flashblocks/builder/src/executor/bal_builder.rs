@@ -1,48 +1,50 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use alloy_consensus::{Header, Transaction, TxReceipt};
-use alloy_eips::{eip2935::HISTORY_STORAGE_ADDRESS, eip4788::BEACON_ROOTS_ADDRESS, Encodable2718};
+use alloy_eips::{Encodable2718, eip2935::HISTORY_STORAGE_ADDRESS, eip4788::BEACON_ROOTS_ADDRESS};
 use alloy_op_evm::{
-    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory, block::receipt_builder::OpReceiptBuilder,
 };
-use alloy_primitives::{keccak256, Address};
+use alloy_primitives::{Address, keccak256};
 use flashblocks_primitives::access_list::{FlashblockAccessList, FlashblockAccessListData};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::revm::{database::StateProviderDatabase, State};
+use reth::revm::{State, database::StateProviderDatabase};
 
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
+    Database, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
     block::{
         BlockExecutionError, BlockExecutor, BlockValidationError, CommitChanges, ExecutableTx,
         StateChangePostBlockSource, StateChangeSource,
     },
     op_revm::{OpSpecId, OpTransaction},
     state_change::{balance_increment_state, post_block_balance_increments},
-    Database, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_provider::{BlockExecutionResult, ProviderError, StateProvider};
 use revm::{
+    DatabaseCommit, DatabaseRef,
     context::{
-        result::{ExecResultAndState, ExecutionResult, ResultAndState},
         Block, BlockEnv, TxEnv,
+        result::{ExecResultAndState, ExecutionResult, ResultAndState},
     },
     database::{BundleState, TransitionAccount},
     state::{Account, AccountInfo, EvmState},
-    DatabaseCommit, DatabaseRef,
 };
 
+#[cfg(feature = "test")]
+use crate::test::BlockContext;
 use crate::{
     access_list::{AccountChangesConstruction, BlockAccessIndex, FlashblockAccessListConstruction},
     executor::{
+        BalExecutorError, BalValidationError,
         bal_executor::BalExecutionState,
         temporal_db::TemporalDbFactory,
         utils::{
-            ensure_create2_deployer, transact_beacon_root_contract_call,
-            transact_blockhashes_contract_call, CREATE_2_DEPLOYER_ADDR,
+            CREATE_2_DEPLOYER_ADDR, ensure_create2_deployer, transact_beacon_root_contract_call,
+            transact_blockhashes_contract_call,
         },
-        BalExecutorError, BalValidationError,
     },
 };
 
@@ -92,11 +94,11 @@ impl<'db, DB, E, R> BalBuilderBlockExecutor<E, R>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'db mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
@@ -533,13 +535,18 @@ where
             .with_block_access_index(merged_result.index + 1)
             .with_gas_used(merged_result.gas_used);
 
-        let (evm, result, access_list, _min_tx_index, _max_tx_index) =
+        let (mut evm, result, access_list, _min_tx_index, _max_tx_index) =
             this.finish_with_access_list()?;
 
         if access_list.access_list_hash != expected_access_list.access_list_hash {
             return Err(BalValidationError::AccessListHashMismatch {
                 expected: expected_access_list.access_list_hash,
                 got: access_list.access_list_hash,
+                #[cfg(feature = "test")]
+                context: BlockContext {
+                    bundle: evm.db_mut().take_bundle().clone().state,
+                    access_list: access_list.access_list,
+                },
             }
             .into());
         }
@@ -561,11 +568,11 @@ impl<'db, DB, E, R> BlockExecutor for BalBuilderBlockExecutor<E, R>
 where
     DB: Database + 'db,
     E: Evm<
-        DB = &'db mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'db mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {

@@ -43,6 +43,11 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 
+[profile.dev-docker]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 [workspace.lints]
 
 [workspace.dependencies]
@@ -253,6 +258,7 @@ testcontainers-modules = { version = "0.11", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 
 lazy_static = "1.4"
+cfg-if = "1.0"
 
 # [patch.crates-io]
 # revm = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }

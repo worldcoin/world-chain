@@ -1,6 +1,9 @@
 use alloy_primitives::FixedBytes;
 use reth_evm::block::BlockExecutionError;
 
+#[cfg(feature = "test")]
+use crate::test::BlockContext;
+
 pub mod bal_builder;
 pub mod bal_executor;
 pub mod factory;
@@ -14,6 +17,8 @@ pub enum BalValidationError {
     AccessListHashMismatch {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
+        #[cfg(feature = "test")]
+        context: BlockContext
     },
     #[error("Incorrect state root after executing block Expected {expected:x}, got {got:x}")]
     #[from(BlockExecutionError)]

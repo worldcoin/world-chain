@@ -3791,6 +3791,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-signer-local",
  "alloy-sol-types 1.4.1",
+ "cfg-if",
  "color-eyre",
  "dashmap 6.1.0",
  "flashblocks-p2p",

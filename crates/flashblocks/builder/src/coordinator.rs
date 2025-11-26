@@ -234,6 +234,7 @@ where
             });
 
             merged.extend(&latest.access_list);
+            
             Some(merged)
         } else {
             None

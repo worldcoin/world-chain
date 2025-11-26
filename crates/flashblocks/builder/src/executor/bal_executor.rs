@@ -1,34 +1,34 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
+use alloy_op_evm::{OpBlockExecutionCtx, block::receipt_builder::OpReceiptBuilder};
 use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::{eyre, OptionExt};
+use eyre::eyre::{OptionExt, eyre};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 use op_alloy_consensus::OpTxEnvelope;
-use reth::revm::{database::StateProviderDatabase, State};
+use reth::revm::{State, database::StateProviderDatabase};
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
+    ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
     block::BlockExecutionError,
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
     op_revm::{OpSpecId, OpTransaction},
-    ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::{transaction::SignedTransaction, Recovered, RecoveredBlock, SealedHeader};
+use reth_primitives::{Recovered, RecoveredBlock, SealedHeader, transaction::SignedTransaction};
 use reth_provider::{BlockExecutionResult, ExecutionOutcome, StateProvider};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
+use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
+    DatabaseRef,
     context::{BlockEnv, TxEnv},
     database::{BundleAccount, BundleState},
     inspector::NoOpInspector,
-    DatabaseRef,
 };
 use revm_database_interface::WrapDatabaseRef;
 use std::{collections::HashMap, sync::Arc};
@@ -39,8 +39,8 @@ use crate::{
     assembler::FlashblocksBlockAssembler,
     block_builder::FlashblocksBlockBuilder,
     executor::{
-        bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
-        BalExecutorError, BalValidationError,
+        BalExecutorError, BalValidationError, bal_builder::BalBuilderBlockExecutor,
+        factory::FlashblocksBlockExecutorFactory,
     },
 };
 
@@ -278,7 +278,6 @@ where
             Vec<Recovered<OpTransactionSigned>>,
             OpBlockExecutionCtx,
             u128,
-            FlashblockAccessList,
         ),
         BalExecutorError,
     >
@@ -315,7 +314,6 @@ where
             self.execution_state.all_transactions_iter().collect(),
             context,
             fees,
-            access_list,
         ))
     }
 
@@ -362,27 +360,23 @@ where
             || compute_state_root(state_provider.clone(), &bundle),
         );
 
-        let (
-            bundle_state,
-            execution_result,
-            evm_env,
-            transactions,
-            execution_context,
-            fees,
-            access_list,
-        ) = r_0?;
+        // #[cfg(feature = "test")]
+        // if let Err(e) = &r_0 {
+        //     if let BalExecutorError::BalValidationError(
+        //         BalValidationError::AccessListHashMismatch { context, .. },
+        //     ) = e
+        //     {
+        //         crate::test::record_computed(
+        //             parent_header.number() + 1,
+        //             index,
+        //             Some(context.clone()),
+        //         );
+        //     }
+        // }
+
+        let (bundle_state, execution_result, evm_env, transactions, execution_context, fees) = r_0?;
 
         let (state_root, trie_updates, hashed_state) = r_1?;
-
-        #[cfg(any(feature = "test", test))]
-        crate::test::record_computed(
-            parent_header.number() + 1,
-            index,
-            Some(crate::test::BlockContext {
-                bundle,
-                access_list: access_list.clone(),
-            }),
-        );
 
         if state_root != diff.state_root {
             error!(
