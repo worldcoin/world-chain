@@ -89,3 +89,4 @@ reth-storage-api.workspace = true
 
 [features]
 test = []
+diagnostics = []

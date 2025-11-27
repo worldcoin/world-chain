@@ -64,8 +64,8 @@ where
     {
         self.spawn_blocking_io_fut(async move |this| {
             let pending_block = this.local_pending_block().await?;
-            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
-                if let Some(pos) = block
+            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
+                && let Some(pos) = block
                     .body()
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)
@@ -91,7 +91,6 @@ where
 
                     return Ok(Some((tx, meta, receipt.clone())));
                 }
-            }
 
             let provider = this.provider();
 

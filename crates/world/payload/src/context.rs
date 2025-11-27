@@ -276,13 +276,12 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.conditional_options() {
-                if validate_conditional_options(conditional_options, &self.client).is_err() {
+            if let Some(conditional_options) = pooled_tx.conditional_options()
+                && validate_conditional_options(conditional_options, &self.client).is_err() {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
-            }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {

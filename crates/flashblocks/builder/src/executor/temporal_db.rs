@@ -44,8 +44,7 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             let acc_at = |cache: &TemporalState, index| {
                 cache
                     .account_info
-                    .get(index, &change.address)
-                    .map(|a| a.clone())
+                    .get(index, &change.address).cloned()
                     .unwrap_or_default()
             };
 
@@ -174,11 +173,10 @@ impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
                 None => self.db.storage_ref(address, index),
             },
             None => {
-                if let Some(account) = self.bundle.account(&address) {
-                    if let Some(storage) = account.storage_slot(index) {
+                if let Some(account) = self.bundle.account(&address)
+                    && let Some(storage) = account.storage_slot(index) {
                         return Ok(storage);
                     }
-                }
 
                 self.db.storage_ref(address, index)
             }

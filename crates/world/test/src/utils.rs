@@ -145,11 +145,11 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .expect("Failed to sign transaction");
     let op_tx: OpTypedTransaction = tx.clone().into();
     let tx_signed = OpTransactionSigned::from(op_tx.into_signed(signature));
-    let pooled = OpPooledTransaction::new(
+    
+    OpPooledTransaction::new(
         tx_signed.clone().try_into_recovered().unwrap(),
         tx_signed.as_eip1559().unwrap().size(),
-    );
-    pooled
+    )
 }
 
 pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {

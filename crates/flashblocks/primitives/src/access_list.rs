@@ -4,7 +4,7 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
-    db::{states::StorageSlot, AccountStatus, BundleAccount, TransitionState},
+    db::{AccountStatus, BundleAccount, TransitionState, states::StorageSlot},
     primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable
 )]
 pub struct FlashblockAccessListData {
     /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occured throughout execution of a

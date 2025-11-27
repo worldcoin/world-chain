@@ -2,6 +2,7 @@ pub mod access_list;
 pub mod assembler;
 pub mod block_builder;
 pub mod coordinator;
+pub mod diagnostics;
 pub mod executor;
 pub mod payload_builder;
 pub mod payload_txns;
@@ -39,19 +40,12 @@ pub mod traits;
 /// ```
 #[cfg(any(feature = "test", test))]
 pub mod test {
-    use std::{
-        collections::{BTreeMap, HashMap},
-        fmt::Write as FmtWrite,
-        path::{Path, PathBuf},
-        sync::LazyLock,
-    };
+    use std::path::PathBuf;
 
     use alloy_primitives::Address;
     use flashblocks_primitives::access_list::FlashblockAccessList;
-    use parking_lot::RwLock;
     use reth::revm::db::BundleAccount;
     use serde::{Deserialize, Serialize};
-    use tracing::{error, info};
 
     /// Base directory for test results output.
     const TEST_RESULTS_DIR: &str = ".report";
@@ -73,11 +67,10 @@ pub mod test {
     impl BlockContext {
         pub fn dump(self) -> eyre::Result<()> {
             let res = serde_json::to_string_pretty(&self)?;
-            let number = self.number;
-            let dir = PathBuf::from(TEST_RESULTS_DIR).join("failure_{number}.json");
+            let dir = PathBuf::from(TEST_RESULTS_DIR).join(format!("failure_{}.json", self.number));
 
-            std::fs::create_dir_all(&dir)?;
-            std::fs::write(dir, res)?;
+            std::fs::create_dir_all(dir.parent().unwrap_or(&PathBuf::from(".")))?;
+            std::fs::write(&dir, res)?;
             Ok(())
         }
     }

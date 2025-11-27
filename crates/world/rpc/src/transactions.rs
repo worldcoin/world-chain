@@ -144,29 +144,25 @@ where
 
     let block_number = latest.header().number();
     let block_timestamp = latest.header().timestamp();
-    if let Some(min_block) = options.block_number_min {
-        if min_block > block_number {
+    if let Some(min_block) = options.block_number_min
+        && min_block > block_number {
             return Err(ErrorCode::from(-32003).into());
         }
-    }
 
-    if let Some(max_block) = options.block_number_max {
-        if max_block < block_number {
+    if let Some(max_block) = options.block_number_max
+        && max_block < block_number {
             return Err(ErrorCode::from(-32003).into());
         }
-    }
 
-    if let Some(min_timestamp) = options.timestamp_min {
-        if min_timestamp > block_timestamp {
+    if let Some(min_timestamp) = options.timestamp_min
+        && min_timestamp > block_timestamp {
             return Err(ErrorCode::from(-32003).into());
         }
-    }
 
-    if let Some(max_timestamp) = options.timestamp_max {
-        if max_timestamp < block_timestamp {
+    if let Some(max_timestamp) = options.timestamp_max
+        && max_timestamp < block_timestamp {
             return Err(ErrorCode::from(-32003).into());
         }
-    }
 
     validate_known_accounts(
         &options.known_accounts,

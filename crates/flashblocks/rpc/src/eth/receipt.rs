@@ -109,14 +109,14 @@ where
                 // new transaction input has changed, since otherwise the L1 cost wouldn't.
                 l1_block_info.clear_tx_l1_cost();
 
-                let res = Ok(OpReceiptBuilder::new(
+                
+
+                Ok(OpReceiptBuilder::new(
                     &self.provider().chain_spec(),
                     input,
                     &mut l1_block_info,
                 )?
-                .build());
-
-                res
+                .build())
             }
         }
     }

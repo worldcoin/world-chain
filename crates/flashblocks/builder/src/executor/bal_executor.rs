@@ -1,12 +1,10 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{OpBlockExecutionCtx, block::receipt_builder::OpReceiptBuilder};
-use alloy_primitives::{Address, Bytes, FixedBytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{OptionExt, eyre};
-use flashblocks_primitives::{
-    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
-};
+use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::revm::{State, database::StateProviderDatabase};
 use reth_chain_state::ExecutedBlock;
@@ -31,7 +29,7 @@ use revm::{
     inspector::NoOpInspector,
 };
 use revm_database_interface::WrapDatabaseRef;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tracing::error;
 
 use crate::{
@@ -43,6 +41,23 @@ use crate::{
         factory::FlashblocksBlockExecutorFactory,
     },
 };
+
+/// Result of computing the state root from a bundle state.
+pub struct StateRootResult {
+    pub state_root: B256,
+    pub trie_updates: TrieUpdates,
+    pub hashed_state: HashedPostState,
+}
+
+/// Result of verifying a flashblock delta against the current state.
+pub struct VerifyBlockResult<R: OpReceiptBuilder> {
+    pub bundle_state: BundleState,
+    pub execution_result: BlockExecutionResult<R::Receipt>,
+    pub evm_env: EvmEnv<OpSpecId>,
+    pub transactions: Vec<Recovered<OpTransactionSigned>>,
+    pub execution_context: OpBlockExecutionCtx,
+    pub fees: u128,
+}
 
 pub struct CommittedState<R: OpReceiptBuilder = OpRethReceiptBuilder> {
     pub gas_used: u64,
@@ -223,7 +238,6 @@ where
 /// A Block Access List is used to improve execution speed
 ///
 /// 'BlockExecutor' trait is not flexible enough for our purposes.
-/// TODO: WIP, currently unused
 pub struct BalBlockValidator<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
     execution_state: BalExecutionState<R>,
     chain_spec: Arc<OpChainSpec>,
@@ -270,17 +284,7 @@ where
         &mut self,
         state_provider: impl StateProvider + Clone + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
-    ) -> Result<
-        (
-            BundleState,
-            BlockExecutionResult<R::Receipt>,
-            EvmEnv<OpSpecId>,
-            Vec<Recovered<OpTransactionSigned>>,
-            OpBlockExecutionCtx,
-            u128,
-        ),
-        BalExecutorError,
-    >
+    ) -> Result<VerifyBlockResult<R>, BalExecutorError>
     where
         Self: Sized,
         R: Clone + Send + Sync + 'static,
@@ -301,20 +305,20 @@ where
 
         let executor_state = Arc::new(&self.execution_state);
 
-        let (bundle, result, env, context, fees, access_list) = executor.execute_block_parallel(
+        let parallel_output = executor.execute_block_parallel(
             executor_state,
             expected_access_list_data,
             state_provider,
         )?;
 
-        Ok((
-            bundle,
-            result,
-            env,
-            self.execution_state.all_transactions_iter().collect(),
-            context,
-            fees,
-        ))
+        Ok(VerifyBlockResult {
+            bundle_state: parallel_output.bundle_state,
+            execution_result: parallel_output.execution_result,
+            evm_env: parallel_output.evm_env,
+            transactions: self.execution_state.all_transactions_iter().collect(),
+            execution_context: parallel_output.execution_context,
+            fees: parallel_output.fees,
+        })
     }
 
     /// Decodes transactions from raw bytes and recovers signer addresses.
@@ -347,66 +351,86 @@ where
         mut self,
         state_provider: Arc<dyn StateProvider>,
         diff: ExecutionPayloadFlashblockDeltaV1,
-        bundle: alloy_primitives::map::HashMap<Address, BundleAccount>,
         parent_header: &SealedHeader<Header>,
         payload_id: PayloadId,
-        index: u64,
+        flashblock_index: u64,
     ) -> Result<OpBuiltPayload, BalExecutorError>
     where
         R: Clone + Send + Sync + 'static,
     {
-        let (r_0, r_1) = rayon::join(
+        let bal_state: alloy_primitives::map::HashMap<Address, BundleAccount> = diff
+            .clone()
+            .access_list_data
+            .ok_or(BalExecutorError::MissingBlockAccessList)?
+            .access_list
+            .into();
+
+        let mut bundle_state = self.execution_state.committed_state.bundle.clone();
+        bundle_state.extend_state(bal_state.into_iter().collect());
+
+        // Clone bundle_state for state root computation since into_iter() moves the state
+        let bundle_state_for_root = bundle_state.clone();
+
+        let (verify_result, state_root_result) = rayon::join(
             || self.verify_block(state_provider.clone(), diff.clone()),
-            || compute_state_root(state_provider.clone(), &bundle),
+            || {
+                compute_state_root(
+                    state_provider.clone(),
+                    &bundle_state_for_root.state.into_iter().collect(),
+                )
+            },
         );
 
-        // #[cfg(feature = "test")]
-        // if let Err(e) = &r_0 {
-        //     if let BalExecutorError::BalValidationError(
-        //         BalValidationError::AccessListHashMismatch { context, .. },
-        //     ) = e
-        //     {
-        //         crate::test::record_computed(
-        //             parent_header.number() + 1,
-        //             index,
-        //             Some(context.clone()),
-        //         );
-        //     }
-        // }
+        let verify_result = verify_result?;
+        let state_root_result = state_root_result?;
 
-        let (bundle_state, execution_result, evm_env, transactions, execution_context, fees) = r_0?;
-
-        let (state_root, trie_updates, hashed_state) = r_1?;
-
-        if state_root != diff.state_root {
+        if state_root_result.state_root != diff.state_root {
             error!(
                 target: "flashblocks::bal_executor",
                 expected = %diff.state_root,
-                got = %state_root,
+                got = %state_root_result.state_root,
                 "State root mismatch after executing flashblock delta"
             );
 
-            return Err(BalValidationError::StateRootMismatch {
-                expected: diff.state_root,
-                got: state_root,
-            }
+            // Get the access list data for diagnostics
+            let access_list_data: Option<flashblocks_primitives::access_list::FlashblockAccessListData> = diff.access_list_data.clone();
+            let validator_access_list = access_list_data
+                .as_ref()
+                .map(|d| d.access_list.clone())
+                .unwrap_or_default();
+            let expected_access_list = access_list_data.map(|d| d.access_list);
+
+            // Create error with explicit state data for reliable diagnostic capture
+            return Err(BalValidationError::state_root_mismatch_with_state(
+                diff.state_root,
+                state_root_result.state_root,
+                payload_id,
+                flashblock_index as u32,
+                verify_result.bundle_state.state.clone(),
+                validator_access_list,
+                expected_access_list,
+            )
             .into());
         }
 
-        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        let (transactions, senders) = verify_result
+            .transactions
+            .into_iter()
+            .map(|tx| tx.into_parts())
+            .unzip();
         let assembler = FlashblocksBlockAssembler::new(self.chain_spec.clone());
 
         let block = assembler.assemble_block(BlockAssemblerInput::<
             FlashblocksBlockExecutorFactory,
         >::new(
-            evm_env,
-            execution_context,
+            verify_result.evm_env,
+            verify_result.execution_context,
             parent_header,
             transactions,
-            &execution_result,
-            &bundle_state,
+            &verify_result.execution_result,
+            &verify_result.bundle_state,
             &state_provider.clone(),
-            state_root,
+            state_root_result.state_root,
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
@@ -424,14 +448,16 @@ where
 
         // Construct the built payload
         let outcome = BlockBuilderOutcome::<OpPrimitives> {
-            execution_result,
-            hashed_state,
-            trie_updates,
+            execution_result: verify_result.execution_result,
+            hashed_state: state_root_result.hashed_state,
+            trie_updates: state_root_result.trie_updates,
             block,
         };
 
         let sealed_block = Arc::new(outcome.block.sealed_block().clone());
 
+        // Use the bundle_state computed from the access list (which was used for state root)
+        // instead of verify_result.bundle_state which may be incomplete from parallel execution
         let execution_outcome = ExecutionOutcome::new(
             bundle_state,
             vec![outcome.execution_result.receipts.clone()],
@@ -450,7 +476,7 @@ where
         Ok(OpBuiltPayload::new(
             payload_id,
             sealed_block,
-            self.execution_state.committed_state.fees + U256::from(fees),
+            self.execution_state.committed_state.fees + U256::from(verify_result.fees),
             Some(executed_block),
         ))
     }
@@ -547,7 +573,7 @@ where
 pub fn compute_state_root(
     state_provider: Arc<dyn StateProvider>,
     bundle_state: &alloy_primitives::map::HashMap<Address, BundleAccount>,
-) -> Result<(FixedBytes<32>, TrieUpdates, HashedPostState), BlockExecutionError> {
+) -> Result<StateRootResult, BlockExecutionError> {
     // compute hashed post state
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
 
@@ -556,7 +582,11 @@ pub fn compute_state_root(
         .state_root_with_updates(hashed_state.clone())
         .map_err(BlockExecutionError::other)?;
 
-    Ok((state_root, trie_updates, hashed_state))
+    Ok(StateRootResult {
+        state_root,
+        trie_updates,
+        hashed_state,
+    })
 }
 
 impl<R> TryFrom<OpBuiltPayload> for CommittedState<R>
@@ -571,7 +601,7 @@ where
             .ok_or(BalExecutorError::MissingExecutedBlock)?;
 
         let gas_used = executed_block.recovered_block().gas_used();
-        let bundle = core::mem::take(&mut executed_block.execution_output.bundle.clone());
+        let bundle = executed_block.execution_outcome().bundle.clone();
         let fees = value.fees();
 
         let transactions: Vec<_> = executed_block

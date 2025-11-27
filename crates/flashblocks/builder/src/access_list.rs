@@ -401,12 +401,10 @@ mod tests {
                 executor.execute_transaction(tx).unwrap();
             }
 
-            let (evm, execution_result, access_list, min_tx_index, max_tx_index) =
-                executor.finish_with_access_list().unwrap();
+            let finish_result = executor.finish_with_access_list().unwrap();
+            let access_list = finish_result.access_list_data.access_list;
 
-            let access_list = access_list.access_list;
-
-            let (db, _) = evm.finish();
+            let (db, _) = finish_result.evm.finish();
 
             assert_eq!(
                 access_list, self.expected,
@@ -438,10 +436,10 @@ mod tests {
 
             (
                 db.bundle_state.clone(),
-                execution_result,
+                finish_result.execution_result,
                 access_list,
-                min_tx_index,
-                max_tx_index,
+                finish_result.min_tx_index,
+                finish_result.max_tx_index,
             )
         }
     }

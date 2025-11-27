@@ -1,4 +1,5 @@
 use alloy_consensus::{Block, Header};
+use alloy_primitives::Address;
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
@@ -199,9 +200,11 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<N>, FlashblockAccessList), BlockExecutionError> {
-        let (evm, result, access_list, _, _) = self.inner.executor.finish_with_access_list()?;
+        let finish_result = self.inner.executor.finish_with_access_list()?;
+        let access_list = finish_result.access_list_data;
+        let result = finish_result.execution_result;
 
-        let (db, evm_env) = evm.finish();
+        let (db, evm_env) = finish_result.evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
@@ -209,7 +212,7 @@ where
         // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
         // which represent a single atomic state transition. therefore reverts should have length 1
         // we only retain the first occurance of a revert for any given account.
-        let flattened = db
+        let flattened: Vec<(Address, revm::database::AccountRevert)> = db
             .bundle_state
             .reverts
             .iter()

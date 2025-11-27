@@ -123,7 +123,7 @@ impl Flashblock {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq, Hash)]
 pub struct FlashblockMetadata {
     /// Total fees collected by the proposer for this block.
     pub fees: U256,

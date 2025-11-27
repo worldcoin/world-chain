@@ -103,6 +103,7 @@ reth-node-builder = { git = "https://github.com/paradigmxyz/reth", features = [
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0", features = [
     "op",
 ] }
+reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-payload-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }

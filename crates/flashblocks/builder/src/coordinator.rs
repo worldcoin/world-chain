@@ -1,8 +1,7 @@
-use alloy_eips::merge;
 use alloy_op_evm::OpBlockExecutionCtx;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{
-    access_list::FlashblockAccessList, p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1,
+    p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1,
 };
 use futures::StreamExt as _;
 use parking_lot::RwLock;
@@ -17,7 +16,7 @@ use reth_optimism_primitives::OpPrimitives;
 
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::{sync::Arc, time::Duration};
-use tokio::{runtime::Handle, sync::broadcast};
+use tokio::sync::broadcast;
 use tracing::{error, trace};
 
 use crate::executor::bal_executor::BalBlockValidator;
@@ -151,11 +150,10 @@ impl FlashblocksExecutionCoordinator {
         event: Events<OpEngineTypes>,
         payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
     ) -> eyre::Result<()> {
-        if let Some(payload_events) = payload_events {
-            if let Err(e) = payload_events.send(event) {
+        if let Some(payload_events) = payload_events
+            && let Err(e) = payload_events.send(event) {
                 error!("error broadcasting payload: {e:?}");
             }
-        }
         Ok(())
     }
 }
@@ -184,13 +182,13 @@ where
     let FlashblocksExecutionCoordinatorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        payload_events: _,
+        ref mut payload_events,
     } = *coordinator.inner.write();
 
     let flashblock = Flashblock { flashblock };
 
-    if let Some(latest_payload) = latest_payload {
-        if latest_payload.0.id() == flashblock.flashblock.payload_id
+    if let Some(latest_payload) = latest_payload
+        && latest_payload.0.id() == flashblock.flashblock.payload_id
             && latest_payload.1 >= flashblock.flashblock.index
         {
             // Already processed this flashblock. This happens when set directly
@@ -199,52 +197,23 @@ where
             pending_block.send_replace(latest_payload.0.executed_block());
             return Ok(());
         }
-    }
 
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
 
     // If for whatever reason we are not processing flashblocks in order
     // we will error and return here.
-    let (base, merged_bundle) = if flashblocks.is_new_payload(&flashblock)? {
+    let base = if flashblocks.is_new_payload(&flashblock)? {
         *latest_payload = None;
         // safe unwrap from check in is_new_payload
-        (
-            flashblock.base().unwrap(),
-            flashblock
-                .diff()
-                .access_list_data
-                .as_ref()
-                .map(|a| a.access_list.clone()),
-        )
+        flashblock.base().unwrap()
     } else {
-        let merged_list = if let Some(latest) = &flashblock.flashblock.diff.access_list_data {
-            let mut merged = flashblocks.0.iter().fold(FlashblockAccessList::default(), {
-                |mut acc, fb| {
-                    acc.extend(
-                        &fb.flashblock
-                            .diff
-                            .access_list_data
-                            .as_ref()
-                            .unwrap()
-                            .access_list,
-                    );
-                    acc
-                }
-            });
-
-            merged.extend(&latest.access_list);
-            
-            Some(merged)
-        } else {
-            None
-        };
-
-        (flashblocks.base(), merged_list)
+        flashblocks.base()
     };
 
-    let timeout = Duration::from_secs(2);
+    let timeout = Duration::from_secs(10);
     let now = std::time::Instant::now();
+
     let sealed_header = loop {
         match provider.sealed_header_by_hash(base.parent_hash) {
             Ok(Some(header)) => break header,
@@ -292,7 +261,6 @@ where
         block_validator.validate_and_execute_diff_parallel(
             state_provider.clone(),
             diff.clone(),
-            merged_bundle.unwrap().into(),
             &sealed_header,
             *flashblock.payload_id(),
             index,
@@ -320,7 +288,7 @@ where
         "built payload from flashblock"
     );
 
-    // coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
-
+    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
+    
     Ok(())
 }

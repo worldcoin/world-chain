@@ -8,3 +8,4 @@ contracts/sepolia_load_test.json
 .claude
 .vscode
 .docker-cache
+/diagnostics

@@ -1,38 +1,39 @@
-use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::b64;
+use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
+use alloy_primitives::{B64, b64};
 use alloy_rpc_types::TransactionRequest;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use ed25519_dalek::SigningKey;
-use flashblocks_primitives::p2p::Authorization;
-use futures::StreamExt;
+use flashblocks_primitives::{
+    flashblocks::{Flashblock, Flashblocks},
+    p2p::Authorization,
+    primitives::FlashblocksPayloadV1,
+};
+use futures::{Stream, StreamExt, stream};
 use op_alloy_consensus::encode_holocene_extra_data;
-use parking_lot::Mutex;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::{
     chainspec::EthChainSpec,
     network::{NetworkSyncUpdater, SyncState},
-    primitives::RecoveredBlock,
-    rpc::eth::EthApiServer,
 };
 use reth_e2e_test_utils::{testsuite::actions::Action, transaction::TransactionTestContext};
-use reth_node_api::{Block, PayloadAttributes};
-use reth_optimism_node::{utils::optimism_payload_attributes, OpPayloadAttributes};
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_node_api::{EngineApiMessageVersion, EngineTypes, PayloadAttributes};
+use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes, utils::optimism_payload_attributes};
 use reth_optimism_payload_builder::payload_id_optimism;
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{fixed_bytes, Address, Bytes, B256, U256};
-use std::{sync::Arc, time::Duration, vec};
+use revm_primitives::{Address, B256, Bytes, U256, fixed_bytes};
+use std::time::Duration;
 use tracing::info;
 use world_chain_test::utils::account;
 
-use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 use world_chain_node::context::{BasicContext, FlashblocksContext};
 use world_chain_test::{
     node::{raw_pbh_bundle_bytes, tx},
     utils::signer,
 };
 
-use crate::{
-    actions::ProduceBlocksWithFlashblocks,
-    setup::{setup, setup_with_tx_peers, CHAIN_SPEC},
+use crate::setup::{
+    CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup, setup_with_tx_peers,
 };
 
 #[tokio::test]
@@ -155,102 +156,64 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
+
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
+    let span_outer = tracing::info_span!("flashblocks_e2e_test");
+    let _enter = span_outer.enter();
+
+    // Builder and Follower
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
 
-    let (_, mut basic_nodes, _tasks, mut basic_env, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+    // Verifier
+    let (_, basic_nodes, _tasks, _basic_env, _) =
+        setup_with_tx_peers::<BasicContext>(1, optimism_payload_attributes, false, false).await?;
 
-    let basic_worldchain_node = basic_nodes.first_mut().unwrap();
+    let basic_worldchain_node = &basic_nodes[0];
 
-    let ext_context_1 = nodes[0].ext_context.clone();
-    let ext_context_2 = nodes[1].ext_context.clone();
+    let [builder_node, follower_node] = &mut nodes[..] else {
+        unreachable!()
+    };
 
-    let now = std::time::Instant::now();
+    let builder_context = builder_node.ext_context.clone();
+    let follower_context = follower_node.ext_context.clone();
 
-    let flashblocks_0 = Arc::new(Mutex::new(Vec::new()));
-    let flashblocks_1 = Arc::new(Mutex::new(Vec::new()));
+    let basic_beacon_handle = basic_worldchain_node
+        .node
+        .inner
+        .consensus_engine_handle()
+        .clone();
 
-    let flashblocks_0_clone = flashblocks_0.clone();
-    let flashblocks_1_clone = flashblocks_1.clone();
-
-    tokio::spawn(async move {
-        let stream_0 = ext_context_1.flashblocks_handle.flashblock_stream();
-        let stream_1 = ext_context_2.flashblocks_handle.flashblock_stream();
-
-        futures::pin_mut!(stream_0);
-        futures::pin_mut!(stream_1);
-
-        while let (Some(flashblock_0), Some(flashblock_1)) =
-            futures::future::join(stream_0.next(), stream_1.next()).await
-        {
-            let elapsed = now.elapsed();
-            info!(
-                "Received flashblocks after {:?}: 0: {:?}, 1: {:?}",
-                elapsed.as_millis(),
-                flashblock_0.payload_id,
-                flashblock_1.payload_id
-            );
-
-            flashblocks_0.lock().push(flashblock_0);
-            flashblocks_1.lock().push(flashblock_1);
-        }
+    let _spam_task = tokio::spawn(async move {
+        tx_spammer.spawn(10).await;
     });
 
-    let node = &mut nodes[0];
+    let block_hash = builder_node.node.block_hash(0);
+    let block_hash_basic = basic_worldchain_node.node.block_hash(0);
 
-    let ext_context = node.ext_context.clone();
-    let block_hash = node.node.block_hash(0);
+    assert_eq!(block_hash, block_hash_basic);
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        builder_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key()
+            .clone(),
+    );
 
-    let authorization_generator = move |attrs: OpPayloadAttributes| {
-        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
-
-        Authorization::new(
-            payload_id,
-            attrs.timestamp(),
-            &authorizer_sk,
-            ext_context
-                .flashblocks_handle
-                .builder_sk()
-                .unwrap()
-                .verifying_key(),
-        )
-    };
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
+    let timestamp = crate::setup::current_timestamp();
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        node.node
-            .inner
-            .chain_spec()
-            .base_fee_params_at_timestamp(timestamp),
+    let eip1559_params = crate::setup::encode_eip1559_params(
+        builder_node.node.inner.chain_spec().as_ref(),
+        timestamp,
     )?;
-
-    let attributes = OpPayloadAttributes {
-        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-            timestamp,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
-        no_tx_pool: Some(false),
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    };
-
-    let _tx = tx.clone();
+    let attributes = crate::setup::build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
+    );
 
     let mut flashblocks_action = crate::actions::AssertMineBlock::new(
         0,
@@ -258,111 +221,80 @@ async fn test_flashblocks() -> eyre::Result<()> {
         Some(B256::ZERO),
         attributes.clone(),
         authorization_generator.clone(),
-        std::time::Duration::from_millis(2000),
+        std::time::Duration::from_secs(2),
         true,
         true,
         tx.clone(),
     )
     .await;
 
-    let mut basic_action = crate::actions::AssertMineBlock::new(
-        0,
-        vec![],
-        Some(B256::ZERO),
-        attributes.clone(),
-        authorization_generator,
-        std::time::Duration::from_millis(2000),
-        false,
-        true,
-        tx,
-    )
-    .await;
-
-    for i in 0..10 {
-        let tx = TransactionTestContext::transfer_tx(
-            node.node.inner.chain_spec().chain_id(),
-            signer(i as u32),
-        )
-        .await;
-        let envelope = TransactionTestContext::sign_tx(signer(i as u32), tx.into()).await;
-        let tx: Bytes = envelope.encoded_2718().into();
-
-        let _ = tokio::join!(
-            node.node.rpc.inject_tx(tx.clone()),
-            basic_worldchain_node.node.rpc.inject_tx(tx)
-        );
-    }
-
     flashblocks_action.execute(&mut flashblocks_env).await?;
 
-    let flashblocks_envelope = rx.recv().await.expect("should receive payload");
-
-    basic_action.execute(&mut basic_env).await?;
-
-    let basic_envelope = rx.recv().await.expect("should receive payload");
-
-    let flashblock_block = flashblocks_envelope
+    let execution_payload_envelope = rx.recv().await.expect("should receive payload");
+    let expected_block_hash = execution_payload_envelope
         .execution_payload
-        .try_into_block::<OpTransactionSigned>()
-        .expect("valid block")
-        .try_into_recovered()
-        .expect("valid recovered block");
+        .payload_inner
+        .payload_inner
+        .block_hash;
 
-    let basic_block = basic_envelope
-        .execution_payload
-        .try_into_block::<OpTransactionSigned>()
-        .expect("valid block")
-        .try_into_recovered()
-        .expect("valid recovered block");
-
-    let hash = flashblock_block.hash_slow();
-    let basic_hash = basic_block.hash_slow();
-
-    assert_eq!(hash, basic_hash, "Blocks from both nodes should match");
-
-    let aggregated_flashblocks_0 = Flashblock::reduce(
-        Flashblocks::new(
-            flashblocks_0_clone
-                .lock()
-                .iter()
-                .map(|fb| Flashblock {
-                    flashblock: fb.clone(),
-                })
-                .collect(),
-        )
-        .unwrap(),
+    // Create a stream that validates each intermediate flashblock against the beacon node
+    let validation_stream = crate::setup::flashblocks_validator_stream(
+        follower_context.flashblocks_handle.flashblock_stream(),
+        basic_beacon_handle.clone(),
+        expected_block_hash,
+        basic_worldchain_node.node.inner.chain_spec().clone(),
     );
 
-    let aggregated_flashblocks_1 = Flashblock::reduce(
-        Flashblocks::new(
-            flashblocks_1_clone
-                .lock()
-                .iter()
-                .map(|fb| Flashblock {
-                    flashblock: fb.clone(),
-                })
-                .collect(),
-        )
-        .unwrap(),
+    futures::pin_mut!(validation_stream);
+
+    // Consume the validation stream, asserting each flashblock is valid
+    let mut validated_count = 0u64;
+    while let Some(validated) = validation_stream.next().await {
+        validated_count += 1;
+
+        // Assert the payload is valid
+        assert!(
+            matches!(
+                validated.status,
+                PayloadStatus {
+                    status: PayloadStatusEnum::Valid,
+                    ..
+                }
+            ),
+            "Intermediate flashblock {} should be valid, got: {:?}",
+            validated.index,
+            validated.status
+        );
+
+        info!(
+            target: "flashblocks",
+            index = %validated.index,
+            validated_count = %validated_count,
+            is_final = %validated.is_final,
+            block_hash = ?validated.execution_data.block_hash(),
+            "Validated intermediate flashblock"
+        );
+
+        if validated.is_final {
+            info!(
+                target: "flashblocks",
+                validated_count = %validated_count,
+                "All flashblocks validated successfully, reached final block"
+            );
+            break;
+        }
+    }
+
+    assert!(
+        validated_count > 0,
+        "Should have validated at least one flashblock"
     );
 
-    let block_0: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
-        RecoveredBlock::try_from(aggregated_flashblocks_0.unwrap())
-            .expect("failed to recover block from flashblock 0");
-
-    let block_1: RecoveredBlock<alloy_consensus::Block<OpTransactionSigned>> =
-        RecoveredBlock::try_from(aggregated_flashblocks_1.unwrap())
-            .expect("failed to recover block from flashblock 1");
-
-    assert_eq!(
-        block_0.hash_slow(),
-        hash,
-        "Flashblock 0 did not match mined block"
-    );
-    assert_eq!(
-        block_1.hash_slow(),
-        hash,
-        "Flashblock 1 did not match mined block"
+    info!(
+        target: "flashblocks",
+        expected_block_hash = ?expected_block_hash,
+        validated_count = %validated_count,
+        "Flashblock validation complete",
     );
 
     Ok(())
@@ -372,62 +304,33 @@ async fn test_flashblocks() -> eyre::Result<()> {
 async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (_, nodes, _tasks, mut env, spammer) =
+    let (_, nodes, _tasks, mut env, _spammer) =
         setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
 
-    tokio::spawn(async move { spammer.spawn(60).await });
     let ext_context = nodes[0].ext_context.clone();
-
     let block_hash = nodes[0].node.block_hash(0);
 
-    let authorization_generator = move |attrs: OpPayloadAttributes| {
-        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key()
+            .clone(),
+    );
 
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
-
-        Authorization::new(
-            payload_id,
-            attrs.timestamp(),
-            &authorizer_sk,
-            ext_context
-                .flashblocks_handle
-                .builder_sk()
-                .unwrap()
-                .verifying_key(),
-        )
-    };
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
+    let timestamp = crate::setup::current_timestamp();
     let (sender, mut block_rx) = tokio::sync::mpsc::channel(1);
-
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        nodes[0]
-            .node
-            .inner
-            .chain_spec()
-            .base_fee_params_at_timestamp(timestamp),
-    )?;
+    let eip1559_params =
+        crate::setup::encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
 
     // Compose a Mine Block action with an eth_getTransactionReceipt action
-    let attributes = OpPayloadAttributes {
-        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-            timestamp,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
-        no_tx_pool: Some(false),
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    };
+    let attributes = crate::setup::build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
+    );
 
     let mock_tx =
         TransactionTestContext::transfer_tx(nodes[0].node.inner.chain_spec().chain_id(), signer(0))
@@ -543,31 +446,19 @@ async fn test_eth_api_call() -> eyre::Result<()> {
         setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
 
     let ext_context = nodes[0].ext_context.clone();
-
     let block_hash = nodes[0].node.block_hash(0);
 
-    let authorization_generator = move |attrs: OpPayloadAttributes| {
-        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key()
+            .clone(),
+    );
 
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
-
-        Authorization::new(
-            payload_id,
-            attrs.timestamp(),
-            &authorizer_sk,
-            ext_context
-                .flashblocks_handle
-                .builder_sk()
-                .unwrap()
-                .verifying_key(),
-        )
-    };
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
+    let timestamp = crate::setup::current_timestamp();
     let (sender, _) = tokio::sync::mpsc::channel(1);
 
     // 200ms backoff should be enough time to fetch the pending receipt
@@ -581,28 +472,14 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     .value(U256::from(100_000_000_000_000_000u64))
     .from(account(0));
 
-    let signer = EthereumWallet::from(signer(0));
-    let envelope =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(mock_tx.clone(), &signer)
-            .await
-            .unwrap();
+    let wallet = EthereumWallet::from(signer(0));
+    let raw_tx = crate::setup::sign_transaction(mock_tx.clone(), &wallet).await;
 
-    let raw_tx: Bytes = envelope.encoded_2718().into();
-
-    let attributes = OpPayloadAttributes {
-        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-            timestamp,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: Some(vec![raw_tx.clone()]),
-        no_tx_pool: Some(false),
-        eip_1559_params: Some(b64!("0000000800000008")),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    };
+    let attributes = crate::setup::build_payload_attributes(
+        timestamp,
+        b64!("0000000800000008"),
+        Some(vec![raw_tx.clone()]),
+    );
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
@@ -667,39 +544,24 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::spawn(async move { spammer.spawn(10) });
 
     let ext_context = nodes[0].ext_context.clone();
-
     let block_hash = nodes[0].node.block_hash(0);
 
-    let builder_sk = ext_context.flashblocks_handle.builder_sk().unwrap().clone();
-
-    let authorization_generator = move |attrs: OpPayloadAttributes| {
-        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
-
-        Authorization::new(
-            payload_id,
-            attrs.timestamp(),
-            &authorizer_sk,
-            builder_sk.verifying_key(),
-        )
-    };
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key()
+            .clone(),
+    );
 
     let (sender, _) = tokio::sync::mpsc::channel(1);
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
 
-    let eip1559 = encode_holocene_extra_data(
-        Default::default(),
-        nodes[0]
-            .node
-            .inner
-            .chain_spec()
-            .base_fee_params_at_timestamp(timestamp),
-    )?;
-
+    // Note: Using a fixed timestamp for deterministic block hash in this test
     let attributes = OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp: 1756929279,
@@ -710,7 +572,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         },
         transactions: Some(vec![]),
         no_tx_pool: Some(false),
-        eip_1559_params: Some(eip1559[1..=8].try_into()?),
+        eip_1559_params: Some(eip1559_params),
         gas_limit: Some(30_000_000),
         min_base_fee: None,
     };
@@ -745,44 +607,6 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_flashblocks_bal_with_spammer() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let (_, nodes, _tasks, mut env, spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
-
-    tokio::spawn(async move { spammer.spawn(20).await });
-
-    let ext_context = nodes[0].ext_context.clone();
-
-    let builder_sk = ext_context.flashblocks_handle.builder_sk().unwrap().clone();
-
-    let authorization_generator = move |attrs: OpPayloadAttributes, hash| {
-        let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-
-        let payload_id = payload_id_optimism(&hash, &attrs, 3);
-
-        Authorization::new(
-            payload_id,
-            attrs.timestamp(),
-            &authorizer_sk,
-            builder_sk.verifying_key(),
-        )
-    };
-
-    let mut action = crate::actions::ProduceBlocksWithFlashblocks::new(10, authorization_generator);
-
-    action.execute(&mut env).await?;
-
-    Ok(())
-}
-
-// TODO: Mock failover scenario test
-// - Assert Mined block of both nodes is identical in a failover scenario for FCU's with the same parent attributes
-//
-
 // Transaction Propagation Tests
 
 /// Test default transaction propagation behavior without tx_peers configuration
@@ -800,46 +624,46 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
     };
-    let node_0 = &mut node_0_ctx.node;
-    let node_1 = &mut node_1_ctx.node;
-    let node_2 = &mut node_2_ctx.node;
 
     // Set nodes to Idle state to enable transaction propagation
-    node_0.inner.network.update_sync_state(SyncState::Idle);
-    node_1.inner.network.update_sync_state(SyncState::Idle);
-    node_2.inner.network.update_sync_state(SyncState::Idle);
+    node_0_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_1_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_2_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Create and inject transaction into Node 0
-    let tx_request = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
-    let wallet = signer(0);
-    let signer_wallet = EthereumWallet::from(wallet);
-    let signed =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &signer_wallet)
-            .await
-            .unwrap();
+    let (raw_tx, tx_hash) = crate::setup::create_test_transaction(0, 0).await;
 
-    let raw_tx: Bytes = signed.encoded_2718().into();
-    let tx_hash = *signed.tx_hash();
-
-    let result = node_0.rpc.inject_tx(raw_tx.clone()).await;
+    let result = node_0_ctx.node.rpc.inject_tx(raw_tx).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 0");
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     assert!(
-        node_0.inner.pool().contains(&tx_hash),
+        node_0_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should be in Node 0's pool"
     );
 
     assert!(
-        node_1.inner.pool().contains(&tx_hash),
+        node_1_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction SHOULD propagate to Node 1 with default policy (TransactionPropagationKind::All)"
     );
 
     assert!(
-        node_2.inner.pool().contains(&tx_hash),
+        node_2_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction SHOULD propagate to Node 2 with default policy (TransactionPropagationKind::All)"
     );
 
@@ -876,102 +700,112 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
         unreachable!()
     };
 
-    let node_0 = &mut node_0_ctx.node;
-    let node_1 = &mut node_1_ctx.node;
-    let node_2 = &mut node_2_ctx.node;
-
-    let node_0_peer_id = node_0.network.record().id;
-    let node_1_peer_id = node_1.network.record().id;
-    let node_2_peer_id = node_2.network.record().id;
+    let node_0_peer_id = node_0_ctx.node.network.record().id;
+    let node_1_peer_id = node_1_ctx.node.network.record().id;
+    let node_2_peer_id = node_2_ctx.node.network.record().id;
 
     // Set nodes to Idle state to enable transaction propagation
-    use reth::network::{NetworkSyncUpdater, Peers, SyncState};
-    node_0.inner.network.update_sync_state(SyncState::Idle);
-    node_1.inner.network.update_sync_state(SyncState::Idle);
-    node_2.inner.network.update_sync_state(SyncState::Idle);
+    use reth::network::Peers;
+    node_0_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_1_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_2_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
 
     // Disconnect Node 0 from Node 2 to prevent multi-hop forwarding
-    node_0.inner.network.disconnect_peer(node_2_peer_id);
-    node_2.inner.network.disconnect_peer(node_0_peer_id);
+    node_0_ctx
+        .node
+        .inner
+        .network
+        .disconnect_peer(node_2_peer_id);
+    node_2_ctx
+        .node
+        .inner
+        .network
+        .disconnect_peer(node_0_peer_id);
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Create and inject transaction into Node 1 (which has tx_peers = [Node 0 only])
-    let tx_request = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
-    let wallet = signer(0);
-    let signer_wallet = EthereumWallet::from(wallet);
-    let signed =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &signer_wallet)
-            .await
-            .unwrap();
+    let (raw_tx, tx_hash) = crate::setup::create_test_transaction(0, 0).await;
 
-    let raw_tx: Bytes = signed.encoded_2718().into();
-    let tx_hash = *signed.tx_hash();
-
-    let result = node_1.rpc.inject_tx(raw_tx.clone()).await;
+    let result = node_1_ctx.node.rpc.inject_tx(raw_tx).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 1");
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     assert!(
-        node_1.inner.pool().contains(&tx_hash),
+        node_1_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should be in Node 1's pool"
     );
 
     assert!(
-        node_0.inner.pool().contains(&tx_hash),
+        node_0_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction SHOULD propagate to Node 0 (whitelisted in Node 1's tx_peers)"
     );
 
     assert!(
-        !node_2.inner.pool().contains(&tx_hash),
+        !node_2_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should NOT propagate to Node 2 (NOT in Node 1's tx_peers whitelist)"
     );
 
     // Part 2: Test Node 2 -> Node 0 and Node 1
     // Disconnect node 0 and node 1
-    node_0.inner.network.disconnect_peer(node_1_peer_id);
-    node_1.inner.network.disconnect_peer(node_0_peer_id);
+    node_0_ctx
+        .node
+        .inner
+        .network
+        .disconnect_peer(node_1_peer_id);
+    node_1_ctx
+        .node
+        .inner
+        .network
+        .disconnect_peer(node_0_peer_id);
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Reconnect Node 0 and Node 2
-    let node_0_addr = node_0.network.record().tcp_addr();
-    node_2.inner.network.add_peer(node_0_peer_id, node_0_addr);
+    let node_0_addr = node_0_ctx.node.network.record().tcp_addr();
+    node_2_ctx
+        .node
+        .inner
+        .network
+        .add_peer(node_0_peer_id, node_0_addr);
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Create a new transaction and inject into Node 2
     // Node 2 has tx_peers = [Node 0, Node 1], so it should propagate to both
-    let tx_request_2 = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
-    let wallet_2 = signer(1); // Different signer
-    let signer_wallet_2 = EthereumWallet::from(wallet_2);
-    let signed_2 =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request_2, &signer_wallet_2)
-            .await
-            .unwrap();
-
-    let raw_tx_2: Bytes = signed_2.encoded_2718().into();
-    let tx_hash_2 = *signed_2.tx_hash();
+    let (raw_tx_2, tx_hash_2) = crate::setup::create_test_transaction(1, 0).await;
 
     // Inject transaction into Node 2
-    let result = node_2.rpc.inject_tx(raw_tx_2.clone()).await;
+    let result = node_2_ctx.node.rpc.inject_tx(raw_tx_2).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 2");
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     assert!(
-        node_2.inner.pool().contains(&tx_hash_2),
+        node_2_ctx.node.inner.pool().contains(&tx_hash_2),
         "Transaction should be in Node 2's pool"
     );
 
     assert!(
-        node_0.inner.pool().contains(&tx_hash_2),
+        node_0_ctx.node.inner.pool().contains(&tx_hash_2),
         "Transaction SHOULD propagate to Node 0 (whitelisted in Node 2's tx_peers)"
     );
 
     assert!(
-        node_1.inner.pool().contains(&tx_hash_2),
+        node_1_ctx.node.inner.pool().contains(&tx_hash_2),
         "Transaction SHOULD propagate to Node 1 (whitelisted in Node 2's tx_peers)"
     );
 
@@ -997,8 +831,6 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
 async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    use crate::setup::setup_with_tx_peers;
-
     let (_, mut nodes, _tasks, _, _) =
         setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true)
             .await?;
@@ -1006,48 +838,48 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
     };
-    let node_0 = &mut node_0_ctx.node;
-    let node_1 = &mut node_1_ctx.node;
-    let node_2 = &mut node_2_ctx.node;
 
     // Set nodes to Idle state to enable transaction propagation
-    node_0.inner.network.update_sync_state(SyncState::Idle);
-    node_1.inner.network.update_sync_state(SyncState::Idle);
-    node_2.inner.network.update_sync_state(SyncState::Idle);
+    node_0_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_1_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
+    node_2_ctx
+        .node
+        .inner
+        .network
+        .update_sync_state(SyncState::Idle);
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Inject transaction into Node 1 (which has tx_peers = [Node 0])
     // Even with tx_peers configured, gossip disabled should prevent propagation
-    let tx_request_2 = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
-    let wallet_2 = signer(1);
-    let signer_wallet_2 = EthereumWallet::from(wallet_2);
-    let signed_2 =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request_2, &signer_wallet_2)
-            .await
-            .unwrap();
+    let (raw_tx, tx_hash) = create_test_transaction(1, 0).await;
 
-    let raw_tx_2: Bytes = signed_2.encoded_2718().into();
-    let tx_hash_2 = *signed_2.tx_hash();
-
-    let result = node_1.rpc.inject_tx(raw_tx_2.clone()).await;
+    let result = node_1_ctx.node.rpc.inject_tx(raw_tx).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 1");
 
     // Wait for potential propagation
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     assert!(
-        node_1.inner.pool().contains(&tx_hash_2),
+        node_1_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should be in Node 1's pool"
     );
 
     assert!(
-        !node_0.inner.pool().contains(&tx_hash_2),
+        !node_0_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should NOT propagate to Node 0 (gossip disabled takes precedence over tx_peers)"
     );
 
     assert!(
-        !node_2.inner.pool().contains(&tx_hash_2),
+        !node_2_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should NOT propagate to Node 2 (gossip disabled)"
     );
 

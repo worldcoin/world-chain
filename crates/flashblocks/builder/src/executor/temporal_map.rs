@@ -42,14 +42,14 @@ where
 
     /// Optional: get also returns the index it came from.
     pub fn get_with_index(&self, index: I, key: &K) -> Option<(&I, &V)> {
-        let res = self.inner.get(key).and_then(|versions| {
+        
+
+        self.inner.get(key).and_then(|versions| {
             versions
                 .range((Unbounded, Included(index)))
                 .next_back()
                 .map(|(i, v)| (i, v))
-        });
-
-        res
+        })
     }
 }
 
