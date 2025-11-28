@@ -201,7 +201,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         builder_node.node.inner.chain_spec().as_ref(),
         timestamp,
     )?;
-    
+
     let attributes = crate::setup::build_payload_attributes(
         timestamp,
         eip1559_params,

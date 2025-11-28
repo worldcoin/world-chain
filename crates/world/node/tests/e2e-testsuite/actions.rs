@@ -42,7 +42,6 @@ where
     Arc::new(f)
 }
 
-
 /// Compose two actions: first runs, then second
 pub struct Then<A, B> {
     first: A,
@@ -230,7 +229,6 @@ impl Action<OpEngineTypes> for Repeat {
     }
 }
 
-
 pub struct FlashblocksValidatonStream {
     pub node_indexes: Vec<usize>,
     pub flashblocks_stream:
@@ -279,7 +277,7 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                 let Some(reduced) = Flashblock::reduce(ordered.clone()).ok() else {
                     continue;
                 };
-                
+
                 let reduced_hash = reduced.diff().block_hash;
 
                 info!(
