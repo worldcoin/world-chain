@@ -38,8 +38,7 @@ use crate::{
     assembler::FlashblocksBlockAssembler,
     block_builder::FlashblocksBlockBuilder,
     executor::{
-        BalExecutorError, BalValidationError,
-        bal_builder::BalBuilderBlockExecutor,
+        BalExecutorError, BalValidationError, bal_builder::BalBuilderBlockExecutor,
         factory::FlashblocksBlockExecutorFactory,
     },
 };

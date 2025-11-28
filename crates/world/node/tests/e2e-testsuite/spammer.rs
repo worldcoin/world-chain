@@ -5,19 +5,18 @@ use alloy_eips::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_provider::ProviderBuilder;
 use alloy_rpc_types::TransactionRequest;
-use alloy_sol_types::{sol, SolCall};
-use futures::{stream::FuturesOrdered, StreamExt};
+use alloy_sol_types::{SolCall, sol};
+use futures::{StreamExt, stream::FuturesOrdered};
+use reqwest::Url;
 use reth::{chainspec::EthChainSpec, rpc::api::EthApiClient};
 use reth_e2e_test_utils::testsuite::NodeClient;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use revm_primitives::{Address, B256, Bytes};
-use reqwest::Url;
 use tracing::{error, info};
 use world_chain_test::{node::tx, utils::signer};
 
-use crate::actions::BlockProductionState;
-use crate::setup::CHAIN_SPEC;
+use crate::{actions::BlockProductionState, setup::CHAIN_SPEC};
 
 sol! {
     #[sol(rpc, bytecode = "6080604052348015600e575f5ffd5b506101338061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061004a575f3560e01c80632b68b9c61461004e578063703c2d1a14610056578063affed0e01461005e578063b8dda9c71461007a575b5f5ffd5b61005433ff5b005b6100546100ac565b61006760015481565b6040519081526020015b60405180910390f35b61009c6100883660046100f7565b5f6020819052908152604090205460ff1681565b6040519015158152602001610071565b5f5b60648110156100f4576001805f8282546100c8919061010e565b9091555050600180545f908152602081905260409020805460ff19811660ff90911615179055016100ae565b50565b5f60208284031215610107575f5ffd5b5035919050565b8082018082111561012d57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
@@ -204,7 +203,6 @@ impl TxSpammer {
             futures.push(tx_type);
         }
 
-        
         futures::future::join_all(futures).await
     }
 

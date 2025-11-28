@@ -4,7 +4,8 @@ use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{Address, B64, Sealed, address};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
+    CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    PraguePayloadFields,
 };
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
@@ -26,8 +27,8 @@ use reth_e2e_test_utils::{
     testsuite::{BlockInfo, Environment, NodeClient, NodeState},
 };
 use reth_node_api::{
-     FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter, PayloadAttributes, PayloadTypes,
+    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadAttributes,
+    PayloadTypes,
 };
 use reth_node_builder::{
     NodeComponents, NodeComponentsBuilder,
@@ -281,10 +282,12 @@ where
         }
 
         // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2
-            && let Some(first_node) = node_contexts.first_mut() {
-                node.connect(&mut first_node.node).await;
-            }
+        if idx + 1 == num_nodes
+            && num_nodes > 2
+            && let Some(first_node) = node_contexts.first_mut()
+        {
+            node.connect(&mut first_node.node).await;
+        }
 
         let world_chain_test_node = WorldChainTestingNodeContext { node, ext_context };
 

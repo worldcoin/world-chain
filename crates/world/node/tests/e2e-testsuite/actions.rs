@@ -71,7 +71,7 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
             let mut ordered = flashblocks;
 
             // Process flashblocks from the stream
-            while let Some(flashblock) = self.flashblocks_stream.next().await  {
+            while let Some(flashblock) = self.flashblocks_stream.next().await {
                 let index = flashblock.index;
 
                 // Push the new flashblock into the ordered collection
@@ -143,13 +143,14 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                             },
                         };
                         if let Some(ref hook) = validation_hook
-                            && let Err(e) = hook(status.clone()) {
-                                error!(
-                                    target: "flashblocks",
-                                    index = %index,
-                                    "Validation hook failed: {:?}", e
-                                );
-                            }
+                            && let Err(e) = hook(status.clone())
+                        {
+                            error!(
+                                target: "flashblocks",
+                                index = %index,
+                                "Validation hook failed: {:?}", e
+                            );
+                        }
                         status
                     })
                     .collect::<Vec<_>>()
@@ -184,9 +185,7 @@ impl GetReceipts {
         let receipt_hashes = stream::unfold(flashblocks_stream, |mut stream| async {
             match stream.next().await {
                 Some(payload) => {
-                    let txs = payload
-                        .diff
-                        .transactions.to_vec();
+                    let txs = payload.diff.transactions.to_vec();
 
                     let decoded = txs
                         .iter()
@@ -2013,9 +2012,10 @@ impl ReadOnlyAction for QueryValidatedBlocks {
                         .await?;
 
                     if let Some(ref b) = block
-                        && let Some(ref hook) = self.on_block {
-                            hook(b.clone())?;
-                        }
+                        && let Some(ref hook) = self.on_block
+                    {
+                        hook(b.clone())?;
+                    }
                 }
             }
             Ok(())
@@ -2072,9 +2072,10 @@ impl ReadOnlyAction for QueryTxReceipts {
                     .await?;
 
                     if let Some(ref r) = receipt
-                        && let Some(ref hook) = self.on_receipt {
-                            hook(r.clone())?;
-                        }
+                        && let Some(ref hook) = self.on_receipt
+                    {
+                        hook(r.clone())?;
+                    }
                 }
             }
             Ok(())

@@ -1,6 +1,6 @@
-mod testsuite;
-mod spammer;
 mod actions;
 mod setup;
+mod spammer;
+mod testsuite;
 
 const fn main() {}
