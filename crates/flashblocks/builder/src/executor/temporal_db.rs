@@ -1,10 +1,10 @@
 use alloy_primitives::{Address, B256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use revm::{
+    DatabaseRef,
     database::BundleState,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
-    DatabaseRef,
 };
 
 use crate::executor::temporal_map::TemporalMap;
@@ -44,7 +44,8 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             let acc_at = |cache: &TemporalState, index| {
                 cache
                     .account_info
-                    .get(index, &change.address).cloned()
+                    .get(index, &change.address)
+                    .cloned()
                     .unwrap_or_default()
             };
 
@@ -174,9 +175,10 @@ impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
             },
             None => {
                 if let Some(account) = self.bundle.account(&address)
-                    && let Some(storage) = account.storage_slot(index) {
-                        return Ok(storage);
-                    }
+                    && let Some(storage) = account.storage_slot(index)
+                {
+                    return Ok(storage);
+                }
 
                 self.db.storage_ref(address, index)
             }
@@ -194,7 +196,7 @@ mod tests {
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
-    use alloy_primitives::{address, b256, bytes, U256};
+    use alloy_primitives::{U256, address, b256, bytes};
     use flashblocks_primitives::access_list::FlashblockAccessListData;
     use reth::revm::State;
     use revm::{

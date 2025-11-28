@@ -186,7 +186,7 @@ where
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
-   
+
         let maybe_pre_state = self
             .check_for_pre_state(&config.attributes)
             .inspect_err(|_| {

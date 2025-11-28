@@ -4,15 +4,15 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::{
+    BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
     components::{
         ComponentsBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
-    BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
 };
 
 use reth::{
     rpc::eth::EthApiTypes,
-    transaction_pool::{blobstore::DiskFileBlobStore, TransactionValidationTaskExecutor},
+    transaction_pool::{TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore},
 };
 
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -20,18 +20,18 @@ use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{NodeAddOns, PayloadAttributesBuilder};
 use reth_node_builder::{
+    DebugNode, FullNodeComponents, NodeComponents, PayloadTypes, PrimitivesTy, TxTy,
     components::{NetworkBuilder, PayloadServiceBuilder},
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    DebugNode, FullNodeComponents, NodeComponents, PayloadTypes, PrimitivesTy, TxTy,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    node::{OpConsensusBuilder, OpExecutorBuilder},
-    txpool::{OpPooledTx, OpTransactionValidator},
     OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
     OpStorage,
+    node::{OpConsensusBuilder, OpExecutorBuilder},
+    txpool::{OpPooledTx, OpTransactionValidator},
 };
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -49,11 +49,11 @@ use crate::{args::NodeContextType, config::WorldChainNodeConfig};
 use tracing::{debug, info};
 use world_chain_payload::builder::WorldChainPayloadBuilder;
 use world_chain_pool::{
+    WorldChainTransactionPool,
     ordering::WorldChainOrdering,
     root::WorldChainRootValidator,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
-    WorldChainTransactionPool,
 };
 
 /// Context trait for World Chain node implementations.
@@ -93,23 +93,23 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
     /// Responsible for constructing execution payloads, managing the transaction pool,
     /// and coordinating with the consensus layer for block production.
     type PayloadServiceBuilder: PayloadServiceBuilder<
-        N,
-        WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
-        Self::Evm,
-    >;
+            N,
+            WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
+            Self::Evm,
+        >;
 
     /// Builder for the core node components.
     ///
     /// Constructs essential node services including the RPC server, transaction pool,
     /// block executor, and other fundamental components required for node operation.
     type ComponentsBuilder: NodeComponentsBuilder<
-        N,
-        Components: NodeComponents<
             N,
-            Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
-            Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-        >,
-    >;
+            Components: NodeComponents<
+                N,
+                Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
+                Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+            >,
+        >;
 
     /// Customizable add-on types for extending node functionality.
     ///
@@ -470,16 +470,16 @@ impl<Node, S, Txs>
     for WorldChainPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<
-        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Types: NodeTypes<
-            Primitives = OpPrimitives,
-            Payload: PayloadTypes<
-                BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
-                PayloadAttributes = OpPayloadAttributes,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
+            Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+            Types: NodeTypes<
+                Primitives = OpPrimitives,
+                Payload: PayloadTypes<
+                    BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
+                    PayloadAttributes = OpPayloadAttributes,
+                    PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
+                >,
             >,
         >,
-    >,
     Node::Provider: StateProviderFactory + BlockReaderIdExt + BlockReader<Block = OpBlock>,
     S: BlobStore + Clone,
     Txs: OpPayloadTransactions<WorldChainPooledTransaction>,

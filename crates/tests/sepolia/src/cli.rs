@@ -1,4 +1,4 @@
-use alloy_primitives::{uint, Address, U256};
+use alloy_primitives::{Address, U256, uint};
 use clap::{Parser, ValueEnum};
 use reth_rpc_layer::JwtSecret;
 

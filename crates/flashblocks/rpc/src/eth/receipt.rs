@@ -1,4 +1,4 @@
-use alloy_consensus::{transaction::SignerRecoverable, TxReceipt};
+use alloy_consensus::{TxReceipt, transaction::SignerRecoverable};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth::rpc::{compat::RpcReceipt, server_types::eth::block::BlockAndReceipts};
 use reth_chainspec::ChainSpecProvider;
@@ -8,9 +8,9 @@ use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 use reth_primitives::TransactionMeta;
 use reth_provider::{ProviderReceipt, ProviderTx};
 use reth_rpc_eth_api::{
+    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{LoadPendingBlock, LoadReceipt},
     transaction::ConvertReceiptInput,
-    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::EthApiError;
 use tracing::trace;
@@ -109,14 +109,14 @@ where
                 // new transaction input has changed, since otherwise the L1 cost wouldn't.
                 l1_block_info.clear_tx_l1_cost();
 
-                
-
-                Ok(OpReceiptBuilder::new(
-                    &self.provider().chain_spec(),
-                    input,
-                    &mut l1_block_info,
-                )?
-                .build())
+                Ok(
+                    OpReceiptBuilder::new(
+                        &self.provider().chain_spec(),
+                        input,
+                        &mut l1_block_info,
+                    )?
+                    .build(),
+                )
             }
         }
     }

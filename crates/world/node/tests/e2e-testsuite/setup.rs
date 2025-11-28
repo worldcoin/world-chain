@@ -1,21 +1,14 @@
-use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip7685::EMPTY_REQUESTS_HASH};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{Address, B64, Sealed, address};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkchoiceState, PayloadStatus, PraguePayloadFields,
+    CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
-use flashblocks_primitives::{
-    flashblocks::{Flashblock, Flashblocks},
-    p2p::Authorization,
-    primitives::{ExecutionPayloadBaseV1, FlashblocksPayloadV1},
-};
-use futures::{Stream, StreamExt, stream};
+use flashblocks_primitives::{flashblocks::Flashblock, p2p::Authorization};
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit, encode_holocene_extra_data};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
@@ -26,39 +19,35 @@ use reth::{
     builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
     chainspec::EthChainSpec,
     network::PeersHandleProvider,
-    rpc::api::EthApiClient,
     tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
     testsuite::{BlockInfo, Environment, NodeClient, NodeState},
 };
-use reth_evm::env;
 use reth_node_api::{
-    BlockTy, ConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
-    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadAttributes,
-    PayloadTypes,
+     FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadAttributes, PayloadTypes,
 };
 use reth_node_builder::{
-    AddOns, NodeComponents, NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcRegistry},
+    NodeComponents, NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
 use reth_node_core::args::RpcServerArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
-    num,
     ops::Range,
     sync::{Arc, LazyLock},
     time::Duration,
 };
-use tracing::{error, info, span};
+use tracing::{info, span};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
     args::NodeContextType,
@@ -77,6 +66,8 @@ use world_chain_pool::{
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+
+use crate::spammer::{TxSpammer, TxType};
 
 const GENESIS: &str = include_str!("../res/genesis.json");
 
@@ -208,7 +199,10 @@ where
     let mut node_contexts =
         Vec::<WorldChainTestingNodeContext<T>>::with_capacity(num_nodes as usize);
 
-    let mut spammer = TxSpammer { rpc: Vec::new() };
+    let mut spammer = TxSpammer {
+        rpc: Vec::new(),
+        sequence: vec![TxType::Sstore, TxType::Deploy, TxType::DeployAndDestruct],
+    };
 
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
@@ -287,11 +281,10 @@ where
         }
 
         // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2 {
-            if let Some(first_node) = node_contexts.first_mut() {
+        if idx + 1 == num_nodes && num_nodes > 2
+            && let Some(first_node) = node_contexts.first_mut() {
                 node.connect(&mut first_node.node).await;
             }
-        }
 
         let world_chain_test_node = WorldChainTestingNodeContext { node, ext_context };
 
@@ -354,69 +347,6 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
         .ecotone_activated()
         .build()
 });
-
-#[derive(Debug)]
-pub struct TxSpammer {
-    pub rpc: Vec<NodeClient<OpEngineTypes>>,
-}
-
-impl TxSpammer {
-    pub async fn spawn(self, tpf: u64) {
-        tokio::spawn(async move {
-            let mut nonce = 0;
-            loop {
-                let clients = self.rpc.clone();
-                let signers = (0..20).into_iter().take(tpf as usize).map(signer);
-
-                let txs = signers
-                    .map(|s| async move {
-                        let signer = EthereumWallet::new(s);
-                        let mut txs = Vec::with_capacity(tpf as usize + 1);
-
-                        let tx: TransactionRequest =
-                            tx(CHAIN_SPEC.chain_id(), None, nonce, Address::ZERO, 21_000);
-
-                        let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(
-                            tx, &signer,
-                        )
-                        .await
-                        .unwrap();
-
-                        let raw: Bytes = signed.encoded_2718().into();
-                        txs.push(raw);
-
-                        txs
-                    })
-                    .collect::<Vec<_>>();
-
-                let txs: Vec<_> = futures::future::join_all(txs).await;
-
-                for client in clients {
-                    for tx in txs.iter().flatten() {
-                        let _hash = EthApiClient::<
-                            TransactionRequest,
-                            OpTransactionSigned,
-                            alloy_consensus::Block<OpTransactionSigned>,
-                            OpReceipt,
-                            Header,
-                            Bytes,
-                        >::send_raw_transaction(
-                            &client.rpc, tx.clone()
-                        )
-                        .await
-                        .inspect_err(|e| error!("Error sending transaction: {:?}", e));
-                    }
-                }
-
-                nonce += 1;
-
-                info!("Submitted {} transactions", tpf);
-
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-        });
-    }
-}
 
 // ============================================================================
 // Test Helpers
@@ -507,147 +437,6 @@ pub(crate) async fn create_test_transaction(signer_index: u32, nonce: u64) -> (B
         .await
         .unwrap();
     (signed.encoded_2718().into(), *signed.tx_hash())
-}
-
-/// A single validated flashblock item streamed back to the caller
-#[derive(Debug)]
-pub struct ValidatedFlashblock {
-    /// The execution data that was validated
-    pub execution_data: OpExecutionData,
-    /// The flashblock index within the current payload
-    pub index: u64,
-    /// The payload validation status from the beacon node
-    pub status: PayloadStatus,
-    /// Whether this is the final flashblock matching the target hash
-    pub is_final: bool,
-}
-
-/// Creates a stream that validates each intermediate flashblock payload against the beacon node.
-///
-/// This function returns a stream that for each incoming flashblock:
-/// 1. Accumulates it into an ordered collection
-/// 2. Reduces the accumulated flashblocks to get the intermediate state
-/// 3. Constructs an execution payload and validates it via `new_payload`
-/// 4. Yields the execution data, index, and validation status to the caller
-///
-/// The stream continues until the reduced block hash matches `target_block_hash`.
-///
-/// # Arguments
-/// * `flashblock_stream` - Stream of incoming flashblock payloads
-/// * `beacon_handle` - Handle to the beacon consensus engine for validation
-/// * `target_block_hash` - The expected final block hash to wait for
-///
-/// # Returns
-/// A stream of `ValidatedFlashblock` items containing execution data, index, and status
-/// ```
-pub(crate) fn flashblocks_validator_stream<S>(
-    flashblock_stream: S,
-    beacon_handle: ConsensusEngineHandle<OpEngineTypes>,
-    target_block_hash: B256,
-    chain_spec: Arc<OpChainSpec>,
-) -> impl Stream<Item = ValidatedFlashblock>
-where
-    S: Stream<Item = FlashblocksPayloadV1> + Send + Unpin,
-{
-    let chain_spec = chain_spec.clone();
-    stream::unfold(
-        (
-            flashblock_stream,
-            Flashblocks::default(),
-            beacon_handle,
-            target_block_hash,
-        ),
-        move |(mut stream, mut ordered, beacon_handle, target_hash): (
-            S,
-            Flashblocks,
-            ConsensusEngineHandle<OpEngineTypes>,
-            B256,
-        )| {
-            let chain_spec = chain_spec.clone();
-            async move {
-                let flashblock = stream.next().await?;
-                let index = flashblock.index;
-
-                // Push the new flashblock into the ordered collection
-                let is_new = ordered
-                    .push(Flashblock {
-                        flashblock: flashblock.clone(),
-                    })
-                    .ok()?;
-
-                if is_new {
-                    info!(
-                        target: "flashblocks",
-                        index = %index,
-                        "New payload started, resetting flashblock collection"
-                    );
-                }
-
-                // Reduce accumulated flashblocks to get intermediate state
-                let reduced = Flashblock::reduce(ordered.clone()).ok()?;
-                let reduced_hash = reduced.diff().block_hash;
-
-                info!(
-                    target: "flashblocks",
-                    index = %index,
-                    block_hash = ?reduced_hash,
-                    "Reduced flashblocks for validation"
-                );
-
-                // Construct execution data from the reduced flashblocks for validation
-                let execution_data =
-                    execution_data_from_from_reduced_flashblock(reduced, chain_spec.clone());
-
-                // Update forkchoice to parent hash before validating
-                let parent = execution_data.parent_hash();
-                let forkchoice = ForkchoiceState {
-                    head_block_hash: parent,
-                    safe_block_hash: parent,
-                    finalized_block_hash: parent,
-                };
-
-                beacon_handle
-                    .fork_choice_updated(forkchoice, None, EngineApiMessageVersion::V3)
-                    .await
-                    .ok()?;
-
-                // Validate the intermediate payload
-                let status = beacon_handle
-                    .new_payload(execution_data.clone())
-                    .await
-                    .ok()?;
-
-                info!(
-                    target: "flashblocks",
-                    ?status,
-                    index = %index,
-                    block_hash = ?reduced_hash,
-                    "Validated intermediate flashblock payload"
-                );
-
-                // Check if we've reached the final expected block hash
-                let is_final = reduced_hash == target_hash;
-
-                if is_final {
-                    info!(
-                        target: "flashblocks",
-                        block_hash = ?reduced_hash,
-                        index = %index,
-                        "Found flashblock with matching final block hash"
-                    );
-                }
-
-                let validated = ValidatedFlashblock {
-                    execution_data,
-                    index,
-                    status,
-                    is_final,
-                };
-
-                Some((validated, (stream, ordered, beacon_handle, target_hash)))
-            }
-        },
-    )
 }
 
 pub(crate) fn execution_data_from_from_reduced_flashblock(

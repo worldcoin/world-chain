@@ -60,13 +60,12 @@ where
             let block = this.client.block(latest.into())?;
             if let Some(block) = block
                 && let Ok(state) = this.client.state_by_block_hash(block.header().hash_slow())
-                    && let Ok(Some(latest_root)) =
-                        state.storage(this.world_id, LATEST_ROOT_SLOT.into())
-                    {
-                        this.latest_root = latest_root;
-                        this.valid_roots
-                            .insert(block.header().timestamp(), latest_root);
-                    }
+                && let Ok(Some(latest_root)) = state.storage(this.world_id, LATEST_ROOT_SLOT.into())
+            {
+                this.latest_root = latest_root;
+                this.valid_roots
+                    .insert(block.header().timestamp(), latest_root);
+            }
         }
         Ok(this)
     }
@@ -182,7 +181,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{address, Address};
+    use alloy_primitives::{Address, address};
     use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 

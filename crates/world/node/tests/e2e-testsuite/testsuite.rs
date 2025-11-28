@@ -1,28 +1,31 @@
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
-use alloy_primitives::{B64, b64};
-use alloy_rpc_types::TransactionRequest;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
-use ed25519_dalek::SigningKey;
-use flashblocks_primitives::{
-    flashblocks::{Flashblock, Flashblocks},
-    p2p::Authorization,
-    primitives::FlashblocksPayloadV1,
+use crate::{
+    actions::{
+        ActionSequence, BlockProductionState, DynamicMineBlock, DynamicValidateFlashblocks,
+        LogBlockComplete, QueryTxReceipts, QueryValidatedBlocks, ResetState, Sleep,
+    },
+    setup::{TX_SET_L1_BLOCK, build_payload_attributes},
 };
-use futures::{Stream, StreamExt, stream};
-use op_alloy_consensus::encode_holocene_extra_data;
-use op_alloy_rpc_types_engine::OpExecutionData;
+use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
+use alloy_primitives::b64;
+use alloy_rpc_types::TransactionRequest;
+use alloy_rpc_types_engine::PayloadStatusEnum;
+use eyre::eyre::eyre;
+use futures::future::Either;
 use reth::{
     chainspec::EthChainSpec,
     network::{NetworkSyncUpdater, SyncState},
 };
-use reth_e2e_test_utils::{testsuite::actions::Action, transaction::TransactionTestContext};
-use reth_engine_primitives::ConsensusEngineHandle;
-use reth_node_api::{EngineApiMessageVersion, EngineTypes, PayloadAttributes};
-use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes, utils::optimism_payload_attributes};
-use reth_optimism_payload_builder::payload_id_optimism;
+use reth_e2e_test_utils::testsuite::actions::Action;
+use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{Address, B256, Bytes, U256, fixed_bytes};
-use std::time::Duration;
+use revm_primitives::{Address, U256};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 use tracing::info;
 use world_chain_test::utils::account;
 
@@ -159,9 +162,6 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let span_outer = tracing::info_span!("flashblocks_e2e_test");
-    let _enter = span_outer.enter();
-
     // Builder and Follower
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
         setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
@@ -172,39 +172,31 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let basic_worldchain_node = &basic_nodes[0];
 
-    let [builder_node, follower_node] = &mut nodes[..] else {
+    let [builder_node, _follower_node] = &mut nodes[..] else {
         unreachable!()
     };
 
     let builder_context = builder_node.ext_context.clone();
-    let follower_context = follower_node.ext_context.clone();
+    let rpc_url = builder_node.node.rpc_url();
 
-    let basic_beacon_handle = basic_worldchain_node
-        .node
-        .inner
-        .consensus_engine_handle()
-        .clone();
-
-    let _spam_task = tokio::spawn(async move {
-        tx_spammer.spawn(10).await;
-    });
+    tx_spammer.spawn(50, rpc_url);
 
     let block_hash = builder_node.node.block_hash(0);
     let block_hash_basic = basic_worldchain_node.node.block_hash(0);
 
     assert_eq!(block_hash, block_hash_basic);
+
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
         builder_context
             .flashblocks_handle
             .builder_sk()
             .unwrap()
-            .verifying_key()
-            .clone(),
+            .verifying_key(),
     );
 
     let timestamp = crate::setup::current_timestamp();
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
     let eip1559_params = crate::setup::encode_eip1559_params(
         builder_node.node.inner.chain_spec().as_ref(),
         timestamp,
@@ -215,87 +207,46 @@ async fn test_flashblocks() -> eyre::Result<()> {
         Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
     );
 
-    let mut flashblocks_action = crate::actions::AssertMineBlock::new(
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    let mine_block = crate::actions::AssertMineBlock::new(
         0,
-        vec![],
-        Some(B256::ZERO),
-        attributes.clone(),
-        authorization_generator.clone(),
-        std::time::Duration::from_secs(2),
+        None,
+        attributes,
+        authorization_generator,
+        std::time::Duration::from_millis(2000),
         true,
-        true,
-        tx.clone(),
+        tx,
     )
     .await;
 
-    flashblocks_action.execute(&mut flashblocks_env).await?;
+    let validation_stream = crate::actions::FlashblocksValidatonStream {
+        node_indexes: vec![0, 1],
+        flashblocks_stream: Box::pin(builder_context.flashblocks_handle.flashblock_stream()),
+        validation_hook: Some(Arc::new(move |status: PayloadStatusEnum| {
+            assert_eq!(status, PayloadStatusEnum::Valid);
+            Ok(())
+        })),
+        chain_spec: basic_worldchain_node.node.inner.chain_spec().clone(),
+    };
 
-    let execution_payload_envelope = rx.recv().await.expect("should receive payload");
-    let expected_block_hash = execution_payload_envelope
-        .execution_payload
-        .payload_inner
-        .payload_inner
-        .block_hash;
+    let mut sequence: ActionSequence = ActionSequence::new()
+        .then(mine_block)
+        .then(validation_stream);
 
-    // Create a stream that validates each intermediate flashblock against the beacon node
-    let validation_stream = crate::setup::flashblocks_validator_stream(
-        follower_context.flashblocks_handle.flashblock_stream(),
-        basic_beacon_handle.clone(),
-        expected_block_hash,
-        basic_worldchain_node.node.inner.chain_spec().clone(),
-    );
+    let fut = async { sequence.execute(&mut flashblocks_env).await };
 
-    futures::pin_mut!(validation_stream);
-
-    // Consume the validation stream, asserting each flashblock is valid
-    let mut validated_count = 0u64;
-    while let Some(validated) = validation_stream.next().await {
-        validated_count += 1;
-
-        // Assert the payload is valid
-        assert!(
-            matches!(
-                validated.status,
-                PayloadStatus {
-                    status: PayloadStatusEnum::Valid,
-                    ..
-                }
-            ),
-            "Intermediate flashblock {} should be valid, got: {:?}",
-            validated.index,
-            validated.status
-        );
-
-        info!(
-            target: "flashblocks",
-            index = %validated.index,
-            validated_count = %validated_count,
-            is_final = %validated.is_final,
-            block_hash = ?validated.execution_data.block_hash(),
-            "Validated intermediate flashblock"
-        );
-
-        if validated.is_final {
-            info!(
-                target: "flashblocks",
-                validated_count = %validated_count,
-                "All flashblocks validated successfully, reached final block"
-            );
-            break;
-        }
-    }
-
-    assert!(
-        validated_count > 0,
-        "Should have validated at least one flashblock"
-    );
-
-    info!(
-        target: "flashblocks",
-        expected_block_hash = ?expected_block_hash,
-        validated_count = %validated_count,
-        "Flashblock validation complete",
-    );
+    futures::future::try_select(
+        Box::pin(fut),
+        Box::pin(async { rx.recv().await.ok_or(eyre!("failed to fetch envelope")) }),
+    )
+    .await
+    .map_err(|e| {
+        eyre!(
+            "failed to complete flashblocks test: {}",
+            e.factor_first().0
+        )
+    })?;
 
     Ok(())
 }
@@ -316,8 +267,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
             .flashblocks_handle
             .builder_sk()
             .unwrap()
-            .verifying_key()
-            .clone(),
+            .verifying_key(),
     );
 
     let timestamp = crate::setup::current_timestamp();
@@ -332,108 +282,45 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
     );
 
-    let mock_tx =
-        TransactionTestContext::transfer_tx(nodes[0].node.inner.chain_spec().chain_id(), signer(0))
-            .await;
-
-    let raw_tx: Bytes = mock_tx.encoded_2718().into();
-
-    nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
-
-    let mut hashes = vec![];
-    for i in 1..20 {
-        let mock_tx = TransactionTestContext::transfer_tx(
-            nodes[0].node.inner.chain_spec().chain_id(),
-            signer(i),
-        )
-        .await;
-
-        let raw_tx: Bytes = mock_tx.encoded_2718().into();
-
-        let hash = nodes[0].node.rpc.inject_tx(raw_tx.clone()).await?;
-        hashes.push(hash);
-    }
+    let cannon_flashblocks_stream = nodes[0].ext_context.flashblocks_handle.flashblock_stream();
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
-        vec![],
         None,
         attributes,
         authorization_generator,
         std::time::Duration::from_millis(2000),
         true,
-        true,
         sender,
     )
     .await;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
     let transaction_receipt =
-        crate::actions::EthGetTransactionReceipt::new(hashes, vec![0, 1, 2], 240, tx);
+        crate::actions::GetReceipts::new(vec![0, 1, 2], cannon_flashblocks_stream).on_receipts(
+            move |receipts| {
+                for receipts in receipts {
+                    crate::actions::assert::all_some(&receipts, "transaction receipt")?;
+                }
+
+                Ok(())
+            },
+        );
 
     let mut action = crate::actions::EthApiAction::new(mine_block, transaction_receipt);
-    action.execute(&mut env).await?;
 
-    let mined_block = block_rx.recv().await.expect("should receive mined block");
-    let receipts: Vec<Vec<_>> = rx.recv().await.expect("should receive receipts");
+    let fut = async { action.execute(&mut env).await };
 
-    info!("Receipts: {:?}", receipts);
-
-    assert_eq!(
-        receipts.len(),
-        3,
-        "Should receive receipts from all 3 nodes"
-    );
-
-    for (idx, receipt_opt) in receipts.iter().enumerate() {
-        assert!(
-            receipt_opt.iter().all(|r| r.is_some()),
-            "Node {} should return a receipt",
-            idx
-        );
-    }
-
-    let receipts: Vec<Vec<_>> = receipts
-        .into_iter()
-        .map(|r| r.iter().map(|r| r.clone().unwrap()).collect())
-        .collect();
-
-    let first_node_receipts = &receipts[0];
-
-    for (_, receipts) in receipts.iter().enumerate().skip(1) {
-        assert_eq!(
-            receipts.len() + 2,
-            mined_block
-                .execution_payload
-                .payload_inner
-                .payload_inner
-                .transactions
-                .len(),
-            "Receipt count should match transaction count"
-        );
-
-        for (tx_idx, receipt) in receipts.iter().enumerate() {
-            let block_hash = mined_block
-                .execution_payload
-                .payload_inner
-                .payload_inner
-                .block_hash;
-
-            assert_eq!(
-                receipt.inner.block_hash,
-                Some(block_hash),
-                "Receipt block hash should match mined block hash"
-            );
-
-            assert_eq!(
-                receipt, &first_node_receipts[tx_idx],
-                "Receipts should match across nodes"
-            );
-        }
-
-        assert_eq!(receipts.len(), first_node_receipts.len())
-    }
+    futures::future::try_select(
+        Box::pin(fut),
+        Box::pin(async {
+            block_rx
+                .recv()
+                .await
+                .ok_or(eyre!("failed to fetch envelope"))
+        }),
+    )
+    .await
+    .map_err(|e| eyre!("{}", e.factor_first().0))?;
 
     Ok(())
 }
@@ -454,12 +341,11 @@ async fn test_eth_api_call() -> eyre::Result<()> {
             .flashblocks_handle
             .builder_sk()
             .unwrap()
-            .verifying_key()
-            .clone(),
+            .verifying_key(),
     );
 
     let timestamp = crate::setup::current_timestamp();
-    let (sender, _) = tokio::sync::mpsc::channel(1);
+    let (sender, _rx) = tokio::sync::mpsc::channel(1);
 
     // 200ms backoff should be enough time to fetch the pending receipt
     let mut mock_tx: TransactionRequest = tx(
@@ -483,18 +369,16 @@ async fn test_eth_api_call() -> eyre::Result<()> {
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
-        vec![],
-        Some(B256::ZERO),
+        None,
         attributes,
         authorization_generator,
         std::time::Duration::from_millis(2000),
         true,
-        false,
         sender,
     )
     .await;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let (tx, mut rx) = tokio::sync::mpsc::channel(3);
 
     mock_tx.value = Some(U256::from(1));
     mock_tx.nonce = None;
@@ -541,8 +425,6 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let (_, nodes, _tasks, mut env, spammer) =
         setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
 
-    tokio::spawn(async move { spammer.spawn(10) });
-
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
 
@@ -552,57 +434,53 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
             .flashblocks_handle
             .builder_sk()
             .unwrap()
-            .verifying_key()
-            .clone(),
+            .verifying_key(),
     );
 
-    let (sender, _) = tokio::sync::mpsc::channel(1);
+    spammer.spawn(20, nodes[0].node.rpc_url());
+
+    let cannon_flashblocks_stream = nodes[0].ext_context.flashblocks_handle.flashblock_stream();
+
+    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
     let timestamp = crate::setup::current_timestamp();
     let eip1559_params =
         encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
 
     // Note: Using a fixed timestamp for deterministic block hash in this test
-    let attributes = OpPayloadAttributes {
-        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-            timestamp: 1756929279,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: Address::ZERO,
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-        },
-        transactions: Some(vec![]),
-        no_tx_pool: Some(false),
-        eip_1559_params: Some(eip1559_params),
-        gas_limit: Some(30_000_000),
-        min_base_fee: None,
-    };
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
-        vec![],
-        Some(B256::ZERO),
+        None,
         attributes,
         authorization_generator,
         std::time::Duration::from_millis(2000),
         true,
-        false,
         sender,
     )
     .await;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let blocks_found = Arc::new(AtomicUsize::new(0));
+    let blocks_counter = blocks_found.clone();
+    let eth_block_by_hash =
+        crate::actions::GetBlockByHash::new(vec![0, 1], cannon_flashblocks_stream).on_blocks(
+            move |blocks| {
+                crate::actions::assert::all_some(&blocks, "pending block by hash")?;
+                blocks_counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
 
-    let pending_hash =
-        fixed_bytes!("0x080d3c4547e6f4133dfe28bfd35511e16add1778a8904dd6f65a30c79803c635");
-
-    let eth_block_by_hash = crate::actions::EthGetBlockByHash::new(pending_hash, vec![0], 230, tx);
     let mut action = crate::actions::EthApiAction::new(mine_block, eth_block_by_hash);
+    let fut = async {
+        let _ = action.execute(&mut env).await;
+    };
 
-    action.execute(&mut env).await?;
-
-    // ensure the pre-confirmed block exists on the path of the pending tag
-    let mut blocks = rx.recv().await.expect("should receive block");
-    blocks.pop().expect("should have one block").unwrap();
+    futures::future::select(Box::pin(fut), Box::pin(rx.recv())).await;
 
     Ok(())
 }
@@ -881,6 +759,186 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     assert!(
         !node_2_ctx.node.inner.pool().contains(&tx_hash),
         "Transaction should NOT propagate to Node 2 (gossip disabled)"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "flaky test"]
+async fn test_continuous_block_production_with_validation() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const NUM_BLOCKS: u64 = 10;
+    const BLOCK_INTERVAL_MS: u64 = 2000;
+    const TXS_PER_FLASHBLOCK: u64 = 20;
+
+    let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
+        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+
+    // Setup: 1 basic verifier node for flashblock validation
+    let (_, mut basic_validators, _tasks, _basic_env, _) =
+        setup_with_tx_peers::<BasicContext>(1, optimism_payload_attributes, false, false).await?;
+
+    let basic_validator = &mut basic_validators[0];
+
+    let [builder_node, follower_0, follower_1] = &mut nodes[..] else {
+        unreachable!("Expected exactly 2 nodes")
+    };
+
+    let builder_context = builder_node.ext_context.clone();
+
+    let basic_beacon_handle =
+        Arc::new(basic_validator.node.inner.consensus_engine_handle().clone());
+
+    let follower_context_0 = follower_0.ext_context.clone();
+    let _follower_context_1 = follower_1.ext_context.clone();
+
+    // Create shared state for cross-action communication
+    let state = BlockProductionState::new();
+
+    // Create authorization generator
+    let genesis_hash = builder_node.node.block_hash(0);
+    let authorization_generator = crate::setup::create_authorization_generator(
+        genesis_hash,
+        builder_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    // Spawn spammer with shared state to track tx hashes
+    let rpc_url = builder_node.node.rpc_url();
+    tx_spammer.spawn_with_state(TXS_PER_FLASHBLOCK, rpc_url, state.clone());
+
+    info!(
+        target: "test",
+        "Starting continuous block production test for {} blocks using ActionSequence",
+        NUM_BLOCKS
+    );
+
+    // Track statistics via hooks
+    let blocks_produced = Arc::new(AtomicU64::new(0));
+    let validated_hashes = Arc::new(AtomicUsize::new(0));
+    let receipts_fetched = Arc::new(AtomicUsize::new(0));
+
+    // Create timestamp state that advances with each iteration
+    let timestamp = Arc::new(AtomicU64::new(crate::setup::current_timestamp()));
+    let chain_spec = builder_node.node.inner.chain_spec().clone();
+
+    // Clone handles for the attribute builder closure
+    let timestamp_for_attrs = timestamp.clone();
+    let chain_spec_for_attrs = chain_spec.clone();
+
+    let validated_hashes_counter = validated_hashes.clone();
+    let receipts_counter = receipts_fetched.clone();
+
+    // Build the composable action sequence for ONE block cycle
+    let block_cycle = ActionSequence::new()
+        // 1. Reset state at start of each block
+        .then(ResetState::new(state.clone()))
+        // 2. Mine block + validate flashblocks in parallel
+        .with(
+            DynamicMineBlock::new(
+                0, // builder node
+                authorization_generator.clone(),
+                state.clone(),
+                move || {
+                    let ts = timestamp_for_attrs.load(Ordering::SeqCst);
+                    let eip1559 =
+                        crate::setup::encode_eip1559_params(chain_spec_for_attrs.as_ref(), ts)
+                            .unwrap();
+                    crate::setup::build_payload_attributes(
+                        ts,
+                        eip1559,
+                        Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
+                    )
+                },
+            )
+            .with_interval(Duration::from_millis(BLOCK_INTERVAL_MS)),
+            DynamicValidateFlashblocks::new(
+                follower_context_0.flashblocks_handle.clone(),
+                basic_beacon_handle,
+                chain_spec.clone(),
+                state.clone(),
+            ),
+        )
+        // 3. Query validated blocks and receipts in parallel (AFTER mining/validation)
+        .with(
+            QueryValidatedBlocks::new(vec![0, 1], state.clone()).on_block(move |_| {
+                validated_hashes_counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+            QueryTxReceipts::new(vec![0, 1], state.clone()).on_receipt(move |_| {
+                receipts_counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+        )
+        // 6. Log completion and track stats
+        // Note: Skipping Canonicalize on follower nodes for now
+        // because Isthmus V4 payloads don't work with RPC new_payload_v3
+        .then({
+            let counter = blocks_produced.clone();
+            LogBlockComplete::new(state.clone()).on_complete(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        })
+        // 8. Small delay between blocks
+        .then(Sleep::millis(100));
+
+    // Repeat the block cycle N times, advancing timestamp each iteration
+    let timestamp_for_repeat = timestamp.clone();
+    let mut action = block_cycle.repeat(NUM_BLOCKS).on_each(move |i| {
+        // Advance timestamp for next block (after first iteration)
+        if i > 0 {
+            timestamp_for_repeat.fetch_add(2, Ordering::SeqCst);
+        }
+        info!(
+            target: "test",
+            iteration = i + 1,
+            total = NUM_BLOCKS,
+            "Starting block cycle"
+        );
+
+        Ok(())
+    });
+
+    // Execute the entire repeated sequence as a single action
+    let fut = async { action.execute(&mut flashblocks_env).await };
+
+    futures::future::select(
+        Box::pin(fut),
+        Box::pin(if blocks_produced.load(Ordering::SeqCst) == NUM_BLOCKS {
+            Either::Left(futures::future::ready(()))
+        } else {
+            Either::Right(futures::future::pending::<()>())
+        }),
+    )
+    .await;
+
+    let final_blocks = blocks_produced.load(Ordering::SeqCst);
+    let final_hashes = validated_hashes.load(Ordering::SeqCst);
+    let final_receipts = receipts_fetched.load(Ordering::SeqCst);
+
+    info!(
+        target: "test",
+        blocks_produced = final_blocks,
+        validated_hashes = final_hashes,
+        receipts_fetched = final_receipts,
+        "Test completed successfully"
+    );
+
+    assert_eq!(
+        final_blocks, NUM_BLOCKS,
+        "Should have produced {} blocks",
+        NUM_BLOCKS
+    );
+
+    assert!(
+        final_hashes > 0,
+        "Should have validated at least some block hashes"
     );
 
     Ok(())

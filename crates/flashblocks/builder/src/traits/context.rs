@@ -4,13 +4,13 @@ use op_alloy_consensus::EIP1559ParamError;
 use reth::{builder::PayloadBuilderError, payload::PayloadId, revm::State};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    block::BlockExecutor, execute::BlockBuilder, op_revm::OpSpecId, ConfigureEvm, Evm, EvmEnv,
+    ConfigureEvm, Evm, EvmEnv, block::BlockExecutor, execute::BlockBuilder, op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::{OpPooledTransaction, OpPooledTx},
     OpEvmConfig,
+    txpool::{OpPooledTransaction, OpPooledTx},
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
@@ -107,9 +107,9 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            > + 'a,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+        > + 'a,
         PayloadBuilderError,
     >
     where
@@ -148,9 +148,9 @@ pub trait PayloadBuilderCtx: Send + Sync {
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-        >,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+            >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;
 
     /// Determines if validator withdrawals should be processed in this block.
@@ -259,9 +259,9 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
-        >,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
     {
         self.execute_best_transactions(info, builder, best_txs)
@@ -283,9 +283,9 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-            > + 'a,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+        > + 'a,
         PayloadBuilderError,
     >
     where

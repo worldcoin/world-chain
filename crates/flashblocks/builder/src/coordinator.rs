@@ -1,8 +1,6 @@
 use alloy_op_evm::OpBlockExecutionCtx;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::{
-    p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1,
-};
+use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
@@ -151,9 +149,10 @@ impl FlashblocksExecutionCoordinator {
         payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
     ) -> eyre::Result<()> {
         if let Some(payload_events) = payload_events
-            && let Err(e) = payload_events.send(event) {
-                error!("error broadcasting payload: {e:?}");
-            }
+            && let Err(e) = payload_events.send(event)
+        {
+            error!("error broadcasting payload: {e:?}");
+        }
         Ok(())
     }
 }
@@ -189,14 +188,14 @@ where
 
     if let Some(latest_payload) = latest_payload
         && latest_payload.0.id() == flashblock.flashblock.payload_id
-            && latest_payload.1 >= flashblock.flashblock.index
-        {
-            // Already processed this flashblock. This happens when set directly
-            // from publish_build_payload. Since we already built the payload, no need
-            // to do it again.
-            pending_block.send_replace(latest_payload.0.executed_block());
-            return Ok(());
-        }
+        && latest_payload.1 >= flashblock.flashblock.index
+    {
+        // Already processed this flashblock. This happens when set directly
+        // from publish_build_payload. Since we already built the payload, no need
+        // to do it again.
+        pending_block.send_replace(latest_payload.0.executed_block());
+        return Ok(());
+    }
 
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
@@ -263,7 +262,6 @@ where
             diff.clone(),
             &sealed_header,
             *flashblock.payload_id(),
-            index,
         )?
     } else {
         block_validator.validate_and_execute_diff_linear(
@@ -289,6 +287,6 @@ where
     );
 
     coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
-    
+
     Ok(())
 }

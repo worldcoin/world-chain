@@ -5,7 +5,7 @@ use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use reth::{
     api::PayloadBuilderError,
     payload::PayloadBuilderAttributes,
-    revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State},
+    revm::{State, database::StateProviderDatabase, witness::ExecutionWitnessRecord},
     transaction_pool::{BestTransactionsAttributes, TransactionPool},
 };
 use reth_basic_payload_builder::{
@@ -14,8 +14,8 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Database, Evm,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -23,9 +23,9 @@ use reth_optimism_node::{
     OpBuiltPayload, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::{
+    OpPayloadAttributes,
     builder::{OpPayloadBuilderCtx, OpPayloadTransactions},
     config::OpBuilderConfig,
-    OpPayloadAttributes,
 };
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
@@ -38,7 +38,7 @@ use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
-use world_chain_pool::{tx::WorldChainPooledTransaction, WorldChainTransactionPool};
+use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPooledTransaction};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]

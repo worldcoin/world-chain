@@ -1,10 +1,10 @@
+use IPBHEntryPoint::PBHPayload as IPBHPayload;
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
 use world_chain_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::{PBHPayload, Proof},
 };
-use IPBHEntryPoint::PBHPayload as IPBHPayload;
 
 sol! {
     contract IMulticall3 {

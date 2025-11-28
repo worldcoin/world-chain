@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, btree_map::Entry},
     fmt::{self},
     hash::Hash,
     ops::Bound::{Included, Unbounded},
@@ -42,8 +42,6 @@ where
 
     /// Optional: get also returns the index it came from.
     pub fn get_with_index(&self, index: I, key: &K) -> Option<(&I, &V)> {
-        
-
         self.inner.get(key).and_then(|versions| {
             versions
                 .range((Unbounded, Included(index)))
@@ -80,5 +78,4 @@ mod tests {
         assert_eq!(map.get(7, &"key_a"), Some(&"val_a2")); // value at 7
         assert_eq!(map.get(100, &"key_a"), Some(&"val_a2")); // value at 7 (last before 100)
     }
-
 }

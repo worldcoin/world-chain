@@ -1,9 +1,9 @@
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
 use reth::revm::State;
 use reth_evm::{
+    EvmFactory,
     block::{BlockExecutorFactory, BlockExecutorFor},
     op_revm::OpTransaction,
-    EvmFactory,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;

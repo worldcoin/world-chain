@@ -3,8 +3,8 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use reth_ethereum::network::api::PeerId;
 use reth_network::{
-    events::{NetworkPeersEvents, PeerEvent},
     Peers, PeersInfo,
+    events::{NetworkPeersEvents, PeerEvent},
 };
 use reth_tasks::TaskExecutor;
 use std::{

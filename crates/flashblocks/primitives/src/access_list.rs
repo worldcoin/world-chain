@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockAccessListData {
     /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occured throughout execution of a

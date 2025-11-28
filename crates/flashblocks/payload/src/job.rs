@@ -10,8 +10,6 @@ use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 
-#[cfg(feature = "diagnostics")]
-use flashblocks_builder::diagnostics;
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
@@ -344,6 +342,7 @@ where
     /// the [`FlashblocksHandle`] where the payload will be broadcasted across the network.
     ///
     /// See: [`FlashblocksHandle::publish_new`].
+    /// TODO: We need span tracing here to track payload publishing
     pub(crate) fn publish_payload(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
@@ -353,18 +352,6 @@ where
         let offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
-
-        // Record builder state and write per-flashblock benchmark
-        #[cfg(feature = "diagnostics")]
-        if let Some(executed_block) = payload.executed_block() {
-            let bundle_state = executed_block.execution_outcome().bundle.state.clone();
-            diagnostics::record_and_write_flashblock_benchmark(
-                self.config.payload_id(),
-                self.block_index as u32,
-                bundle_state,
-                access_list.clone(),
-            );
-        }
 
         let flashblock = Flashblock::new(
             payload,

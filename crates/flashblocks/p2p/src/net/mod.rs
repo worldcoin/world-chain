@@ -5,12 +5,12 @@ use crate::{
 use reth::chainspec::Hardforks;
 use reth_eth_wire::NetPrimitivesFor;
 use reth_ethereum::network::api::FullNetwork;
-use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
 use reth_node_api::{PrimitivesTy, TxTy};
 use reth_node_builder::{
+    BuilderContext,
     components::NetworkBuilder,
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 

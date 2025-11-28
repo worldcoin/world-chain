@@ -5,10 +5,10 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_provider::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
     EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+    helpers::{LoadPendingBlock, SpawnBlocking, pending_block::PendingEnvBuilder},
 };
-use reth_rpc_eth_types::{block::BlockAndReceipts, EthApiError, PendingBlock};
+use reth_rpc_eth_types::{EthApiError, PendingBlock, block::BlockAndReceipts};
 
 use crate::eth::FlashblocksEthApi;
 

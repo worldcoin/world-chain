@@ -91,7 +91,8 @@ pub struct BalBuilderBlockExecutor<Evm, R>
 where
     R: OpReceiptBuilder,
 {
-    inner: OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
+    /// The underlying OpBlockExecutor - public for parallel execution access
+    pub inner: OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
     flashblock_access_list: FlashblockAccessListConstruction,
     block_access_index: Option<BlockAccessIndex>,
     min_tx_index: BlockAccessIndex,
@@ -453,12 +454,10 @@ where
         {
             // Note: PayloadId and flashblock index not available at this level
             // The caller should handle diagnostic recording
-            return Err(BalValidationError::access_list_mismatch(
-                expected_access_list.access_list_hash,
-                finish_result.access_list_data.access_list_hash,
-                None, // PayloadId not available in this context
-                None, // Flashblock index not available in this context
-            )
+            return Err(BalValidationError::AccessListHashMismatch {
+                expected: expected_access_list.access_list_hash,
+                got: finish_result.access_list_data.access_list_hash,
+            }
             .into());
         }
 

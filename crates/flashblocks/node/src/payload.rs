@@ -4,11 +4,11 @@ use flashblocks_builder::{
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use op_alloy_consensus::OpTxEnvelope;
-use reth::builder::{components::PayloadBuilderBuilder, BuilderContext, FullNodeTypes};
+use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};
 use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes, txpool::OpPooledTx,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_provider::{
@@ -50,12 +50,14 @@ where
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
         + HeaderProvider<Header = alloy_consensus::Header>,
     Node::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
     Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>
         + Unpin
         + 'static,

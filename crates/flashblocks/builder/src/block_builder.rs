@@ -1,15 +1,15 @@
 use alloy_consensus::{Block, Header};
+use alloy_op_evm::{OpBlockExecutionCtx, block::receipt_builder::OpReceiptBuilder};
 use alloy_primitives::Address;
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::{
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
     op_revm::{OpHaltReason, OpSpecId, OpTransaction},
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpBlockAssembler;
@@ -17,7 +17,7 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{
-    context::{result::ExecutionResult, BlockEnv, TxEnv},
+    context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
 use std::{collections::HashSet, sync::Arc};
@@ -62,18 +62,18 @@ impl<'a, DB, R, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = Block<OpTransactionSigned>,
-        BlockHeader = Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = Block<OpTransactionSigned>,
+            BlockHeader = Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'a mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
@@ -179,18 +179,18 @@ impl<'a, DB, R, N, E> FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'a mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,

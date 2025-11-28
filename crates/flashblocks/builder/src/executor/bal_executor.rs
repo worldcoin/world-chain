@@ -1,15 +1,16 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{OpBlockExecutionCtx, block::receipt_builder::OpReceiptBuilder};
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{OptionExt, eyre};
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth::revm::{State, database::StateProviderDatabase};
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
-    ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
+    ConfigureEvm, Database, Evm as EvmTrait, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
     block::BlockExecutionError,
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
     op_revm::{OpSpecId, OpTransaction},
@@ -37,7 +38,8 @@ use crate::{
     assembler::FlashblocksBlockAssembler,
     block_builder::FlashblocksBlockBuilder,
     executor::{
-        BalExecutorError, BalValidationError, bal_builder::BalBuilderBlockExecutor,
+        BalExecutorError, BalValidationError,
+        bal_builder::BalBuilderBlockExecutor,
         factory::FlashblocksBlockExecutorFactory,
     },
 };
@@ -346,14 +348,13 @@ where
     /// And computes the resulting [`OpBuiltPayload`].
     ///
     /// # Errors
-    ///     If the provided BAL passed in the `diff` does not match the computed BAL from execution.
+    /// Returns an error if the provided BAL in `diff` does not match the computed BAL from execution.
     pub fn validate_and_execute_diff_parallel(
         mut self,
         state_provider: Arc<dyn StateProvider>,
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent_header: &SealedHeader<Header>,
         payload_id: PayloadId,
-        flashblock_index: u64,
     ) -> Result<OpBuiltPayload, BalExecutorError>
     where
         R: Clone + Send + Sync + 'static,
@@ -392,24 +393,11 @@ where
                 "State root mismatch after executing flashblock delta"
             );
 
-            // Get the access list data for diagnostics
-            let access_list_data: Option<flashblocks_primitives::access_list::FlashblockAccessListData> = diff.access_list_data.clone();
-            let validator_access_list = access_list_data
-                .as_ref()
-                .map(|d| d.access_list.clone())
-                .unwrap_or_default();
-            let expected_access_list = access_list_data.map(|d| d.access_list);
-
             // Create error with explicit state data for reliable diagnostic capture
-            return Err(BalValidationError::state_root_mismatch_with_state(
-                diff.state_root,
-                state_root_result.state_root,
-                payload_id,
-                flashblock_index as u32,
-                verify_result.bundle_state.state.clone(),
-                validator_access_list,
-                expected_access_list,
-            )
+            return Err(BalValidationError::StateRootMismatch {
+                expected: diff.state_root,
+                got: state_root_result.state_root,
+            }
             .into());
         }
 

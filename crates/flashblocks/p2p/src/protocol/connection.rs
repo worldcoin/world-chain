@@ -1,6 +1,6 @@
 use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, PeerMsg, PublishingStatus,
-    MAX_FLASHBLOCK_INDEX,
+    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PeerMsg,
+    PublishingStatus,
 };
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
@@ -17,7 +17,7 @@ use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnectio
 use reth_network::types::ReputationChangeKind;
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, trace};

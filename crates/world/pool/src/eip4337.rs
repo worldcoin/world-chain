@@ -1,5 +1,5 @@
 use alloy_sol_types::SolValue;
-use semaphore_rs::{hash_to_field, Field};
+use semaphore_rs::{Field, hash_to_field};
 
 use crate::bindings::IEntryPoint::PackedUserOperation;
 
