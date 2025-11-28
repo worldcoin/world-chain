@@ -65,9 +65,15 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
+
 COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 COPY --from=builder /usr/local/cargo/bin/cast /usr/local/bin/
+
+COPY scripts/* /usr/local/bin
+
+RUN chmod +x /usr/local/bin/*.sh
+
 RUN cast --version
 
 EXPOSE 30303 30303/udp 9001 8545 8546
