@@ -23,8 +23,8 @@ deploy-contracts:
 devnet-down:
     @just ./devnet/devnet-down
 
-test LEVEL='info' *args='':
-    RUST_LOG=LEVEL cargo nextest run --workspace $@
+test *args='':
+    RUST_LOG="info" cargo nextest run --workspace $@
 
 # Formats the whole workspace
 fmt: devnet-fmt contracts-fmt fmt-fix fmt-check
