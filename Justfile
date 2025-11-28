@@ -5,53 +5,16 @@ default:
     @just --list
 
 # Spawns the devnet
-devnet-up build_image="true" dev="false": (deploy-devnet build_image dev) deploy-contracts
+devnet-up: deploy-devnet deploy-contracts
 
-deploy-devnet build_image dev:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ "{{ build_image }}" == "true" ]]; then
-        if [[ "{{ dev }}" == "true" ]]; then
-            just build-dev
-        else
-            just build
-        fi
-    fi
+deploy-devnet: build
     just ./devnet/devnet-up
 
-build cache_type="local" cache_ref=".docker-cache" profile="maxperf":
-    #!/usr/bin/env bash
-
-    if [[ "{{ cache_type }}" == "local" ]]; then
-        mkdir -p {{ cache_ref }}
-        docker buildx build \
-            --build-arg PROFILE={{ profile }} \
-            --build-arg FEATURES=jemalloc,test \
-            --cache-from type=local,src={{ cache_ref }} \
-            --cache-to type=local,dest={{ cache_ref }},mode=max \
-            -t world-chain:latest .
-    elif [[ "{{ cache_type }}" == "gha" ]]; then
-        docker buildx build \
-            --build-arg PROFILE={{ profile }} \
-            --build-arg FEATURES=jemalloc \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
-            -t world-chain:latest .
-    elif [[ "{{ cache_type }}" == "registry" ]]; then
-        docker buildx build \
-            --build-arg PROFILE={{ profile }} \
-            --build-arg FEATURES=jemalloc \
-            --cache-from type=registry,ref={{ cache_ref }} \
-            --cache-to type=registry,ref={{ cache_ref }},mode=max \
-            -t world-chain:latest .
-    else
-        echo "Unknown cache type: {{ cache_type }}"
-        exit 1
-    fi
-
-# Fast dev build using dev-docker profile (much faster than maxperf)
-build-dev cache_type="local" cache_ref=".docker-cache":
-    just build {{ cache_type }} {{ cache_ref }} dev-docker
+build:
+    docker buildx build \
+        --cache-from type=local,src=.docker-cache \
+        --cache-to type=local,dest=.docker-cache,mode=max \
+        -t world-chain:latest .
 
 deploy-contracts:
     @just ./contracts/deploy-contracts

@@ -43,11 +43,6 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 
-[profile.dev-docker]
-inherits = "release"
-lto = "thin"
-codegen-units = 16
-
 [workspace.lints]
 
 [workspace.dependencies]

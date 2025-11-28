@@ -369,6 +369,9 @@ where
         let bundle_state_for_root = bundle_state.clone();
 
         let (verify_result, state_root_result) = rayon::join(
+            // Inside `self.verify_block` we assert that the block access list produced by this BalBlockValidator
+            // matches the expected list embedded in `diff`. If they differ we return a BalExecutorError, ensuring
+            // that the expected list is safe to feed into `compute_state_root` and will yield the same state root
             || self.verify_block(state_provider.clone(), diff.clone()),
             || {
                 compute_state_root(
