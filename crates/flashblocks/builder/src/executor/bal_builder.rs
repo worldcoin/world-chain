@@ -244,14 +244,14 @@ where
                 });
 
             // Remove empty account changes
-            // if self
-            //     .flashblock_access_list
-            //     .changes
-            //     .get(address)
-            //     .is_some_and(|changes| changes.is_empty())
-            // {
-            //     self.flashblock_access_list.changes.remove(address);
-            // }
+            if self
+                .flashblock_access_list
+                .changes
+                .get(address)
+                .is_some_and(|changes| changes.is_empty())
+            {
+                self.flashblock_access_list.changes.remove(address);
+            }
         }
 
         Ok(())
@@ -410,7 +410,7 @@ where
 
     pub fn execute_block_parallel(
         mut self,
-        execution_state: Arc<&BalExecutionState<R>>,
+        execution_state: &BalExecutionState<R>,
         expected_access_list: FlashblockAccessListData,
         state_provider: impl StateProvider + Clone + 'static,
     ) -> Result<ParallelExecutionOutput, BalExecutorError>
@@ -475,7 +475,7 @@ where
     /// Execute all transactions in parallel using temporal databases.
     fn execute_transactions_parallel<SP: StateProvider + Clone + 'static>(
         &self,
-        execution_state: Arc<&BalExecutionState<R>>,
+        execution_state: &BalExecutionState<R>,
         temporal_db_factory: &TemporalDbFactory<Arc<StateProviderDatabase<SP>>>,
         initial_gas_used: u64,
     ) -> Result<TransactionExecutionResult, BlockExecutionError>
@@ -492,7 +492,7 @@ where
             .into_par_iter()
             .map(|(index, tx)| {
                 execute_single_transaction(
-                    execution_state.clone(),
+                    execution_state,
                     temporal_db_factory,
                     &receipt_builder,
                     &spec,
@@ -569,7 +569,7 @@ where
 /// This is a free function to avoid capturing `&self` in parallel iterators,
 /// as `BalBuilderBlockExecutor` contains `OnStateHook` which is not `Sync`.
 fn execute_single_transaction<R, SP>(
-    execution_state: Arc<&BalExecutionState<R>>,
+    execution_state: &BalExecutionState<R>,
     temporal_db_factory: &TemporalDbFactory<Arc<StateProviderDatabase<SP>>>,
     receipt_builder: &R,
     spec: &Arc<OpChainSpec>,

@@ -46,7 +46,6 @@ where
             versions
                 .range((Unbounded, Included(index)))
                 .next_back()
-                .map(|(i, v)| (i, v))
         })
     }
 }

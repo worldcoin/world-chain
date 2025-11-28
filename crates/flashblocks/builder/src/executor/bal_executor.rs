@@ -6,11 +6,10 @@ use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::{OptionExt, eyre};
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use op_alloy_consensus::OpTxEnvelope;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth::revm::{State, database::StateProviderDatabase};
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
-    ConfigureEvm, Database, Evm as EvmTrait, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
+    ConfigureEvm, Database, EvmEnv, EvmEnvFor, EvmFactory, EvmFactoryFor, EvmFor,
     block::BlockExecutionError,
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
     op_revm::{OpSpecId, OpTransaction},
@@ -304,10 +303,8 @@ where
             &mut state,
         );
 
-        let executor_state = Arc::new(&self.execution_state);
-
         let parallel_output = executor.execute_block_parallel(
-            executor_state,
+            &self.execution_state,
             expected_access_list_data,
             state_provider,
         )?;

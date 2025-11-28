@@ -11,7 +11,7 @@ license.workspace = true
 flashblocks-primitives.workspace = true
 flashblocks-builder.workspace = true
 flashblocks-p2p.workspace = true
-serde_json.workspace = true
+
 # reth
 reth.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -27,6 +27,7 @@ reth-optimism-primitives.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 alloy-rlp.workspace = true
+
 # tokio
 tokio.workspace = true
 
@@ -38,12 +39,3 @@ metrics-derive.workspace = true
 tracing.workspace = true
 futures.workspace = true
 eyre.workspace = true
-serde = { workspace = true, optional = true }
-
-[dev-dependencies]
-parking_lot.workspace = true
-serde.workspace = true
-
-[features]
-test = ["flashblocks-builder/test"]
-diagnostics = ["flashblocks-builder/diagnostics"]

@@ -13,7 +13,7 @@ use reth_e2e_test_utils::testsuite::NodeClient;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use revm_primitives::{Address, B256, Bytes};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use world_chain_test::{node::tx, utils::signer};
 
 use crate::{actions::BlockProductionState, setup::CHAIN_SPEC};
@@ -67,7 +67,7 @@ pub enum TxType {
 
 impl TxType {
     pub async fn to_raw(
-        &self,
+        self,
         signer_id: u32,
         nonce: u64,
         contract: Address,
@@ -224,9 +224,8 @@ impl TxSpammer {
                         .await
                         .inspect_err(|e| error!("Error sending transaction: {:?}", e));
 
-                    match result {
-                        Ok(tx_hash) => info!("Submitted tx: {:?}", tx_hash),
-                        Err(_) => {} // already logged
+                    if let Ok(tx_hash) = result {
+                        debug!("Sent transact {}", tx_hash);
                     }
                 });
             }
@@ -239,7 +238,7 @@ impl TxSpammer {
     async fn broadcast_batch_with_hashes(&self, batch: &[Bytes]) -> Vec<B256> {
         let mut tx_hashes = Vec::with_capacity(batch.len());
 
-        for client in &self.rpc {
+        while let Some(client) = self.rpc.first() {
             for tx in batch {
                 let result = EthApiClient::<
                     TransactionRequest,
@@ -257,8 +256,6 @@ impl TxSpammer {
                     tx_hashes.push(tx_hash);
                 }
             }
-            // Only send to first client to avoid duplicates
-            break;
         }
 
         tx_hashes

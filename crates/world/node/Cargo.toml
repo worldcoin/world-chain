@@ -58,7 +58,6 @@ world-chain-rpc.workspace = true
 world-chain-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-node.workspace = true
-flashblocks-payload = { workspace = true, features = ["test"] }
 
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
@@ -102,6 +101,3 @@ alloy-contract.workspace = true
 alloy-provider.workspace = true
 alloy-rpc-client.workspace = true
 reqwest.workspace = true
-
-[features]
-test = ["flashblocks-payload/test"]

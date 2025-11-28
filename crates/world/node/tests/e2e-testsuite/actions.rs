@@ -33,17 +33,203 @@ use tracing::{debug, error, info};
 
 use crate::setup::execution_data_from_from_reduced_flashblock;
 
-/// A hook that receives results from actions and can perform assertions.
-/// Returns Ok(()) if assertions pass, Err if they fail.
 pub type Hook<T> = Arc<dyn Fn(T) -> Result<()> + Send + Sync>;
 
-/// Creates a hook from a closure
 pub fn hook<T, F>(f: F) -> Hook<T>
 where
     F: Fn(T) -> Result<()> + Send + Sync + 'static,
 {
     Arc::new(f)
 }
+
+
+/// Compose two actions: first runs, then second
+pub struct Then<A, B> {
+    first: A,
+    second: B,
+}
+
+impl<A, B> Then<A, B> {
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+impl<A, B> Action<OpEngineTypes> for Then<A, B>
+where
+    A: Action<OpEngineTypes> + Send,
+    B: Action<OpEngineTypes> + Send,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.first.execute(env).await?;
+            self.second.execute(env).await?;
+            Ok(())
+        })
+    }
+}
+
+/// Trait for read-only actions that can run in parallel.
+/// These actions only read from the environment, never write.
+pub trait ReadOnlyAction: Send + Sync {
+    /// Execute with shared read-only access to the environment.
+    /// No Mutex needed since we're only reading.
+    fn execute_readonly<'a>(
+        &'a self,
+        env: &'a Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>>;
+}
+
+/// Run two read-only actions in parallel using Arc (no Mutex needed for reads)
+pub struct WithParallel<A, B> {
+    pub action_a: A,
+    pub action_b: B,
+}
+
+impl<A, B> WithParallel<A, B> {
+    pub fn new(action_a: A, action_b: B) -> Self {
+        Self { action_a, action_b }
+    }
+}
+
+impl<A, B> ReadOnlyAction for WithParallel<A, B>
+where
+    A: ReadOnlyAction,
+    B: ReadOnlyAction,
+{
+    fn execute_readonly<'a>(
+        &'a self,
+        env: &'a Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Both actions get shared &Environment - no Mutex needed for reads
+            let (res_a, res_b) = tokio::join!(
+                self.action_a.execute_readonly(env),
+                self.action_b.execute_readonly(env)
+            );
+            res_a?;
+            res_b?;
+            Ok(())
+        })
+    }
+}
+
+/// Wrapper to run a ReadOnlyAction as a regular Action
+pub struct AsAction<R> {
+    inner: R,
+}
+
+impl<R: ReadOnlyAction> AsAction<R> {
+    pub fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R: ReadOnlyAction + 'static> Action<OpEngineTypes> for AsAction<R> {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        // Convert &mut to & for read-only access
+        Box::pin(async move { self.inner.execute_readonly(env).await })
+    }
+}
+
+pub struct ActionSequence {
+    actions: Vec<Box<dyn Action<OpEngineTypes> + Send>>,
+}
+
+impl ActionSequence {
+    pub fn new() -> Self {
+        Self { actions: vec![] }
+    }
+
+    /// Compose two actions in parallel with each other
+    pub fn with<A: ReadOnlyAction + Sync + 'static, B: ReadOnlyAction + Sync + 'static>(
+        mut self,
+        a: A,
+        b: B,
+    ) -> Self {
+        let with = WithParallel::new(a, b);
+        let action = AsAction::new(with);
+        self.actions.push(Box::new(action));
+        self
+    }
+
+    /// Add an action to the sequence
+    pub fn then<A: Action<OpEngineTypes> + Send + 'static>(mut self, action: A) -> Self {
+        self.actions.push(Box::new(action));
+        self
+    }
+
+    /// Convert to a Repeat action that runs this sequence N times
+    pub fn repeat(self, times: u64) -> Repeat {
+        Repeat {
+            sequence: self,
+            times,
+            on_iteration: None,
+        }
+    }
+}
+
+impl Default for ActionSequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Action<OpEngineTypes> for ActionSequence {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            for action in &mut self.actions {
+                action.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Repeat a sequence N times with an optional callback between iterations
+pub struct Repeat {
+    sequence: ActionSequence,
+    times: u64,
+    on_iteration: Option<Arc<dyn Fn(u64) -> Result<()> + Send + Sync>>,
+}
+
+impl Repeat {
+    /// Called before each iteration with the iteration number (0-indexed)
+    pub fn on_each<F>(mut self, f: F) -> Self
+    where
+        F: Fn(u64) -> Result<()> + Send + Sync + 'static,
+    {
+        self.on_iteration = Some(Arc::new(f));
+        self
+    }
+}
+
+impl Action<OpEngineTypes> for Repeat {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            for i in 0..self.times {
+                if let Some(ref callback) = self.on_iteration {
+                    callback(i)?;
+                }
+                self.sequence.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
 
 pub struct FlashblocksValidatonStream {
     pub node_indexes: Vec<usize>,
@@ -93,6 +279,7 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                 let Some(reduced) = Flashblock::reduce(ordered.clone()).ok() else {
                     continue;
                 };
+                
                 let reduced_hash = reduced.diff().block_hash;
 
                 info!(
@@ -118,7 +305,6 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                     .clone()
                     .into_iter()
                     .map(|beacon_handle| {
-                        let forkchoice = forkchoice;
                         let execution_data = execution_data.clone();
                         async move {
                             beacon_handle
@@ -615,48 +801,6 @@ impl Action<OpEngineTypes> for GetStorage {
     }
 }
 
-/// Query supported capabilities with optional assertion hook
-pub struct GetCapabilities {
-    pub node_idx: usize,
-    pub on_capabilities: Option<Hook<Vec<String>>>,
-}
-
-impl GetCapabilities {
-    pub fn new(node_idx: usize) -> Self {
-        Self {
-            node_idx,
-            on_capabilities: None,
-        }
-    }
-
-    pub fn on_capabilities<F>(mut self, f: F) -> Self
-    where
-        F: Fn(Vec<String>) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_capabilities = Some(hook(f));
-        self
-    }
-}
-
-impl Action<OpEngineTypes> for GetCapabilities {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let capabilities =
-                OpApiExtClient::supported_capabilities(&env.node_clients[self.node_idx].rpc)
-                    .await?;
-
-            if let Some(ref hook) = self.on_capabilities {
-                hook(capabilities)?;
-            }
-
-            Ok(())
-        })
-    }
-}
-
 /// Assertion helpers
 pub mod assert {
     use super::*;
@@ -833,71 +977,6 @@ where
         })
     }
 }
-
-/// Get transaction receipts and send through channel
-pub struct EthGetTransactionReceipt {
-    pub hashes: Vec<B256>,
-    pub node_idxs: Vec<usize>,
-    pub backoff_ms: u64,
-    pub sender: mpsc::Sender<Vec<Vec<Option<OpTransactionReceipt>>>>,
-}
-
-impl EthGetTransactionReceipt {
-    pub fn new(
-        hashes: Vec<B256>,
-        node_idxs: Vec<usize>,
-        backoff_ms: u64,
-        sender: mpsc::Sender<Vec<Vec<Option<OpTransactionReceipt>>>>,
-    ) -> Self {
-        Self {
-            hashes,
-            node_idxs,
-            backoff_ms,
-            sender,
-        }
-    }
-}
-
-impl Action<OpEngineTypes> for EthGetTransactionReceipt {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            tokio::time::sleep(Duration::from_millis(self.backoff_ms)).await;
-
-            let mut all_receipts = Vec::with_capacity(self.node_idxs.len());
-
-            for &node_idx in &self.node_idxs {
-                let rpc = &env.node_clients[node_idx].rpc;
-                let mut node_receipts = Vec::with_capacity(self.hashes.len());
-
-                for hash in &self.hashes {
-                    let receipt: Option<OpTransactionReceipt> =
-                        EthApiClient::<
-                            TransactionRequest,
-                            Transaction,
-                            alloy_rpc_types_eth::Block,
-                            OpTransactionReceipt,
-                            Header,
-                            TransactionSigned,
-                        >::transaction_receipt(rpc, *hash)
-                        .await?;
-                    node_receipts.push(receipt);
-                }
-                all_receipts.push(node_receipts);
-            }
-
-            self.sender
-                .send(all_receipts)
-                .await
-                .map_err(|e| eyre!("Failed to send receipts: {}", e))?;
-
-            Ok(())
-        })
-    }
-}
-
 /// Call supported_capabilities and send through channel
 pub struct SupportedCapabilitiesCall {
     pub sender: mpsc::Sender<Vec<String>>,
@@ -1449,228 +1528,6 @@ impl Action<OpEngineTypes> for ValidateFlashblocksWithState {
     }
 }
 
-/// Query blocks by hash as they become available from validation
-pub struct GetBlockByHashStream {
-    pub node_idxs: Vec<usize>,
-    pub state: BlockProductionState,
-    pub on_block: Option<Hook<alloy_rpc_types_eth::Block>>,
-}
-
-impl GetBlockByHashStream {
-    pub fn new(node_idxs: Vec<usize>, state: BlockProductionState) -> Self {
-        Self {
-            node_idxs,
-            state,
-            on_block: None,
-        }
-    }
-
-    pub fn on_block<F>(mut self, f: F) -> Self
-    where
-        F: Fn(alloy_rpc_types_eth::Block) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_block = Some(hook(f));
-        self
-    }
-}
-
-impl Action<OpEngineTypes> for GetBlockByHashStream {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut final_rx = self.state.final_validated_rx.clone();
-            let mut processed = 0usize;
-
-            loop {
-                // Check for new hashes to query
-                let hashes = self.state.validated_block_hashes.read().clone();
-
-                for hash in hashes.iter().skip(processed) {
-                    for &node_idx in &self.node_idxs {
-                        let block: Option<alloy_rpc_types_eth::Block> =
-                            EthApiClient::<
-                                TransactionRequest,
-                                Transaction,
-                                alloy_rpc_types_eth::Block,
-                                alloy_consensus::Receipt,
-                                Header,
-                                TransactionSigned,
-                            >::block_by_hash(
-                                &env.node_clients[node_idx].rpc, *hash, true
-                            )
-                            .await?;
-
-                        if let Some(ref block) = block {
-                            if let Some(ref hook) = self.on_block {
-                                hook(block.clone())?;
-                            }
-                            info!(
-                                target: "actions",
-                                node_idx = node_idx,
-                                hash = ?hash,
-                                "Fetched block by hash"
-                            );
-                        }
-                    }
-                    processed += 1;
-                }
-
-                // Check if we should stop
-                if *final_rx.borrow() {
-                    break;
-                }
-
-                tokio::select! {
-                    _ = final_rx.changed() => {
-                        if *final_rx.borrow() {
-                            break;
-                        }
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-                }
-            }
-
-            Ok(())
-        })
-    }
-}
-
-/// Query receipts for transaction hashes from shared state
-pub struct GetReceiptsStream {
-    pub node_idxs: Vec<usize>,
-    pub state: BlockProductionState,
-    pub on_receipt: Option<Hook<OpTransactionReceipt>>,
-}
-
-impl GetReceiptsStream {
-    pub fn new(node_idxs: Vec<usize>, state: BlockProductionState) -> Self {
-        Self {
-            node_idxs,
-            state,
-            on_receipt: None,
-        }
-    }
-
-    pub fn on_receipt<F>(mut self, f: F) -> Self
-    where
-        F: Fn(OpTransactionReceipt) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_receipt = Some(hook(f));
-        self
-    }
-}
-
-impl Action<OpEngineTypes> for GetReceiptsStream {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut final_rx = self.state.final_validated_rx.clone();
-            let mut processed = 0usize;
-
-            loop {
-                let tx_hashes = self.state.get_tx_hashes();
-
-                for hash in tx_hashes.iter().skip(processed) {
-                    for &node_idx in &self.node_idxs {
-                        let receipt: Option<OpTransactionReceipt> = EthApiClient::<
-                            TransactionRequest,
-                            Transaction,
-                            alloy_rpc_types_eth::Block,
-                            OpTransactionReceipt,
-                            Header,
-                            TransactionSigned,
-                        >::transaction_receipt(
-                            &env.node_clients[node_idx].rpc,
-                            *hash,
-                        )
-                        .await?;
-
-                        if let Some(ref r) = receipt {
-                            if let Some(ref hook) = self.on_receipt {
-                                hook(r.clone())?;
-                            }
-                            info!(
-                                target: "actions",
-                                node_idx = node_idx,
-                                tx_hash = ?hash,
-                                "Fetched receipt"
-                            );
-                        }
-                    }
-                    processed += 1;
-                }
-
-                // Check if we should stop
-                if *final_rx.borrow() {
-                    break;
-                }
-
-                tokio::select! {
-                    _ = final_rx.changed() => {
-                        if *final_rx.borrow() {
-                            break;
-                        }
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-                }
-            }
-
-            Ok(())
-        })
-    }
-}
-
-/// Run multiple actions in parallel
-pub struct Parallel {
-    actions: Vec<Box<dyn Action<OpEngineTypes> + Send>>,
-}
-
-impl Parallel {
-    pub fn new() -> Self {
-        Self { actions: vec![] }
-    }
-
-    pub fn with<A: Action<OpEngineTypes> + Send + 'static>(mut self, action: A) -> Self {
-        self.actions.push(Box::new(action));
-        self
-    }
-}
-
-impl Default for Parallel {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Action<OpEngineTypes> for Parallel {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // We need to execute all actions concurrently
-            // Since we can't easily share &mut env, we'll execute them sequentially
-            // but signal completion via shared state
-            //
-            // For true parallel execution, we would need Arc<Mutex<Environment>>
-            // which would require changes to the Action trait.
-            //
-            // Instead, we use tokio::spawn for actions that don't need env mutation
-            // and run the main action in the current task.
-
-            // For now, run actions sequentially (they coordinate via shared state)
-            for action in &mut self.actions {
-                action.execute(env).await?;
-            }
-            Ok(())
-        })
-    }
-}
-
 // ============================================================================
 // Block Production Loop - Composable N-block production as a single Action
 // ============================================================================
@@ -1721,219 +1578,6 @@ pub struct BlockProductionLoop<A, F, H> {
     pub on_validated_hash: Option<Hook<B256>>,
     /// Hook for each fetched receipt
     pub on_receipt: Option<Hook<OpTransactionReceipt>>,
-}
-
-/// Type alias for boxed flashblock stream
-pub type FlashblockStreamBoxed =
-    Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Send + Sync + 'static>>;
-
-/// Trait for types that can provide flashblock streams
-pub(crate) trait FlashblocksStreamProvider: Send + Sync {
-    fn flashblock_stream(&self) -> FlashblockStreamBoxed;
-}
-
-// Implement for flashblocks_p2p handle
-impl FlashblocksStreamProvider for flashblocks_p2p::protocol::handler::FlashblocksHandle {
-    fn flashblock_stream(&self) -> FlashblockStreamBoxed {
-        Box::pin(self.flashblock_stream())
-    }
-}
-
-/// Compose two actions: first runs, then second
-pub struct Then<A, B> {
-    first: A,
-    second: B,
-}
-
-impl<A, B> Then<A, B> {
-    pub fn new(first: A, second: B) -> Self {
-        Self { first, second }
-    }
-}
-
-impl<A, B> Action<OpEngineTypes> for Then<A, B>
-where
-    A: Action<OpEngineTypes> + Send,
-    B: Action<OpEngineTypes> + Send,
-{
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            self.first.execute(env).await?;
-            self.second.execute(env).await?;
-            Ok(())
-        })
-    }
-}
-
-/// Trait for read-only actions that can run in parallel.
-/// These actions only read from the environment, never write.
-pub trait ReadOnlyAction: Send + Sync {
-    /// Execute with shared read-only access to the environment.
-    /// No Mutex needed since we're only reading.
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>>;
-}
-
-/// Run two read-only actions in parallel using Arc (no Mutex needed for reads)
-pub struct WithParallel<A, B> {
-    pub action_a: A,
-    pub action_b: B,
-}
-
-impl<A, B> WithParallel<A, B> {
-    pub fn new(action_a: A, action_b: B) -> Self {
-        Self { action_a, action_b }
-    }
-}
-
-impl<A, B> ReadOnlyAction for WithParallel<A, B>
-where
-    A: ReadOnlyAction,
-    B: ReadOnlyAction,
-{
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // Both actions get shared &Environment - no Mutex needed for reads
-            let (res_a, res_b) = tokio::join!(
-                self.action_a.execute_readonly(env),
-                self.action_b.execute_readonly(env)
-            );
-            res_a?;
-            res_b?;
-            Ok(())
-        })
-    }
-}
-
-/// Wrapper to run a ReadOnlyAction as a regular Action
-pub struct AsAction<R> {
-    inner: R,
-}
-
-impl<R: ReadOnlyAction> AsAction<R> {
-    pub fn new(inner: R) -> Self {
-        Self { inner }
-    }
-}
-
-impl<R: ReadOnlyAction + 'static> Action<OpEngineTypes> for AsAction<R> {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        // Convert &mut to & for read-only access
-        Box::pin(async move { self.inner.execute_readonly(env).await })
-    }
-}
-
-/// A composable sequence of actions with hooks between steps.
-///
-/// Usage:
-/// ```ignore
-/// ActionSequence::new()
-///     .then(MineBlockWithState::new(...))
-///     .then(ValidateFlashblocks::new(...))
-///     .then(Canonicalize::new(...))
-///     .build()
-/// ```
-pub struct ActionSequence {
-    actions: Vec<Box<dyn Action<OpEngineTypes> + Send>>,
-}
-
-impl ActionSequence {
-    pub fn new() -> Self {
-        Self { actions: vec![] }
-    }
-
-    /// Compose two actions in parallel with each other
-    pub fn with<A: ReadOnlyAction + Sync + 'static, B: ReadOnlyAction + Sync + 'static>(
-        mut self,
-        a: A,
-        b: B,
-    ) -> Self {
-        let with = WithParallel::new(a, b);
-        let action = AsAction::new(with);
-        self.actions.push(Box::new(action));
-        self
-    }
-
-    /// Add an action to the sequence
-    pub fn then<A: Action<OpEngineTypes> + Send + 'static>(mut self, action: A) -> Self {
-        self.actions.push(Box::new(action));
-        self
-    }
-
-    /// Convert to a Repeat action that runs this sequence N times
-    pub fn repeat(self, times: u64) -> Repeat {
-        Repeat {
-            sequence: self,
-            times,
-            on_iteration: None,
-        }
-    }
-}
-
-impl Default for ActionSequence {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Action<OpEngineTypes> for ActionSequence {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            for action in &mut self.actions {
-                action.execute(env).await?;
-            }
-            Ok(())
-        })
-    }
-}
-
-/// Repeat a sequence N times with an optional callback between iterations
-pub struct Repeat {
-    sequence: ActionSequence,
-    times: u64,
-    on_iteration: Option<Arc<dyn Fn(u64) -> Result<()> + Send + Sync>>,
-}
-
-impl Repeat {
-    /// Called before each iteration with the iteration number (0-indexed)
-    pub fn on_each<F>(mut self, f: F) -> Self
-    where
-        F: Fn(u64) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_iteration = Some(Arc::new(f));
-        self
-    }
-}
-
-impl Action<OpEngineTypes> for Repeat {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            for i in 0..self.times {
-                if let Some(ref callback) = self.on_iteration {
-                    callback(i)?;
-                }
-                self.sequence.execute(env).await?;
-            }
-            Ok(())
-        })
-    }
 }
 
 // ============================================================================
