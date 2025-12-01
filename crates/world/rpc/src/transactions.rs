@@ -2,23 +2,23 @@ use std::error::Error;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashMap, StorageKey};
+use alloy_primitives::{StorageKey, map::HashMap};
 use alloy_rpc_types::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee::{
-    core::{async_trait, RpcResult},
+    core::{RpcResult, async_trait},
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
 };
 use reth::{
     api::Block,
     rpc::{
         api::eth::{AsEthApiError, FromEthApiError},
-        server_types::eth::{utils::recover_raw_transaction, EthApiError},
+        server_types::eth::{EthApiError, utils::recover_raw_transaction},
     },
     transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
 };
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use revm_primitives::{map::FbBuildHasher, Address, Bytes, FixedBytes, B256};
+use revm_primitives::{Address, B256, Bytes, FixedBytes, map::FbBuildHasher};
 use world_chain_pool::tx::WorldChainPooledTransaction;
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
@@ -144,28 +144,28 @@ where
 
     let block_number = latest.header().number();
     let block_timestamp = latest.header().timestamp();
-    if let Some(min_block) = options.block_number_min {
-        if min_block > block_number {
-            return Err(ErrorCode::from(-32003).into());
-        }
+    if let Some(min_block) = options.block_number_min
+        && min_block > block_number
+    {
+        return Err(ErrorCode::from(-32003).into());
     }
 
-    if let Some(max_block) = options.block_number_max {
-        if max_block < block_number {
-            return Err(ErrorCode::from(-32003).into());
-        }
+    if let Some(max_block) = options.block_number_max
+        && max_block < block_number
+    {
+        return Err(ErrorCode::from(-32003).into());
     }
 
-    if let Some(min_timestamp) = options.timestamp_min {
-        if min_timestamp > block_timestamp {
-            return Err(ErrorCode::from(-32003).into());
-        }
+    if let Some(min_timestamp) = options.timestamp_min
+        && min_timestamp > block_timestamp
+    {
+        return Err(ErrorCode::from(-32003).into());
     }
 
-    if let Some(max_timestamp) = options.timestamp_max {
-        if max_timestamp < block_timestamp {
-            return Err(ErrorCode::from(-32003).into());
-        }
+    if let Some(max_timestamp) = options.timestamp_max
+        && max_timestamp < block_timestamp
+    {
+        return Err(ErrorCode::from(-32003).into());
     }
 
     validate_known_accounts(

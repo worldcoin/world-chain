@@ -3,8 +3,8 @@ use alloy_rpc_types::erc4337::TransactionConditional;
 use reqwest::Client;
 use serde_json::json;
 use std::sync::{
-    atomic::{self, AtomicUsize},
     Arc,
+    atomic::{self, AtomicUsize},
 };
 use tracing::warn;
 

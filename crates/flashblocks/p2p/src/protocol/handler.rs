@@ -9,7 +9,7 @@ use flashblocks_primitives::{
     },
     primitives::FlashblocksPayloadV1,
 };
-use futures::{stream, Stream, StreamExt};
+use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
@@ -285,6 +285,7 @@ impl FlashblocksHandle {
     /// This is never guaranteed to return.
     pub async fn await_clearance(&self) {
         let mut status = self.state.lock().publishing_status.subscribe();
+
         // Safe to unwrap becuase self holds a sender.
         status
             .wait_for(|status| matches!(status, PublishingStatus::Publishing { .. }))
@@ -453,6 +454,8 @@ impl FlashblocksHandle {
     /// The stream will continue to yield flashblocks for consecutive payloads as well, so
     /// consumers should take care to handle the stream appropriately.
     pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
+        // Seed the stream with already-buffered contiguous flashblocks, then rely on the broadcast
+        // channel for future ones so ordering stays strict even if inserts arrive out of order.
         let flashblocks = self
             .state
             .lock()

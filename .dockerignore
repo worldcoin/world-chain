@@ -14,3 +14,6 @@ CODEOWNERS
 # Added by SEC-1406 patch
 .git
 .gitignore
+.docker-cache/
+.DS_Store
+**/.DS_Store

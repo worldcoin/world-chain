@@ -1,8 +1,8 @@
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call, EthCall},
     EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+    helpers::{Call, EthCall, estimate::EstimateCall},
 };
 
 use crate::eth::FlashblocksEthApi;

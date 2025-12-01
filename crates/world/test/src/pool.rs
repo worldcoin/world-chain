@@ -10,12 +10,12 @@ use world_chain_pool::{
     root::WorldChainRootValidator,
     tx::WorldChainPooledTransaction,
     validator::{
-        WorldChainTransactionValidator, MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT,
+        MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT, WorldChainTransactionValidator,
     },
 };
 
-pub fn world_chain_validator(
-) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+pub fn world_chain_validator()
+-> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
     let client = MockEthProvider::default();
 
     let validator = EthTransactionValidatorBuilder::new(client.clone())

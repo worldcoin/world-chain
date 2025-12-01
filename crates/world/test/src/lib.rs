@@ -1,7 +1,7 @@
 //! Test utilities for interfacing with PBH & the World Chain Devnet.
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_primitives::{address, Address};
+use alloy_primitives::{Address, address};
 
 const MNEMONIC: &str = "test test test test test test test test test test test junk";
 

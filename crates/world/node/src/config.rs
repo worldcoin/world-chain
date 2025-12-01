@@ -1,4 +1,4 @@
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use flashblocks_builder::FlashblocksPayloadBuilderConfig;
 
 use crate::args::WorldChainArgs;
 
@@ -6,5 +6,6 @@ use crate::args::WorldChainArgs;
 pub struct WorldChainNodeConfig {
     /// World Chain Specific CLI arguements
     pub args: WorldChainArgs,
-    pub builder_config: OpBuilderConfig,
+    /// World Chain Payload Builder Configeration
+    pub builder_config: FlashblocksPayloadBuilderConfig,
 }

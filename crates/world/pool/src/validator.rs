@@ -2,8 +2,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
 };
 
@@ -18,8 +18,8 @@ use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth::transaction_pool::{
-    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction,
 };
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
@@ -162,7 +162,7 @@ where
                     return WorldChainPoolTransactionError::from(
                         PBHValidationError::InvalidCalldata,
                     )
-                    .to_outcome(tx)
+                    .to_outcome(tx);
                 }
             };
 
@@ -297,17 +297,17 @@ where
 #[cfg(test)]
 pub mod tests {
     use alloy_consensus::{Block, Header};
-    use alloy_primitives::{address, Address};
+    use alloy_primitives::{Address, address};
     use alloy_sol_types::SolCall;
     use reth::transaction_pool::{
-        blobstore::InMemoryBlobStore, Pool, TransactionPool, TransactionValidator,
+        Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
     };
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
     use world_chain_test::{
-        utils::{account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op, TREE},
         PBH_DEV_ENTRYPOINT,
+        utils::{TREE, account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op},
     };
 
     /// Devnet World ID for testing
@@ -325,8 +325,8 @@ pub mod tests {
         address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9");
 
     /// Create a World Chain validator for testing
-    fn world_chain_validator(
-    ) -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+    fn world_chain_validator()
+    -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
         use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
         use crate::root::WorldChainRootValidator;
         use reth_optimism_node::txpool::OpTransactionValidator;
@@ -620,9 +620,10 @@ pub mod tests {
             .add_external_transaction(tx.clone().into())
             .await
             .expect_err("Validation should fail because of missing proof");
-        assert!(err
-            .to_string()
-            .contains("Invalid external nullifier period"),);
+        assert!(
+            err.to_string()
+                .contains("Invalid external nullifier period"),
+        );
     }
 
     #[tokio::test]
@@ -657,9 +658,10 @@ pub mod tests {
             .await
             .expect_err("Validation should fail because of missing proof");
 
-        assert!(err
-            .to_string()
-            .contains("Invalid external nullifier period"),);
+        assert!(
+            err.to_string()
+                .contains("Invalid external nullifier period"),
+        );
     }
 
     #[tokio::test]

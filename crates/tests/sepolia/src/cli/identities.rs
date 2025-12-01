@@ -1,5 +1,5 @@
 use rand::RngCore;
-use semaphore_rs::{hash::Hash, identity::Identity, Field};
+use semaphore_rs::{Field, hash::Hash, identity::Identity};
 use serde::{Deserialize, Serialize};
 
 use super::GenerateArgs;

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::{
-    args::WorldChainArgs,
+    args::{NodeContextType, WorldChainArgs},
     config::WorldChainNodeConfig,
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -21,14 +21,14 @@ use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
+    NodeAdapter, NodeComponentsBuilder,
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
-    OpExecutorBuilder, OpNetworkBuilder,
+    OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder, OpExecutorBuilder,
+    OpNetworkBuilder, args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
@@ -39,7 +39,7 @@ use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
 use reth_network_peers::PeerId;
-use reth_node_builder::{components::NetworkBuilder, BuilderContext};
+use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// Network builder for World Chain that optionally applies custom transaction propagation policy.
@@ -127,14 +127,20 @@ impl From<WorldChainNodeConfig> for BasicContext {
     }
 }
 
+impl From<BasicContext> for NodeContextType {
+    fn from(_val: BasicContext) -> Self {
+        NodeContextType::Basic
+    }
+}
+
 impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeContext<N>
     for BasicContext
 where
     BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
-        N,
-        BasicWorldChainPool<N>,
-        OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    >,
+            N,
+            BasicWorldChainPool<N>,
+            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
 {
     type Net = WorldChainNetworkBuilder;
     type Evm = OpEvmConfig;
@@ -190,7 +196,7 @@ where
                     pbh.signature_aggregator,
                     builder.private_key,
                 )
-                .with_da_config(builder_config.da_config),
+                .with_da_config(builder_config.inner.da_config),
             ))
             .network(network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -199,7 +205,7 @@ where
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
             .with_sequencer(self.0.args.rollup.sequencer.clone())
-            .with_da_config(self.0.builder_config.da_config.clone())
+            .with_da_config(self.0.builder_config.inner.da_config.clone())
             .build()
     }
 
@@ -212,16 +218,22 @@ pub struct FlashblocksContext {
     components_context: FlashblocksComponentsContext,
 }
 
+impl From<FlashblocksContext> for NodeContextType {
+    fn from(_val: FlashblocksContext) -> Self {
+        NodeContextType::Flashblocks
+    }
+}
+
 impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
     for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >: PayloadServiceBuilder<
-        N,
-        BasicWorldChainPool<N>,
-        OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    >,
+            N,
+            BasicWorldChainPool<N>,
+            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
 {
     type Net = FlashblocksNetworkBuilder<WorldChainNetworkBuilder>;
     type Evm = OpEvmConfig;
@@ -308,7 +320,6 @@ where
                 Duration::from_millis(flashblocks_args.recommit_interval),
             ))
             .network(fb_network_builder)
-            .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -336,8 +347,8 @@ where
 
         OpAddOns::new(
             rpc_add_ons,
-            self.config.builder_config.da_config.clone(),
-            self.config.builder_config.gas_limit_config.clone(),
+            self.config.builder_config.inner.da_config.clone(),
+            self.config.builder_config.inner.gas_limit_config.clone(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
@@ -354,7 +365,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -387,11 +398,8 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
-        let flashblocks_state = FlashblocksStateExecutor::new(
-            flashblocks_handle.clone(),
-            value.builder_config.clone(),
-            pending_block,
-        );
+        let flashblocks_state =
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

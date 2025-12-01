@@ -3,7 +3,7 @@
 use ordering::WorldChainOrdering;
 use reth::{
     api::FullNodeTypes,
-    transaction_pool::{blobstore::DiskFileBlobStore, Pool, TransactionValidationTaskExecutor},
+    transaction_pool::{Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore},
 };
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;

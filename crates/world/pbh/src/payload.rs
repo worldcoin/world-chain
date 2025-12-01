@@ -5,9 +5,9 @@ use crate::{
 use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use semaphore_rs::{
-    packed_proof::PackedProof,
-    protocol::{verify_proof, ProofError},
     Field,
+    packed_proof::PackedProof,
+    protocol::{ProofError, verify_proof},
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

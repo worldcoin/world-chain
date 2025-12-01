@@ -4,8 +4,8 @@ use flashblocks_cli::FlashblocksArgs;
 use flashblocks_node::FlashblocksNodeBuilder;
 use flashblocks_p2p::protocol::handler::FlashblocksP2PProtocol;
 use flashblocks_rpc::op::{FlashblocksOpApi, OpApiExtServer};
-use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+use reth_ethereum::network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
+use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_optimism_node::args::RollupArgs;
 use tracing::info;
 

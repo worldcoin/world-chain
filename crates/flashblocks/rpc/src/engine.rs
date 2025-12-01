@@ -1,12 +1,12 @@
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{BlockHash, B256, U64};
+use alloy_primitives::{B256, BlockHash, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use flashblocks_primitives::p2p::Authorization;
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
-use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
+use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
 };

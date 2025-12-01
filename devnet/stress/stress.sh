@@ -17,7 +17,7 @@ stress_precompile() {
 generate_report() {
     contender report "$BUILDER"
 }
-
+    
 case "$1" in
 "stress-precompile")
     stress_precompile

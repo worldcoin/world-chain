@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
 use alloy_consensus::BlobTransactionValidationError;
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization, Typed2718};
+use alloy_eips::{Typed2718, eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Bytes, TxHash};
-use alloy_rpc_types::{erc4337::TransactionConditional, AccessList};
+use alloy_rpc_types::{AccessList, erc4337::TransactionConditional};
 use reth::transaction_pool::{
-    error::{InvalidPoolTransactionError, PoolTransactionError},
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
+    error::{InvalidPoolTransactionError, PoolTransactionError},
 };
 use reth_optimism_node::txpool::{
-    conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
-    interop::MaybeInteropTransaction, OpPooledTransaction, OpPooledTx,
+    OpPooledTransaction, OpPooledTx, conditional::MaybeConditionalTransaction,
+    estimated_da_size::DataAvailabilitySized, interop::MaybeInteropTransaction,
 };
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{kzg::KzgSettings, Recovered};
+use reth_primitives::{Recovered, kzg::KzgSettings};
 use reth_primitives_traits::InMemorySize;
-use revm_primitives::{Address, TxKind, B256, U256};
+use revm_primitives::{Address, B256, TxKind, U256};
 use std::borrow::Cow;
 use thiserror::Error;
 use world_chain_pbh::payload::{PBHPayload, PBHValidationError};

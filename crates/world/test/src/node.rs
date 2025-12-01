@@ -1,14 +1,14 @@
 use crate::{
-    utils::{pbh_bundle, pbh_multicall, signer, user_op},
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    utils::{pbh_bundle, pbh_multicall, signer, user_op},
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
@@ -23,22 +23,22 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChainSpecProvider, ChangeSetReader, HashedPostStateProvider, HeaderProvider,
-    NodePrimitivesProvider, ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
+    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, ProviderError, ProviderResult,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    providers::StaticFileProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_transaction_pool::{
-    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use revm_primitives::TxKind;
 use std::{
@@ -64,18 +64,19 @@ use reth_network_peers::PeerId;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 
 use world_chain_node::{
-    args::{BuilderArgs, PbhArgs, WorldChainArgs},
+    args::{BuilderArgs, NodeContextType, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };
 
-pub fn test_config() -> WorldChainNodeConfig {
-    test_config_with_peers_and_gossip(None, false)
+pub fn test_config(context: NodeContextType) -> WorldChainNodeConfig {
+    test_config_with_peers_and_gossip(None, false, context)
 }
 
 /// Creates a test config with optional transaction propagation peers and gossip control
 pub fn test_config_with_peers_and_gossip(
     tx_peers: Option<Vec<PeerId>>,
     disable_txpool_gossip: bool,
+    context: NodeContextType,
 ) -> WorldChainNodeConfig {
     use reth_optimism_node::args::RollupArgs;
 
@@ -98,6 +99,7 @@ pub fn test_config_with_peers_and_gossip(
         builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
         recommit_interval: 50,
         flashblocks_interval: 200,
+        access_list: true,
     };
 
     let rollup = RollupArgs {
@@ -110,10 +112,17 @@ pub fn test_config_with_peers_and_gossip(
             rollup,
             builder,
             pbh,
-            flashblocks: Some(flashblocks),
+            flashblocks: if matches!(context, NodeContextType::Flashblocks) {
+                Some(flashblocks)
+            } else {
+                None
+            },
             tx_peers,
         },
-        builder_config: OpBuilderConfig::default(),
+        builder_config: FlashblocksPayloadBuilderConfig {
+            inner: OpBuilderConfig::default(),
+            bal_enabled: matches!(context, NodeContextType::Flashblocks),
+        },
     }
 }
 

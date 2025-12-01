@@ -1,8 +1,8 @@
-use crate::{sequencer::SequencerClient, EthTransactionsExt};
-use alloy_primitives::{Bytes, B256};
+use crate::{EthTransactionsExt, sequencer::SequencerClient};
+use alloy_primitives::{B256, Bytes};
 use alloy_rpc_types::erc4337::TransactionConditional;
 use jsonrpsee::{
-    core::{async_trait, RpcResult},
+    core::{RpcResult, async_trait},
     proc_macros::rpc,
 };
 use reth::transaction_pool::TransactionPool;

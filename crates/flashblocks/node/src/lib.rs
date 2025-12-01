@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::context::OpPayloadBuilderCtxBuilder,
+    FlashblocksPayloadBuilderConfig, coordinator::FlashblocksExecutionCoordinator,
+    traits::context::OpPayloadBuilderCtxBuilder,
 };
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
@@ -15,16 +16,16 @@ use reth_node_api::{
     FullNodeComponents, FullNodeTypes, NodeTypes, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_builder::{
+    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
     components::ComponentsBuilder,
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    args::RollupArgs, txpool::OpPooledTx, OpAddOns, OpBuiltPayload, OpConsensusBuilder,
-    OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder,
-    OpNodeTypes, OpPayloadBuilderAttributes, OpPoolBuilder, OpStorage,
+    OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder,
+    OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder, OpNodeTypes, OpPayloadBuilderAttributes,
+    OpPoolBuilder, OpStorage, args::RollupArgs, txpool::OpPooledTx,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::OpPrimitives;
@@ -57,23 +58,25 @@ impl<T> FlashblocksFullNodeTypes for T where
 /// Helper trait used for flashblocks reth components
 pub trait FlashblocksNodeTypes:
     NodeTypes<
-    Payload: PayloadTypes<
-        BuiltPayload = OpBuiltPayload,
-        PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-    >,
-    ChainSpec = OpChainSpec,
->
-{
-}
-
-impl<T> FlashblocksNodeTypes for T where
-    T: NodeTypes<
         Payload: PayloadTypes<
             BuiltPayload = OpBuiltPayload,
             PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
         >,
         ChainSpec = OpChainSpec,
     >
+{
+}
+
+impl<T> FlashblocksNodeTypes for T where
+    T: NodeTypes<
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
+            ChainSpec = OpChainSpec,
+        >
 {
 }
 
@@ -128,11 +131,8 @@ impl FlashblocksNodeBuilder {
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
-        let flashblocks_state = FlashblocksStateExecutor::new(
-            flashblocks_handle.clone(),
-            self.builder_config.clone(),
-            pending_block,
-        );
+        let flashblocks_state =
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
@@ -159,7 +159,7 @@ pub struct FlashblocksNode {
 
     pub builder_config: OpBuilderConfig,
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -177,7 +177,6 @@ pub type FlashblocksNodeComponentBuilder<Node> = ComponentsBuilder<
 impl<N> Node<N> for FlashblocksNode
 where
     N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
-
     N: FullNodeTypes,
     N::Provider: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
@@ -185,12 +184,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
 {
     type ComponentsBuilder = FlashblocksNodeComponentBuilder<N>;
 
@@ -217,6 +218,11 @@ where
         let fb_network_builder =
             FlashblocksNetworkBuilder::new(op_network_builder, self.flashblocks_handle.clone());
 
+        let payload_builder_config = FlashblocksPayloadBuilderConfig {
+            bal_enabled: self.flashblocks.access_list,
+            inner: self.builder_config.clone(),
+        };
+
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(
@@ -232,7 +238,7 @@ where
                 FlashblocksPayloadBuilderBuilder::new(
                     OpPayloadBuilderCtxBuilder,
                     self.flashblocks_state.clone(),
-                    self.builder_config.clone(),
+                    payload_builder_config,
                 ),
                 self.flashblocks_handle.clone(),
                 self.flashblocks_state.clone(),
@@ -291,12 +297,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
 

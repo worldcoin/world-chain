@@ -1,16 +1,16 @@
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor,
+    FlashblocksPayloadBuilderConfig,
+    coordinator::FlashblocksExecutionCoordinator,
+    payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
-    FlashblocksPayloadBuilder,
 };
 use op_alloy_consensus::OpTxEnvelope;
-use reth::builder::{components::PayloadBuilderBuilder, BuilderContext, FullNodeTypes};
+use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};
 use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes, txpool::OpPooledTx,
 };
-use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
@@ -19,8 +19,8 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: FlashblocksStateExecutor,
-    pub builder_config: OpBuilderConfig,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
+    pub builder_config: FlashblocksPayloadBuilderConfig,
 }
 
 impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
@@ -29,8 +29,8 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: FlashblocksStateExecutor,
-        builder_config: OpBuilderConfig,
+        flashblocks_state: FlashblocksExecutionCoordinator,
+        builder_config: FlashblocksPayloadBuilderConfig,
     ) -> Self {
         Self {
             ctx_builder,
@@ -50,12 +50,14 @@ where
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
         + HeaderProvider<Header = alloy_consensus::Header>,
     Node::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
     Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>
         + Unpin
         + 'static,
@@ -74,18 +76,13 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state.launch::<_, _, _>(
-            ctx,
-            pool.clone(),
-            self.ctx_builder.clone(),
-            evm_config.clone(),
-        );
+        self.flashblocks_state.launch::<_>(ctx, evm_config.clone());
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,
             pool,
             client: ctx.provider().clone(),
-            builder_config: self.builder_config,
+            config: self.builder_config,
             best_transactions: (),
             ctx_builder: self.ctx_builder,
         };

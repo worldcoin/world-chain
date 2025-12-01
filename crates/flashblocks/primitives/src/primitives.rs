@@ -1,10 +1,12 @@
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
+use core::fmt;
+
+use alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::flashblocks::FlashblockMetadata;
+use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetadata};
 
 /// Represents the modified portions of an execution payload within a flashblock.
 /// This structure contains only the fields that can be updated during block construction,
@@ -14,6 +16,7 @@ use crate::flashblocks::FlashblockMetadata;
 #[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
+#[rlp(trailing)]
 pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The state root of the block.
     pub state_root: B256,
@@ -32,6 +35,38 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals: Vec<Withdrawal>,
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
+    /// Optional [`FlashblockAccessList`] and associated Hash
+    pub access_list_data: Option<FlashblockAccessListData>,
+}
+
+impl fmt::Display for ExecutionPayloadFlashblockDeltaV1 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ExecutionPayloadFlashblockDeltaV1 {{ \
+             state_root: {}, \
+             receipts_root: {}, \
+             logs_bloom: {}, \
+             gas_used: {}, \
+             block_hash: {}, \
+             transactions: {} tx(s), \
+             withdrawals: {} withdrawal(s), \
+             withdrawals_root: {}, \
+             access_list_data: {} \
+             }}",
+            self.state_root,
+            self.receipts_root,
+            self.logs_bloom,
+            self.gas_used,
+            self.block_hash,
+            self.transactions.len(),
+            self.withdrawals.len(),
+            self.withdrawals_root,
+            self.access_list_data
+                .as_ref()
+                .map_or_else(|| "None".to_string(), |data| format!("{:#?}", data))
+        )
+    }
 }
 
 /// Represents the base configuration of an execution payload that remains constant
@@ -39,7 +74,7 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
 /// parent hash, block number, and other header fields that are determined at
 /// block creation and cannot be modified.
 #[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable, Hash,
 )]
 pub struct ExecutionPayloadBaseV1 {
     /// Ecotone parent beacon block root
@@ -65,8 +100,8 @@ pub struct ExecutionPayloadBaseV1 {
     pub base_fee_per_gas: U256,
 }
 
-#[derive(Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq)]
-pub struct FlashblocksPayloadV1<M = FlashblockMetadata> {
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq, Default)]
+pub struct FlashblocksPayloadV1<M: Default = FlashblockMetadata> {
     /// The payload id of the flashblock
     pub payload_id: PayloadId,
     /// The index of the flashblock in the block
@@ -84,7 +119,7 @@ pub struct FlashblocksPayloadV1<M = FlashblockMetadata> {
 /// outside of alloy-rlp’s blanket impls.
 impl<M> Encodable for FlashblocksPayloadV1<M>
 where
-    M: Serialize,
+    M: Serialize + Default,
 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         // ---- compute payload length -------------------------------------------------
@@ -157,7 +192,7 @@ where
 
 impl<M> Decodable for FlashblocksPayloadV1<M>
 where
-    M: DeserializeOwned,
+    M: DeserializeOwned + Default,
 {
     fn decode(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         let header = Header::decode(buf)?;
@@ -199,8 +234,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::access_list::FlashblockAccessList;
+
     use super::*;
-    use alloy_rlp::{encode, Decodable};
+    use alloy_rlp::{Decodable, encode};
 
     fn sample_diff() -> ExecutionPayloadFlashblockDeltaV1 {
         ExecutionPayloadFlashblockDeltaV1 {
@@ -212,6 +249,18 @@ mod tests {
             transactions: vec![Bytes::from(vec![0xde, 0xad, 0xbe, 0xef])],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
+            access_list_data: Some(sample_access_list_data()),
+        }
+    }
+
+    fn sample_access_list_data() -> FlashblockAccessListData {
+        FlashblockAccessListData {
+            access_list: FlashblockAccessList {
+                changes: vec![],
+                max_tx_index: 0,
+                min_tx_index: 0,
+            },
+            access_list_hash: B256::with_last_byte(0x4),
         }
     }
 

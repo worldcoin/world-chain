@@ -6,8 +6,8 @@ use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::RecoveredBlock;
 use reth_provider::{BlockIdReader, BlockReader};
 use reth_rpc_eth_api::{
-    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use std::sync::Arc;
