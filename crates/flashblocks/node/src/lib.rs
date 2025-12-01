@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::context::OpPayloadBuilderCtxBuilder,
+    FlashblocksPayloadBuilderConfig, coordinator::FlashblocksExecutionCoordinator,
+    traits::context::OpPayloadBuilderCtxBuilder,
 };
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
@@ -217,6 +218,11 @@ where
         let fb_network_builder =
             FlashblocksNetworkBuilder::new(op_network_builder, self.flashblocks_handle.clone());
 
+        let payload_builder_config = FlashblocksPayloadBuilderConfig {
+            bal_enabled: self.flashblocks.access_list,
+            inner: self.builder_config.clone(),
+        };
+
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(
@@ -232,7 +238,7 @@ where
                 FlashblocksPayloadBuilderBuilder::new(
                     OpPayloadBuilderCtxBuilder,
                     self.flashblocks_state.clone(),
-                    self.builder_config.clone(),
+                    payload_builder_config,
                 ),
                 self.flashblocks_handle.clone(),
                 self.flashblocks_state.clone(),

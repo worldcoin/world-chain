@@ -196,7 +196,7 @@ where
                     pbh.signature_aggregator,
                     builder.private_key,
                 )
-                .with_da_config(builder_config.da_config),
+                .with_da_config(builder_config.inner.da_config),
             ))
             .network(network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -205,7 +205,7 @@ where
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
             .with_sequencer(self.0.args.rollup.sequencer.clone())
-            .with_da_config(self.0.builder_config.da_config.clone())
+            .with_da_config(self.0.builder_config.inner.da_config.clone())
             .build()
     }
 
@@ -347,8 +347,8 @@ where
 
         OpAddOns::new(
             rpc_add_ons,
-            self.config.builder_config.da_config.clone(),
-            self.config.builder_config.gas_limit_config.clone(),
+            self.config.builder_config.inner.da_config.clone(),
+            self.config.builder_config.inner.gas_limit_config.clone(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),

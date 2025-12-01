@@ -1,4 +1,5 @@
 use crate::{
+    FlashblocksPayloadBuilderConfig,
     executor::bal_executor::{BalExecutionState, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
@@ -40,7 +41,6 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
-    config::OpBuilderConfig,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
@@ -66,7 +66,7 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// Node client.
     pub client: Client,
     /// Settings for the builder, e.g. DA settings.
-    pub config: OpBuilderConfig,
+    pub config: FlashblocksPayloadBuilderConfig,
     /// Iterator over best transactions from the pool.
     pub best_transactions: Txs,
     /// Context builder for the payload.
@@ -98,7 +98,7 @@ where
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
         committed_payload: Option<&OpBuiltPayload>,
-    ) -> Result<(BuildOutcome<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
+    ) -> Result<(BuildOutcome<OpBuiltPayload>, Option<FlashblockAccessList>), PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
     {
@@ -112,7 +112,7 @@ where
         let ctx = self.ctx_builder.build(
             self.client.clone(),
             self.evm_config.clone(),
-            self.config.clone(),
+            self.config.inner.clone(),
             config,
             &cancel,
             best_payload.clone(),
@@ -129,6 +129,7 @@ where
                 &state_provider,
                 &ctx,
                 committed_payload,
+                self.config.bal_enabled,
             )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
@@ -139,6 +140,7 @@ where
                 &state_provider,
                 &ctx,
                 committed_payload,
+                self.config.bal_enabled,
             )
         }
         .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
@@ -229,7 +231,7 @@ where
     ) -> Result<
         (
             BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>,
-            FlashblockAccessList,
+            Option<FlashblockAccessList>,
         ),
         PayloadBuilderError,
     > {
@@ -252,7 +254,14 @@ fn build<'a, Txs, Ctx, Pool>(
     state_provider: impl StateProvider,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
-) -> Result<(BuildOutcomeKind<OpBuiltPayload>, FlashblockAccessList), PayloadBuilderError>
+    bal_enabled: bool,
+) -> Result<
+    (
+        BuildOutcomeKind<OpBuiltPayload>,
+        Option<FlashblockAccessList>,
+    ),
+    PayloadBuilderError,
+>
 where
     Pool: TransactionPool,
     Txs: PayloadTransactions,
@@ -369,10 +378,7 @@ where
             warn!(target: "flashblocks::payload_builder", "payload build cancelled");
             if let Some(best_payload) = committed_payload {
                 // we can return the previous best payload since we didn't include any new txs
-                return Ok((
-                    BuildOutcomeKind::Freeze(best_payload.clone()),
-                    FlashblockAccessList::default(),
-                ));
+                return Ok((BuildOutcomeKind::Freeze(best_payload.clone()), None));
             } else {
                 return Err(PayloadBuilderError::MissingPayload);
             }
@@ -385,13 +391,18 @@ where
                 BuildOutcomeKind::Aborted {
                     fees: info.total_fees,
                 },
-                FlashblockAccessList::default(),
+                None,
             ));
         }
     }
 
     // 6. Build the block
-    let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
+    let (build_outcome, access_list) = if bal_enabled {
+        let (outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
+        (outcome, Some(access_list))
+    } else {
+        (builder.finish(&state_provider)?, None)
+    };
 
     info!(target: "test_target", "built new payload with {} transactions, receipts {:#?}", build_outcome.block.body().transactions().count(), build_outcome.execution_result.receipts.len());
 

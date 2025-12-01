@@ -8,7 +8,7 @@ use alloy_primitives::{
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
@@ -119,7 +119,10 @@ pub fn test_config_with_peers_and_gossip(
             },
             tx_peers,
         },
-        builder_config: OpBuilderConfig::default(),
+        builder_config: FlashblocksPayloadBuilderConfig {
+            inner: OpBuilderConfig::default(),
+            bal_enabled: matches!(context, NodeContextType::Flashblocks),
+        },
     }
 }
 

@@ -3835,6 +3835,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "ed25519-dalek",
+ "flashblocks-builder",
  "hex",
 ]
 

@@ -97,6 +97,8 @@ pub fn parse_vk(s: &str) -> eyre::Result<VerifyingKey> {
     Ok(VerifyingKey::from_bytes(&bytes)?)
 }
 
+pub use flashblocks_builder::FlashblocksPayloadBuilderConfig;
+
 #[cfg(test)]
 mod tests {
     use super::*;

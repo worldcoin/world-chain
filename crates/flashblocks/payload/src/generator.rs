@@ -229,12 +229,11 @@ where
             .map(|(pre_state, index, access_list)| (Some(pre_state), index, access_list))
             .unwrap_or((None, 0, None));
 
-        let committed_payload =
-            if let (Some(pre_state), Some(access_list)) = (pre_state, access_list) {
-                CommittedPayloadState::from((PayloadState::Frozen(pre_state), access_list))
-            } else {
-                CommittedPayloadState::Empty
-            };
+        let committed_payload = if let (Some(pre_state), access_list) = (pre_state, access_list) {
+            CommittedPayloadState::from((PayloadState::Frozen(pre_state), access_list))
+        } else {
+            CommittedPayloadState::Empty
+        };
 
         let best_payload = if committed_payload.is_frozen() {
             (
