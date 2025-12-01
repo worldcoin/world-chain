@@ -157,19 +157,15 @@ impl<P: BuiltPayload> CommittedPayloadState<P> {
     pub fn take_access_list(&mut self) -> Option<FlashblockAccessListData> {
         match self {
             CommittedPayloadState::Frozen { access_list, .. } => {
-                access_list.as_mut().map_or(None, |a| {
-                    Some(FlashblockAccessListData {
-                        access_list_hash: a.access_list_hash,
-                        access_list: core::mem::take(&mut a.access_list),
-                    })
+                access_list.as_mut().map(|a| FlashblockAccessListData {
+                    access_list_hash: a.access_list_hash,
+                    access_list: core::mem::take(&mut a.access_list),
                 })
             }
             CommittedPayloadState::Best { access_list, .. } => {
-                access_list.as_mut().map_or(None, |a| {
-                    Some(FlashblockAccessListData {
-                        access_list_hash: a.access_list_hash,
-                        access_list: core::mem::take(&mut a.access_list),
-                    })
+                access_list.as_mut().map(|a| FlashblockAccessListData {
+                    access_list_hash: a.access_list_hash,
+                    access_list: core::mem::take(&mut a.access_list),
                 })
             }
             CommittedPayloadState::Empty => None,

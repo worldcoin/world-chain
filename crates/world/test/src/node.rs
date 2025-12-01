@@ -121,10 +121,7 @@ pub fn test_config_with_peers_and_gossip(
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
-            bal_enabled: match context {
-                NodeContextType::Flashblocks => true,
-                _ => false,
-            },
+            bal_enabled: matches!(context, NodeContextType::Flashblocks),
         },
     }
 }

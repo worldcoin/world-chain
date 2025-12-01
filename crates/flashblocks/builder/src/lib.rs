@@ -12,19 +12,10 @@ pub mod payload_builder;
 pub mod payload_txns;
 pub mod traits;
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {
     /// Inner OP Payload Builder Configuration
     pub inner: OpBuilderConfig,
     /// Whether to enable BAL support
     pub bal_enabled: bool,
-}
-
-impl Default for FlashblocksPayloadBuilderConfig {
-    fn default() -> Self {
-        Self {
-            inner: OpBuilderConfig::default(),
-            bal_enabled: false,
-        }
-    }
 }
