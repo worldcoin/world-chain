@@ -21,7 +21,7 @@ use reqwest::{
     header::{AUTHORIZATION, HeaderMap},
 };
 use reth_rpc_layer::secret_to_bearer_header;
-use semaphore_rs::{hash_to_field, identity::Identity, Field};
+use semaphore_rs::{Field, hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -233,14 +233,14 @@ pub async fn send_user_operations(
                 signal_hash,
             )?;
             let proof = world_chain_pbh::payload::Proof(semaphore_proof);
-            let p0 = proof.0 .0 .0;
-            let p1 = proof.0 .0 .1;
-            let p2 = proof.0 .1 .0[0];
-            let p3 = proof.0 .1 .0[1];
-            let p4 = proof.0 .1 .1[0];
-            let p5 = proof.0 .1 .1[1];
-            let p6 = proof.0 .2 .0;
-            let p7 = proof.0 .2 .1;
+            let p0 = proof.0.0.0;
+            let p1 = proof.0.0.1;
+            let p2 = proof.0.1.0[0];
+            let p3 = proof.0.1.0[1];
+            let p4 = proof.0.1.1[0];
+            let p5 = proof.0.1.1[1];
+            let p6 = proof.0.2.0;
+            let p7 = proof.0.2.1;
             let proof = [p0, p1, p2, p3, p4, p5, p6, p7];
             let input = [root, nullifier_hash, signal_hash, external_nullifier_hash];
 
