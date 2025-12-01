@@ -160,6 +160,8 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
+    const TRANSACTIONS_PER_FLASHBLOCK: u64 = 20;
+
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Builder and Follower
@@ -179,7 +181,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     let builder_context = builder_node.ext_context.clone();
     let rpc_url = builder_node.node.rpc_url();
 
-    tx_spammer.spawn(50, rpc_url);
+    tx_spammer.spawn(TRANSACTIONS_PER_FLASHBLOCK, rpc_url);
 
     let block_hash = builder_node.node.block_hash(0);
     let block_hash_basic = basic_worldchain_node.node.block_hash(0);

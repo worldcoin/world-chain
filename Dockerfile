@@ -34,7 +34,7 @@ ARG FEATURES="jemalloc"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
+    cargo chef cook --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

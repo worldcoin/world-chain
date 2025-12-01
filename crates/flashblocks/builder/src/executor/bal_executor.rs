@@ -99,7 +99,6 @@ impl<R: OpReceiptBuilder + Default> Default for CommittedState<R> {
 
 pub struct BalExecutionState<R: OpReceiptBuilder> {
     pub committed_state: CommittedState<R>,
-    pub transactions: Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>,
     pub evm_env: EvmEnvFor<OpEvmConfig>,
     pub evm_config: OpEvmConfig,
     pub execution_context: OpBlockExecutionCtx,
@@ -125,7 +124,6 @@ where
 
         Ok(BalExecutionState {
             committed_state,
-            transactions: Vec::new(),
             evm_env,
             evm_config,
             execution_context,
@@ -405,6 +403,7 @@ where
             .into_iter()
             .map(|tx| tx.into_parts())
             .unzip();
+
         let assembler = FlashblocksBlockAssembler::new(self.chain_spec.clone());
 
         let block = assembler.assemble_block(BlockAssemblerInput::<

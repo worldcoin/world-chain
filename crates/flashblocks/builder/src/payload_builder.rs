@@ -343,7 +343,11 @@ where
         ctx.execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?
     } else {
-        ExecutionInfo::default()
+        committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
+            total_fees: p.fees(),
+            cumulative_gas_used: p.block().gas_used(),
+            ..Default::default()
+        })
     };
 
     // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
@@ -352,8 +356,9 @@ where
         let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
         let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(
             execution_state
-                .executor_transactions_iter()
-                .map(|tx| *tx.hash())
+                .committed_transactions_iter()
+                .map(|tx| tx.hash())
+                .copied()
                 .collect(),
         );
 
@@ -387,6 +392,7 @@ where
 
     // 6. Build the block
     let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
+
     info!(target: "test_target", "built new payload with {} transactions, receipts {:#?}", build_outcome.block.body().transactions().count(), build_outcome.execution_result.receipts.len());
 
     // 7. Seal the block
@@ -455,18 +461,13 @@ where
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
     let executor = execution_state.basic_executor(ctx.spec().clone().into(), R::default(), state);
-    let committed_transactions = execution_state
-        .committed_state
-        .transactions
-        .iter()
-        .map(|(_, tx)| tx.clone())
-        .collect::<Vec<_>>();
+    let committed_transactions = execution_state.committed_transactions_iter();
 
     Ok(FlashblocksBlockBuilder::new(
         execution_state.execution_context.clone(),
         ctx.parent(),
         executor,
-        committed_transactions,
+        committed_transactions.cloned().collect(),
         Arc::new(ctx.spec().clone()),
     ))
 }

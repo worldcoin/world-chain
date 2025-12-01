@@ -9,3 +9,5 @@ contracts/sepolia_load_test.json
 .vscode
 .docker-cache
 /diagnostics
+.DS_Store
+**/.DS_Store
