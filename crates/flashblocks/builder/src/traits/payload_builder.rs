@@ -19,5 +19,11 @@ pub trait FlashblockPayloadBuilder: PayloadBuilder + Send + Sync + Clone {
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
         committed_payload: Option<&Self::BuiltPayload>,
-    ) -> Result<(BuildOutcome<Self::BuiltPayload>, FlashblockAccessList), PayloadBuilderError>;
+    ) -> Result<
+        (
+            BuildOutcome<Self::BuiltPayload>,
+            Option<FlashblockAccessList>,
+        ),
+        PayloadBuilderError,
+    >;
 }

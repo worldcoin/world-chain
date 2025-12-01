@@ -50,8 +50,9 @@ pub struct FlashblocksPendingPayload<P> {
     /// The marker to cancel the job on drop
     _cancel: CancelOnDrop,
     /// The channel to send the result to.
-    payload:
-        oneshot::Receiver<Result<(BuildOutcome<P>, FlashblockAccessList), PayloadBuilderError>>,
+    payload: oneshot::Receiver<
+        Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>,
+    >,
 }
 
 // FIXME: this conversion is sad
@@ -81,7 +82,7 @@ impl<P> FlashblocksPendingPayload<P> {
     pub const fn new(
         cancel: CancelOnDrop,
         payload: oneshot::Receiver<
-            Result<(BuildOutcome<P>, FlashblockAccessList), PayloadBuilderError>,
+            Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>,
         >,
     ) -> Self {
         Self {
@@ -92,7 +93,7 @@ impl<P> FlashblocksPendingPayload<P> {
 }
 
 impl<P> Future for FlashblocksPendingPayload<P> {
-    type Output = Result<(BuildOutcome<P>, FlashblockAccessList), PayloadBuilderError>;
+    type Output = Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.payload.poll_unpin(cx));
@@ -103,11 +104,11 @@ impl<P> Future for FlashblocksPendingPayload<P> {
 pub enum CommittedPayloadState<P> {
     Frozen {
         payload: P,
-        access_list: FlashblockAccessListData,
+        access_list: Option<FlashblockAccessListData>,
     },
     Best {
         payload: P,
-        access_list: FlashblockAccessListData,
+        access_list: Option<FlashblockAccessListData>,
     },
     Empty,
 }
@@ -147,22 +148,30 @@ impl<P: BuiltPayload> CommittedPayloadState<P> {
 
     pub fn access_list(&self) -> Option<&FlashblockAccessListData> {
         match self {
-            CommittedPayloadState::Frozen { access_list, .. } => Some(access_list),
-            CommittedPayloadState::Best { access_list, .. } => Some(access_list),
+            CommittedPayloadState::Frozen { access_list, .. } => access_list.as_ref(),
+            CommittedPayloadState::Best { access_list, .. } => access_list.as_ref(),
             CommittedPayloadState::Empty => None,
         }
     }
 
     pub fn take_access_list(&mut self) -> Option<FlashblockAccessListData> {
         match self {
-            CommittedPayloadState::Frozen { access_list, .. } => Some(FlashblockAccessListData {
-                access_list_hash: access_list.access_list_hash,
-                access_list: core::mem::take(&mut access_list.access_list),
-            }),
-            CommittedPayloadState::Best { access_list, .. } => Some(FlashblockAccessListData {
-                access_list_hash: access_list.access_list_hash,
-                access_list: core::mem::take(&mut access_list.access_list),
-            }),
+            CommittedPayloadState::Frozen { access_list, .. } => {
+                access_list.as_mut().map_or(None, |a| {
+                    Some(FlashblockAccessListData {
+                        access_list_hash: a.access_list_hash,
+                        access_list: core::mem::take(&mut a.access_list),
+                    })
+                })
+            }
+            CommittedPayloadState::Best { access_list, .. } => {
+                access_list.as_mut().map_or(None, |a| {
+                    Some(FlashblockAccessListData {
+                        access_list_hash: a.access_list_hash,
+                        access_list: core::mem::take(&mut a.access_list),
+                    })
+                })
+            }
             CommittedPayloadState::Empty => None,
         }
     }
@@ -187,35 +196,29 @@ impl<P: Clone> Clone for CommittedPayloadState<P> {
                 access_list,
             } => CommittedPayloadState::Frozen {
                 payload: payload.clone(),
-                access_list: FlashblockAccessListData {
-                    access_list_hash: access_list.access_list_hash,
-                    access_list: access_list.access_list.clone(),
-                },
+                access_list: access_list.clone(),
             },
             CommittedPayloadState::Best {
                 payload,
                 access_list,
             } => CommittedPayloadState::Best {
                 payload: payload.clone(),
-                access_list: FlashblockAccessListData {
-                    access_list_hash: access_list.access_list_hash,
-                    access_list: access_list.access_list.clone(),
-                },
+                access_list: access_list.clone(),
             },
             CommittedPayloadState::Empty => CommittedPayloadState::Empty,
         }
     }
 }
 
-impl<P> From<(PayloadState<P>, FlashblockAccessList)> for CommittedPayloadState<P>
+impl<P> From<(PayloadState<P>, Option<FlashblockAccessList>)> for CommittedPayloadState<P>
 where
     P: Clone,
 {
-    fn from((state, access_list): (PayloadState<P>, FlashblockAccessList)) -> Self {
-        let access_list_data = FlashblockAccessListData {
+    fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
+        let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
             access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
             access_list,
-        };
+        });
         match state {
             PayloadState::Frozen(payload) => CommittedPayloadState::Frozen {
                 payload: payload.clone(),
@@ -346,7 +349,7 @@ where
     pub(crate) fn publish_payload(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
-        access_list: FlashblockAccessList,
+        access_list: Option<FlashblockAccessList>,
         prev: Option<&OpBuiltPayload<OpPrimitives>>,
     ) -> eyre::Result<()> {
         let tx_offset = prev
@@ -366,7 +369,7 @@ where
             self.block_index,
             tx_offset,
             withdrawals_offset,
-            Some(access_list),
+            access_list,
         );
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
@@ -485,7 +488,7 @@ where
         // commit to the best payload, reset the interval, and publish the payload
         if joined_fut.poll_unpin(cx).is_ready()
             && !this.best_payload.0.is_frozen()
-            && let (Some(payload), Some(access_list)) = (
+            && let (Some(payload), access_list) = (
                 this.best_payload.0.payload().cloned(),
                 this.best_payload.1.clone(),
             )
@@ -544,12 +547,12 @@ where
                             .is_none_or(|p| p.block().hash() != payload.block().hash())
                         {
                             this.cached_reads = Some(cached_reads);
-                            this.best_payload = (PayloadState::Best(payload), Some(access_list));
+                            this.best_payload = (PayloadState::Best(payload), access_list);
                         }
                     }
                     BuildOutcome::Freeze(payload) => {
                         trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
-                        this.best_payload = (PayloadState::Frozen(payload), Some(access_list));
+                        this.best_payload = (PayloadState::Frozen(payload), access_list);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
                         this.cached_reads = Some(cached_reads);

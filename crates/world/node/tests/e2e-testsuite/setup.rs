@@ -52,7 +52,7 @@ use tracing::{info, span};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
     args::NodeContextType,
-    context::FlashblocksContext,
+    context::BasicContext,
     node::{WorldChainNode, WorldChainNodeContext},
 };
 use world_chain_test::{
@@ -208,8 +208,7 @@ where
     for idx in 0..num_nodes {
         let span = span!(tracing::Level::INFO, "test_node", idx);
         let _enter = span.enter();
-        let is_flashblocks =
-            std::any::TypeId::of::<T>() == std::any::TypeId::of::<FlashblocksContext>();
+        let is_basic = std::any::TypeId::of::<T>() == std::any::TypeId::of::<BasicContext>();
 
         // Configure tx_peers if enabled and this is not the first node
         let config = if enable_tx_peers && idx > 0 {
@@ -222,20 +221,20 @@ where
             test_config_with_peers_and_gossip(
                 Some(previous_peer_ids),
                 disable_gossip,
-                if is_flashblocks {
-                    NodeContextType::Flashblocks
-                } else {
+                if is_basic {
                     NodeContextType::Basic
+                } else {
+                    NodeContextType::Flashblocks
                 },
             )
         } else {
             test_config_with_peers_and_gossip(
                 None,
                 disable_gossip,
-                if is_flashblocks {
-                    NodeContextType::Flashblocks
-                } else {
+                if is_basic {
                     NodeContextType::Basic
+                } else {
+                    NodeContextType::Flashblocks
                 },
             )
         };
