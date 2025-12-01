@@ -38,6 +38,7 @@ use crate::{
     executor::{
         BalExecutorError, BalValidationError,
         bal_executor::BalExecutionState,
+        bundle_db::BundleDb,
         temporal_db::TemporalDbFactory,
         utils::{
             CREATE_2_DEPLOYER_ADDR, ensure_create2_deployer, transact_beacon_root_contract_call,
@@ -428,11 +429,9 @@ where
         // Setup parallel execution infrastructure
         let database = Arc::new(StateProviderDatabase::new(state_provider));
         let bundle_state = self.evm().db().bundle_state.clone();
-        let temporal_db_factory = TemporalDbFactory::new(
-            &database,
-            expected_access_list.access_list.clone(),
-            &bundle_state,
-        );
+        let bundle_db = BundleDb::new(database, bundle_state);
+        let temporal_db_factory =
+            TemporalDbFactory::new(&bundle_db, expected_access_list.access_list.clone());
 
         // Execute transactions in parallel
         let mut merged_result = self.execute_transactions_parallel(
@@ -473,14 +472,15 @@ where
     }
 
     /// Execute all transactions in parallel using temporal databases.
-    fn execute_transactions_parallel<SP: StateProvider + Clone + 'static>(
+    fn execute_transactions_parallel<DBI>(
         &self,
         execution_state: &BalExecutionState<R>,
-        temporal_db_factory: &TemporalDbFactory<Arc<StateProviderDatabase<SP>>>,
+        temporal_db_factory: &TemporalDbFactory<DBI>,
         initial_gas_used: u64,
     ) -> Result<TransactionExecutionResult, BlockExecutionError>
     where
         DB: DatabaseRef<Error: Send + Sync + 'static> + Clone + Send + Sync + 'db,
+        DBI: DatabaseRef<Error: Send + Sync> + std::fmt::Debug + Clone + Send + Sync + 'static,
         R: Default + Send + Sync + Clone + 'static,
     {
         let receipt_builder = self.inner.receipt_builder.clone();
@@ -538,13 +538,14 @@ where
     }
 
     /// Apply the merged parallel execution results to the executor state.
-    fn apply_parallel_results<SP: StateProvider + Clone + 'static>(
+    fn apply_parallel_results<DBI>(
         &mut self,
         merged_result: &mut TransactionExecutionResult,
-        _temporal_db_factory: &TemporalDbFactory<Arc<StateProviderDatabase<SP>>>,
+        _temporal_db_factory: &TemporalDbFactory<DBI>,
     ) -> Result<(), BlockExecutionError>
     where
         DB: DatabaseRef<Error: Send + Sync + 'static> + Clone + Send + Sync + 'db,
+        DBI: DatabaseRef<Error: Send + Sync> + std::fmt::Debug + Clone + Send + Sync + 'static,
     {
         let database = self.evm_mut().db_mut();
 
@@ -568,9 +569,9 @@ where
 ///
 /// This is a free function to avoid capturing `&self` in parallel iterators,
 /// as `BalBuilderBlockExecutor` contains `OnStateHook` which is not `Sync`.
-fn execute_single_transaction<R, SP>(
+fn execute_single_transaction<R, DB>(
     execution_state: &BalExecutionState<R>,
-    temporal_db_factory: &TemporalDbFactory<Arc<StateProviderDatabase<SP>>>,
+    temporal_db_factory: &TemporalDbFactory<DB>,
     receipt_builder: &R,
     spec: &Arc<OpChainSpec>,
     base_fee: u64,
@@ -584,7 +585,8 @@ where
         + Sync
         + Clone
         + 'static,
-    SP: StateProvider + Clone + 'static,
+    DB: DatabaseRef<Error: Send + Sync> + std::fmt::Debug + Clone + Send + Sync + 'static,
+    for<'a> &'a DB: Send,
 {
     let temporal_db = temporal_db_factory.db(index as u64);
 
