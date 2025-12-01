@@ -1,6 +1,6 @@
 [workspace.package]
 version = "1.9.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.89.0"
 license = "MIT"
 homepage = "https://world.org/world-chain"
@@ -98,6 +98,7 @@ reth-node-builder = { git = "https://github.com/paradigmxyz/reth", features = [
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0", features = [
     "op",
 ] }
+reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }
 reth-payload-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.0" }

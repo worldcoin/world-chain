@@ -13,10 +13,10 @@ use std::{
 };
 
 use alloy_network::Network;
-use alloy_provider::{network::Ethereum, Provider, ProviderBuilder, RootProvider};
+use alloy_provider::{Provider, ProviderBuilder, RootProvider, network::Ethereum};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use clap::Parser;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use fixtures::TransactionFixtures;
 use std::process::Command;
 use tokio::time::sleep;
@@ -33,7 +33,9 @@ pub struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
     }
 
     tracing_subscriber::fmt()

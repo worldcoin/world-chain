@@ -15,16 +15,16 @@ use reth_node_api::{
     FullNodeComponents, FullNodeTypes, NodeTypes, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_builder::{
+    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
     components::ComponentsBuilder,
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    args::RollupArgs, txpool::OpPooledTx, OpAddOns, OpBuiltPayload, OpConsensusBuilder,
-    OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder,
-    OpNodeTypes, OpPayloadBuilderAttributes, OpPoolBuilder, OpStorage,
+    OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder,
+    OpExecutorBuilder, OpFullNodeTypes, OpNetworkBuilder, OpNodeTypes, OpPayloadBuilderAttributes,
+    OpPoolBuilder, OpStorage, args::RollupArgs, txpool::OpPooledTx,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::OpPrimitives;
@@ -57,23 +57,25 @@ impl<T> FlashblocksFullNodeTypes for T where
 /// Helper trait used for flashblocks reth components
 pub trait FlashblocksNodeTypes:
     NodeTypes<
-    Payload: PayloadTypes<
-        BuiltPayload = OpBuiltPayload,
-        PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-    >,
-    ChainSpec = OpChainSpec,
->
-{
-}
-
-impl<T> FlashblocksNodeTypes for T where
-    T: NodeTypes<
         Payload: PayloadTypes<
             BuiltPayload = OpBuiltPayload,
             PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
         >,
         ChainSpec = OpChainSpec,
     >
+{
+}
+
+impl<T> FlashblocksNodeTypes for T where
+    T: NodeTypes<
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
+            ChainSpec = OpChainSpec,
+        >
 {
 }
 
@@ -174,7 +176,6 @@ pub type FlashblocksNodeComponentBuilder<Node> = ComponentsBuilder<
 impl<N> Node<N> for FlashblocksNode
 where
     N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
-
     N: FullNodeTypes,
     N::Provider: StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
@@ -182,12 +183,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
 {
     type ComponentsBuilder = FlashblocksNodeComponentBuilder<N>;
 
@@ -288,12 +291,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     N::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
 

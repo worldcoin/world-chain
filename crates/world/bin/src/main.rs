@@ -1,14 +1,14 @@
 use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_tracing::tracing::info;
 use world_chain_node::{
+    FlashblocksOpApi, OpApiExtServer,
     args::{NodeContextType, WorldChainArgs},
     config::WorldChainNodeConfig,
     context::{BasicContext, FlashblocksContext},
     node::WorldChainNode,
-    FlashblocksOpApi, OpApiExtServer,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
@@ -28,12 +28,16 @@ fn main() {
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
-        std::env::set_var("RUST_BACKTRACE", "1");
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "1");
+        }
     }
 
     // Set default log level
     if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "info,reth=info");
+        unsafe {
+            std::env::set_var("RUST_LOG", "info,reth=info");
+        }
     }
 
     if let Err(err) =

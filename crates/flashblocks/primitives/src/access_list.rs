@@ -4,7 +4,7 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
-    db::{states::StorageSlot, AccountStatus, BundleAccount, TransitionState},
+    db::{AccountStatus, BundleAccount, TransitionState, states::StorageSlot},
     primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
@@ -152,13 +152,14 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
 /// This is useful for Pre-Loading a bundle into the EVM Database, or Constructing the Hashed Post State from a [`FlashblockAccessList`]
 ///
 /// See [`reth_trie_common::hashed_state::HashedPostState::from_bundle_state`]
-impl From<FlashblockAccessList> for HashMap<Address, BundleAccount> {
+impl From<FlashblockAccessList> for alloy_primitives::map::HashMap<Address, BundleAccount> {
     fn from(value: FlashblockAccessList) -> Self {
-        let mut result = HashMap::new();
+        let mut result = alloy_primitives::map::HashMap::default();
         for account in value.changes.iter() {
             let address = account.address;
 
-            let mut account_storage: HashMap<U256, StorageSlot> = HashMap::default();
+            let mut account_storage: alloy_primitives::map::HashMap<U256, StorageSlot> =
+                HashMap::default();
 
             // Aggregate the storage changes. Keep the latest value stored for each storage key.
             // This assumes that the changes are ordered by transaction index.

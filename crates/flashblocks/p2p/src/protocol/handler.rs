@@ -9,7 +9,7 @@ use flashblocks_primitives::{
     },
     primitives::FlashblocksPayloadV1,
 };
-use futures::{stream, Stream, StreamExt};
+use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
@@ -285,6 +285,7 @@ impl FlashblocksHandle {
     /// This is never guaranteed to return.
     pub async fn await_clearance(&self) {
         let mut status = self.state.lock().publishing_status.subscribe();
+
         // Safe to unwrap becuase self holds a sender.
         status
             .wait_for(|status| matches!(status, PublishingStatus::Publishing { .. }))

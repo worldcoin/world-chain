@@ -1,10 +1,10 @@
 use core::fmt;
 
-use alloy_primitives::{Address, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetadata};
 
@@ -74,7 +74,7 @@ impl fmt::Display for ExecutionPayloadFlashblockDeltaV1 {
 /// parent hash, block number, and other header fields that are determined at
 /// block creation and cannot be modified.
 #[derive(
-    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
+    Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable, Hash,
 )]
 pub struct ExecutionPayloadBaseV1 {
     /// Ecotone parent beacon block root
@@ -237,7 +237,7 @@ mod tests {
     use crate::access_list::FlashblockAccessList;
 
     use super::*;
-    use alloy_rlp::{encode, Decodable};
+    use alloy_rlp::{Decodable, encode};
 
     fn sample_diff() -> ExecutionPayloadFlashblockDeltaV1 {
         ExecutionPayloadFlashblockDeltaV1 {

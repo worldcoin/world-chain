@@ -1,14 +1,15 @@
 use alloy_consensus::{Block, Header};
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
+use alloy_op_evm::{OpBlockExecutionCtx, block::receipt_builder::OpReceiptBuilder};
+use alloy_primitives::Address;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::{
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
     op_revm::{OpHaltReason, OpSpecId, OpTransaction},
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpBlockAssembler;
@@ -16,7 +17,7 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{
-    context::{result::ExecutionResult, BlockEnv, TxEnv},
+    context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
 use std::{collections::HashSet, sync::Arc};
@@ -61,18 +62,18 @@ impl<'a, DB, R, N, E> BlockBuilder for FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = Block<OpTransactionSigned>,
-        BlockHeader = Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = Block<OpTransactionSigned>,
+            BlockHeader = Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'a mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
@@ -178,18 +179,18 @@ impl<'a, DB, R, N, E> FlashblocksBlockBuilder<'a, R, N, E>
 where
     DB: Database + 'a,
     N: NodePrimitives<
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
-    >,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
     E: Evm<
-        DB = &'a mut State<DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = &'a mut State<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
@@ -199,9 +200,11 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<N>, FlashblockAccessList), BlockExecutionError> {
-        let (evm, result, access_list, _, _) = self.inner.executor.finish_with_access_list()?;
+        let finish_result = self.inner.executor.finish_with_access_list()?;
+        let access_list = finish_result.access_list_data;
+        let result = finish_result.execution_result;
 
-        let (db, evm_env) = evm.finish();
+        let (db, evm_env) = finish_result.evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
@@ -209,7 +212,7 @@ where
         // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
         // which represent a single atomic state transition. therefore reverts should have length 1
         // we only retain the first occurance of a revert for any given account.
-        let flattened = db
+        let flattened: Vec<(Address, revm::database::AccountRevert)> = db
             .bundle_state
             .reverts
             .iter()

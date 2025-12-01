@@ -1,3 +1,6 @@
+#![warn(unused_crate_dependencies)]
+#![allow(clippy::type_complexity)]
+
 pub mod access_list;
 pub mod assembler;
 pub mod block_builder;

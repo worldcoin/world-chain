@@ -10,7 +10,7 @@ use crate::{
 use crate::block_builder::FlashblocksBlockBuilder;
 use alloy_consensus::{BlockHeader, Header};
 
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpEvm};
+use alloy_op_evm::{OpEvm, block::receipt_builder::OpReceiptBuilder};
 use flashblocks_primitives::{
     access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
@@ -18,7 +18,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
-    revm::{database::StateProviderDatabase, State},
+    revm::{State, database::StateProviderDatabase},
 };
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
@@ -26,9 +26,9 @@ use reth_basic_payload_builder::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_evm::{
+    ConfigureEvm, Database,
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
-    ConfigureEvm, Database,
 };
 use reth_primitives::NodePrimitives;
 use tracing::{info, warn};
@@ -36,7 +36,7 @@ use tracing::{info, warn};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::OpPooledTx, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+    OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
@@ -79,11 +79,11 @@ where
     Txs: OpPayloadTransactions<Pool::Transaction>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     CtxBuilder: PayloadBuilderCtxBuilder<
-        Client,
-        OpEvmConfig,
-        OpChainSpec,
-        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
-    >,
+            Client,
+            OpEvmConfig,
+            OpChainSpec,
+            PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+        >,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -152,11 +152,11 @@ where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     CtxBuilder: PayloadBuilderCtxBuilder<
-        Client,
-        OpEvmConfig,
-        OpChainSpec,
-        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
-    >,
+            Client,
+            OpEvmConfig,
+            OpChainSpec,
+            PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+        >,
 {
     type Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>;
     type BuiltPayload = OpBuiltPayload;
@@ -213,11 +213,11 @@ where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     CtxBuilder: PayloadBuilderCtxBuilder<
-        Client,
-        OpEvmConfig,
-        OpChainSpec,
-        PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
-    >,
+            Client,
+            OpEvmConfig,
+            OpChainSpec,
+            PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
+        >,
 {
     fn try_build_with_precommit(
         &self,
@@ -258,10 +258,10 @@ where
     Txs: PayloadTransactions,
     Txs::Transaction: OpPooledTx,
     Ctx: PayloadBuilderCtx<
-        Evm = OpEvmConfig,
-        Transaction = Txs::Transaction,
-        ChainSpec = OpChainSpec,
-    >,
+            Evm = OpEvmConfig,
+            Transaction = Txs::Transaction,
+            ChainSpec = OpChainSpec,
+        >,
 {
     let span = span!(
         tracing::Level::INFO,
@@ -343,7 +343,11 @@ where
         ctx.execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?
     } else {
-        ExecutionInfo::default()
+        committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
+            total_fees: p.fees(),
+            cumulative_gas_used: p.block().gas_used(),
+            ..Default::default()
+        })
     };
 
     // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
@@ -352,8 +356,9 @@ where
         let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
         let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(
             execution_state
-                .executor_transactions_iter()
-                .map(|tx| *tx.hash())
+                .committed_transactions_iter()
+                .map(|tx| tx.hash())
+                .copied()
                 .collect(),
         );
 
@@ -387,6 +392,7 @@ where
 
     // 6. Build the block
     let (build_outcome, access_list) = builder.finish_with_access_list(&state_provider)?;
+
     info!(target: "test_target", "built new payload with {} transactions, receipts {:#?}", build_outcome.block.body().transactions().count(), build_outcome.execution_result.receipts.len());
 
     // 7. Seal the block
@@ -444,29 +450,24 @@ fn block_builder<'a, Ctx, DB, R, N, Tx>(
 where
     Tx: PoolTransaction + OpPooledTx,
     N: NodePrimitives<
-        Block = alloy_consensus::Block<OpTransactionSigned>,
-        BlockHeader = alloy_consensus::Header,
-        Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
-    >,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+        >,
     DB: reth_evm::Database + Send + Sync + 'a,
     DB::Error: Send + Sync + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
     let executor = execution_state.basic_executor(ctx.spec().clone().into(), R::default(), state);
-    let committed_transactions = execution_state
-        .committed_state
-        .transactions
-        .iter()
-        .map(|(_, tx)| tx.clone())
-        .collect::<Vec<_>>();
+    let committed_transactions = execution_state.committed_transactions_iter();
 
     Ok(FlashblocksBlockBuilder::new(
         execution_state.execution_context.clone(),
         ctx.parent(),
         executor,
-        committed_transactions,
+        committed_transactions.cloned().collect(),
         Arc::new(ctx.spec().clone()),
     ))
 }

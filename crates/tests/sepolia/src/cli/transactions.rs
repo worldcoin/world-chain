@@ -1,24 +1,24 @@
 use alloy_eips::Encodable2718;
 use alloy_primitives::{
-    address, bytes, fixed_bytes, Address, Bytes, FixedBytes, TxKind, B256, U128, U256,
+    Address, B256, Bytes, FixedBytes, TxKind, U128, U256, address, bytes, fixed_bytes,
 };
 use alloy_provider::{
-    network::{EthereumWallet, TransactionBuilder},
     Provider, ProviderBuilder,
+    network::{EthereumWallet, TransactionBuilder},
 };
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{sol, SolCall, SolInterface, SolValue};
+use alloy_sol_types::{SolCall, SolInterface, SolValue, sol};
 use alloy_transport_http::Http;
-use eyre::eyre::{bail, Context};
-use futures::{stream, StreamExt, TryStreamExt};
+use eyre::eyre::{Context, bail};
+use futures::{StreamExt, TryStreamExt, stream};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use reqwest::{
-    header::{HeaderMap, AUTHORIZATION},
     Client,
+    header::{AUTHORIZATION, HeaderMap},
 };
 use reth_rpc_layer::secret_to_bearer_header;
 use semaphore_rs::{hash_to_field, identity::Identity};
@@ -37,25 +37,25 @@ use world_chain_pbh::{
 };
 
 use world_chain_test::{
+    DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
     bindings::{
         IEntryPoint::{PackedUserOperation, UserOpsPerAggregator},
         IMulticall3, IPBHEntryPoint,
     },
     utils::{
-        get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof,
-        RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+        InclusionProof, RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash,
+        RpcUserOperationV0_7, get_operation_hash, partial_user_op_sepolia, user_op_sepolia,
     },
-    DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
 };
 
 use crate::{
-    cli::{transactions::LoadTestContract::LoadTestContractInstance, LoadTestArgs},
     PBH_SIGNATURE_AGGREGATOR,
+    cli::{LoadTestArgs, transactions::LoadTestContract::LoadTestContractInstance},
 };
 
 use super::{
-    identities::SerializableIdentity, BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs,
-    StakeAAArgs, TxType,
+    BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs, TxType,
+    identities::SerializableIdentity,
 };
 use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 

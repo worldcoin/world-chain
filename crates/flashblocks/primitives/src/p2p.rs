@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use alloy_primitives::{Bytes, B64};
+use alloy_primitives::{B64, Bytes};
 use alloy_rlp::{Decodable, Encodable, Header};
 use alloy_rpc_types_engine::PayloadId;
 use bytes::{Buf as _, BufMut as _, BytesMut};
@@ -602,8 +602,8 @@ mod tests {
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
-    use alloy_primitives::{Address, Bloom, FixedBytes, B256, U256};
-    use alloy_rlp::{encode, Decodable, Encodable};
+    use alloy_primitives::{Address, B256, Bloom, FixedBytes, U256};
+    use alloy_rlp::{Decodable, Encodable, encode};
     use alloy_rpc_types_eth::Withdrawal;
     use bytes::{BufMut, BytesMut};
 

@@ -1,17 +1,17 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Bytes, TxHash, B256};
+use alloy_primitives::{B256, Bytes, TxHash};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_primitives::TransactionMeta;
 use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
-    helpers::{
-        spec::SignersForRpc, EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking,
-    },
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    helpers::{
+        EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking, spec::SignersForRpc,
+    },
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 
@@ -64,33 +64,32 @@ where
     {
         self.spawn_blocking_io_fut(async move |this| {
             let pending_block = this.local_pending_block().await?;
-            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone() {
-                if let Some(pos) = block
+            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
+                && let Some(pos) = block
                     .body()
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)
-                {
-                    let receipt = &receipts[pos];
-                    let tx = block
-                        .clone()
-                        .body()
-                        .transactions_iter()
-                        .nth(pos)
-                        .expect("position is valid; qed")
-                        .clone();
+            {
+                let receipt = &receipts[pos];
+                let tx = block
+                    .clone()
+                    .body()
+                    .transactions_iter()
+                    .nth(pos)
+                    .expect("position is valid; qed")
+                    .clone();
 
-                    let meta = TransactionMeta {
-                        tx_hash: tx.tx_hash(),
-                        block_hash: block.hash_slow(),
-                        block_number: block.number(),
-                        index: pos as u64,
-                        base_fee: block.base_fee_per_gas(),
-                        timestamp: block.header().timestamp(),
-                        ..Default::default()
-                    };
+                let meta = TransactionMeta {
+                    tx_hash: tx.tx_hash(),
+                    block_hash: block.hash_slow(),
+                    block_number: block.number(),
+                    index: pos as u64,
+                    base_fee: block.base_fee_per_gas(),
+                    timestamp: block.header().timestamp(),
+                    ..Default::default()
+                };
 
-                    return Ok(Some((tx, meta, receipt.clone())));
-                }
+                return Ok(Some((tx, meta, receipt.clone())));
             }
 
             let provider = this.provider();

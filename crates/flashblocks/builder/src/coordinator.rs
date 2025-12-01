@@ -13,7 +13,7 @@ use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_provider::{HeaderProvider, StateProviderFactory};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use tracing::{error, trace};
 
@@ -148,10 +148,10 @@ impl FlashblocksExecutionCoordinator {
         event: Events<OpEngineTypes>,
         payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
     ) -> eyre::Result<()> {
-        if let Some(payload_events) = payload_events {
-            if let Err(e) = payload_events.send(event) {
-                error!("error broadcasting payload: {e:?}");
-            }
+        if let Some(payload_events) = payload_events
+            && let Err(e) = payload_events.send(event)
+        {
+            error!("error broadcasting payload: {e:?}");
         }
         Ok(())
     }
@@ -181,21 +181,20 @@ where
     let FlashblocksExecutionCoordinatorInner {
         ref mut flashblocks,
         ref mut latest_payload,
-        payload_events: _,
+        ref mut payload_events,
     } = *coordinator.inner.write();
 
     let flashblock = Flashblock { flashblock };
 
-    if let Some(latest_payload) = latest_payload {
-        if latest_payload.0.id() == flashblock.flashblock.payload_id
-            && latest_payload.1 >= flashblock.flashblock.index
-        {
-            // Already processed this flashblock. This happens when set directly
-            // from publish_build_payload. Since we already built the payload, no need
-            // to do it again.
-            pending_block.send_replace(latest_payload.0.executed_block());
-            return Ok(());
-        }
+    if let Some(latest_payload) = latest_payload
+        && latest_payload.0.id() == flashblock.flashblock.payload_id
+        && latest_payload.1 >= flashblock.flashblock.index
+    {
+        // Already processed this flashblock. This happens when set directly
+        // from publish_build_payload. Since we already built the payload, no need
+        // to do it again.
+        pending_block.send_replace(latest_payload.0.executed_block());
+        return Ok(());
     }
 
     let diff = flashblock.diff().clone();
@@ -211,14 +210,19 @@ where
         flashblocks.base()
     };
 
+    let timeout = Duration::from_secs(10);
+    let now = std::time::Instant::now();
+
     let sealed_header = loop {
         match provider.sealed_header_by_hash(base.parent_hash) {
             Ok(Some(header)) => break header,
             _ => {
-                trace!(
-                    parent_hash = %base.parent_hash,
-                    "waiting for parent sealed header to be available"
-                );
+                if now.elapsed() > timeout {
+                    return Err(eyre::eyre::eyre!(
+                        "timed out waiting for parent header {}",
+                        base.parent_hash
+                    ));
+                }
             }
         }
     };
@@ -282,7 +286,7 @@ where
         "built payload from flashblock"
     );
 
-    // coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
+    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
 
     Ok(())
 }

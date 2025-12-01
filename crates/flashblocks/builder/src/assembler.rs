@@ -29,10 +29,10 @@ impl FlashblocksBlockAssembler {
 impl<F> BlockAssembler<F> for FlashblocksBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
 {
     type Block = Block<F::Transaction>;
 

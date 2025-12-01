@@ -61,6 +61,7 @@ world-chain-node.workspace = true
 
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
+reth-engine-primitives.workspace = true
 reth-node-core.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
@@ -77,6 +78,8 @@ alloy-network.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
 
 op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -93,3 +96,8 @@ parking_lot.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 bytes.workspace = true
+alloy-sol-types.workspace = true
+alloy-contract.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
+reqwest.workspace = true

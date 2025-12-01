@@ -1,4 +1,4 @@
-set positional-arguments
+set positional-arguments := true
 
 # default recipe to display help information
 default:
@@ -8,41 +8,44 @@ default:
 devnet-up: deploy-devnet deploy-contracts
 
 deploy-devnet: build
-  @just ./devnet/devnet-up
+    just ./devnet/devnet-up
 
 build:
-  docker buildx build -t world-chain:latest .
+    docker buildx build \
+        --cache-from type=local,src=.docker-cache \
+        --cache-to type=local,dest=.docker-cache,mode=max \
+        -t world-chain:latest .
 
 deploy-contracts:
-  @just ./contracts/deploy-contracts
+    @just ./contracts/deploy-contracts
 
 # Stops the devnet **This will prune all docker containers**
 devnet-down:
-  @just ./devnet/devnet-down
+    @just ./devnet/devnet-down
 
-test: 
-  cargo nextest run --workspace
+test *args='':
+    RUST_LOG="info" cargo nextest run --workspace $@
 
 # Formats the whole workspace
 fmt: devnet-fmt contracts-fmt fmt-fix fmt-check
 
 devnet-fmt:
-  @just ./devnet/fmt
+    @just ./devnet/fmt
 
 contracts-fmt:
-  @just ./contracts/fmt
+    @just ./contracts/fmt
 
 fmt-fix:
-  cargo +nightly fmt --all
+    cargo +nightly fmt --all
 
 fmt-check:
-  cargo +nightly fmt --all -- --check
+    cargo +nightly fmt --all -- --check
 
 e2e-test *args='':
-  RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
+    RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
 
 install *args='':
-  cargo install --path crates/world/bin --locked $@
+    cargo install --path crates/world/bin --locked $@
 
 stress-test *args='':
-  @just ./devnet/stress-test $@
+    @just ./devnet/stress-test $@

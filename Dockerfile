@@ -28,17 +28,19 @@ WORKDIR /app
 RUN cargo install --git https://github.com/foundry-rs/foundry --tag v1.3.6 --profile release --locked cast
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
+ARG PROFILE="maxperf"
+ARG FEATURES="jemalloc"
+
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
-
+    cargo chef cook --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
+    cargo build --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
 FROM debian:bookworm-slim
@@ -65,7 +67,8 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
     rm -rf /tmp/aws /tmp/awscliv2.zip
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
-COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
+ARG PROFILE="maxperf"
+COPY --from=builder /app/target/${PROFILE}/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 COPY --from=builder /usr/local/cargo/bin/cast /usr/local/bin/
 RUN cast --version

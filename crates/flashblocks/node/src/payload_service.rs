@@ -12,8 +12,8 @@ use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
-    components::{PayloadBuilderBuilder, PayloadServiceBuilder},
     BuilderContext,
+    components::{PayloadBuilderBuilder, PayloadServiceBuilder},
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, OpPayloadBuilderAttributes};
@@ -65,12 +65,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     Node::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
     Pool: TransactionPool,
     EvmConfig: Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,

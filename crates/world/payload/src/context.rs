@@ -13,21 +13,21 @@ use reth::{
     api::PayloadBuilderError,
     chainspec::EthChainSpec,
     payload::{PayloadBuilderAttributes, PayloadId},
-    revm::{cancelled::CancelOnDrop, State},
+    revm::{State, cancelled::CancelOnDrop},
     transaction_pool::{BestTransactionsAttributes, TransactionPool},
 };
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::{
+    ConfigureEvm, Database, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
-    ConfigureEvm, Database, Evm, EvmEnv,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    txpool::estimated_da_size::DataAvailabilitySized, OpBuiltPayload, OpEvmConfig,
-    OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    txpool::estimated_da_size::DataAvailabilitySized,
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
@@ -153,9 +153,9 @@ where
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            > + 'a,
+            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+        > + 'a,
         PayloadBuilderError,
     >
     where
@@ -242,9 +242,9 @@ where
         DB: reth_evm::Database + 'a,
         DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-        >,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+            >,
         Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,
@@ -276,12 +276,12 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.conditional_options() {
-                if validate_conditional_options(conditional_options, &self.client).is_err() {
-                    best_txs.mark_invalid(tx.signer(), tx.nonce());
-                    invalid_txs.push(*pooled_tx.hash());
-                    continue;
-                }
+            if let Some(conditional_options) = pooled_tx.conditional_options()
+                && validate_conditional_options(conditional_options, &self.client).is_err()
+            {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                invalid_txs.push(*pooled_tx.hash());
+                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.

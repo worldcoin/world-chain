@@ -193,32 +193,32 @@ impl AccountChangesConstruction {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use crate::executor::bal_builder::BalBuilderBlockExecutor;
-    use alloy_consensus::{constants::KECCAK_EMPTY, TxEip1559};
+    use alloy_consensus::{TxEip1559, constants::KECCAK_EMPTY};
     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
-    use alloy_primitives::{address, bytes, keccak256, Address, Bytes, FixedBytes, TxKind, U256};
+    use alloy_primitives::{Address, Bytes, FixedBytes, TxKind, U256, address, bytes, keccak256};
 
     use alloy_signer_local::PrivateKeySigner;
-    use alloy_sol_types::{sol, SolCall};
+    use alloy_sol_types::{SolCall, sol};
     use flashblocks_primitives::access_list::FlashblockAccessList;
     use lazy_static::lazy_static;
     use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
     use op_alloy_network::TxSignerSync;
     use reth::revm::State;
-    use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm, EvmFactory};
+    use reth_evm::{ConfigureEvm, Evm, EvmFactory, block::BlockExecutor};
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-    use reth_primitives::{transaction::SignedTransaction, Recovered};
+    use reth_primitives::{Recovered, transaction::SignedTransaction};
     use reth_provider::BlockExecutionResult;
     use revm::{
         database::{
-            states::{bundle_state::BundleRetention, reverts::Reverts},
             BundleAccount, BundleState, InMemoryDB,
+            states::{bundle_state::BundleRetention, reverts::Reverts},
         },
         state::{AccountInfo, Bytecode},
     };
@@ -401,12 +401,10 @@ mod tests {
                 executor.execute_transaction(tx).unwrap();
             }
 
-            let (evm, execution_result, access_list, min_tx_index, max_tx_index) =
-                executor.finish_with_access_list().unwrap();
+            let finish_result = executor.finish_with_access_list().unwrap();
+            let access_list = finish_result.access_list_data.access_list;
 
-            let access_list = access_list.access_list;
-
-            let (db, _) = evm.finish();
+            let (db, _) = finish_result.evm.finish();
 
             assert_eq!(
                 access_list, self.expected,
@@ -438,10 +436,10 @@ mod tests {
 
             (
                 db.bundle_state.clone(),
-                execution_result,
+                finish_result.execution_result,
                 access_list,
-                min_tx_index,
-                max_tx_index,
+                finish_result.min_tx_index,
+                finish_result.max_tx_index,
             )
         }
     }
@@ -620,7 +618,7 @@ mod tests {
             })
             .test();
 
-        let bundle: HashMap<Address, BundleAccount> = access_list.into();
+        let bundle: alloy_primitives::map::HashMap<Address, BundleAccount> = access_list.into();
 
         for (address, account) in bundle.iter() {
             let expected = expected_bundle.state.get(address).unwrap();

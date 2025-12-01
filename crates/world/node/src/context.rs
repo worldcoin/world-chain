@@ -21,14 +21,14 @@ use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
+    NodeAdapter, NodeComponentsBuilder,
     components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
-    OpExecutorBuilder, OpNetworkBuilder,
+    OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder, OpExecutorBuilder,
+    OpNetworkBuilder, args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
@@ -39,7 +39,7 @@ use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
 use reth_network_peers::PeerId;
-use reth_node_builder::{components::NetworkBuilder, BuilderContext};
+use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// Network builder for World Chain that optionally applies custom transaction propagation policy.
@@ -137,10 +137,10 @@ impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeConte
     for BasicContext
 where
     BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
-        N,
-        BasicWorldChainPool<N>,
-        OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    >,
+            N,
+            BasicWorldChainPool<N>,
+            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
 {
     type Net = WorldChainNetworkBuilder;
     type Evm = OpEvmConfig;
@@ -230,10 +230,10 @@ where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >: PayloadServiceBuilder<
-        N,
-        BasicWorldChainPool<N>,
-        OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    >,
+            N,
+            BasicWorldChainPool<N>,
+            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
 {
     type Net = FlashblocksNetworkBuilder<WorldChainNetworkBuilder>;
     type Evm = OpEvmConfig;

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use alloy_primitives::FixedBytes;
 use reth_evm::block::BlockExecutionError;
 
@@ -8,6 +10,7 @@ pub mod temporal_db;
 pub mod temporal_map;
 pub mod utils;
 
+/// Validation errors that occur when comparing builder and validator states.
 #[derive(thiserror::Error, Debug)]
 pub enum BalValidationError {
     #[error("Final access list hash mismatch. Expected {expected:x}, got {got:x}")]
@@ -15,8 +18,7 @@ pub enum BalValidationError {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
     },
-    #[error("Incorrect state root after executing block Expected {expected:x}, got {got:x}")]
-    #[from(BlockExecutionError)]
+    #[error("Incorrect state root after executing block. Expected {expected:x}, got {got:x}")]
     StateRootMismatch {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,

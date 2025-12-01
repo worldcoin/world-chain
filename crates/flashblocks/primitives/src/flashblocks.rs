@@ -3,11 +3,11 @@ use crate::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use alloy_consensus::{
-    proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
-    EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
+    proofs::ordered_trie_root_with_encoder,
 };
-use alloy_eips::{merge::BEACON_NONCE, Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, U256};
+use alloy_eips::{Decodable2718, Encodable2718, merge::BEACON_NONCE};
+use alloy_primitives::{U256, keccak256};
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
@@ -123,7 +123,7 @@ impl Flashblock {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq, Hash)]
 pub struct FlashblockMetadata {
     /// Total fees collected by the proposer for this block.
     pub fees: U256,
@@ -321,7 +321,9 @@ impl Flashblocks {
                 bail!("New flashblock has different payload_id and must contain the base payload");
             };
             if base.timestamp <= self.base().timestamp {
-                bail!("New flashblock has different payload_id and must have a later timestamp than the current base");
+                bail!(
+                    "New flashblock has different payload_id and must have a later timestamp than the current base"
+                );
             }
 
             return Ok(true);
