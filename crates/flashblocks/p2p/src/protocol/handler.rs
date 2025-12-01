@@ -317,8 +317,14 @@ impl FlashblocksHandle {
         state.publishing_status.send_modify(|status| {
             match status {
                 PublishingStatus::Publishing { authorization } => {
-                    // We are already publishing, so we just update the authorization.
-                    *authorization = new_authorization;
+                    // Ensure that the new authorization's timestamp is strictly greater than the currently
+                    // active one before updating, otherwise it would be possible to reuse outdated authorizations
+                    // for an active publisher.
+                    if new_authorization.timestamp > authorization.timestamp {
+                        // We are already publishing, and the new authorization is newer than the
+                        // current active one, so we just update the authorization.
+                        *authorization = new_authorization;
+                    }
                 }
                 PublishingStatus::WaitingToPublish {
                     authorization,

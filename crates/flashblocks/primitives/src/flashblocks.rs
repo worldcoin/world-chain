@@ -34,6 +34,7 @@ impl Flashblock {
         config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
         index: u64,
         transactions_offset: usize,
+        withdrawal_offset: usize,
         access_list: Option<FlashblockAccessList>,
     ) -> Self {
         let block = payload.block();
@@ -77,7 +78,7 @@ impl Flashblock {
                 withdrawals
                     .into_iter()
                     .cloned()
-                    .skip(transactions_offset)
+                    .skip(withdrawal_offset)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -168,6 +169,11 @@ impl Flashblock {
             if acc.base.is_none() && next.flashblock.base.is_some() {
                 acc.base = next.flashblock.base;
             }
+
+            acc.index = next.flashblock.index;
+
+            acc.metadata.fees = next.flashblock.metadata.fees;
+            acc.metadata.flashblock_timestamp = next.flashblock.metadata.flashblock_timestamp;
 
             acc.diff.gas_used = next.flashblock.diff.gas_used;
 

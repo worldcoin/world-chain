@@ -19,6 +19,15 @@ impl From<&Identity> for SerializableIdentity {
     }
 }
 
+impl From<SerializableIdentity> for Identity {
+    fn from(value: SerializableIdentity) -> Self {
+        Identity {
+            trapdoor: value.trapdoor,
+            nullifier: value.nullifier,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]

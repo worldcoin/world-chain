@@ -23,7 +23,7 @@ use std::task::ready;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
-    api::{BuiltPayload, PayloadBuilderError, PayloadKind},
+    api::{BlockBody, BuiltPayload, PayloadBuilderError, PayloadKind},
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -349,15 +349,23 @@ where
         access_list: FlashblockAccessList,
         prev: Option<&OpBuiltPayload<OpPrimitives>>,
     ) -> eyre::Result<()> {
-        let offset = prev
+        let tx_offset = prev
             .as_ref()
             .map_or(0, |p| p.block().body().transactions().count());
+
+        let withdrawals_offset = prev.as_ref().map_or(0, |p| {
+            p.block()
+                .body()
+                .withdrawals()
+                .map_or(0, |withdrawals| withdrawals.len())
+        });
 
         let flashblock = Flashblock::new(
             payload,
             &self.config,
             self.block_index,
-            offset,
+            tx_offset,
+            withdrawals_offset,
             Some(access_list),
         );
 

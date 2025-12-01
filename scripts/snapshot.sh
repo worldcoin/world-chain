@@ -130,10 +130,11 @@ while true; do
     exit $EXIT_CODE
   fi
 
-  if ! is_synced; then
+  if [[ "${FORCE_SNAPSHOT:-}" == "true" ]]; then
+    echo "[INFO] FORCE_SNAPSHOT enabled; skipping sync check."
+  elif ! is_synced; then
     continue
   fi
 
   take_snapshot
 done
-

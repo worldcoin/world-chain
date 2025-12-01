@@ -304,6 +304,9 @@ impl<Builder, Client, Tasks> FlashblocksPayloadJobGenerator<Client, Tasks, Build
 where
     Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload>,
 {
+    /// Check for any existing flashblock for the same payload id exists, and if so
+    /// reduces all existing flashblocks into a payload, returning the payload and the
+    /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
         attributes: &<Builder as PayloadBuilder>::Attributes,

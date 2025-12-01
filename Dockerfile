@@ -1,4 +1,4 @@
-FROM rust:1.89.0-bookworm AS base
+FROM rust:1.91.1-bookworm AS base
 
 ARG FEATURES
 
@@ -71,6 +71,11 @@ ARG PROFILE="maxperf"
 COPY --from=builder /app/target/${PROFILE}/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 COPY --from=builder /usr/local/cargo/bin/cast /usr/local/bin/
+
+COPY scripts/* /usr/local/bin
+
+RUN chmod +x /usr/local/bin/*.sh
+
 RUN cast --version
 
 EXPOSE 30303 30303/udp 9001 8545 8546

@@ -1,6 +1,7 @@
 use alloy_primitives::{Address, U256, uint};
 use clap::{Parser, ValueEnum};
 use reth_rpc_layer::JwtSecret;
+use std::fmt::Display;
 
 pub mod identities;
 pub mod transactions;
@@ -46,11 +47,43 @@ pub struct LoadTestArgs {
     /// The RPC URL
     #[clap(long, env = "RPC_URL")]
     pub rpc_url: String,
+    /// The URL to the target signup sequencer.
+    #[clap(
+        long,
+        short,
+        default_value = "https://signup-orb-ethereum.stage-crypto.worldcoin.dev"
+    )]
+    pub signup_sequencer_url: String,
     /// The path to a json holding information pertaining to the Safes, and Module
     #[clap(long, env = "CONFIG_PATH", default_value = "load_test_config.json")]
     pub config_path: String,
+    /// The path to a json holding information about an Identity.
+    #[clap(long, env = "IDENTITY_PATH", default_value = "load_test_identity.json")]
+    pub identity_path: String,
     #[clap(long, env = "TRANSACTION_COUNT", default_value_t = 1)]
     pub transaction_count: usize,
+    /// Specifies the tx type you want to test.
+    #[clap(long, env = "TEST_TX_TYPE", default_value_t = TestTxType::Sstore)]
+    pub tx_type: TestTxType,
+}
+
+/// The type of the test transaction that you want to send.
+#[derive(Default, Debug, Clone, Copy, ValueEnum)]
+pub enum TestTxType {
+    /// Tests `SSTORE` opcode.
+    #[default]
+    Sstore,
+    /// Tests several elliptic curve operations.
+    Ec,
+}
+
+impl Display for TestTxType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sstore => write!(f, "sstore"),
+            Self::Ec => write!(f, "ec"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
