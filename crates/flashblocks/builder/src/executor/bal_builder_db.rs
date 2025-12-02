@@ -5,7 +5,6 @@ use crossbeam_channel::{Receiver, Sender};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
-    database::CacheDB,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
@@ -89,7 +88,7 @@ impl<DB: DatabaseRef + Send + Sync + 'static> BalBuilder<DB> {
     ) -> JoinHandle<FlashblockAccessListConstruction> {
         std::thread::spawn(move || {
             let mut bal_builder = BalBuilder {
-                db: CacheDB::new(db),
+                db,
                 access_list: Default::default(),
                 index: 0,
             };
