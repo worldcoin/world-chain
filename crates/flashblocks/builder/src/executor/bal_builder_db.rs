@@ -24,10 +24,6 @@ pub struct BalBuilderDb<DB> {
     db: DB,
     /// The sender to the builder thread.
     tx: Sender<BalBuilderMsg>,
-    // /// The Flashblock Access List under construction.
-    // access_list: FlashblockAccessListConstruction,
-    // /// The current transaction index within the overall block.
-    // index: u16,
     /// Join hande for the builder thread
     handle: JoinHandle<FlashblockAccessListConstruction>,
 }
