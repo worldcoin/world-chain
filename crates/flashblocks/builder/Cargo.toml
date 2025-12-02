@@ -51,6 +51,7 @@ revm-database-interface.workspace = true
 tokio.workspace = true
 
 # misc
+crossbeam-channel.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 futures.workspace = true

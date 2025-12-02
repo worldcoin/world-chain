@@ -40,6 +40,8 @@ where
         self.get_with_index(index, key).map(|(_, v)| v)
     }
 
+    /// Returns the latest value in the map up to and including the given index.
+    ///
     /// Optional: get also returns the index it came from.
     pub fn get_with_index(&self, index: I, key: &K) -> Option<(&I, &V)> {
         self.inner
