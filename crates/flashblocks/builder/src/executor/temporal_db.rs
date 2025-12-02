@@ -8,9 +8,13 @@ use revm::{
 
 use crate::executor::temporal_map::TemporalMap;
 
+/// Represents the temporal state of accounts, storage, and contracts
 #[derive(Clone, Debug, Default)]
 pub struct TemporalState {
     /// Block state account with account info
+    ///
+    /// We prioritize access speed over memory usage here by having a single map
+    /// for each field in AccountInfo, rather than multiple maps for each field.
     pub account_info: TemporalMap<Address, AccountInfo, u64>,
     /// Block state account with account info
     pub account_storage: HashMap<Address, TemporalMap<StorageKey, StorageValue, u64>>,
@@ -18,11 +22,12 @@ pub struct TemporalState {
     pub contracts: TemporalMap<B256, Bytecode, u64>,
 }
 
+/// A factory for creating TemporalDb instances at specific BlockAccessIndices
 #[derive(Clone, Debug)]
 pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
     /// Layer 0: Cached Pre-State from the BAL
     pub cache: TemporalState,
-    /// Layer 2: The underlying database
+    /// Layer 1: The underlying database
     pub db: &'a DB,
 }
 

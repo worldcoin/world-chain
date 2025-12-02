@@ -1,89 +1,126 @@
+use std::thread::JoinHandle;
+
 use alloy_primitives::{Address, B256};
+use crossbeam_channel::{Receiver, Sender};
 use revm::{
+    Database, DatabaseCommit, DatabaseRef,
+    database::CacheDB,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
-    Database, DatabaseCommit, DatabaseRef,
 };
 
 use crate::access_list::FlashblockAccessListConstruction;
 
 /// A wrapper around a database that builds a Flashblock
-/// Access List during execution. Between transactions, the index
+/// Access List during execution.
+///
+/// Commiting to this DB will both construct the underlying access list
+/// and commit to the inner database. Between transactions, the index
 /// should be updated to reflect the current transaction index within the block.
 ///
 /// This type intentionally does not implement `DatabaseRef` because
 /// we need mutable access to update the access list during reads.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct BalBuilderDb<DB> {
-    /// The underlying database.
+    /// The underlying read/write database.
     db: DB,
+    /// The sender to the builder thread.
+    tx: Sender<BalBuilderMsg>,
+    // /// The Flashblock Access List under construction.
+    // access_list: FlashblockAccessListConstruction,
+    // /// The current transaction index within the overall block.
+    // index: u16,
+    /// Join hande for the builder thread
+    handle: JoinHandle<FlashblockAccessListConstruction>,
+}
+
+#[derive(Clone, Debug)]
+struct BalBuilder<DB: DatabaseRef> {
+    /// Underlying cached database.
+    db: CacheDB<DB>,
     /// The Flashblock Access List under construction.
     access_list: FlashblockAccessListConstruction,
-    /// The current transaction index within the overall block.
+    /// The current index being built
     index: u16,
 }
 
+enum BalBuilderMsg {
+    StorageRead(Address, StorageKey),
+    Commit(HashMap<Address, revm::state::Account>),
+    SetIndex(u16),
+    Finish,
+}
+
 impl<DB> BalBuilderDb<DB> {
-    pub fn new(db: DB) -> Self {
+    pub fn new<RODB: DatabaseRef + Send + 'static>(write_db: DB, read_db: RODB) -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
+        let handle = BalBuilder::spawn(read_db, rx);
+
         Self {
-            db,
-            access_list: Default::default(),
-            index: 0,
+            db: write_db,
+            tx,
+            handle,
         }
     }
-}
 
-impl<DB> BalBuilderDb<DB> {
     pub fn set_index(&mut self, index: u16) {
-        self.index = index;
+        let _ = self.tx.send(BalBuilderMsg::SetIndex(index));
+    }
+
+    pub fn finish(self) -> FlashblockAccessListConstruction {
+        let _ = self.tx.send(BalBuilderMsg::Finish);
+        self.handle.join().unwrap()
     }
 }
 
-impl<DB: Database> Database for BalBuilderDb<DB> {
-    type Error = DB::Error;
+impl<DB: DatabaseRef + Send + 'static> BalBuilder<DB> {
+    pub fn spawn(
+        db: DB,
+        rx: Receiver<BalBuilderMsg>,
+    ) -> JoinHandle<FlashblockAccessListConstruction> {
+        std::thread::spawn(move || {
+            let mut bal_builder = BalBuilder {
+                db: CacheDB::new(db),
+                access_list: Default::default(),
+                index: 0,
+            };
 
-    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.db.basic(address)
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    BalBuilderMsg::StorageRead(address, index) => {
+                        bal_builder.storage_read(address, index);
+                    }
+                    BalBuilderMsg::Commit(changes) => {
+                        bal_builder.commit(changes);
+                    }
+                    BalBuilderMsg::SetIndex(index) => {
+                        bal_builder.index = index;
+                    }
+                    BalBuilderMsg::Finish => {
+                        return bal_builder.access_list;
+                    }
+                }
+            }
+
+            unreachable!();
+        })
     }
 
-    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.db.code_by_hash(code_hash)
-    }
-
-    fn storage(
-        &mut self,
-        address: Address,
-        index: StorageKey,
-    ) -> Result<StorageValue, Self::Error> {
+    fn storage_read(&mut self, address: Address, index: StorageKey) {
         let mut account = self.access_list.changes.entry(address).or_default();
         account.storage_reads.insert(index);
-        self.db.storage(address, index)
     }
 
-    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.db.block_hash(number)
-    }
-}
-
-impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
-    /// TODO: par iter
-    ///
-    /// TODO: we are currently performing a blocking read, then a blocking write for each operation here.
-    /// This can be optimized writing immediately, then reading asynchronously and building the
-    /// access list.
-    ///
-    /// Ideally we want a read only save point at each transaction boundary, so that we can assess
-    /// the changes made asynchronously and update the access list accordingly. We could use something similar to
-    /// the temporal DB for this, or we could somehow snapshot the DB at each transaction boundary.
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
         changes.iter().for_each(|(address, account)| {
             let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
-            // TODO: there is an edge case here where we could change an account, then change it
+            // There is an edge case here where we could change an account, then change it
             // back. This would result in appending a value to the access list that isn't strctly
-            // required.
+            // required. For this reason we should dedup consecutive identical entries when
+            // finalizing the access list.
             match self.db.basic_ref(*address).unwrap() {
                 Some(previous) => {
                     if previous.balance != account.info.balance {
@@ -128,7 +165,41 @@ impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
                 }
             });
         });
+    }
+}
 
+impl<DB: Database> Database for BalBuilderDb<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.db.basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.db.code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.tx
+            .send(BalBuilderMsg::StorageRead(address, index))
+            .expect("BalBuilder thread has terminated unexpectedly");
+        self.db.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.db.block_hash(number)
+    }
+}
+
+impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+        self.tx
+            .send(BalBuilderMsg::Commit(changes.clone()))
+            .expect("BalBuilder thread has terminated unexpectedly");
         self.db.commit(changes)
     }
 }
@@ -136,12 +207,12 @@ impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, uint, U256};
+    use alloy_primitives::{U256, address, b256, uint};
     use revm::{
+        Database, DatabaseCommit,
         database::InMemoryDB,
         primitives::{HashMap, KECCAK_EMPTY},
         state::{Account, AccountInfo, AccountStatus, Bytecode, EvmStorageSlot},
-        Database, DatabaseCommit,
     };
 
     // Helper function to create a simple account

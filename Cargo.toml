@@ -168,8 +168,8 @@ alloy-rlp = { version = "0.3.10", default-features = false, features = [
 ] }
 alloy-eips = { version = "1.0.41", default-features = false }
 alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "307eae2", default-features = false, features = [
-    "serde",
-    "rlp",
+  "serde",
+  "rlp",
 ] }
 alloy-genesis = { version = "1.0.41", default-features = false }
 alloy-rpc-types-debug = "1.0.41"
@@ -203,6 +203,7 @@ tokio-util = "0.7.15"
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.28.0"
 
+crossbeam-channel = "0.5"
 futures = "0.3"
 futures-util = "0.3"
 chrono = "0.4"

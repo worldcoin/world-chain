@@ -3791,6 +3791,7 @@ dependencies = [
  "alloy-signer-local",
  "alloy-sol-types 1.4.1",
  "color-eyre",
+ "crossbeam-channel",
  "dashmap 6.1.0",
  "flashblocks-p2p",
  "flashblocks-primitives",
