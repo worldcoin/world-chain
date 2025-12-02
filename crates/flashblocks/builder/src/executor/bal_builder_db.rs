@@ -18,9 +18,6 @@ use crate::access_list::FlashblockAccessListConstruction;
 /// and commit to the inner database. Between transactions, call
 /// [`BalBuilderDb::set_index`] with the block-local transaction index so changes can be
 /// attributed correctly.
-///
-/// This type intentionally does not implement `DatabaseRef` because
-/// we need mutable access to update the access list during reads.
 #[derive(Debug)]
 pub struct BalBuilderDb<DB> {
     /// The underlying read/write database.
@@ -117,7 +114,7 @@ impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
         account.storage_reads.insert(index);
     }
 
-    /// Applies account/storage changes, comparing against the cached DB to
+    /// Applies account/storage changes, comparing against the dummy DB to
     /// capture only new values in the access list.
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // When we commit new account state we must first load the previous account state. Only
