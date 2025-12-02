@@ -15,8 +15,9 @@ use crate::access_list::FlashblockAccessListConstruction;
 /// Access List during execution.
 ///
 /// Commiting to this DB will both construct the underlying access list
-/// and commit to the inner database. Between transactions, the index
-/// should be updated to reflect the current transaction index within the block.
+/// and commit to the inner database. Between transactions, call
+/// [`BalBuilderDb::set_index`] with the block-local transaction index so changes can be
+/// attributed correctly.
 ///
 /// This type intentionally does not implement `DatabaseRef` because
 /// we need mutable access to update the access list during reads.
@@ -37,21 +38,23 @@ pub struct BalBuilderDb<DB> {
 #[derive(Clone, Debug)]
 struct BalBuilder<DB: DatabaseRef> {
     /// Underlying cached database.
-    db: CacheDB<DB>,
+    db: DB,
     /// The Flashblock Access List under construction.
     access_list: FlashblockAccessListConstruction,
     /// The current index being built
     index: u16,
 }
 
+/// Messages sent to the background builder for recording reads/writes.
 enum BalBuilderMsg {
     StorageRead(Address, StorageKey),
     Commit(HashMap<Address, revm::state::Account>),
     SetIndex(u16),
-    Finish,
 }
 
 impl<DB> BalBuilderDb<DB> {
+    /// Creates a new builder around a writable DB plus a read-only mirror that
+    /// the background thread uses to compare state when deriving changes.
     pub fn new<RODB: DatabaseRef + Send + 'static>(write_db: DB, read_db: RODB) -> Self {
         let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
         let handle = BalBuilder::spawn(read_db, rx);
@@ -63,17 +66,22 @@ impl<DB> BalBuilderDb<DB> {
         }
     }
 
+    /// Updates the current transaction index used to tag future changes.
     pub fn set_index(&mut self, index: u16) {
         let _ = self.tx.send(BalBuilderMsg::SetIndex(index));
     }
 
+    /// Signals the background thread to finish and returns the constructed
+    /// access list.
     pub fn finish(self) -> FlashblockAccessListConstruction {
-        let _ = self.tx.send(BalBuilderMsg::Finish);
+        drop(self.tx);
         self.handle.join().unwrap()
     }
 }
 
 impl<DB: DatabaseRef + Send + 'static> BalBuilder<DB> {
+    /// Spawns a background thread that receives read/write events and builds
+    /// the access list. `db` should probably have a chaching layer for performance reasons
     pub fn spawn(
         db: DB,
         rx: Receiver<BalBuilderMsg>,
@@ -96,21 +104,21 @@ impl<DB: DatabaseRef + Send + 'static> BalBuilder<DB> {
                     BalBuilderMsg::SetIndex(index) => {
                         bal_builder.index = index;
                     }
-                    BalBuilderMsg::Finish => {
-                        return bal_builder.access_list;
-                    }
                 }
             }
 
-            unreachable!();
+            bal_builder.access_list
         })
     }
 
+    /// Records a storage read for the given address and slot.
     fn storage_read(&mut self, address: Address, index: StorageKey) {
         let mut account = self.access_list.changes.entry(address).or_default();
         account.storage_reads.insert(index);
     }
 
+    /// Applies account/storage changes, comparing against the cached DB to
+    /// capture only new values in the access list.
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
@@ -225,38 +233,70 @@ mod tests {
         }
     }
 
+    fn bal_db_with_mirror(db: InMemoryDB) -> BalBuilderDb<InMemoryDB> {
+        let read_db = db.clone();
+        BalBuilderDb::new(db, read_db)
+    }
+
     #[test]
     fn test_new_bal_builder_db() {
         let db = InMemoryDB::default();
-        let bal_db = BalBuilderDb::new(db);
+        let bal_db = bal_db_with_mirror(db);
 
-        assert_eq!(bal_db.index, 0);
-        assert_eq!(bal_db.access_list.changes.len(), 0);
+        let access_list = bal_db.finish();
+        assert!(access_list.changes.is_empty());
     }
 
     #[test]
     fn test_set_index() {
         let db = InMemoryDB::default();
-        let mut bal_db = BalBuilderDb::new(db);
+        let addr = address!("0000000000000000000000000000000000000001");
+        let mut bal_db = bal_db_with_mirror(db);
 
         bal_db.set_index(10);
-        assert_eq!(bal_db.index, 10);
+        let mut changes = HashMap::default();
+        changes.insert(
+            addr,
+            Account {
+                info: create_account(uint!(1_U256), 0, None),
+                status: AccountStatus::Touched,
+                storage: Default::default(),
+                transaction_id: 0,
+            },
+        );
+        bal_db.commit(changes);
 
         bal_db.set_index(20);
-        assert_eq!(bal_db.index, 20);
+        let mut changes = HashMap::default();
+        changes.insert(
+            addr,
+            Account {
+                info: create_account(uint!(2_U256), 0, None),
+                status: AccountStatus::Touched,
+                storage: Default::default(),
+                transaction_id: 1,
+            },
+        );
+        bal_db.commit(changes);
+
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
+        assert_eq!(acc_changes.balance_changes.get(&11), Some(&uint!(1_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&21), Some(&uint!(2_U256)));
     }
 
     #[test]
     fn test_basic_nonexistent_account() {
         let db = InMemoryDB::default();
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         let addr = address!("0000000000000000000000000000000000000001");
 
         let result = bal_db.basic(addr).unwrap();
         assert_eq!(result, None);
 
         // Access list should not have entry for nonexistent account
-        assert!(bal_db.access_list.changes.get(&addr).is_none());
+        let access_list = bal_db.finish();
+        assert!(access_list.changes.get(&addr).is_none());
     }
 
     #[test]
@@ -269,13 +309,14 @@ mod tests {
         // Set up initial storage
         db.insert_account_storage(addr, slot, value).unwrap();
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         let result = bal_db.storage(addr, slot).unwrap();
 
         assert_eq!(result, value);
 
         // Verify storage read was recorded
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         assert!(acc_changes.storage_reads.contains(&slot));
     }
 
@@ -291,12 +332,13 @@ mod tests {
         db.insert_account_storage(addr, slot1, value1).unwrap();
         db.insert_account_storage(addr, slot2, value2).unwrap();
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.storage(addr, slot1).unwrap();
         bal_db.storage(addr, slot2).unwrap();
 
         // Verify both reads were recorded
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         assert!(acc_changes.storage_reads.contains(&slot1));
         assert!(acc_changes.storage_reads.contains(&slot2));
         assert_eq!(acc_changes.storage_reads.len(), 2);
@@ -310,11 +352,8 @@ mod tests {
 
         db.insert_account_info(addr, initial_account.clone());
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
-
-        // First read the account to record initial state
-        bal_db.basic(addr).unwrap();
 
         // Create a change
         let mut changes = HashMap::default();
@@ -329,7 +368,8 @@ mod tests {
         bal_db.commit(changes);
 
         // Verify the change was recorded at index 1 (index + 1)
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(2000_U256)));
     }
 
@@ -341,10 +381,8 @@ mod tests {
 
         db.insert_account_info(addr, initial_account.clone());
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
-
-        bal_db.basic(addr).unwrap();
 
         let mut changes = HashMap::default();
         let new_account = Account {
@@ -357,7 +395,8 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.nonce_changes.get(&1), Some(&6));
     }
 
@@ -369,10 +408,8 @@ mod tests {
 
         db.insert_account_info(addr, initial_account.clone());
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
-
-        bal_db.basic(addr).unwrap();
 
         let new_bytecode = Bytecode::new_raw(vec![0x60, 0x00, 0x60, 0x00].into());
         let mut changes = HashMap::default();
@@ -386,7 +423,8 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.code_changes.get(&1), Some(&new_bytecode));
     }
 
@@ -403,7 +441,7 @@ mod tests {
         db.insert_account_storage(addr, slot, initial_value)
             .unwrap();
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
 
         let mut changes = HashMap::default();
@@ -426,7 +464,8 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         let slot_changes = acc_changes.storage_changes.get(&slot).unwrap();
         assert_eq!(slot_changes.get(&1), Some(&new_value));
     }
@@ -439,10 +478,8 @@ mod tests {
 
         db.insert_account_info(addr, initial_account.clone());
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
-
-        bal_db.basic(addr).unwrap();
 
         // Commit same values (no change)
         let mut changes = HashMap::default();
@@ -455,12 +492,16 @@ mod tests {
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
+
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
+        assert!(acc_changes.is_empty());
     }
 
     #[test]
     fn test_commit_new_account() {
         let db = InMemoryDB::default();
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
 
         let addr = address!("0000000000000000000000000000000000000001");
@@ -477,7 +518,8 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         // New account should record all values at index 1
         assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(1000_U256)));
         assert_eq!(acc_changes.nonce_changes.get(&1), Some(&1));
@@ -492,11 +534,10 @@ mod tests {
 
         db.insert_account_info(addr, initial_account.clone());
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
 
         // Transaction 0
         bal_db.set_index(0);
-        bal_db.basic(addr).unwrap();
 
         let mut changes = HashMap::default();
         changes.insert(
@@ -524,7 +565,8 @@ mod tests {
         );
         bal_db.commit(changes);
 
-        let acc_changes = bal_db.access_list.changes.get(&addr).unwrap();
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
         // Should have initial state and two changes
         assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(900_U256)));
         assert_eq!(acc_changes.balance_changes.get(&2), Some(&uint!(800_U256)));
@@ -548,16 +590,19 @@ mod tests {
             },
         );
 
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         let result = bal_db.code_by_hash(code_hash).unwrap();
 
         assert_eq!(result, bytecode);
+
+        let access_list = bal_db.finish();
+        assert!(access_list.changes.is_empty());
     }
 
     #[test]
     fn test_block_hash() {
         let db = InMemoryDB::default();
-        let mut bal_db = BalBuilderDb::new(db);
+        let mut bal_db = bal_db_with_mirror(db);
         let block_num = 0u64;
 
         // InMemoryDB computes block hash from block number
@@ -568,5 +613,8 @@ mod tests {
             result,
             b256!("0000000000000000000000000000000000000000000000000000000000000000")
         );
+
+        let access_list = bal_db.finish();
+        assert!(access_list.changes.is_empty());
     }
 }
