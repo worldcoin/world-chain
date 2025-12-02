@@ -4,7 +4,7 @@ use alloy_primitives::FixedBytes;
 use reth_evm::block::BlockExecutionError;
 
 pub mod bal_builder;
-pub mod bal_db;
+pub mod bal_builder_db;
 pub mod bal_executor;
 pub mod bundle_db;
 pub mod factory;
