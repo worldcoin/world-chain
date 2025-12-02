@@ -435,7 +435,7 @@ where
                     best_txns.guard(),
                     gas_limit,
                 )?
-                .is_none()
+                .is_some()
             {
                 warn!(target: "flashblocks::payload_builder", "payload build cancelled");
                 if let Some(best_payload) = committed_payload {
