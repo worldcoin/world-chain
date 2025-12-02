@@ -138,31 +138,31 @@ impl<DB: DatabaseRef + Send + Sync + 'static> BalBuilder<DB> {
                         if previous.balance != account.info.balance {
                             acc_changes
                                 .balance_changes
-                                .insert(self.index + 1, account.info.balance);
+                                .insert(self.index, account.info.balance);
                         }
                         if previous.nonce != account.info.nonce {
                             acc_changes
                                 .nonce_changes
-                                .insert(self.index + 1, account.info.nonce);
+                                .insert(self.index, account.info.nonce);
                         }
                         if previous.code_hash != account.info.code_hash {
                             let bytecode = account.info.code.clone().unwrap_or_else(|| {
                                 self.db.code_by_hash_ref(account.info.code_hash).unwrap()
                             });
-                            acc_changes.code_changes.insert(self.index + 1, bytecode);
+                            acc_changes.code_changes.insert(self.index, bytecode);
                         }
                     }
                     None => {
                         acc_changes
                             .balance_changes
-                            .insert(self.index + 1, account.info.balance);
+                            .insert(self.index, account.info.balance);
                         acc_changes
                             .nonce_changes
-                            .insert(self.index + 1, account.info.nonce);
+                            .insert(self.index, account.info.nonce);
                         let bytecode = account.info.code.clone().unwrap_or_else(|| {
                             self.db.code_by_hash_ref(account.info.code_hash).unwrap()
                         });
-                        acc_changes.code_changes.insert(self.index + 1, bytecode);
+                        acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
 
@@ -173,7 +173,7 @@ impl<DB: DatabaseRef + Send + Sync + 'static> BalBuilder<DB> {
                             .storage_changes
                             .entry(key)
                             .or_default()
-                            .insert(self.index + 1, value.present_value);
+                            .insert(self.index, value.present_value);
                     }
                 });
             });
@@ -285,8 +285,8 @@ mod tests {
 
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
-        assert_eq!(acc_changes.balance_changes.get(&11), Some(&uint!(1_U256)));
-        assert_eq!(acc_changes.balance_changes.get(&21), Some(&uint!(2_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&10), Some(&uint!(1_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&20), Some(&uint!(2_U256)));
     }
 
     #[test]
@@ -371,10 +371,10 @@ mod tests {
 
         bal_db.commit(changes);
 
-        // Verify the change was recorded at index 1 (index + 1)
+        // Verify the change was recorded at the current index
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
-        assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(2000_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(2000_U256)));
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod tests {
 
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
-        assert_eq!(acc_changes.nonce_changes.get(&1), Some(&6));
+        assert_eq!(acc_changes.nonce_changes.get(&0), Some(&6));
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
 
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
-        assert_eq!(acc_changes.code_changes.get(&1), Some(&new_bytecode));
+        assert_eq!(acc_changes.code_changes.get(&0), Some(&new_bytecode));
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod tests {
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
         let slot_changes = acc_changes.storage_changes.get(&slot).unwrap();
-        assert_eq!(slot_changes.get(&1), Some(&new_value));
+        assert_eq!(slot_changes.get(&0), Some(&new_value));
     }
 
     #[test]
@@ -524,10 +524,10 @@ mod tests {
 
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
-        // New account should record all values at index 1
-        assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(1000_U256)));
-        assert_eq!(acc_changes.nonce_changes.get(&1), Some(&1));
-        assert_eq!(acc_changes.code_changes.get(&1), Some(&bytecode));
+        // New account should record all values at the current index
+        assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(1000_U256)));
+        assert_eq!(acc_changes.nonce_changes.get(&0), Some(&1));
+        assert_eq!(acc_changes.code_changes.get(&0), Some(&bytecode));
     }
 
     #[test]
@@ -572,8 +572,8 @@ mod tests {
         let access_list = bal_db.finish();
         let acc_changes = access_list.changes.get(&addr).unwrap();
         // Should have initial state and two changes
-        assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(900_U256)));
-        assert_eq!(acc_changes.balance_changes.get(&2), Some(&uint!(800_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(900_U256)));
+        assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(800_U256)));
     }
 
     #[test]
