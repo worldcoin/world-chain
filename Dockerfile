@@ -64,10 +64,9 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   /tmp/aws/install && \
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Install s5cmd
-RUN curl -L "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_linux_amd64.deb" -o "/tmp/s5cmd.deb" && \
-  dpkg -i /tmp/s5cmd.deb && \
-  rm /tmp/s5cmd.deb
+# Install s3fcp
+RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.1.4/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
+  chmod +x /usr/local/bin/s3fcp
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 
