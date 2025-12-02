@@ -25,7 +25,7 @@ pub struct BalBuilderDb<DB> {
     /// The sender to the builder thread.
     tx: Sender<BalBuilderMsg>,
     /// Join hande for the builder thread
-    handle: JoinHandle<FlashblockAccessListConstruction>,
+    handle: JoinHandle<eyre::Result<FlashblockAccessListConstruction>>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,7 +49,7 @@ impl<DB> BalBuilderDb<DB> {
     /// Creates a new builder around a writable DB plus a dummy mirror that
     /// the background thread uses to compare state when deriving changes. The dummy will
     /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB: DatabaseRef + DatabaseCommit + Send + Sync + 'static>(
+    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync + 'static>(
         db: DB,
         dummy_db: DDB,
     ) -> Self {
@@ -66,19 +66,24 @@ impl<DB> BalBuilderDb<DB> {
 
     /// Signals the background thread to finish and returns the constructed
     /// access list.
-    pub fn finish(self) -> FlashblockAccessListConstruction {
+    pub fn finish(self) -> eyre::Result<FlashblockAccessListConstruction> {
         drop(self.tx);
+        // unwrap should be safe here since builder thread can't panic
         self.handle.join().unwrap()
     }
 }
 
-impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
+impl<DB> BalBuilder<DB>
+where
+    DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static,
+    DB::Error: Send + Sync + 'static,
+{
     /// Spawns a background thread that receives read/write events and builds
     /// the access list. `db` should probably have a chaching layer for performance reasons
     pub fn spawn(
         db: DB,
         rx: Receiver<BalBuilderMsg>,
-    ) -> JoinHandle<FlashblockAccessListConstruction> {
+    ) -> JoinHandle<eyre::Result<FlashblockAccessListConstruction>> {
         std::thread::spawn(move || {
             let mut bal_builder = BalBuilder {
                 db,
@@ -92,7 +97,7 @@ impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
                         bal_builder.storage_read(address, index);
                     }
                     BalBuilderMsg::Commit(changes) => {
-                        bal_builder.commit(changes);
+                        bal_builder.commit(changes)?;
                     }
                     BalBuilderMsg::SetIndex(index) => {
                         bal_builder.index = index;
@@ -100,7 +105,7 @@ impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
                 }
             }
 
-            bal_builder.access_list
+            Ok(bal_builder.access_list)
         })
     }
 
@@ -112,62 +117,72 @@ impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
 
     /// Applies account/storage changes, comparing against the dummy DB to
     /// capture only new values in the access list.
-    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) -> Result<(), DB::Error> {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
-        changes.iter().par_bridge().for_each(|(address, account)| {
-            let mut acc_changes = self.access_list.changes.entry(*address).or_default();
+        changes
+            .iter()
+            .par_bridge()
+            .try_for_each(|(address, account)| {
+                let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
-            // There is an edge case here where we could change an account, then change it
-            // back. This would result in appending a value to the access list that isn't strctly
-            // required. For this reason we should dedup consecutive identical entries when
-            // finalizing the access list.
-            match self.db.basic_ref(*address).unwrap() {
-                Some(previous) => {
-                    if previous.balance != account.info.balance {
+                // There is an edge case here where we could change an account, then change it
+                // back. This would result in appending a value to the access list that isn't strctly
+                // required. For this reason we should dedup consecutive identical entries when
+                // finalizing the access list.
+                match self.db.basic_ref(*address)? {
+                    Some(previous) => {
+                        if previous.balance != account.info.balance {
+                            acc_changes
+                                .balance_changes
+                                .insert(self.index, account.info.balance);
+                        }
+                        if previous.nonce != account.info.nonce {
+                            acc_changes
+                                .nonce_changes
+                                .insert(self.index, account.info.nonce);
+                        }
+                        if previous.code_hash != account.info.code_hash {
+                            let bytecode = match account.info.code.clone() {
+                                Some(code) => code,
+                                None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                            };
+                            acc_changes.code_changes.insert(self.index, bytecode);
+                        }
+                    }
+                    None => {
                         acc_changes
                             .balance_changes
                             .insert(self.index, account.info.balance);
-                    }
-                    if previous.nonce != account.info.nonce {
                         acc_changes
                             .nonce_changes
                             .insert(self.index, account.info.nonce);
-                    }
-                    if previous.code_hash != account.info.code_hash {
-                        let bytecode = account.info.code.clone().unwrap_or_else(|| {
-                            self.db.code_by_hash_ref(account.info.code_hash).unwrap()
-                        });
+                        let bytecode = match account.info.code.clone() {
+                            Some(code) => code,
+                            None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                        };
                         acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
-                None => {
-                    acc_changes
-                        .balance_changes
-                        .insert(self.index, account.info.balance);
-                    acc_changes
-                        .nonce_changes
-                        .insert(self.index, account.info.nonce);
-                    let bytecode = account.info.code.clone().unwrap_or_else(|| {
-                        self.db.code_by_hash_ref(account.info.code_hash).unwrap()
-                    });
-                    acc_changes.code_changes.insert(self.index, bytecode);
-                }
-            }
 
-            account.storage.iter().for_each(|(key, value)| {
-                let previous_value = self.db.storage_ref(*address, *key).unwrap();
-                if previous_value != value.present_value {
-                    acc_changes
-                        .storage_changes
-                        .entry(*key)
-                        .or_default()
-                        .insert(self.index, value.present_value);
-                }
-            });
-        });
+                account.storage.iter().try_for_each(|(key, value)| {
+                    let previous_value = self.db.storage_ref(*address, *key)?;
+                    if previous_value != value.present_value {
+                        acc_changes
+                            .storage_changes
+                            .entry(*key)
+                            .or_default()
+                            .insert(self.index, value.present_value);
+                    }
+                    Result::<(), DB::Error>::Ok(())
+                })?;
 
-        self.db.commit(changes)
+                Ok(())
+            })?;
+
+        self.db.commit(changes);
+
+        Ok(())
     }
 }
 
@@ -234,16 +249,18 @@ mod tests {
     }
 
     #[test]
-    fn test_new_bal_builder_db() {
+    fn test_new_bal_builder_db() -> eyre::Result<()> {
         let db = InMemoryDB::default();
         let bal_db = bal_db_with_mirror(db);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         assert!(access_list.changes.is_empty());
+
+        Ok(())
     }
 
     #[test]
-    fn test_set_index() {
+    fn test_set_index() -> eyre::Result<()> {
         let db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let mut bal_db = bal_db_with_mirror(db);
@@ -274,14 +291,16 @@ mod tests {
         );
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.balance_changes.get(&10), Some(&uint!(1_U256)));
         assert_eq!(acc_changes.balance_changes.get(&20), Some(&uint!(2_U256)));
+
+        Ok(())
     }
 
     #[test]
-    fn test_basic_nonexistent_account() {
+    fn test_basic_nonexistent_account() -> eyre::Result<()> {
         let db = InMemoryDB::default();
         let mut bal_db = bal_db_with_mirror(db);
         let addr = address!("0000000000000000000000000000000000000001");
@@ -290,12 +309,14 @@ mod tests {
         assert_eq!(result, None);
 
         // Access list should not have entry for nonexistent account
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         assert!(access_list.changes.get(&addr).is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn test_storage_records_reads() {
+    fn test_storage_records_reads() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let slot = U256::from(1);
@@ -310,13 +331,15 @@ mod tests {
         assert_eq!(result, value);
 
         // Verify storage read was recorded
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert!(acc_changes.storage_reads.contains(&slot));
+
+        Ok(())
     }
 
     #[test]
-    fn test_storage_multiple_reads() {
+    fn test_storage_multiple_reads() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let slot1 = U256::from(1);
@@ -332,15 +355,17 @@ mod tests {
         bal_db.storage(addr, slot2).unwrap();
 
         // Verify both reads were recorded
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert!(acc_changes.storage_reads.contains(&slot1));
         assert!(acc_changes.storage_reads.contains(&slot2));
         assert_eq!(acc_changes.storage_reads.len(), 2);
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_balance_change() {
+    fn test_commit_balance_change() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 5, None);
@@ -363,13 +388,15 @@ mod tests {
         bal_db.commit(changes);
 
         // Verify the change was recorded at the current index
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(2000_U256)));
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_nonce_change() {
+    fn test_commit_nonce_change() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 5, None);
@@ -390,13 +417,15 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.nonce_changes.get(&0), Some(&6));
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_code_change() {
+    fn test_commit_code_change() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 5, None);
@@ -418,13 +447,15 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.code_changes.get(&0), Some(&new_bytecode));
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_storage_change() {
+    fn test_commit_storage_change() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let slot = U256::from(1);
@@ -459,14 +490,16 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         let slot_changes = acc_changes.storage_changes.get(&slot).unwrap();
         assert_eq!(slot_changes.get(&0), Some(&new_value));
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_no_change_not_recorded() {
+    fn test_commit_no_change_not_recorded() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 5, None);
@@ -488,13 +521,15 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert!(acc_changes.is_empty());
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_updates_dummy_database() {
+    fn test_commit_updates_dummy_database() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 0, None);
@@ -529,15 +564,17 @@ mod tests {
         );
         bal_db.commit(repeat_changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         assert_eq!(acc_changes.balance_changes.len(), 1);
         assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(1500_U256)));
         assert!(!acc_changes.balance_changes.contains_key(&1));
+
+        Ok(())
     }
 
     #[test]
-    fn test_commit_new_account() {
+    fn test_commit_new_account() -> eyre::Result<()> {
         let db = InMemoryDB::default();
         let mut bal_db = bal_db_with_mirror(db);
         bal_db.set_index(0);
@@ -556,16 +593,18 @@ mod tests {
 
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         // New account should record all values at the current index
         assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(1000_U256)));
         assert_eq!(acc_changes.nonce_changes.get(&0), Some(&1));
         assert_eq!(acc_changes.code_changes.get(&0), Some(&bytecode));
+
+        Ok(())
     }
 
     #[test]
-    fn test_multiple_transactions() {
+    fn test_multiple_transactions() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let initial_account = create_account(uint!(1000_U256), 5, None);
@@ -603,15 +642,17 @@ mod tests {
         );
         bal_db.commit(changes);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         let acc_changes = access_list.changes.get(&addr).unwrap();
         // Should have initial state and two changes
         assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(900_U256)));
         assert_eq!(acc_changes.balance_changes.get(&1), Some(&uint!(800_U256)));
+
+        Ok(())
     }
 
     #[test]
-    fn test_code_by_hash() {
+    fn test_code_by_hash() -> eyre::Result<()> {
         let mut db = InMemoryDB::default();
         let addr = address!("0000000000000000000000000000000000000001");
         let bytecode = Bytecode::new_raw(vec![0x60, 0x00, 0x60, 0x00].into());
@@ -633,12 +674,14 @@ mod tests {
 
         assert_eq!(result, bytecode);
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         assert!(access_list.changes.is_empty());
+
+        Ok(())
     }
 
     #[test]
-    fn test_block_hash() {
+    fn test_block_hash() -> eyre::Result<()> {
         let db = InMemoryDB::default();
         let mut bal_db = bal_db_with_mirror(db);
         let block_num = 0u64;
@@ -652,7 +695,9 @@ mod tests {
             b256!("0000000000000000000000000000000000000000000000000000000000000000")
         );
 
-        let access_list = bal_db.finish();
+        let access_list = bal_db.finish()?;
         assert!(access_list.changes.is_empty());
+
+        Ok(())
     }
 }
