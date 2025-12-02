@@ -202,9 +202,11 @@ impl<DB: Database> Database for BalBuilderDb<DB> {
         address: Address,
         index: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
+        // Ignore errors from the builder channel.
+        // relevent errors will be propagated through `finish()`.
         self.tx
             .send(BalBuilderMsg::StorageRead(address, index))
-            .expect("BalBuilder thread has terminated unexpectedly");
+            .ok();
         self.db.storage(address, index)
     }
 
@@ -215,9 +217,9 @@ impl<DB: Database> Database for BalBuilderDb<DB> {
 
 impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
-        self.tx
-            .send(BalBuilderMsg::Commit(changes.clone()))
-            .expect("BalBuilder thread has terminated unexpectedly");
+        // Ignore errors from the builder channel.
+        // relevent errors will be propagated through `finish()`.
+        self.tx.send(BalBuilderMsg::Commit(changes.clone())).ok();
         self.db.commit(changes)
     }
 }
