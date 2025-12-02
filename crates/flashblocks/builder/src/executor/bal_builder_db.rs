@@ -53,17 +53,17 @@ enum BalBuilderMsg {
 }
 
 impl<DB> BalBuilderDb<DB> {
-    /// Creates a new builder around a writable DB plus a read-only mirror that
-    /// the background thread uses to compare state when deriving changes.
-    pub fn new<RODB: DatabaseRef + Send + Sync + 'static>(write_db: DB, read_db: RODB) -> Self {
+    /// Creates a new builder around a writable DB plus a dummy mirror that
+    /// the background thread uses to compare state when deriving changes. The dummy will
+    /// be commited to so the caller should likely wrap in a caching layer.
+    pub fn new<DDB: DatabaseRef + DatabaseCommit + Send + Sync + 'static>(
+        db: DB,
+        dummy_db: DDB,
+    ) -> Self {
         let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
-        let handle = BalBuilder::spawn(read_db, rx);
+        let handle = BalBuilder::spawn(dummy_db, rx);
 
-        Self {
-            db: write_db,
-            tx,
-            handle,
-        }
+        Self { db, tx, handle }
     }
 
     /// Updates the current transaction index used to tag future changes.
@@ -79,7 +79,7 @@ impl<DB> BalBuilderDb<DB> {
     }
 }
 
-impl<DB: DatabaseRef + Send + Sync + 'static> BalBuilder<DB> {
+impl<DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static> BalBuilder<DB> {
     /// Spawns a background thread that receives read/write events and builds
     /// the access list. `db` should probably have a chaching layer for performance reasons
     pub fn spawn(
@@ -122,60 +122,59 @@ impl<DB: DatabaseRef + Send + Sync + 'static> BalBuilder<DB> {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
-        changes
-            .into_iter()
-            .par_bridge()
-            .for_each(|(address, account)| {
-                let mut acc_changes = self.access_list.changes.entry(address).or_default();
+        changes.iter().par_bridge().for_each(|(address, account)| {
+            let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
-                // There is an edge case here where we could change an account, then change it
-                // back. This would result in appending a value to the access list that isn't strctly
-                // required. For this reason we should dedup consecutive identical entries when
-                // finalizing the access list.
-                match self.db.basic_ref(address).unwrap() {
-                    Some(previous) => {
-                        if previous.balance != account.info.balance {
-                            acc_changes
-                                .balance_changes
-                                .insert(self.index, account.info.balance);
-                        }
-                        if previous.nonce != account.info.nonce {
-                            acc_changes
-                                .nonce_changes
-                                .insert(self.index, account.info.nonce);
-                        }
-                        if previous.code_hash != account.info.code_hash {
-                            let bytecode = account.info.code.clone().unwrap_or_else(|| {
-                                self.db.code_by_hash_ref(account.info.code_hash).unwrap()
-                            });
-                            acc_changes.code_changes.insert(self.index, bytecode);
-                        }
-                    }
-                    None => {
+            // There is an edge case here where we could change an account, then change it
+            // back. This would result in appending a value to the access list that isn't strctly
+            // required. For this reason we should dedup consecutive identical entries when
+            // finalizing the access list.
+            match self.db.basic_ref(*address).unwrap() {
+                Some(previous) => {
+                    if previous.balance != account.info.balance {
                         acc_changes
                             .balance_changes
                             .insert(self.index, account.info.balance);
+                    }
+                    if previous.nonce != account.info.nonce {
                         acc_changes
                             .nonce_changes
                             .insert(self.index, account.info.nonce);
+                    }
+                    if previous.code_hash != account.info.code_hash {
                         let bytecode = account.info.code.clone().unwrap_or_else(|| {
                             self.db.code_by_hash_ref(account.info.code_hash).unwrap()
                         });
                         acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
+                None => {
+                    acc_changes
+                        .balance_changes
+                        .insert(self.index, account.info.balance);
+                    acc_changes
+                        .nonce_changes
+                        .insert(self.index, account.info.nonce);
+                    let bytecode = account.info.code.clone().unwrap_or_else(|| {
+                        self.db.code_by_hash_ref(account.info.code_hash).unwrap()
+                    });
+                    acc_changes.code_changes.insert(self.index, bytecode);
+                }
+            }
 
-                account.storage.into_iter().for_each(|(key, value)| {
-                    let previous_value = self.db.storage_ref(address, key).unwrap();
-                    if previous_value != value.present_value {
-                        acc_changes
-                            .storage_changes
-                            .entry(key)
-                            .or_default()
-                            .insert(self.index, value.present_value);
-                    }
-                });
+            account.storage.iter().for_each(|(key, value)| {
+                let previous_value = self.db.storage_ref(*address, *key).unwrap();
+                if previous_value != value.present_value {
+                    acc_changes
+                        .storage_changes
+                        .entry(*key)
+                        .or_default()
+                        .insert(self.index, value.present_value);
+                }
             });
+        });
+
+        self.db.commit(changes)
     }
 }
 
