@@ -498,6 +498,49 @@ mod tests {
     }
 
     #[test]
+    fn test_commit_updates_dummy_database() {
+        let mut db = InMemoryDB::default();
+        let addr = address!("0000000000000000000000000000000000000001");
+        let initial_account = create_account(uint!(1000_U256), 0, None);
+        db.insert_account_info(addr, initial_account);
+
+        let mut bal_db = bal_db_with_mirror(db);
+
+        bal_db.set_index(0);
+        let mut changes = HashMap::default();
+        changes.insert(
+            addr,
+            Account {
+                info: create_account(uint!(1500_U256), 0, None),
+                status: AccountStatus::Touched,
+                storage: Default::default(),
+                transaction_id: 0,
+            },
+        );
+        bal_db.commit(changes);
+
+        // If the dummy DB is committed, the following identical commit should not create a new entry.
+        bal_db.set_index(1);
+        let mut repeat_changes = HashMap::default();
+        repeat_changes.insert(
+            addr,
+            Account {
+                info: create_account(uint!(1500_U256), 0, None),
+                status: AccountStatus::Touched,
+                storage: Default::default(),
+                transaction_id: 1,
+            },
+        );
+        bal_db.commit(repeat_changes);
+
+        let access_list = bal_db.finish();
+        let acc_changes = access_list.changes.get(&addr).unwrap();
+        assert_eq!(acc_changes.balance_changes.len(), 1);
+        assert_eq!(acc_changes.balance_changes.get(&0), Some(&uint!(1500_U256)));
+        assert!(!acc_changes.balance_changes.contains_key(&1));
+    }
+
+    #[test]
     fn test_commit_new_account() {
         let db = InMemoryDB::default();
         let mut bal_db = bal_db_with_mirror(db);
