@@ -6,7 +6,7 @@ RUN cargo install sccache --version ^0.9
 RUN cargo install cargo-chef --version ^0.1
 
 RUN apt-get update \
-    && apt-get install -y clang libclang-dev gcc
+  && apt-get install -y clang libclang-dev gcc
 
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTC_WRAPPER=sccache
@@ -18,9 +18,9 @@ WORKDIR /app
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef prepare --recipe-path recipe.json
+  --mount=type=cache,target=/usr/local/cargo/git \
+  --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+  cargo chef prepare --recipe-path recipe.json
 
 FROM base AS builder
 WORKDIR /app
@@ -31,14 +31,14 @@ ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
+  cargo chef cook --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
 
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
+  --mount=type=cache,target=/usr/local/cargo/git \
+  --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+  cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
 FROM debian:bookworm-slim
@@ -46,23 +46,28 @@ WORKDIR /app
 
 # Install wget in the final image
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        unzip \
-        curl \
-        lz4 \
-        wget \
-        jq \
-        netcat-traditional \
-        tzdata && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+  apt-get install -y --no-install-recommends \
+  ca-certificates \
+  unzip \
+  curl \
+  lz4 \
+  wget \
+  jq \
+  netcat-traditional \
+  tzdata && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
 
 # Install AWS CLI v2
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
-    unzip /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+  unzip /tmp/awscliv2.zip -d /tmp && \
+  /tmp/aws/install && \
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# Install s5cmd
+RUN curl -L "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_linux_amd64.deb" -o "/tmp/s5cmd.deb" && \
+  dpkg -i /tmp/s5cmd.deb && \
+  rm /tmp/s5cmd.deb
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 
