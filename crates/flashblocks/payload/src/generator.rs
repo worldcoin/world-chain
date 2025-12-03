@@ -339,9 +339,10 @@ where
                 flashblock.flashblock().metadata.fees,
                 None,
             );
+
             return Ok(Some((
                 payload,
-                flashblock.flashblock().index,
+                flashblock.flashblock().index + 1,
                 flashblock
                     .diff()
                     .access_list_data
