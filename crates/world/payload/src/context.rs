@@ -292,7 +292,7 @@ where
 
             // check if the job was cancelled, if so we can exit early
             if self.inner.cancel.is_cancelled() {
-                return Ok(None);
+                return Ok(Some(()));
             }
 
             // If the transaction is verified, check if it can be added within the verified gas limit
@@ -377,7 +377,7 @@ where
             pool.remove_transactions(invalid_txs);
         }
 
-        Ok(Some(()))
+        Ok(None)
     }
 }
 

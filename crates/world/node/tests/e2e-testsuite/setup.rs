@@ -397,7 +397,7 @@ pub(crate) fn build_payload_attributes(
         no_tx_pool: Some(false),
         eip_1559_params: Some(eip1559_params),
         gas_limit: Some(30_000_000),
-        min_base_fee: None,
+        min_base_fee: Some(0),
     }
 }
 

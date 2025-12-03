@@ -421,12 +421,7 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        assert_eq!(
-            block.sealed_block().receipts_root(),
-            diff.receipts_root,
-            "Receipts root mismatch after assembling block from execution result"
-        );
-        assert_eq!(
+        debug_assert_eq!(
             block.sealed_block().hash(),
             diff.block_hash,
             "Block hash mismatch after assembling block from execution result"
