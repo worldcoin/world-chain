@@ -238,10 +238,8 @@ where
             ));
         }
 
-        if let Some(a) = authorization {
-            self.to_jobs_generator
-                .as_ref()
-                .map(|to_jobs_gen| to_jobs_gen.send_modify(|b| *b = Some(a)));
+        if let (Some(a), Some(to_jobs_gen)) = (authorization, self.to_jobs_generator.as_ref()) {
+            to_jobs_gen.send_modify(|b| *b = Some(a))
         }
 
         self.fork_choice_updated_v3(fork_choice_state, payload_attributes)

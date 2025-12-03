@@ -7,7 +7,7 @@ use crate::{
     config::WorldChainNodeConfig,
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
-        WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
+        WorldChainPoolBuilder,
     },
 };
 use ed25519_dalek::VerifyingKey;
@@ -21,14 +21,14 @@ use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
+    components::{ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
     NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder,
-    OpExecutorBuilder, OpNetworkBuilder,
+    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder,
+    OpNetworkBuilder,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
@@ -315,11 +315,11 @@ pub struct FlashblocksComponentsContext {
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let components_context = if let Some(_flashblocks_args) = &value.args.flashblocks {
-            Some(value.clone().into())
-        } else {
-            None
-        };
+        let components_context = value
+            .args
+            .flashblocks
+            .as_ref()
+            .map(|_flashblocks_args| value.clone().into());
         Self {
             config: value,
             components_context,
