@@ -468,8 +468,10 @@ where
         }
 
         if this.recommit_interval.poll_tick(cx).is_ready() && !this.best_payload.0.is_frozen() {
-            trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
-            this.spawn_build_job();
+            if this.pending_block.is_none() {
+                trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
+                this.spawn_build_job();
+            }
         }
 
         let network_handle = this.p2p_handler.clone();
