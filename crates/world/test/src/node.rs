@@ -69,13 +69,14 @@ use world_chain_node::{
 };
 
 pub fn test_config() -> WorldChainNodeConfig {
-    test_config_with_peers_and_gossip(None, false)
+    test_config_with_peers_and_gossip(None, false, true)
 }
 
 /// Creates a test config with optional transaction propagation peers and gossip control
 pub fn test_config_with_peers_and_gossip(
     tx_peers: Option<Vec<PeerId>>,
     disable_txpool_gossip: bool,
+    flashblocks_enabled: bool,
 ) -> WorldChainNodeConfig {
     use reth_optimism_node::args::RollupArgs;
 
@@ -91,13 +92,17 @@ pub fn test_config_with_peers_and_gossip(
         world_id: DEV_WORLD_ID,
     };
 
-    let flashblocks = FlashblocksArgs {
-        enabled: true,
-        spoof_authorizer: false,
-        authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
-        builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
-        recommit_interval: 50,
-        flashblocks_interval: 200,
+    let flashblocks = if flashblocks_enabled {
+        Some(FlashblocksArgs {
+            enabled: true,
+            spoof_authorizer: false,
+            authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+            builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
+            recommit_interval: 50,
+            flashblocks_interval: 200,
+        })
+    } else {
+        None
     };
 
     let rollup = RollupArgs {
@@ -110,7 +115,7 @@ pub fn test_config_with_peers_and_gossip(
             rollup,
             builder,
             pbh,
-            flashblocks: Some(flashblocks),
+            flashblocks,
             tx_peers,
         },
         builder_config: OpBuilderConfig::default(),
