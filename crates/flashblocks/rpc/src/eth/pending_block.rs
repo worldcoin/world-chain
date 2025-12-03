@@ -41,23 +41,25 @@ where
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
         // check the pending block from the executor
-        let pending_block = self.pending_block.borrow().clone();
+        if let Some(pending_block) = self.pending_block.as_ref() {
+            let pending_block = pending_block.borrow().clone();
 
-        if let Some(pending_block) = pending_block {
-            let block = pending_block.recovered_block;
-            let receipts = pending_block
-                .execution_output
-                .receipts
-                .clone()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>(); // always a single block executed through the state executor
+            if let Some(pending_block) = pending_block {
+                let block = pending_block.recovered_block;
+                let receipts = pending_block
+                    .execution_output
+                    .receipts
+                    .clone()
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>(); // always a single block executed through the state executor
 
-            let block_and_receipts = BlockAndReceipts {
-                block,
-                receipts: receipts.into(),
-            };
-            return Ok(Some(block_and_receipts));
+                let block_and_receipts = BlockAndReceipts {
+                    block,
+                    receipts: receipts.into(),
+                };
+                return Ok(Some(block_and_receipts));
+            }
         }
 
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>

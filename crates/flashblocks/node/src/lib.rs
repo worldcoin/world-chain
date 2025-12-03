@@ -214,8 +214,10 @@ where
             disable_discovery_v4: !discovery_v4,
         };
 
-        let fb_network_builder =
-            FlashblocksNetworkBuilder::new(op_network_builder, self.flashblocks_handle.clone());
+        let fb_network_builder = FlashblocksNetworkBuilder::new(
+            op_network_builder,
+            Some(self.flashblocks_handle.clone()),
+        );
 
         ComponentsBuilder::default()
             .node_types::<N>()
@@ -231,12 +233,12 @@ where
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     OpPayloadBuilderCtxBuilder,
-                    self.flashblocks_state.clone(),
+                    Some(self.flashblocks_state.clone()),
                     self.builder_config.clone(),
                 ),
-                self.flashblocks_handle.clone(),
-                self.flashblocks_state.clone(),
-                self.to_jobs_generator.clone().subscribe(),
+                Some(self.flashblocks_handle.clone()),
+                Some(self.flashblocks_state.clone()),
+                Some(self.to_jobs_generator.clone().subscribe()),
                 Duration::from_millis(self.flashblocks.flashblocks_interval),
                 Duration::from_millis(self.flashblocks.recommit_interval),
             ))
@@ -248,15 +250,15 @@ where
         let engine_api_builder = FlashblocksEngineApiBuilder {
             engine_validator_builder: Default::default(),
             flashblocks_handle: Some(self.flashblocks_handle.clone()),
-            to_jobs_generator: self.to_jobs_generator.clone(),
-            authorizer_vk: self.authorizer_vk,
+            to_jobs_generator: Some(self.to_jobs_generator.clone()),
+            authorizer_vk: Some(self.authorizer_vk),
         };
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.rollup.sequencer.clone());
 
         let flashblocks_eth_api_builder = FlashblocksEthApiBuilder::new(
             op_eth_api_builder,
-            self.flashblocks_state.pending_block(),
+            Some(self.flashblocks_state.pending_block()),
         );
 
         let rpc_add_ons = RpcAddOns::new(
