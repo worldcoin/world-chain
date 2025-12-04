@@ -1,4 +1,4 @@
-FROM rust:1.91.1-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.91.1-bookworm AS base
 
 ARG FEATURES
 
@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
-FROM debian:bookworm-slim
+FROM public.ecr.aws/docker/library/debian:bookworm-slim
 WORKDIR /app
 
 # Install wget in the final image
