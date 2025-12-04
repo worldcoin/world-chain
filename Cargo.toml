@@ -114,6 +114,7 @@ reth-rpc-engine-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77d
 reth-network = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-network-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-network-peers = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+
 # reth-optimism
 reth-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-optimism-evm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
