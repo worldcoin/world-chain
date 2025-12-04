@@ -167,20 +167,20 @@ where
 #[derive(Debug, Clone)]
 pub struct FlashblocksBlockExecutorFactory {
     inner: OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-    pre_state: Option<BundleState>,
+    pre_state: Arc<RwLock<Option<BundleState>>>,
 }
 
 impl FlashblocksBlockExecutorFactory {
     /// Creates a new [`OpBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
     /// [`OpReceiptBuilder`].
-    pub const fn new(
+    pub fn new(
         receipt_builder: OpRethReceiptBuilder,
         spec: OpChainSpec,
         evm_factory: OpEvmFactory,
     ) -> Self {
         Self {
             inner: OpBlockExecutorFactory::new(receipt_builder, spec, evm_factory),
-            pre_state: None,
+            pre_state: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -194,13 +194,13 @@ impl FlashblocksBlockExecutorFactory {
         self.inner.evm_factory()
     }
 
-    pub const fn take_bundle(&mut self) -> Option<BundleState> {
-        self.pre_state.take()
+    pub fn take_bundle(&mut self) -> Option<BundleState> {
+        self.pre_state.write().take()
     }
 
     /// Sets the pre-state for the block executor factory.
     pub fn set_pre_state(&mut self, pre_state: BundleState) {
-        self.pre_state = Some(pre_state);
+        *self.pre_state.write() = Some(pre_state);
     }
 }
 
@@ -223,14 +223,14 @@ impl BlockExecutorFactory for FlashblocksBlockExecutorFactory {
         DB: Database + 'a,
         I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
-        if let Some(pre_state) = &self.pre_state {
+        if let Some(pre_state) = self.pre_state.write().take() {
             return FlashblocksBlockExecutor::new(
                 evm,
                 ctx,
                 self.spec().clone(),
                 OpRethReceiptBuilder::default(),
             )
-            .with_bundle_prestate(pre_state.clone()); // TODO: Terrible clone here
+            .with_bundle_prestate(pre_state);
         }
 
         FlashblocksBlockExecutor::new(
