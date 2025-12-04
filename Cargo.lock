@@ -3876,6 +3876,8 @@ dependencies = [
  "tracing",
  "tracing-test",
  "url",
+ "world-chain-node",
+ "world-chain-test",
 ]
 
 [[package]]

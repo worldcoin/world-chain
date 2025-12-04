@@ -79,3 +79,5 @@ flashblocks-p2p = { workspace = true, features = ["test-utils"] }
 reth-e2e-test-utils.workspace = true
 tracing-test.workspace = true
 tempfile.workspace = true
+world-chain-node.workspace = true
+world-chain-test.workspace = true
