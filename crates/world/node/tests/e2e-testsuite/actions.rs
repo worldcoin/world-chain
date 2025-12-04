@@ -673,19 +673,36 @@ impl Action<OpEngineTypes> for EthGetTransactionReceipt {
         Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(self.backoff)).await;
 
+            // Retry configuration: up to 10 attempts with 100ms between retries
+            const MAX_RETRIES: u32 = 10;
+            const RETRY_DELAY_MS: u64 = 100;
+
             let mut receipts = vec![];
             for node_idx in &self.node_idxs {
                 let rpc_client = env.node_clients[*node_idx].rpc.clone();
-                let receipt: Option<OpTransactionReceipt> =
-                    EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        alloy_rpc_types_eth::Block,
-                        OpTransactionReceipt,
-                        Header,
-                        TransactionSigned,
-                    >::transaction_receipt(&rpc_client, self.hash)
-                    .await?;
+                // Retry loop for each node to handle sync delays in CI
+                let mut receipt: Option<OpTransactionReceipt> = None;
+                for attempt in 0..MAX_RETRIES {
+                    let result: Option<OpTransactionReceipt> =
+                        EthApiClient::<
+                            TransactionRequest,
+                            Transaction,
+                            alloy_rpc_types_eth::Block,
+                            OpTransactionReceipt,
+                            Header,
+                            TransactionSigned,
+                        >::transaction_receipt(&rpc_client, self.hash)
+                        .await?;
+
+                    if result.is_some() {
+                        receipt = result;
+                        break;
+                    }
+
+                    if attempt < MAX_RETRIES - 1 {
+                        tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS)).await;
+                    }
+                }
                 receipts.push(receipt);
             }
 
