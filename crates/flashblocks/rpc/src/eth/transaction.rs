@@ -41,7 +41,7 @@ where
             reth_primitives::Recovered<reth_transaction_pool::PoolPooledTx<Self::Pool>>,
         >,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        unimplemented!("TODO:")
+        async { todo!("implement this") }
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

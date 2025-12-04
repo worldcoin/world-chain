@@ -44,7 +44,7 @@ impl FlashblockAccessListConstruction {
     }
 
     /// Consumes the builder and produces a [`FlashblockAccessList`]
-    pub fn build(self, min_tx_index: u64, max_tx_index: u64) -> FlashblockAccessList {
+    pub fn build(self, (min_tx_index, max_tx_index): (u16, u16)) -> FlashblockAccessList {
         // Sort addresses lexicographically
         let mut changes: Vec<_> = self
             .changes

@@ -14,6 +14,7 @@ use reth_evm::{
     execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
     op_revm::{OpSpecId, OpTransaction},
 };
+use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
@@ -29,7 +30,7 @@ use revm::{
     inspector::NoOpInspector,
 };
 use revm_database_interface::WrapDatabaseRef;
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 use tracing::error;
 
 use crate::{
@@ -301,20 +302,21 @@ where
             &mut state,
         );
 
-        let parallel_output = executor.execute_block_parallel(
-            &self.execution_state,
-            expected_access_list_data,
-            state_provider,
-        )?;
+        todo!();
+        // let parallel_output = executor.execute_block_parallel(
+        //     &self.execution_state,
+        //     expected_access_list_data,
+        //     state_provider,
+        // )?;
 
-        Ok(VerifyBlockResult {
-            bundle_state: parallel_output.bundle_state,
-            execution_result: parallel_output.execution_result,
-            evm_env: parallel_output.evm_env,
-            transactions: self.execution_state.all_transactions_iter().collect(),
-            execution_context: parallel_output.execution_context,
-            fees: parallel_output.fees,
-        })
+        // Ok(VerifyBlockResult {
+        //     bundle_state: parallel_output.bundle_state,
+        //     execution_result: parallel_output.execution_result,
+        //     evm_env: parallel_output.evm_env,
+        //     transactions: self.execution_state.all_transactions_iter().collect(),
+        //     execution_context: parallel_output.execution_context,
+        //     fees: parallel_output.fees,
+        // })
     }
 
     /// Decodes transactions from raw bytes and recovers signer addresses.
@@ -414,7 +416,7 @@ where
             parent_header,
             transactions,
             &verify_result.execution_result,
-            &verify_result.bundle_state,
+            Cow::Borrowed(&verify_result.bundle_state),
             &state_provider.clone(),
             state_root_result.state_root,
         ))?;
@@ -447,11 +449,11 @@ where
         );
 
         // create the executed block data
-        let executed_block = ExecutedBlock {
+        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(outcome.block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(outcome.hashed_state),
-            trie_updates: Arc::new(outcome.trie_updates),
+            hashed_state: either::Left(Arc::new(outcome.hashed_state)),
+            trie_updates: either::Left(Arc::new(outcome.trie_updates)),
         };
 
         Ok(OpBuiltPayload::new(
@@ -533,11 +535,11 @@ where
         );
 
         // create the executed block data
-        let executed_block = ExecutedBlock {
+        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            hashed_state: either::Left(Arc::new(hashed_state)),
+            trie_updates: either::Left(Arc::new(trie_updates)),
         };
 
         let payload = OpBuiltPayload::new(
@@ -581,19 +583,19 @@ where
             .executed_block()
             .ok_or(BalExecutorError::MissingExecutedBlock)?;
 
-        let gas_used = executed_block.recovered_block().gas_used();
-        let bundle = executed_block.execution_outcome().bundle.clone();
+        let gas_used = executed_block.recovered_block.gas_used();
+        let bundle = executed_block.execution_output.bundle.clone();
         let fees = value.fees();
 
         let transactions: Vec<_> = executed_block
-            .recovered_block()
+            .recovered_block
             .clone_transactions_recovered()
             .enumerate()
             .map(|(index, tx)| (index as BlockAccessIndex, tx))
             .collect();
 
         let receipts: Vec<_> = executed_block
-            .execution_outcome()
+            .execution_output
             .receipts()
             .iter()
             .flatten()

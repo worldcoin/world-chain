@@ -1,15 +1,21 @@
-use std::thread::JoinHandle;
+use std::{
+    ops::{Deref, DerefMut},
+    thread::JoinHandle,
+};
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::{Receiver, Sender};
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth::revm::State;
+use reth_evm::block::{BlockExecutionError, StateDB};
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
+    database::{BundleState, states::bundle_state::BundleRetention},
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
 
-use crate::access_list::FlashblockAccessListConstruction;
+use crate::{access_list::FlashblockAccessListConstruction, block_executor::BalExecutorError};
 
 /// A wrapper around a database that builds a Flashblock
 /// Access List during execution.
@@ -25,7 +31,7 @@ pub struct BalBuilderDb<DB> {
     /// The sender to the builder thread.
     tx: Sender<BalBuilderMsg>,
     /// Join hande for the builder thread
-    handle: JoinHandle<eyre::Result<FlashblockAccessListConstruction>>,
+    handle: JoinHandle<Result<FlashblockAccessListConstruction, BlockExecutionError>>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +72,7 @@ impl<DB> BalBuilderDb<DB> {
 
     /// Signals the background thread to finish and returns the constructed
     /// access list.
-    pub fn finish(self) -> eyre::Result<FlashblockAccessListConstruction> {
+    pub fn finish(self) -> Result<FlashblockAccessListConstruction, BlockExecutionError> {
         drop(self.tx);
         // unwrap should be safe here since builder thread can't panic
         self.handle.join().unwrap()
@@ -83,7 +89,7 @@ where
     pub fn spawn(
         db: DB,
         rx: Receiver<BalBuilderMsg>,
-    ) -> JoinHandle<eyre::Result<FlashblockAccessListConstruction>> {
+    ) -> JoinHandle<Result<FlashblockAccessListConstruction, BlockExecutionError>> {
         std::thread::spawn(move || {
             let mut bal_builder = BalBuilder {
                 db,
@@ -97,7 +103,9 @@ where
                         bal_builder.storage_read(address, index);
                     }
                     BalBuilderMsg::Commit(changes) => {
-                        bal_builder.commit(changes)?;
+                        bal_builder
+                            .commit(changes)
+                            .map_err(BlockExecutionError::other)?;
                     }
                     BalBuilderMsg::SetIndex(index) => {
                         bal_builder.index = index;
@@ -135,33 +143,33 @@ where
                         if previous.balance != account.info.balance {
                             acc_changes
                                 .balance_changes
-                                .insert(self.index, account.info.balance);
+                                .insert(self.index as u16, account.info.balance);
                         }
                         if previous.nonce != account.info.nonce {
                             acc_changes
                                 .nonce_changes
-                                .insert(self.index, account.info.nonce);
+                                .insert(self.index as u16, account.info.nonce);
                         }
                         if previous.code_hash != account.info.code_hash {
                             let bytecode = match account.info.code.clone() {
                                 Some(code) => code,
                                 None => self.db.code_by_hash_ref(account.info.code_hash)?,
                             };
-                            acc_changes.code_changes.insert(self.index, bytecode);
+                            acc_changes.code_changes.insert(self.index as u16, bytecode);
                         }
                     }
                     None => {
                         acc_changes
                             .balance_changes
-                            .insert(self.index, account.info.balance);
+                            .insert(self.index as u16, account.info.balance);
                         acc_changes
                             .nonce_changes
-                            .insert(self.index, account.info.nonce);
+                            .insert(self.index as u16, account.info.nonce);
                         let bytecode = match account.info.code.clone() {
                             Some(code) => code,
                             None => self.db.code_by_hash_ref(account.info.code_hash)?,
                         };
-                        acc_changes.code_changes.insert(self.index, bytecode);
+                        acc_changes.code_changes.insert(self.index as u16, bytecode);
                     }
                 }
 
@@ -172,7 +180,7 @@ where
                             .storage_changes
                             .entry(*key)
                             .or_default()
-                            .insert(self.index, value.present_value);
+                            .insert(self.index as u16, value.present_value);
                     }
                     Result::<(), DB::Error>::Ok(())
                 })?;
@@ -215,12 +223,30 @@ impl<DB: Database> Database for BalBuilderDb<DB> {
     }
 }
 
-impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
+impl<DB: DatabaseCommit> DatabaseCommit for BalBuilderDb<DB> {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // Ignore errors from the builder channel.
         // relevent errors will be propagated through `finish()`.
         self.tx.send(BalBuilderMsg::Commit(changes.clone())).ok();
         self.db.commit(changes)
+    }
+}
+
+impl<DB: StateDB> StateDB for BalBuilderDb<DB> {
+    fn bundle_state(&self) -> &BundleState {
+        self.db.bundle_state()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        self.db.bundle_state_mut()
+    }
+
+    fn merge_transitions(&mut self, retention: BundleRetention) {
+        self.db.merge_transitions(retention);
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
     }
 }
 

@@ -23,12 +23,6 @@ pub struct NoopWorldChainTransactionPool {
 
 impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
-    async fn add_transactions_with_origins(
-        &self,
-        _transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<PoolResult<reth::transaction_pool::AddedTransactionOutcome>> {
-        vec![]
-    }
 
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]

@@ -25,12 +25,12 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     ConfigureEvm, Database,
     execute::{BlockBuilder, BlockBuilderOutcome},
     precompiles::PrecompilesMap,
 };
+use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_primitives::NodePrimitives;
 use tracing::{info, warn};
 
@@ -43,7 +43,7 @@ use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
     ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
@@ -424,11 +424,11 @@ where
     );
 
     // create the executed block data
-    let executed_block = ExecutedBlock {
+    let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
         recovered_block: Arc::new(block),
         execution_output: Arc::new(execution_outcome),
-        hashed_state: Arc::new(hashed_state),
-        trie_updates: Arc::new(trie_updates),
+        hashed_state: either::Left(Arc::new(hashed_state)),
+        trie_updates: either::Left(Arc::new(trie_updates)),
     };
 
     let payload = OpBuiltPayload::new(

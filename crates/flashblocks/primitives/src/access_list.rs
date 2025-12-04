@@ -29,10 +29,10 @@ pub struct FlashblockAccessList {
     /// All [`AccountChanges`] constructed during the execution of transactions from `min_tx_index` to `max_tx_index`
     pub changes: Vec<AccountChanges>,
     /// The Minimum transaction index in the global indexing of the block.
-    pub min_tx_index: u64,
+    pub min_tx_index: u16,
     /// The Maximum transaction index in the global indexing of the block.
     /// Note: This will always correspond to the System Transaction e.g. Balance Increments
-    pub max_tx_index: u64,
+    pub max_tx_index: u16,
 }
 
 impl FlashblockAccessList {

@@ -193,7 +193,12 @@ where
         // Already processed this flashblock. This happens when set directly
         // from publish_build_payload. Since we already built the payload, no need
         // to do it again.
-        pending_block.send_replace(latest_payload.0.executed_block());
+        pending_block.send_replace(
+            latest_payload
+                .0
+                .executed_block()
+                .map(|p| p.into_executed_payload()),
+        );
         return Ok(());
     }
 
@@ -276,7 +281,7 @@ where
 
     flashblocks.push(flashblock)?;
 
-    pending_block.send_replace(payload.executed_block());
+    pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
 
     trace!(
         target: "flashblocks::state_executor",

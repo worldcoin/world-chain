@@ -20,7 +20,7 @@ use crate::eth::FlashblocksEthApi;
 impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore<Primitives = OpPrimitives, Provider: ChainSpecProvider<ChainSpec: OpHardforks>>,
-    Rpc: RpcConvert<Primitives = N::Primitives> + Clone,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = Self::Error> + Clone,
     OpEthApi<N, Rpc>: LoadReceipt + Clone,
     Self: LoadPendingBlock
         + EthApiTypes<
@@ -94,7 +94,7 @@ where
 
         match block {
             None => Ok(self
-                .tx_resp_builder()
+                .converter()
                 .convert_receipts(vec![input])?
                 .pop()
                 .unwrap()),

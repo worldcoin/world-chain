@@ -59,6 +59,7 @@ eyre.workspace = true
 rayon.workspace = true
 dashmap.workspace = true
 thiserror.workspace = true
+either.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

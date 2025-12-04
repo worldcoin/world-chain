@@ -20,7 +20,7 @@ use revm::{
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
-use std::{collections::HashSet, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 use crate::executor::{
     bal_builder::BalBuilderBlockExecutor, factory::FlashblocksBlockExecutorFactory,
@@ -147,7 +147,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            &db.bundle_state,
+            Cow::Borrowed(&db.bundle_state),
             &state,
             state_root,
         ))?;
@@ -251,7 +251,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            &db.bundle_state,
+            Cow::Borrowed(&db.bundle_state),
             &state,
             state_root,
         ))?;

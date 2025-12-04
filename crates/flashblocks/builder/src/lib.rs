@@ -6,6 +6,7 @@ use reth_optimism_payload_builder::config::OpBuilderConfig;
 pub mod access_list;
 pub mod assembler;
 pub mod block_builder;
+pub mod block_executor;
 pub mod coordinator;
 pub mod executor;
 pub mod payload_builder;
