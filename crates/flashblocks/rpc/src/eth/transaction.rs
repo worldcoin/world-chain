@@ -34,6 +34,16 @@ where
         self.inner.signers()
     }
 
+    // TODO: FIXME:
+    fn send_transaction(
+        &self,
+        tx: alloy_eips::eip2718::WithEncoded<
+            reth_primitives::Recovered<reth_transaction_pool::PoolPooledTx<Self::Pool>>,
+        >,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
+        unimplemented!("TODO:")
+    }
+
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
