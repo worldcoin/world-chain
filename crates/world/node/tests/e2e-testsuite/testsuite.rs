@@ -20,10 +20,10 @@ use reth_transaction_pool::TransactionPool;
 use revm_primitives::{fixed_bytes, Address, Bytes, B256, U256};
 use std::{sync::Arc, time::Duration, vec};
 use tracing::info;
+use world_chain_node::context::FlashblocksContext;
 use world_chain_test::utils::account;
 
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
-use world_chain_node::context::{BasicContext, FlashblocksContext};
 use world_chain_test::{
     node::{raw_pbh_bundle_bytes, tx},
     utils::signer,
@@ -35,7 +35,7 @@ use crate::setup::{setup, setup_with_tx_peers, CHAIN_SPEC};
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -66,7 +66,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -111,7 +111,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -126,7 +126,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 
@@ -154,15 +154,16 @@ async fn test_flashblocks() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, mut nodes, _tasks, mut flashblocks_env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     let (_, mut basic_nodes, _tasks, mut basic_env) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
 
     let basic_worldchain_node = basic_nodes.first_mut().unwrap();
 
-    let ext_context_1 = nodes[0].ext_context.clone();
-    let ext_context_2 = nodes[1].ext_context.clone();
+    // Safe unwrap here because nodes 0 and 1 have flashblocks enabled
+    let ext_context_1 = nodes[0].ext_context.clone().unwrap();
+    let ext_context_2 = nodes[1].ext_context.clone().unwrap();
 
     let now = std::time::Instant::now();
 
@@ -212,7 +213,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
         );
     }
 
-    let ext_context = node.ext_context.clone();
+    // Safe unwrap because node 0 has flashblocks enabled
+    let ext_context = node.ext_context.clone().unwrap();
     let block_hash = node.node.block_hash(0);
 
     let authorization_generator = move |attrs: OpPayloadAttributes| {
@@ -250,7 +252,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
-        min_base_fee: None,
+        min_base_fee: Some(10),
     };
 
     let _tx = tx.clone();
@@ -360,9 +362,10 @@ async fn test_flashblocks() -> eyre::Result<()> {
 async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
-    let ext_context = nodes[0].ext_context.clone();
+    // Safe unwrap because nodes have flashblocks enabled
+    let ext_context = nodes[0].ext_context.clone().unwrap();
 
     let block_hash = nodes[0].node.block_hash(0);
 
@@ -412,7 +415,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(eip1559[1..=8].try_into()?),
         gas_limit: Some(30_000_000),
-        min_base_fee: None,
+        min_base_fee: Some(10),
     };
 
     let mock_tx =
@@ -487,9 +490,10 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
-    let ext_context = nodes[0].ext_context.clone();
+    // Safe unwrap because nodes have flashblocks enabled
+    let ext_context = nodes[0].ext_context.clone().unwrap();
 
     let block_hash = nodes[0].node.block_hash(0);
 
@@ -548,7 +552,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
         no_tx_pool: Some(false),
         eip_1559_params: Some(b64!("0000000800000008")),
         gas_limit: Some(30_000_000),
-        min_base_fee: None,
+        min_base_fee: Some(10),
     };
 
     let mine_block = crate::actions::AssertMineBlock::new(
@@ -589,7 +593,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, _nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
@@ -609,9 +613,10 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
 
-    let ext_context = nodes[0].ext_context.clone();
+    // Safe unwrap because nodes have flashblocks enabled
+    let ext_context = nodes[0].ext_context.clone().unwrap();
 
     let block_hash = nodes[0].node.block_hash(0);
 
@@ -693,7 +698,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 
     // Spin up 3 nodes WITHOUT tx_peers configuration
     let (_, mut nodes, _tasks, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -766,9 +771,14 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // We disconnect Node 0 from Node 2 to prevent multi-hop forwarding in Part 1
-    let (_, mut nodes, _tasks, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, false)
-            .await?;
+    let (_, mut nodes, _tasks, _) = setup_with_tx_peers::<FlashblocksContext>(
+        3,
+        optimism_payload_attributes,
+        true,
+        false,
+        true,
+    )
+    .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -898,7 +908,7 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     use crate::setup::setup_with_tx_peers;
 
     let (_, mut nodes, _tasks, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true)
+        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true, true)
             .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {

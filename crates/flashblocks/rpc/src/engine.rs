@@ -24,8 +24,8 @@ use tracing::trace;
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     /// The inner [`OpEngineApi`] instance that this extension wraps.
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
-    /// A watch channel notifier to the jobs generator.
-    to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    /// A (optional) watch channel notifier to the jobs generator.
+    to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -34,7 +34,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     /// Creates a new instance of [`OpEngineApiExt`], and spawns a task to handle incoming flashblocks.
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
-        to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+        to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
     ) -> Self {
         Self {
             inner,
@@ -238,8 +238,8 @@ where
             ));
         }
 
-        if let Some(a) = authorization {
-            self.to_jobs_generator.send_modify(|b| *b = Some(a))
+        if let (Some(a), Some(to_jobs_gen)) = (authorization, self.to_jobs_generator.as_ref()) {
+            to_jobs_gen.send_modify(|b| *b = Some(a))
         }
 
         self.fork_choice_updated_v3(fork_choice_state, payload_attributes)

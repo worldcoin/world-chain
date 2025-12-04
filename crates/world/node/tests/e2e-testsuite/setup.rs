@@ -111,6 +111,7 @@ type WorldChainNodeTestContext<T> = NodeHelperType<
 pub async fn setup<T>(
     num_nodes: u8,
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    flashblocks_enabled: bool,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -121,7 +122,14 @@ where
     T: WorldChainTestContextBounds,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
-    setup_with_tx_peers::<T>(num_nodes, attributes_generator, false, false).await
+    setup_with_tx_peers::<T>(
+        num_nodes,
+        attributes_generator,
+        false,
+        false,
+        flashblocks_enabled,
+    )
+    .await
 }
 
 /// Setup multiple nodes with optional transaction propagation peer configuration
@@ -130,6 +138,7 @@ pub async fn setup_with_tx_peers<T>(
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
     enable_tx_peers: bool,
     disable_gossip: bool,
+    flashblocks_enabled: bool,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -140,7 +149,9 @@ where
     T: WorldChainTestContextBounds,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
-    std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
+    unsafe {
+        std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
+    }
     let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
     let tasks = TaskManager::current();
@@ -186,40 +197,53 @@ where
                 .map(|n| n.node.network.record().id)
                 .collect();
 
-            test_config_with_peers_and_gossip(Some(previous_peer_ids), disable_gossip)
+            test_config_with_peers_and_gossip(
+                Some(previous_peer_ids),
+                disable_gossip,
+                flashblocks_enabled,
+            )
         } else {
-            test_config_with_peers_and_gossip(None, disable_gossip)
+            test_config_with_peers_and_gossip(None, disable_gossip, flashblocks_enabled)
         };
 
         let node = WorldChainNode::<T>::new(config.args.clone().into_config(&op_chain_spec)?);
 
-        let ext_context = node.ext_context();
+        let ext_context = node.ext_context::<FullNodeTypesAdapter<
+            WorldChainNode<T>,
+            TmpDB,
+            BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>,
+        >>();
 
         let NodeHandle {
             node,
             node_exit_future: _,
-        } = NodeBuilder::new(node_config.clone())
-            .testing_node(exec.clone())
-            .with_types_and_provider::<WorldChainNode<T>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>>>()
-            .with_components(node.components_builder())
-            .with_add_ons(node.add_ons())
-            .extend_rpc_modules(move |ctx| {
-                let provider = ctx.provider().clone();
-                let pool = ctx.pool().clone();
-                let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
-                let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
-                ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                ctx.modules.replace_configured(FlashblocksOpApi.into_rpc())?;
-                Ok(())
-            })
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    builder.task_executor().clone(),
-                    builder.config().datadir(),
-                    TreeConfig::default(),
-                );
-                builder.launch_with(launcher)
-            }).await?;
+        } =
+            NodeBuilder::new(node_config.clone())
+                .testing_node(exec.clone())
+                .with_types_and_provider::<WorldChainNode<T>, BlockchainProvider<
+                    NodeTypesWithDBAdapter<WorldChainNode<T>, TmpDB>,
+                >>()
+                .with_components(node.components_builder())
+                .with_add_ons(node.add_ons())
+                .extend_rpc_modules(move |ctx| {
+                    let provider = ctx.provider().clone();
+                    let pool = ctx.pool().clone();
+                    let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
+                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                    ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
+                    ctx.modules
+                        .replace_configured(FlashblocksOpApi.into_rpc())?;
+                    Ok(())
+                })
+                .launch_with_fn(|builder| {
+                    let launcher = EngineNodeLauncher::new(
+                        builder.task_executor().clone(),
+                        builder.config().datadir(),
+                        TreeConfig::default(),
+                    );
+                    builder.launch_with(launcher)
+                })
+                .await?;
 
         let mut node = WorldChainNodeTestContext::new(node, attributes_generator).await?;
         let genesis = node.inner.chain_spec().sealed_genesis_header();
