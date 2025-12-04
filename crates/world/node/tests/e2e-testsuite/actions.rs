@@ -2,6 +2,7 @@
 use alloy_eips::BlockId;
 use alloy_rpc_types::{Header, Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
+use backon::{ConstantBuilder, Retryable};
 use eyre::eyre::{eyre, Result};
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
@@ -665,6 +666,15 @@ impl EthGetTransactionReceipt {
     }
 }
 
+/// Error type for receipt fetching retry logic
+#[derive(Debug)]
+enum ReceiptFetchError {
+    /// Receipt not yet available - this is retryable
+    NotFound,
+    /// RPC error - not retryable, should propagate
+    Rpc(eyre::Report),
+}
+
 impl Action<OpEngineTypes> for EthGetTransactionReceipt {
     fn execute<'a>(
         &'a mut self,
@@ -674,35 +684,45 @@ impl Action<OpEngineTypes> for EthGetTransactionReceipt {
             tokio::time::sleep(Duration::from_millis(self.backoff)).await;
 
             // Retry configuration: up to 10 attempts with 100ms between retries
-            const MAX_RETRIES: u32 = 10;
+            const MAX_RETRIES: usize = 10;
             const RETRY_DELAY_MS: u64 = 100;
 
             let mut receipts = vec![];
             for node_idx in &self.node_idxs {
                 let rpc_client = env.node_clients[*node_idx].rpc.clone();
-                // Retry loop for each node to handle sync delays in CI
-                let mut receipt: Option<OpTransactionReceipt> = None;
-                for attempt in 0..MAX_RETRIES {
-                    let result: Option<OpTransactionReceipt> =
-                        EthApiClient::<
-                            TransactionRequest,
-                            Transaction,
-                            alloy_rpc_types_eth::Block,
-                            OpTransactionReceipt,
-                            Header,
-                            TransactionSigned,
-                        >::transaction_receipt(&rpc_client, self.hash)
-                        .await?;
+                let tx_hash = self.hash;
 
-                    if result.is_some() {
-                        receipt = result;
-                        break;
+                // Retry logic to handle CI delays
+                let result = (|| async {
+                    match EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        OpTransactionReceipt,
+                        Header,
+                        TransactionSigned,
+                    >::transaction_receipt(&rpc_client, tx_hash)
+                    .await
+                    {
+                        Ok(Some(receipt)) => Ok(receipt),
+                        Ok(None) => Err(ReceiptFetchError::NotFound),
+                        Err(e) => Err(ReceiptFetchError::Rpc(eyre!(e))),
                     }
+                })
+                .retry(
+                    ConstantBuilder::default()
+                        .with_delay(Duration::from_millis(RETRY_DELAY_MS))
+                        .with_max_times(MAX_RETRIES),
+                )
+                .when(|e| matches!(e, ReceiptFetchError::NotFound))
+                .await;
 
-                    if attempt < MAX_RETRIES - 1 {
-                        tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS)).await;
-                    }
-                }
+                // Convert result back to Option, propagating RPC errors
+                let receipt = match result {
+                    Ok(r) => Some(r),
+                    Err(ReceiptFetchError::NotFound) => None,
+                    Err(ReceiptFetchError::Rpc(e)) => return Err(e),
+                };
                 receipts.push(receipt);
             }
 
