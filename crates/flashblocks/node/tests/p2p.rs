@@ -6,7 +6,6 @@ use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
-use flashblocks_node::{FlashblocksNode, FlashblocksNodeBuilder};
 use flashblocks_p2p::{
     monitor,
     protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg},
@@ -20,16 +19,19 @@ use flashblocks_primitives::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+use reth_e2e_test_utils::TmpDB;
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
+use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
@@ -48,6 +50,15 @@ use tempfile::NamedTempFile;
 use tokio::time::{sleep, Duration, Instant};
 use tracing::{info, Dispatch};
 use url::Host;
+use world_chain_node::{
+    args::{BuilderArgs, PbhArgs, WorldChainArgs},
+    config::WorldChainNodeConfig,
+    context::FlashblocksContext,
+    node::WorldChainNode,
+};
+use world_chain_test::{
+    utils::signer, DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Metadata {
@@ -158,28 +169,57 @@ async fn setup_node_extended_cfg(
         node_config = node_config.with_unused_ports();
     }
 
-    let node = FlashblocksNodeBuilder {
-        rollup: Default::default(),
-        flashblocks: FlashblocksArgs {
-            enabled: true,
-            authorizer_vk: Some(authorizer_sk.verifying_key()),
-            builder_sk: Some(builder_sk.clone()),
-            spoof_authorizer: false,
-            flashblocks_interval: 200,
-            recommit_interval: 200,
-        },
-        builder_config: Default::default(),
-    }
-    .build();
+    let pbh = PbhArgs {
+        verified_blockspace_capacity: 70,
+        entrypoint: PBH_DEV_ENTRYPOINT,
+        signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+        world_id: DEV_WORLD_ID,
+    };
 
-    let p2p_handle = node.flashblocks_handle.clone();
+    let builder = BuilderArgs {
+        enabled: false,
+        private_key: signer(6),
+    };
+
+    let world_chain_node_config = WorldChainNodeConfig {
+        args: WorldChainArgs {
+            rollup: Default::default(),
+            builder,
+            pbh,
+            flashblocks: Some(FlashblocksArgs {
+                enabled: true,
+                authorizer_vk: Some(authorizer_sk.verifying_key()),
+                builder_sk: Some(builder_sk.clone()),
+                spoof_authorizer: false,
+                flashblocks_interval: 200,
+                recommit_interval: 200,
+            }),
+            tx_peers: None,
+        },
+        builder_config: OpBuilderConfig::default(),
+    };
+
+    let node = WorldChainNode::<FlashblocksContext>::new(
+        world_chain_node_config
+            .args
+            .clone()
+            .into_config(&chain_spec)?,
+    );
+
+    let ext_context = node.ext_context::<FullNodeTypesAdapter<
+        WorldChainNode<FlashblocksContext>,
+        TmpDB,
+        BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<FlashblocksContext>, TmpDB>>,
+    >>();
+    // Safe unwrap because node has flashblocks enabled
+    let p2p_handle = ext_context.unwrap().flashblocks_handle.clone();
 
     let NodeHandle {
         node,
         node_exit_future,
     } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
-        .with_types_and_provider::<FlashblocksNode, BlockchainProvider<_>>()
+        .with_types_and_provider::<WorldChainNode<FlashblocksContext>, BlockchainProvider<_>>()
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons())
         .launch()
