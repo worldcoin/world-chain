@@ -238,7 +238,10 @@ where
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
                 Executor: BlockExecutor<
-                    Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database, BlockEnv = BlockEnv>,
+                    Evm: Evm<
+                        DB: StateDB + DatabaseCommit + reth_evm::Database,
+                        BlockEnv = BlockEnv,
+                    >,
                 >,
             >,
         Txs: PayloadTransactions<

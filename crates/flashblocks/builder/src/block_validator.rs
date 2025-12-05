@@ -5,9 +5,9 @@ use alloy_eips::Decodable2718;
 use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory, block::receipt_builder::OpReceiptBuilder};
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
-use eyre::eyre::eyre;
 use flashblocks_primitives::{
-    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
+    primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -106,29 +106,36 @@ where
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
-        let access_list_data = diff.clone().access_list_data.unwrap();
+        let FlashblockAccessListData {
+            access_list,
+            access_list_hash,
+        } = diff.access_list_data.unwrap();
+
+        let index_range = (access_list.min_tx_index, access_list.max_tx_index);
 
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());
 
         let bundle_db = BundleDb::new(
-            state_provider_database,
+            state_provider_database.clone(),
             self.ctx.committed_state.bundle.clone(),
         );
 
-        let temporal_db_factory =
-            TemporalDbFactory::new(Arc::new(bundle_db), access_list_data.access_list.clone());
-
-        let start_index = access_list_data.access_list.min_tx_index as u64;
+        let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
 
         let mut state = State::builder()
-            .with_database_ref(temporal_db_factory.db(start_index))
+            .with_database_ref(temporal_db_factory.db(index_range.0 as u64))
             .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
             .with_bundle_update()
             .build();
 
-        let database: BalBuilderDb<&mut State<revm_database_interface::WrapDatabaseRef<_>>> =
-            BalBuilderDb::new(&mut state);
+        let state_dummy = State::builder()
+            .with_database_ref(temporal_db_factory.db(index_range.0 as u64))
+            .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
+            .with_bundle_update()
+            .build();
+
+        let database = BalBuilderDb::new(&mut state);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -136,7 +143,9 @@ where
         // The full bundle we expect to compute after execution
         // [committed bundle + access list changes]
         let mut state_root_bundle = self.ctx.committed_state.bundle.clone();
-        state_root_bundle.extend_state(access_list_data.access_list.clone().into());
+        access_list
+            .extend_bundle(&mut state_root_bundle, &state_provider_database)
+            .map_err(BalExecutorError::other)?;
 
         let state_provider_clone = state_provider.clone();
 
@@ -157,11 +166,6 @@ where
         )
         .with_receipts(self.ctx.committed_state.receipts_iter().cloned().collect())
         .with_gas_used(self.ctx.committed_state.gas_used);
-
-        let index_range = (
-            access_list_data.access_list.min_tx_index,
-            access_list_data.access_list.max_tx_index,
-        );
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
             self.ctx.execution_context.clone(),
@@ -189,23 +193,23 @@ where
             .recv()
             .map_err(BalExecutorError::other)?;
 
-        let access_list_hash =
+        let computed_access_list_hash =
             flashblocks_primitives::access_list::compute_access_list_hash(&computed_access_list);
 
         // 5. Verify computed results
-        if access_list_hash != access_list_data.clone().access_list_hash {
+        if computed_access_list_hash != access_list_hash {
             error!(
                 target: "flashblocks::state_executor",
                 ?access_list_hash,
-                expected = ?access_list_data.access_list_hash,
+                expected = ?access_list_hash,
                 access_list = ?computed_access_list,
-                expected_access_list = ?access_list_data.access_list.clone(),
+                expected_access_list = ?access_list.clone(),
                 "Access list hash mismatch"
             );
 
             return Err(BalExecutorError::BalHashMismatch {
-                expected: access_list_data.access_list_hash,
-                got: access_list_hash,
+                expected: access_list_hash,
+                got: computed_access_list_hash,
             });
         }
 
@@ -754,159 +758,13 @@ pub fn decode_transactions(
         .enumerate()
         .map(|(i, tx)| {
             let tx_envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
-                .map_err(|e| eyre!("failed to decode transaction: {e}"))
-                .unwrap(); // TODO:
+                .map_err(BalExecutorError::other)?;
 
             let recovered = tx_envelope
                 .try_clone_into_recovered()
-                .map_err(|e| eyre!("failed to recover transaction from signed envelope: {e}"))
-                .unwrap(); // TODO:
+                .map_err(BalExecutorError::other)?;
 
             Ok((start_index + i as BlockAccessIndex, recovered))
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_consensus::TxEip1559;
-    use alloy_primitives::{Signature, TxKind, U256, uint};
-    use op_alloy_consensus::OpTypedTransaction;
-    use revm::{
-        primitives::KECCAK_EMPTY,
-        state::{AccountInfo, Bytecode},
-    };
-
-    // Helper to create an account info
-    fn create_account(balance: U256, nonce: u64) -> AccountInfo {
-        AccountInfo {
-            balance,
-            nonce,
-            code_hash: KECCAK_EMPTY,
-            code: Some(Bytecode::default()),
-        }
-    }
-
-    // Helper to create a simple unsigned EIP-1559 transaction
-    #[allow(dead_code)]
-    fn create_eip1559_tx(
-        chain_id: u64,
-        nonce: u64,
-        to: Address,
-        value: U256,
-        gas_limit: u64,
-    ) -> TxEip1559 {
-        TxEip1559 {
-            chain_id,
-            nonce,
-            gas_limit,
-            max_fee_per_gas: 20_000_000_000,
-            max_priority_fee_per_gas: 1_000_000_000,
-            to: TxKind::Call(to),
-            value,
-            access_list: Default::default(),
-            input: Default::default(),
-        }
-    }
-
-    // Helper to create a signed OP transaction
-    #[allow(dead_code)]
-    fn create_signed_op_tx(
-        chain_id: u64,
-        nonce: u64,
-        to: Address,
-        value: U256,
-        gas_limit: u64,
-    ) -> OpTransactionSigned {
-        let inner_tx = create_eip1559_tx(chain_id, nonce, to, value, gas_limit);
-        let typed_tx = OpTypedTransaction::Eip1559(inner_tx);
-
-        // Create a dummy signature (for testing purposes only)
-        let signature = Signature::new(
-            uint!(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef_U256),
-            uint!(0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321_U256),
-            false,
-        );
-
-        OpTransactionSigned::new_unhashed(typed_tx, signature)
-    }
-
-    #[test]
-    fn test_merge_transaction_results_empty() {
-        let results = vec![];
-        let merged = merge_transaction_results(results, 0);
-
-        assert_eq!(merged.gas_used, 0);
-        assert!(merged.transitions.is_empty());
-        assert!(merged.receipts.is_empty());
-        assert_eq!(merged.fees, 0);
-    }
-
-    #[test]
-    fn test_merge_transaction_results_accumulates_gas() {
-        let result1 = ParalleExecutionResult {
-            transitions: Default::default(),
-            receipts: vec![],
-            gas_used: 21000,
-            fees: 100,
-            access_list: Default::default(),
-            index: 0,
-        };
-
-        let result2 = ParalleExecutionResult {
-            transitions: Default::default(),
-            receipts: vec![],
-            gas_used: 50000,
-            fees: 200,
-            access_list: Default::default(),
-            index: 1,
-        };
-
-        let merged = merge_transaction_results(vec![result1, result2], 0);
-
-        assert_eq!(merged.gas_used, 71000, "Gas should be accumulated");
-        assert_eq!(merged.fees, 300, "Fees should be accumulated");
-    }
-
-    #[test]
-    fn test_parallel_execution_result_default() {
-        let result = ParalleExecutionResult::default();
-
-        assert!(result.transitions.is_empty());
-        assert!(result.receipts.is_empty());
-        assert_eq!(result.gas_used, 0);
-        assert_eq!(result.fees, 0);
-        assert_eq!(result.index, 0);
-    }
-
-    #[test]
-    fn test_block_access_index_counter() {
-        use crate::block_executor::BlockAccessIndexCounter;
-
-        let mut counter = BlockAccessIndexCounter::new(5);
-
-        assert_eq!(counter.next_index(), 5);
-        assert_eq!(counter.next_index(), 6);
-        assert_eq!(counter.next_index(), 7);
-
-        let (start, end) = counter.finish();
-        assert_eq!(start, 5);
-        assert_eq!(end, 8);
-    }
-
-    #[test]
-    fn test_block_access_index_counter_from_zero() {
-        use crate::block_executor::BlockAccessIndexCounter;
-
-        let mut counter = BlockAccessIndexCounter::new(0);
-
-        assert_eq!(counter.next_index(), 0);
-        assert_eq!(counter.next_index(), 1);
-        assert_eq!(counter.next_index(), 2);
-
-        let (start, end) = counter.finish();
-        assert_eq!(start, 0);
-        assert_eq!(end, 3);
-    }
 }

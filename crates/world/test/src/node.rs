@@ -22,7 +22,6 @@ use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
     SealedHeader, TransactionMeta, TransactionSigned,
 };
-use tracing::info;
 use reth_provider::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
@@ -49,6 +48,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{broadcast, watch};
+use tracing::info;
 use world_chain_pbh::external_nullifier::ExternalNullifier;
 
 use alloy_eips::eip2718::Encodable2718;

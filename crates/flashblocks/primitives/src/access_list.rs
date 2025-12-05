@@ -4,7 +4,8 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
-    db::{AccountStatus, BundleAccount, states::StorageSlot},
+    DatabaseRef,
+    db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
     primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
@@ -57,6 +58,119 @@ impl FlashblockAccessList {
 
         // Rebuild the sorted vector
         self.changes = merged.into_values().collect();
+    }
+
+    /// Extends a [`BundleState`] with the account changes from this [`FlashblockAccessList`]
+    ///
+    /// Pulls relevant account `info` from the latest bundle or constructs from the database if missing.
+    pub fn extend_bundle<DB: DatabaseRef>(
+        &self,
+        bundle: &mut BundleState,
+        db: &DB,
+    ) -> Result<(), DB::Error> {
+        let changes = &self.changes;
+
+        for account_changes in changes {
+            let account = account_changes.address;
+
+            let bundle_account = bundle.state.entry(account).or_insert_with(|| {
+                let db_account = db.basic_ref(account).unwrap_or(None);
+                BundleAccount {
+                    info: db_account.clone(),
+                    original_info: db_account,
+                    storage: alloy_primitives::map::HashMap::default(),
+                    status: AccountStatus::Loaded,
+                }
+            });
+
+            // Apply storage changes
+            for slot_changes in &account_changes.storage_changes {
+                let slot: U256 = slot_changes.slot.into();
+                for change in &slot_changes.changes {
+                    bundle_account.storage.insert(
+                        slot,
+                        StorageSlot {
+                            previous_or_original_value: U256::ZERO, // Original value tracking can be added if needed
+                            present_value: change.new_value.into(),
+                        },
+                    );
+
+                    bundle_account.status = AccountStatus::Changed;
+                }
+            }
+
+            // Apply balance changes
+            let balance_changes = account_changes.balance_changes();
+            let latest_change = balance_changes
+                .into_iter()
+                .max_by_key(|b| b.block_access_index);
+
+            if let Some(change) = latest_change {
+                if let Some(info) = &mut bundle_account.info {
+                    info.balance = change.post_balance();
+                } else {
+                    bundle_account.info = Some(AccountInfo {
+                        balance: change.post_balance(),
+                        ..Default::default()
+                    });
+                }
+
+                bundle_account.status = AccountStatus::Changed;
+            }
+
+            // Apply nonce changes
+            let nonce_changes = account_changes.nonce_changes();
+            let latest_nonce_change = nonce_changes
+                .into_iter()
+                .max_by_key(|n| n.block_access_index);
+
+            if let Some(change) = latest_nonce_change {
+                if let Some(info) = &mut bundle_account.info {
+                    info.nonce = change.new_nonce();
+                } else {
+                    bundle_account.info = Some(AccountInfo {
+                        nonce: change.new_nonce(),
+                        ..Default::default()
+                    });
+                }
+
+                bundle_account.status = AccountStatus::Changed;
+            }
+
+            // Apply code changes
+            let code_changes = account_changes.code_changes();
+            let latest_code_change = code_changes
+                .into_iter()
+                .max_by_key(|c| c.block_access_index);
+
+            if let Some(change) = latest_code_change {
+                let bytecode = Bytecode::new_raw(change.new_code().clone());
+                let code_hash = bytecode.hash_slow();
+
+                if let Some(info) = &mut bundle_account.info {
+                    info.code_hash = code_hash;
+                    info.code = Some(bytecode);
+                } else {
+                    bundle_account.info = Some(AccountInfo {
+                        code_hash,
+                        code: Some(bytecode),
+                        ..Default::default()
+                    });
+                }
+
+                bundle_account.status = AccountStatus::Changed;
+            }
+
+            // Update the bundle with the modified account
+            if bundle_account.status.is_not_modified()
+                || (bundle_account.original_info.is_none()
+                    && bundle_account.info.as_ref().is_some_and(|i| i.is_empty()))
+            {
+                bundle.state.remove(&account);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -132,85 +246,173 @@ pub fn compute_access_list_hash(access_list: &FlashblockAccessList) -> B256 {
     alloy_primitives::keccak256(&rlp_encoded)
 }
 
-/// Conversion from a [`FlashblockAccessList`] to a HashMap of Bundle Accounts.
-/// This is useful for Pre-Loading a bundle into the EVM Database, or Constructing the Hashed Post State from a [`FlashblockAccessList`]
-///
-/// See [`reth_trie_common::hashed_state::HashedPostState::from_bundle_state`]
-impl From<FlashblockAccessList> for alloy_primitives::map::HashMap<Address, BundleAccount> {
-    fn from(value: FlashblockAccessList) -> Self {
-        let mut result = alloy_primitives::map::HashMap::default();
-        for account in value.changes.iter() {
-            let address = account.address;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::address;
+    use reth::revm::db::AccountStatus;
+    use std::convert::Infallible;
 
-            let mut account_storage: alloy_primitives::map::HashMap<U256, StorageSlot> =
-                HashMap::default();
+    /// Mock database for testing that can be configured with initial account state
+    #[derive(Debug, Clone, Default)]
+    struct MockDb {
+        accounts: HashMap<Address, AccountInfo>,
+    }
 
-            // Aggregate the storage changes. Keep the latest value stored for each storage key.
-            // This assumes that the changes are ordered by transaction index.
-            for change in &account.storage_changes {
-                let slot: U256 = change.slot.into();
-
-                let latest_value = match change.changes.last() {
-                    Some(change) => change.new_value,
-                    None => continue,
-                };
-
-                account_storage.insert(
-                    slot,
-                    StorageSlot {
-                        previous_or_original_value: U256::ZERO,
-                        present_value: latest_value.into(),
-                    },
-                );
-            }
-
-            // Accumulate the latest account info changes.
-            let latest_balance_change = account
-                .balance_changes()
-                .last()
-                .map(|change| change.post_balance())
-                .unwrap_or_default();
-
-            let latest_nonce_change = account
-                .nonce_changes()
-                .last()
-                .map(|change| change.new_nonce())
-                .unwrap_or_default();
-
-            let latest_code_changes = account
-                .code_changes()
-                .last()
-                .map(|change| change.new_code())
-                .unwrap_or_default();
-
-            let bytecode = Bytecode::new_raw(latest_code_changes.clone());
-            let code_hash = bytecode.hash_slow();
-
-            let account_info = AccountInfo {
-                balance: latest_balance_change,
-                nonce: latest_nonce_change,
-                code_hash,
-                code: Some(Bytecode::new_raw(latest_code_changes.clone())),
-            };
-
-            let is_empty = latest_balance_change.is_zero()
-                && latest_nonce_change == 0
-                && code_hash == KECCAK_EMPTY
-                && account_info.code == Some(Bytecode::default());
-
-            let bundle_account = BundleAccount {
-                info: Some(account_info),
-                original_info: None,
-                storage: account_storage.into_iter().collect(),
-                status: AccountStatus::Changed,
-            };
-
-            if !is_empty || !bundle_account.storage.is_empty() {
-                // Insert or update the account in the resulting map.
-                result.insert(address, bundle_account);
-            }
+    impl MockDb {
+        fn new() -> Self {
+            Self::default()
         }
 
-        result
+        fn with_account(mut self, address: Address, info: AccountInfo) -> Self {
+            self.accounts.insert(address, info);
+            self
+        }
+    }
+
+    impl DatabaseRef for MockDb {
+        type Error = Infallible;
+
+        fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.accounts.get(&address).cloned())
+        }
+
+        fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(Bytecode::default())
+        }
+
+        fn storage_ref(&self, _address: Address, _index: U256) -> Result<U256, Self::Error> {
+            Ok(U256::ZERO)
+        }
+
+        fn block_hash_ref(&self, _number: u64) -> Result<B256, Self::Error> {
+            Ok(B256::ZERO)
+        }
+    }
+
+    #[test]
+    fn test_extend_populated_bundle() {
+        let account = address!("0x1000000000000000000000000000000000000000");
+
+        let info = AccountInfo {
+            balance: U256::from(1000),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let bundle_account = BundleAccount {
+            info: Some(AccountInfo {
+                balance: U256::from(1000),
+                nonce: 2,
+                code_hash: KECCAK_EMPTY,
+                code: None,
+            }),
+            original_info: Some(info.clone()),
+            storage: alloy_primitives::map::HashMap::default(),
+            status: AccountStatus::Loaded,
+        };
+
+        let mut bundle = BundleState {
+            state: HashMap::from_iter([(account, bundle_account)]),
+            ..Default::default()
+        };
+
+        let mut access_list = FlashblockAccessList::default();
+
+        access_list.changes.push(AccountChanges {
+            address: account,
+            balance_changes: vec![BalanceChange {
+                block_access_index: 1,
+                post_balance: U256::from(1500),
+            }],
+            ..Default::default()
+        });
+
+        let db = MockDb::new().with_account(account, info.clone());
+
+        access_list
+            .extend_bundle(&mut bundle, &db)
+            .expect("Failed to extend bundle");
+
+        let new_bundle_account = bundle
+            .state
+            .get(&account)
+            .expect("Account missing in bundle")
+            .clone();
+
+        assert_eq!(
+            new_bundle_account.info.unwrap(),
+            AccountInfo {
+                balance: U256::from(1500),
+                nonce: 2,
+                code_hash: KECCAK_EMPTY,
+                code: None,
+            }
+        );
+
+        assert_eq!(new_bundle_account.original_info.unwrap(), info);
+        assert_eq!(new_bundle_account.status, AccountStatus::Changed);
+    }
+
+    /// Tests that when an account is NOT in the bundle but IS in the database,
+    /// the database info is used as the base for both `info` and `original_info`.
+    #[test]
+    fn test_extend_bundle_falls_back_to_database_when_account_missing() {
+        let account = address!("0x2000000000000000000000000000000000000000");
+
+        // Account info in database (simulating existing on-chain state)
+        let db_info = AccountInfo {
+            balance: U256::from(5000),
+            nonce: 10,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
+
+        let db = MockDb::new().with_account(account, db_info.clone());
+
+        // Empty bundle - account does NOT exist here
+        let mut bundle = BundleState::default();
+        assert!(bundle.state.get(&account).is_none());
+
+        // Create access list with a balance change for the account
+        let mut access_list = FlashblockAccessList::default();
+        access_list.changes.push(AccountChanges {
+            address: account,
+            balance_changes: vec![BalanceChange {
+                block_access_index: 1,
+                post_balance: U256::from(6000),
+            }],
+            ..Default::default()
+        });
+
+        access_list
+            .extend_bundle(&mut bundle, &db)
+            .expect("Failed to extend bundle");
+
+        // Account should now exist in bundle
+        let bundle_account = bundle
+            .state
+            .get(&account)
+            .expect("Account should exist in bundle after extend");
+
+        // Info should have the updated balance but preserve nonce from DB
+        let info = bundle_account.info.as_ref().expect("info should exist");
+        assert_eq!(info.balance, U256::from(6000), "balance should be updated");
+        assert_eq!(info.nonce, 10, "nonce should be preserved from database");
+        assert_eq!(info.code_hash, KECCAK_EMPTY);
+
+        // Original info should match what was in the database
+        let original_info = bundle_account
+            .original_info
+            .as_ref()
+            .expect("original_info should exist");
+
+        assert_eq!(
+            *original_info, db_info,
+            "original_info should match database state"
+        );
+
+        assert_eq!(bundle_account.status, AccountStatus::Changed);
     }
 }

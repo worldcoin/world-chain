@@ -101,13 +101,13 @@ impl WorldChainArgs {
         }
 
         let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
-        
+
         Ok(WorldChainNodeConfig {
             args: self,
             builder_config: FlashblocksPayloadBuilderConfig {
                 inner: Default::default(),
                 bal_enabled,
-            }
+            },
         })
     }
 }

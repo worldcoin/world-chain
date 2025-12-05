@@ -286,11 +286,6 @@ where
 
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
         let next_index = self.counter.next_index();
-        trace!(
-            target: "flashblocks::builder::bal_block_builder",
-            next_index,
-            "Setting up BAL database with next access index"
-        );
 
         let db = self.inner.executor.inner.evm_mut().db_mut();
         db.set_index(next_index);

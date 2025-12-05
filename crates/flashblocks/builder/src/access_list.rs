@@ -507,7 +507,7 @@ impl AccountChangesConstruction {
 //             .with_expected(FlashblockAccessList {
 //     changes: vec![
 //         AccountChanges {
-//             address: address!("0x1234567890123456789012345678901234567890"),  
+//             address: address!("0x1234567890123456789012345678901234567890"),
 //             nonce_changes: vec![
 //                 NonceChange {
 //                     block_access_index: 1,

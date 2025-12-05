@@ -226,7 +226,14 @@ async fn test_flashblocks() -> eyre::Result<()> {
     .await;
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
-        beacon_engine_handles: vec![basic_worldchain_node.node.inner.consensus_engine_handle().clone().into()],
+        beacon_engine_handles: vec![
+            basic_worldchain_node
+                .node
+                .inner
+                .consensus_engine_handle()
+                .clone()
+                .into(),
+        ],
         flashblocks_stream: Box::pin(builder_context.flashblocks_handle.flashblock_stream()),
         validation_hook: Some(Arc::new(move |status: PayloadStatusEnum| {
             info!(target: "test", "Flashblock validated with status: {:?}", status);
