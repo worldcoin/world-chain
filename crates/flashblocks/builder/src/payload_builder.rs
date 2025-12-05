@@ -1,7 +1,7 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
     block_executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
-    executor::bal_builder_db::BalBuilderDb,
+    executor::bal_builder_db::AsyncBalBuilderDb,
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -52,10 +52,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{
-    DatabaseCommit, DatabaseRef, context::ContextTr,
-    inspector::NoOpInspector,
-};
+use revm::{DatabaseCommit, DatabaseRef, context::ContextTr, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span};
 
@@ -345,7 +342,7 @@ where
         .with_bundle_update()
         .build();
 
-    let bal_builder_db = BalBuilderDb::new(&mut state, dummy_state);
+    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state);
 
     let visited_transactions = committed_state
         .transaction_hashes_iter()
@@ -465,14 +462,14 @@ where
 
 #[expect(clippy::type_complexity)]
 fn block_builder<'a, Ctx, DB, R, N, Tx>(
-    state: BalBuilderDb<DB>,
+    state: AsyncBalBuilderDb<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
+    BalBlockBuilder<'a, R, N, OpEvm<AsyncBalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where

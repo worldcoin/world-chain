@@ -22,7 +22,7 @@ use revm::{
 };
 use tracing::trace;
 
-use crate::{access_list::BlockAccessIndex, executor::bal_builder_db::BalBuilderDb};
+use crate::{access_list::BlockAccessIndex, executor::bal_builder_db::AsyncBalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -49,11 +49,20 @@ pub enum BalExecutorError {
     #[error("Missing executed block in built payload")]
     MissingExecutedBlock,
     #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
-    StateRootMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    StateRootMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
     #[error("Receipts Root Mismatch: expected {expected:?}, got: {got:?}")]
-    ReceiptsRootMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    ReceiptsRootMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
     #[error("Bal Hash Mismatch: expected {expected:?}, got {got:?}")]
-    BalHashMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    BalHashMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
     #[error("Inernal Error: {0}")]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
@@ -210,8 +219,6 @@ impl BlockExecutorFactory for BalBlockExecutorFactory {
         I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<DB>> + 'a,
         OpEvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
     {
-        
-
         BalBlockExecutor::new(
             evm,
             ctx,
@@ -238,7 +245,12 @@ impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: StateDB + DatabaseCommit + Database + 'a,
-    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: Evm<
+            DB = AsyncBalBuilderDb<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
@@ -296,7 +308,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB = BalBuilderDb<DB>,
+            DB = AsyncBalBuilderDb<DB>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,

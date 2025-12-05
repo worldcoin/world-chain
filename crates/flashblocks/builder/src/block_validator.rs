@@ -45,7 +45,7 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     block_executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
     executor::{
-        bal_builder_db::BalBuilderDb,
+        bal_builder_db::AsyncBalBuilderDb,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
@@ -133,8 +133,8 @@ where
             .with_bundle_update()
             .build();
 
-        let database: BalBuilderDb<&mut State<revm_database_interface::WrapDatabaseRef<_>>> =
-            BalBuilderDb::new(&mut state, state_dummy);
+        let database: AsyncBalBuilderDb<&mut State<revm_database_interface::WrapDatabaseRef<_>>> =
+            AsyncBalBuilderDb::new(&mut state, state_dummy);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -149,7 +149,8 @@ where
         let clone_bundle = state_root_bundle.clone();
         // 3. Spawn the state root computation in a separate thread
         rayon::spawn(move || {
-            let result = compute_state_root(state_provider_clone, state_root_bundle.clone().state());
+            let result =
+                compute_state_root(state_provider_clone, state_root_bundle.clone().state());
             let _ = state_root_sender.send(result);
         });
 
@@ -237,7 +238,6 @@ where
                 "State root mismatch"
             );
 
-         
             return Err(BalExecutorError::StateRootMismatch {
                 expected: diff.state_root,
                 got: outcome.block.state_root,
@@ -344,7 +344,7 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'static,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             BlockEnv = BlockEnv,
@@ -401,7 +401,7 @@ impl<'a, DbRef, R, E> BlockBuilder for BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -523,7 +523,7 @@ impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -683,7 +683,7 @@ where
         .with_bundle_update()
         .build();
 
-    let mut database = BalBuilderDb::new(state, cached_db);
+    let mut database = AsyncBalBuilderDb::new(state, cached_db);
     database.set_index(index);
 
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
