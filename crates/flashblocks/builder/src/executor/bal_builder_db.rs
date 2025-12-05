@@ -231,6 +231,34 @@ where
     }
 }
 
+impl<DB> StateDB for BalBuilderDb<DB>
+where
+    DB: StateDB
+        + Database
+        + DatabaseRef<Error = <DB as Database>::Error>
+        + DatabaseCommit
+        + Send
+        + Sync
+        + 'static,
+    <DB as Database>::Error: Send + Sync + 'static,
+{
+    fn bundle_state(&self) -> &BundleState {
+        self.db.bundle_state()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        self.db.bundle_state_mut()
+    }
+
+    fn merge_transitions(&mut self, retention: BundleRetention) {
+        self.db.merge_transitions(retention);
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
 /// An asynchronous Flashblock Access List builder around a database.
 ///  
 /// commiting to this database will both commit to the inner database
