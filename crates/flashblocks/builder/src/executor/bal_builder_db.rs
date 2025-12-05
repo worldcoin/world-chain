@@ -198,7 +198,9 @@ where
     DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
-        if let Err(e) = self.try_commit(changes.clone()) {
+        // TODO: perhaps we should store an optional error inside the struct
+        // and return it on `finish()` instead?
+        if let Err(e) = self.try_commit(changes) {
             error!("Error committing to BalBuilderDb: {:?}", e);
         }
     }
