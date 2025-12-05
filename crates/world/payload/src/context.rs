@@ -212,17 +212,13 @@ where
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
 
-    fn execute_sequencer_transactions<'a>(
+    fn execute_sequencer_transactions(
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm< DB: StateDB + DatabaseCommit + reth_evm::Database>>,
+            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>
-    where
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
-    {
+    ) -> Result<ExecutionInfo, PayloadBuilderError> {
         self.inner.execute_sequencer_transactions(builder)
     }
 
@@ -241,7 +237,9 @@ where
         Pool: TransactionPool,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>, BlockEnv = BlockEnv>>,
+                Executor: BlockExecutor<
+                    Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database, BlockEnv = BlockEnv>,
+                >,
             >,
         Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,

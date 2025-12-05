@@ -45,7 +45,7 @@ impl<DB> BalBuilderDb<DB> {
 }
 
 #[derive(Clone, Debug)]
-struct BalBuilder<DB: DatabaseRef> {
+struct BalBuilder<DB: Database + DatabaseRef<Error = <DB as Database>::Error>> {
     /// Underlying cached database.
     db: DB,
     /// The Flashblock Access List under construction.
@@ -66,10 +66,11 @@ impl<DB> BalBuilderDb<DB> {
     /// Creates a new builder around a writable DB plus a dummy mirror that
     /// the background thread uses to compare state when deriving changes. The dummy will
     /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync + 'static>(
-        db: DB,
-        dummy_db: DDB,
-    ) -> Self {
+    pub fn new<DDB>(db: DB, dummy_db: DDB) -> Self
+    where
+        DDB: Database + DatabaseRef<Error = <DDB as Database>::Error> + DatabaseCommit + Send + Sync + 'static,
+        <DDB as Database>::Error: Send + Sync + 'static,
+    {
         let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
         let handle = BalBuilder::spawn(dummy_db, rx);
 
@@ -99,8 +100,8 @@ impl<DB> BalBuilderDb<DB> {
 
 impl<'a, DB> BalBuilder<DB>
 where
-    DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static,
-    DB::Error: Send + Sync + 'static,
+    DB: Database + DatabaseRef<Error = <DB as Database>::Error> + DatabaseCommit + Send + Sync + 'static,
+    <DB as Database>::Error: Send + Sync + 'static,
 {
     /// Spawns a background thread that receives read/write events and builds
     /// the access list. `db` should probably have a chaching layer for performance reasons
@@ -146,7 +147,15 @@ where
 
     /// Applies account/storage changes, comparing against the dummy DB to
     /// capture only new values in the access list.
-    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) -> Result<(), DB::Error> {
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) -> Result<(), <DB as Database>::Error> {
+        // Pre-load all accounts into the cache using the mutable `basic` method.
+        // This is required because `State::commit` expects all accounts to be present
+        // in the cache (it panics with "All accounts should be present inside cache" otherwise).
+        // The `DatabaseRef::basic_ref` method does NOT populate the cache, only `Database::basic` does.
+        for address in changes.keys() {
+            let _ = self.db.basic(*address)?;
+        }
+
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
         changes
@@ -203,7 +212,7 @@ where
                             .or_default()
                             .insert(self.index as u16, value.present_value);
                     }
-                    Result::<(), DB::Error>::Ok(())
+                    Result::<(), <DB as Database>::Error>::Ok(())
                 })?;
 
                 Ok(())

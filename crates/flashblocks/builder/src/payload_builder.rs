@@ -8,7 +8,7 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use reth_evm::{EvmFactory, block::StateDB};
+use reth_evm::{EvmFactory, block::StateDB, tx};
 
 use alloy_consensus::{BlockHeader, Header};
 
@@ -341,7 +341,7 @@ where
         .with_bundle_update()
         .build();
 
-    let mut state_provider_database = StateProviderDatabase::new(state_provider.clone());
+    let state_provider_database = StateProviderDatabase::new(state_provider.clone());
 
     let dummy_state = State::builder()
         .with_database(state_provider_database)
@@ -356,12 +356,15 @@ where
         .collect::<Vec<_>>();
 
     // 2. Create the block builder
-    let (mut builder, access_list_rx) = block_builder(
+    let (tx, access_list_rx) = crossbeam_channel::bounded(1);
+
+    let mut builder = block_builder(
         bal_builder_db,
         execution_conext,
         evm_env,
         &committed_state,
         ctx,
+        tx.clone()
     )?;
 
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
@@ -415,8 +418,6 @@ where
     // 6. Build the block
     let build_outcome = builder.finish(&state_provider)?;
 
-    info!(target: "test_target", "built new payload with {} transactions, receipts {:#?}", build_outcome.block.body().transactions().count(), build_outcome.execution_result.receipts.len());
-
     // 7. Seal the block
     let BlockBuilderOutcome {
         execution_result,
@@ -450,6 +451,7 @@ where
     );
 
     let access_list = if bal_enabled {
+        info!(target: "flashblocks::payload_builder", "bal enabled, receiving access list");
         Some(access_list_rx.recv().map_err(PayloadBuilderError::other)?)
     } else {
         None
@@ -473,11 +475,9 @@ fn block_builder<'a, Ctx, DB, R, N, Tx>(
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
+    tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    (
-        BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
-        crossbeam_channel::Receiver<FlashblockAccessList>,
-    ),
+    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where
@@ -504,13 +504,14 @@ where
     .with_gas_used(committed_state.gas_used)
     .with_receipts(committed_state.receipts_iter().cloned().collect());
 
-    let (builder, rx) = BalBlockBuilder::new(
+    let builder = BalBlockBuilder::new(
         execution_context,
         ctx.parent(),
         executor,
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
+        tx,
     );
 
-    Ok((builder, rx))
+    Ok(builder)
 }

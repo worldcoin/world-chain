@@ -22,6 +22,7 @@ use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
     SealedHeader, TransactionMeta, TransactionSigned,
 };
+use tracing::info;
 use reth_provider::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
@@ -106,6 +107,13 @@ pub fn test_config_with_peers_and_gossip(
         disable_txpool_gossip,
         ..Default::default()
     };
+
+    let bal_enabled = matches!(context, NodeContextType::Flashblocks);
+
+    info!(
+        target: "world_chain::test::node",
+        bal_enabled = bal_enabled,
+    );
 
     WorldChainNodeConfig {
         args: WorldChainArgs {
@@ -405,10 +413,6 @@ impl TransactionsProvider for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Ok(None)
-    }
-
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
@@ -692,6 +696,15 @@ impl NodePrimitivesProvider for WorldChainNoopProvider {
 impl StaticFileProviderFactory for WorldChainNoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: reth_provider::StaticFileSegment,
+    ) -> ProviderResult<reth_provider::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>>
+    {
+        unimplemented!()
     }
 }
 

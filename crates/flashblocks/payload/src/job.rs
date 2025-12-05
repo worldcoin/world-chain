@@ -359,6 +359,7 @@ where
                 .map_or(0, |withdrawals| withdrawals.len())
         });
 
+
         let flashblock = Flashblock::new(
             payload,
             &self.config,
@@ -367,6 +368,8 @@ where
             withdrawals_offset,
             access_list,
         );
+
+        trace!(target: "flashblocks::payload_builder", index = %flashblock.flashblock().index, receipts =?payload.executed_block().unwrap().execution_output.receipts, "publishing payload with receipts");
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 

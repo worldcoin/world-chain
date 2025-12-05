@@ -26,8 +26,10 @@ impl WorldChainTransactionPropagationPolicy {
     }
 }
 
-impl TransactionPropagationPolicy for WorldChainTransactionPropagationPolicy {
-    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+impl<N: NetworkPrimitives> TransactionPropagationPolicy<N>
+    for WorldChainTransactionPropagationPolicy
+{
+    fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool {
         // Access peer_id via request_tx().peer_id
         let peer_id = &peer.request_tx().peer_id;
         let allowed = self.allowed_peers.contains(peer_id);
@@ -44,11 +46,11 @@ impl TransactionPropagationPolicy for WorldChainTransactionPropagationPolicy {
         allowed
     }
 
-    fn on_session_established<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {
+    fn on_session_established(&mut self, _peer: &mut PeerMetadata<N>) {
         // No dynamic updates needed
     }
 
-    fn on_session_closed<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {
+    fn on_session_closed(&mut self, _peer: &mut PeerMetadata<N>) {
         // No cleanup needed
     }
 }

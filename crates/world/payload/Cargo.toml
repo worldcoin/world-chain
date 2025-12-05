@@ -53,6 +53,7 @@ eyre.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 semaphore-rs.workspace = true
+either.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

@@ -15,7 +15,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     block_executor::CommittedState,
@@ -255,16 +255,21 @@ where
     };
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
+
     let sealed_header = Arc::new(sealed_header);
 
     let committed_state =
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .unwrap();
 
-    let executor_transactions = decode_transactions(
-        &flashblock.diff().transactions,
-        committed_state.transactions.len() as u16 + 1,
-    )?;
+    let start_index = if committed_state.transactions.is_empty() {
+        0
+    } else {
+        committed_state.transactions.len() as u16 + 1
+    };
+
+    let executor_transactions = decode_transactions(&flashblock.diff().transactions, start_index)?;
+
     let validation_ctx = FlashblocksValidatorCtx {
         chain_spec: chain_spec.clone(),
         evm_config: evm_config.clone(),
@@ -284,6 +289,10 @@ where
             *flashblock.payload_id(),
         )?
     } else {
+        info!(
+            target: "flashblocks::state_executor",
+            "building payload without access list"
+        );
         todo!()
     };
 

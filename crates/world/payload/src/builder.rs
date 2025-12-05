@@ -3,7 +3,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use reth::{
-    api::PayloadBuilderError,
+    api::{BuiltPayloadExecutedBlock, PayloadBuilderError},
     payload::PayloadBuilderAttributes,
     revm::{State, database::StateProviderDatabase, witness::ExecutionWitnessRecord},
     transaction_pool::{BestTransactionsAttributes, TransactionPool},
@@ -431,11 +431,12 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         );
 
         // create the executed block data
-        let executed = ExecutedBlock {
+        // create the executed block data
+        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            hashed_state: either::Left(Arc::new(hashed_state)),
+            trie_updates: either::Left(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = op_ctx.attributes().no_tx_pool;
@@ -444,7 +445,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             op_ctx.payload_id(),
             sealed_block,
             info.total_fees,
-            Some(executed),
+            Some(executed_block),
         );
 
         if no_tx_pool {
