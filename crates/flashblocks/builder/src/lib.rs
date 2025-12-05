@@ -12,6 +12,7 @@ pub mod executor;
 pub mod payload_builder;
 pub mod payload_txns;
 pub mod traits;
+pub mod block_validator;
 
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {
