@@ -543,10 +543,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, uint};
-    use reth::revm::db::states::StorageSlot;
     use revm::{
-        database::BundleAccount,
         primitives::KECCAK_EMPTY,
         state::{AccountInfo, Bytecode},
     };

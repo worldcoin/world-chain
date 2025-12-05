@@ -31,7 +31,7 @@ use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::{ExecutionOutcome, StateProvider};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
-    Database, DatabaseRef,
+    DatabaseRef,
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::{
         BundleAccount, BundleState, TransitionAccount,
@@ -45,7 +45,7 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     block_executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
     executor::{
-        bal_builder_db::AsyncBalBuilderDb,
+        bal_builder_db::BalBuilderDb,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
@@ -127,14 +127,8 @@ where
             .with_bundle_update()
             .build();
 
-        let state_dummy = State::builder()
-            .with_database_ref(temporal_db_factory.db(start_index))
-            .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
-            .with_bundle_update()
-            .build();
-
-        let database: AsyncBalBuilderDb<&mut State<revm_database_interface::WrapDatabaseRef<_>>> =
-            AsyncBalBuilderDb::new(&mut state, state_dummy);
+        let database: BalBuilderDb<&mut State<revm_database_interface::WrapDatabaseRef<_>>> =
+            BalBuilderDb::new(&mut state);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -146,7 +140,6 @@ where
 
         let state_provider_clone = state_provider.clone();
 
-        let clone_bundle = state_root_bundle.clone();
         // 3. Spawn the state root computation in a separate thread
         rayon::spawn(move || {
             let result =
@@ -344,7 +337,7 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'static,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             BlockEnv = BlockEnv,
@@ -401,7 +394,7 @@ impl<'a, DbRef, R, E> BlockBuilder for BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -492,7 +485,7 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-        let access_list = db.finish()?.build(self.index_range);
+        let access_list = db.finish().build(self.index_range);
 
         self.access_list_sender
             .send(access_list)
@@ -523,7 +516,7 @@ impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -677,13 +670,7 @@ where
         .with_bundle_update()
         .build();
 
-    let cached_db = State::builder()
-        .with_database_ref(temporal_db)
-        .with_bundle_prestate(bundle_state)
-        .with_bundle_update()
-        .build();
-
-    let mut database = AsyncBalBuilderDb::new(state, cached_db);
+    let mut database = BalBuilderDb::new(state);
     database.set_index(index);
 
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
@@ -719,7 +706,7 @@ where
         .map(|t| t.take())
         .unwrap_or_default();
 
-    let access_list = db.finish().unwrap();
+    let access_list = db.finish();
 
     Ok(ParalleExecutionResult {
         transitions: transitions.transitions,
@@ -784,12 +771,11 @@ pub fn decode_transactions(
 mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{Signature, TxKind, U256, address, uint};
+    use alloy_primitives::{Signature, TxKind, U256, uint};
     use op_alloy_consensus::OpTypedTransaction;
     use revm::{
-        database::InMemoryDB,
         primitives::KECCAK_EMPTY,
-        state::{AccountInfo, AccountStatus, Bytecode},
+        state::{AccountInfo, Bytecode},
     };
 
     // Helper to create an account info

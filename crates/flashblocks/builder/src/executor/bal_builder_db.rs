@@ -1,7 +1,7 @@
 use std::thread::JoinHandle;
 
 use alloy_primitives::{Address, B256};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_evm::block::{BlockExecutionError, StateDB};
 use revm::{
@@ -30,7 +30,7 @@ enum BalBuilderMsg {
 /// [`BalBuilderDb::set_index`] with the block-local transaction index so changes can be
 /// attributed correctly.
 #[derive(Clone, Debug)]
-struct BalBuilderDb<DB> {
+pub struct BalBuilderDb<DB> {
     /// Underlying cached database.
     db: DB,
     /// The Flashblock Access List under construction.
@@ -41,13 +41,7 @@ struct BalBuilderDb<DB> {
 
 impl<'a, DB> BalBuilderDb<DB>
 where
-    DB: Database
-        + DatabaseRef<Error = <DB as Database>::Error>
-        + DatabaseCommit
-        + Send
-        + Sync
-        + 'static,
-    <DB as Database>::Error: Send + Sync + 'static,
+    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
     /// Creates a new BalBuilderDb around the given database.
     pub fn new(db: DB) -> Self {
@@ -58,38 +52,24 @@ where
         }
     }
 
-    /// Spawns a background thread that receives read/write events and builds
-    /// the access list. `db` should probably have a chaching layer for performance reasons
-    pub fn spawn(
-        mut self,
-        rx: Receiver<BalBuilderMsg>,
-    ) -> JoinHandle<Result<FlashblockAccessListConstruction, BlockExecutionError>> {
-        std::thread::spawn(move || {
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    BalBuilderMsg::StorageRead(address, index) => {
-                        self.handle_storage_read(address, index);
-                    }
-                    BalBuilderMsg::Commit(changes) => {
-                        self.try_commit(changes)
-                            .map_err(BlockExecutionError::other)?;
-                    }
-                    BalBuilderMsg::SetIndex(index) => {
-                        self.set_index(index);
-                    }
-                    BalBuilderMsg::MergeAcccessList(access_list) => {
-                        self.access_list.merge(access_list);
-                    }
-                }
-            }
+    /// Returns a reference to the underlying database.
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
 
-            Ok(self.access_list)
-        })
+    /// Returns a mutable reference to the underlying database.
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
     }
 
     /// Updates the current transaction index used to tag future changes.
     pub fn set_index(&mut self, index: u16) {
         self.index = index;
+    }
+
+    /// Merges the access lists
+    pub fn merge_access_list(&mut self, access_list: FlashblockAccessListConstruction) {
+        self.access_list.merge(access_list);
     }
 
     /// Records a storage read for the given address and slot.
@@ -178,17 +158,16 @@ where
 
         Ok(())
     }
+
+    /// Consumes self and returns the constructed access list.
+    pub fn finish(self) -> FlashblockAccessListConstruction {
+        self.access_list
+    }
 }
 
 impl<DB> Database for BalBuilderDb<DB>
 where
-    DB: Database
-        + DatabaseRef<Error = <DB as Database>::Error>
-        + DatabaseCommit
-        + Send
-        + Sync
-        + 'static,
-    <DB as Database>::Error: Send + Sync + 'static,
+    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
     type Error = <DB as Database>::Error;
 
@@ -216,13 +195,7 @@ where
 
 impl<DB: DatabaseCommit> DatabaseCommit for BalBuilderDb<DB>
 where
-    DB: Database
-        + DatabaseRef<Error = <DB as Database>::Error>
-        + DatabaseCommit
-        + Send
-        + Sync
-        + 'static,
-    <DB as Database>::Error: Send + Sync + 'static,
+    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         if let Err(e) = self.try_commit(changes.clone()) {
@@ -234,13 +207,11 @@ where
 impl<DB> StateDB for BalBuilderDb<DB>
 where
     DB: StateDB
+        + DatabaseCommit
         + Database
         + DatabaseRef<Error = <DB as Database>::Error>
-        + DatabaseCommit
         + Send
-        + Sync
-        + 'static,
-    <DB as Database>::Error: Send + Sync + 'static,
+        + Sync,
 {
     fn bundle_state(&self) -> &BundleState {
         self.db.bundle_state()
@@ -290,7 +261,30 @@ impl<DB> AsyncBalBuilderDb<DB> {
         <DDB as Database>::Error: Send + Sync + 'static,
     {
         let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
-        let handle = BalBuilderDb::new(dummy_db).spawn(rx);
+        let mut bal_builder = BalBuilderDb::new(dummy_db);
+
+        let handle = std::thread::spawn(move || {
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    BalBuilderMsg::StorageRead(address, index) => {
+                        bal_builder.handle_storage_read(address, index);
+                    }
+                    BalBuilderMsg::Commit(changes) => {
+                        bal_builder
+                            .try_commit(changes)
+                            .map_err(BlockExecutionError::other)?;
+                    }
+                    BalBuilderMsg::SetIndex(index) => {
+                        bal_builder.set_index(index);
+                    }
+                    BalBuilderMsg::MergeAcccessList(access_list) => {
+                        bal_builder.merge_access_list(access_list);
+                    }
+                }
+            }
+
+            Ok(bal_builder.access_list)
+        });
 
         Self { db, tx, handle }
     }
