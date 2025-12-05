@@ -211,6 +211,7 @@ def get_config(
     signing_key = sk_for_service(service_name)
     cmd = [
         "node",
+        "--full",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
         "--chain={0}".format(
             launcher.network

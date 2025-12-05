@@ -8,22 +8,19 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use reth_evm::{EvmFactory, block::StateDB, tx};
+use reth_evm::{EvmFactory, block::StateDB};
 
 use alloy_consensus::{BlockHeader, Header};
 
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpEvm, OpEvmFactory, block::receipt_builder::OpReceiptBuilder,
 };
-use flashblocks_primitives::{
-    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
-};
+use flashblocks_primitives::access_list::FlashblockAccessList;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
     chainspec::EthChainSpec,
     revm::{State, database::StateProviderDatabase},
-    rpc::server_types::eth::cache::db,
 };
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
@@ -36,9 +33,8 @@ use reth_evm::{
     precompiles::PrecompilesMap,
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
-use reth_primitives::{NodePrimitives, Recovered};
-use revm_database_interface::WrapDatabaseRef;
-use tracing::{info, warn};
+use reth_primitives::NodePrimitives;
+use tracing::warn;
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -57,7 +53,7 @@ use reth_provider::{
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{
-    DatabaseCommit, DatabaseRef, context::ContextTr, database::states::bundle_state,
+    DatabaseCommit, DatabaseRef, context::ContextTr,
     inspector::NoOpInspector,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -113,7 +109,7 @@ where
     {
         let BuildArguments {
             config,
-            mut cached_reads,
+            cached_reads,
             cancel,
             best_payload,
         } = args;
@@ -128,7 +124,7 @@ where
         );
 
         let state_provider = Arc::new(self.client.state_by_block_hash(ctx.parent().hash())?);
-        let mut db = StateProviderDatabase::new(&state_provider);
+        let db = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
             build(
@@ -259,7 +255,7 @@ where
 fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Pool,
-    db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
+    _db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
     state_provider: impl StateProvider + Clone + 'static,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
@@ -364,7 +360,7 @@ where
         evm_env,
         &committed_state,
         ctx,
-        tx.clone()
+        tx.clone(),
     )?;
 
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
@@ -438,7 +434,7 @@ where
     // create the executed block data
     let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
         recovered_block: Arc::new(block),
-        execution_output: Arc::new(execution_outcome),
+        execution_output: Arc::new(execution_outcome.clone()),
         hashed_state: either::Left(Arc::new(hashed_state)),
         trie_updates: either::Left(Arc::new(trie_updates)),
     };
@@ -451,7 +447,6 @@ where
     );
 
     let access_list = if bal_enabled {
-        info!(target: "flashblocks::payload_builder", "bal enabled, receiving access list");
         Some(access_list_rx.recv().map_err(PayloadBuilderError::other)?)
     } else {
         None

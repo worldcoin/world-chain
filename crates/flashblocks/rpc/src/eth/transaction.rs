@@ -37,7 +37,7 @@ where
     // TODO: FIXME:
     fn send_transaction(
         &self,
-        tx: alloy_eips::eip2718::WithEncoded<
+        _tx: alloy_eips::eip2718::WithEncoded<
             reth_primitives::Recovered<reth_transaction_pool::PoolPooledTx<Self::Pool>>,
         >,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {

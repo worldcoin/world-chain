@@ -3789,7 +3789,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-op-evm",
  "alloy-primitives 1.4.1",
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
  "alloy-sol-types 1.4.1",

@@ -6,7 +6,6 @@ use std::{
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::{Receiver, Sender};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth::revm::State;
 use reth_evm::block::{BlockExecutionError, StateDB};
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
@@ -15,7 +14,7 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 
-use crate::{access_list::FlashblockAccessListConstruction, block_executor::BalExecutorError};
+use crate::access_list::FlashblockAccessListConstruction;
 
 /// A wrapper around a database that builds a Flashblock
 /// Access List during execution.
@@ -173,33 +172,33 @@ where
                         if previous.balance != account.info.balance {
                             acc_changes
                                 .balance_changes
-                                .insert(self.index as u16, account.info.balance);
+                                .insert(self.index, account.info.balance);
                         }
                         if previous.nonce != account.info.nonce {
                             acc_changes
                                 .nonce_changes
-                                .insert(self.index as u16, account.info.nonce);
+                                .insert(self.index, account.info.nonce);
                         }
                         if previous.code_hash != account.info.code_hash {
                             let bytecode = match account.info.code.clone() {
                                 Some(code) => code,
                                 None => self.db.code_by_hash_ref(account.info.code_hash)?,
                             };
-                            acc_changes.code_changes.insert(self.index as u16, bytecode);
+                            acc_changes.code_changes.insert(self.index, bytecode);
                         }
                     }
                     None => {
                         acc_changes
                             .balance_changes
-                            .insert(self.index as u16, account.info.balance);
+                            .insert(self.index, account.info.balance);
                         acc_changes
                             .nonce_changes
-                            .insert(self.index as u16, account.info.nonce);
+                            .insert(self.index, account.info.nonce);
                         let bytecode = match account.info.code.clone() {
                             Some(code) => code,
                             None => self.db.code_by_hash_ref(account.info.code_hash)?,
                         };
-                        acc_changes.code_changes.insert(self.index as u16, bytecode);
+                        acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
 
@@ -210,7 +209,7 @@ where
                             .storage_changes
                             .entry(*key)
                             .or_default()
-                            .insert(self.index as u16, value.present_value);
+                            .insert(self.index, value.present_value);
                     }
                     Result::<(), <DB as Database>::Error>::Ok(())
                 })?;

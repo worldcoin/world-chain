@@ -19,10 +19,10 @@ use reth_optimism_flashblocks::FlashBlockCompleteSequence;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     OpEthApi, OpEthApiBuilder, OpEthApiError,
-    eth::{OpRpcConvert, receipt::OpReceiptConverter, transaction::OpTxInfoMapper},
+    eth::OpRpcConvert,
 };
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes,
     helpers::{
         EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,

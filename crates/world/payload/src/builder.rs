@@ -12,7 +12,6 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     Database, Evm,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},

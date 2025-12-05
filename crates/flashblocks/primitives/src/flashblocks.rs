@@ -1,5 +1,5 @@
 use crate::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData},
+    access_list::{FlashblockAccessList, FlashblockAccessListData, compute_access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use alloy_consensus::{
@@ -93,7 +93,7 @@ impl Flashblock {
         };
 
         let access_list_data = if let Some(access_list) = access_list {
-            let hash = keccak256(alloy_rlp::encode(&access_list));
+            let hash = compute_access_list_hash(&access_list);
             Some(FlashblockAccessListData {
                 access_list,
                 access_list_hash: hash,

@@ -17,7 +17,7 @@ use futures::{
     stream::{self, FuturesUnordered},
 };
 use op_alloy_rpc_types::OpTransactionReceipt;
-use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV3;
+use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
 use parking_lot::RwLock;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
@@ -230,7 +230,7 @@ impl Action<OpEngineTypes> for Repeat {
 }
 
 pub struct FlashblocksValidatonStream {
-    pub node_indexes: Vec<usize>,
+    pub beacon_engine_handles: Vec<Arc<ConsensusEngineHandle<OpEngineTypes>>>,
     pub flashblocks_stream:
         Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Unpin + Send + Sync + 'static>>,
     pub validation_hook: Option<Hook<PayloadStatusEnum>>,
@@ -245,12 +245,6 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
         Box::pin(async move {
             let chain_spec = self.chain_spec.clone();
             let flashblocks: Flashblocks = Flashblocks::default();
-            let consensus_handles: Vec<_> = self
-                .node_indexes
-                .iter()
-                .filter_map(|&idx| env.node_clients[idx].beacon_engine_handle.clone())
-                .map(Arc::new)
-                .collect::<Vec<_>>();
 
             let mut ordered = flashblocks;
 
@@ -299,7 +293,8 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                     finalized_block_hash: parent,
                 };
 
-                let status_results = consensus_handles
+                let status_results = self
+                    .beacon_engine_handles
                     .clone()
                     .into_iter()
                     .map(|beacon_handle| {
@@ -849,7 +844,7 @@ pub struct AssertMineBlock<A> {
     pub authorization_gen: A,
     pub block_interval: Duration,
     pub flashblocks: bool,
-    pub sender: mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
+    pub sender: mpsc::Sender<OpExecutionPayloadEnvelopeV4>,
 }
 
 impl<A> AssertMineBlock<A>
@@ -863,7 +858,7 @@ where
         authorization_gen: A,
         block_interval: Duration,
         flashblocks: bool,
-        sender: mpsc::Sender<OpExecutionPayloadEnvelopeV3>,
+        sender: mpsc::Sender<OpExecutionPayloadEnvelopeV4>,
     ) -> Self {
         Self {
             node_idx,
@@ -945,20 +940,21 @@ where
                 .payload_id
                 .ok_or_else(|| eyre!("No payload ID returned"))?;
 
-            std::thread::sleep(self.block_interval);
-
+            tokio::time::sleep(self.block_interval).await;
             let payload =
-                EngineApiClient::<OpEngineTypes>::get_payload_v3(&engine, payload_id).await?;
+                EngineApiClient::<OpEngineTypes>::get_payload_v4(&engine, payload_id).await?;
 
-            debug!(
+            info!(
                 "Mined block {} with {} txs",
                 payload
                     .execution_payload
                     .payload_inner
                     .payload_inner
+                    .payload_inner
                     .block_hash,
                 payload
                     .execution_payload
+                    .payload_inner
                     .payload_inner
                     .payload_inner
                     .transactions
@@ -1365,7 +1361,7 @@ where
                 .ok_or_else(|| eyre!("No payload ID returned"))?;
 
             // Wait for block to be built
-            std::thread::sleep(self.block_interval);
+            tokio::time::sleep(self.block_interval).await;
 
             let payload =
                 EngineApiClient::<OpEngineTypes>::get_payload_v3(&engine, payload_id).await?;

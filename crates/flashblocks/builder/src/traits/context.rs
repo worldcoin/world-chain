@@ -4,7 +4,7 @@ use op_alloy_consensus::EIP1559ParamError;
 use reth::{builder::PayloadBuilderError, payload::PayloadId, revm::State};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    ConfigureEvm, Database, Evm, EvmEnv,
+    ConfigureEvm, Evm, EvmEnv,
     block::{BlockExecutor, StateDB},
     execute::BlockBuilder,
     op_revm::OpSpecId,

@@ -700,8 +700,8 @@ impl StaticFileProviderFactory for WorldChainNoopProvider {
 
     fn get_static_file_writer(
         &self,
-        block: BlockNumber,
-        segment: reth_provider::StaticFileSegment,
+        _block: BlockNumber,
+        _segment: reth_provider::StaticFileSegment,
     ) -> ProviderResult<reth_provider::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>>
     {
         unimplemented!()

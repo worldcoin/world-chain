@@ -1,4 +1,5 @@
 use std::{
+    fmt::format,
     future::Future,
     pin::{Pin, pin},
     task::{Context, Poll},
@@ -12,7 +13,7 @@ use flashblocks_builder::{
 
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData},
+    access_list::{FlashblockAccessList, FlashblockAccessListData, compute_access_list_hash},
     flashblocks::Flashblock,
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
@@ -24,6 +25,7 @@ use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BlockBody, BuiltPayload, PayloadBuilderError, PayloadKind},
+    core::primitives::AlloyBlockHeader,
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -212,7 +214,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
+            access_list_hash: compute_access_list_hash(&access_list),
             access_list,
         });
         match state {
@@ -359,7 +361,6 @@ where
                 .map_or(0, |withdrawals| withdrawals.len())
         });
 
-
         let flashblock = Flashblock::new(
             payload,
             &self.config,
@@ -369,7 +370,7 @@ where
             access_list,
         );
 
-        trace!(target: "flashblocks::payload_builder", index = %flashblock.flashblock().index, receipts =?payload.executed_block().unwrap().execution_output.receipts, "publishing payload with receipts");
+        trace!(target: "flashblocks::payload_builder", index = %flashblock.flashblock().index, receipts =?payload.block(), "publishing payload with block");
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
@@ -470,11 +471,12 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        if this.recommit_interval.poll_tick(cx).is_ready() && !this.best_payload.0.is_frozen() {
-            if this.pending_block.is_none() {
-                trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
-                this.spawn_build_job();
-            }
+        if this.recommit_interval.poll_tick(cx).is_ready()
+            && !this.best_payload.0.is_frozen()
+            && this.pending_block.is_none()
+        {
+            trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
+            this.spawn_build_job();
         }
 
         let network_handle = this.p2p_handler.clone();

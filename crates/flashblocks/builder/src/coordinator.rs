@@ -275,7 +275,7 @@ where
         evm_config: evm_config.clone(),
         execution_context: execution_context.clone(),
         executor_transactions: executor_transactions.clone(),
-        committed_state: committed_state,
+        committed_state,
         evm_env: evm_env.clone(),
     };
 

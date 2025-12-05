@@ -18,16 +18,14 @@ use reth_provider::BlockExecutionResult;
 use revm::{
     DatabaseCommit,
     context::{BlockEnv, TxEnv, result::ResultAndState},
-    database::{AccountStatus, BundleState},
+    database::BundleState,
 };
-use revm_database_interface::DBErrorMarker;
-use tracing::{info, trace};
+use tracing::trace;
 
 use crate::{access_list::BlockAccessIndex, executor::bal_builder_db::BalBuilderDb};
-use alloy_consensus::{Block, BlockHeader, Header, Transaction, transaction::TxHashRef};
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
+use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
-use reth::revm::State;
 use reth_evm::{
     block::CommitChanges,
     execute::{
@@ -50,15 +48,19 @@ pub enum BalExecutorError {
     BlockExecutionError(#[from] BlockExecutionError),
     #[error("Missing executed block in built payload")]
     MissingExecutedBlock,
-    #[error("Validation error: {0}")]
-    BalValidationError(String),
-    #[error("Evm error: {0}")]
-    EvmError(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
+    #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
+    StateRootMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    #[error("Receipts Root Mismatch: expected {expected:?}, got: {got:?}")]
+    ReceiptsRootMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    #[error("Bal Hash Mismatch: expected {expected:?}, got {got:?}")]
+    BalHashMismatch { expected: FixedBytes<32>, got: FixedBytes<32> },
+    #[error("Inernal Error: {0}")]
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl BalExecutorError {
-    pub fn evm_err<E: core::error::Error + Send + Sync + 'static>(err: E) -> Self {
-        BalExecutorError::EvmError(Box::new(err))
+    pub fn other<E: core::error::Error + Send + Sync + 'static>(err: E) -> Self {
+        BalExecutorError::Other(Box::new(err))
     }
 }
 
@@ -208,14 +210,14 @@ impl BlockExecutorFactory for BalBlockExecutorFactory {
         I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<DB>> + 'a,
         OpEvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
     {
-        let block_executor = BalBlockExecutor::new(
+        
+
+        BalBlockExecutor::new(
             evm,
             ctx,
             self.spec().clone().into(),
             OpRethReceiptBuilder::default(),
-        );
-
-        block_executor
+        )
     }
 }
 
@@ -251,6 +253,7 @@ where
         let start_index = if transactions.is_empty() {
             0
         } else {
+            // pre-execution changes + txns + post-execution changes
             transactions.len() as u16 + 1
         };
 
@@ -466,24 +469,6 @@ where
     }
 }
 
-/// Normalizes account statuses in a bundle state for use as a prestate.
-///
-/// When a bundle is used as a prestate for new execution, accounts with `InMemoryChange`
-/// status need to be converted to `Changed` status. This is because:
-/// - `InMemoryChange` means the account was created in memory without being loaded from DB
-/// - When applying new transitions with `Changed` status, revm expects the account to be
-///   in `Loaded`, `Changed`, or `LoadedEmptyEIP161` status
-/// - `InMemoryChange -> Changed` is not a valid state transition and will panic
-/// - `Changed -> Changed` is a valid state transition
-fn normalize_bundle_for_prestate(mut bundle: BundleState) -> BundleState {
-    for (_address, account) in bundle.state.iter_mut() {
-        if account.status == AccountStatus::InMemoryChange {
-            account.status = AccountStatus::Changed;
-        }
-    }
-    bundle
-}
-
 impl<R> TryFrom<Option<&OpBuiltPayload>> for CommittedState<R>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
@@ -497,12 +482,13 @@ where
                 .ok_or(BalExecutorError::MissingExecutedBlock)?;
 
             let gas_used = executed_block.recovered_block.gas_used();
-            
-            // Normalize the bundle state for use as a prestate.
-            // This converts InMemoryChange accounts to Changed status to allow
-            // valid state transitions when applying new execution results.
-            let bundle =
-                normalize_bundle_for_prestate(executed_block.execution_output.bundle.clone());
+
+            let bundle = value
+                .executed_block()
+                .ok_or(BalExecutorError::MissingExecutedBlock)?
+                .execution_output
+                .bundle
+                .clone();
 
             let fees = value.fees();
 
@@ -561,200 +547,6 @@ mod tests {
             code_hash: KECCAK_EMPTY,
             code: Some(Bytecode::default()),
         }
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_converts_in_memory_change() {
-        let addr = address!("0000000000000000000000000000000000000001");
-
-        let mut bundle = BundleState::default();
-        bundle.state.insert(
-            addr,
-            BundleAccount {
-                info: Some(create_account(uint!(1000_U256), 1)),
-                original_info: Some(create_account(uint!(500_U256), 0)),
-                storage: Default::default(),
-                status: AccountStatus::InMemoryChange,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        let account = normalized.state.get(&addr).unwrap();
-        assert_eq!(
-            account.status,
-            AccountStatus::Changed,
-            "InMemoryChange should be converted to Changed"
-        );
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_preserves_changed() {
-        let addr = address!("0000000000000000000000000000000000000002");
-
-        let mut bundle = BundleState::default();
-        bundle.state.insert(
-            addr,
-            BundleAccount {
-                info: Some(create_account(uint!(2000_U256), 5)),
-                original_info: Some(create_account(uint!(1000_U256), 4)),
-                storage: Default::default(),
-                status: AccountStatus::Changed,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        let account = normalized.state.get(&addr).unwrap();
-        assert_eq!(
-            account.status,
-            AccountStatus::Changed,
-            "Changed status should be preserved"
-        );
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_preserves_loaded() {
-        let addr = address!("0000000000000000000000000000000000000003");
-
-        let mut bundle = BundleState::default();
-        bundle.state.insert(
-            addr,
-            BundleAccount {
-                info: Some(create_account(uint!(3000_U256), 10)),
-                original_info: Some(create_account(uint!(3000_U256), 10)),
-                storage: Default::default(),
-                status: AccountStatus::Loaded,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        let account = normalized.state.get(&addr).unwrap();
-        assert_eq!(
-            account.status,
-            AccountStatus::Loaded,
-            "Loaded status should be preserved"
-        );
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_multiple_accounts() {
-        let addr1 = address!("0000000000000000000000000000000000000001");
-        let addr2 = address!("0000000000000000000000000000000000000002");
-        let addr3 = address!("0000000000000000000000000000000000000003");
-
-        let mut bundle = BundleState::default();
-
-        // InMemoryChange -> should become Changed
-        bundle.state.insert(
-            addr1,
-            BundleAccount {
-                info: Some(create_account(uint!(100_U256), 1)),
-                original_info: None,
-                storage: Default::default(),
-                status: AccountStatus::InMemoryChange,
-            },
-        );
-
-        // Changed -> should stay Changed
-        bundle.state.insert(
-            addr2,
-            BundleAccount {
-                info: Some(create_account(uint!(200_U256), 2)),
-                original_info: Some(create_account(uint!(100_U256), 1)),
-                storage: Default::default(),
-                status: AccountStatus::Changed,
-            },
-        );
-
-        // Loaded -> should stay Loaded
-        bundle.state.insert(
-            addr3,
-            BundleAccount {
-                info: Some(create_account(uint!(300_U256), 3)),
-                original_info: Some(create_account(uint!(300_U256), 3)),
-                storage: Default::default(),
-                status: AccountStatus::Loaded,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        assert_eq!(
-            normalized.state.get(&addr1).unwrap().status,
-            AccountStatus::Changed
-        );
-        assert_eq!(
-            normalized.state.get(&addr2).unwrap().status,
-            AccountStatus::Changed
-        );
-        assert_eq!(
-            normalized.state.get(&addr3).unwrap().status,
-            AccountStatus::Loaded
-        );
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_preserves_storage() {
-        let addr = address!("0000000000000000000000000000000000000001");
-        let slot = uint!(1_U256);
-        let value = uint!(42_U256);
-
-        let mut bundle = BundleState::default();
-        let mut storage = std::collections::HashMap::default();
-        storage.insert(
-            slot,
-            StorageSlot {
-                previous_or_original_value: uint!(0_U256),
-                present_value: value,
-            },
-        );
-
-        bundle.state.insert(
-            addr,
-            BundleAccount {
-                info: Some(create_account(uint!(1000_U256), 1)),
-                original_info: None,
-                storage,
-                status: AccountStatus::InMemoryChange,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        let account = normalized.state.get(&addr).unwrap();
-        assert_eq!(account.storage.len(), 1, "Storage should be preserved");
-        assert_eq!(
-            account.storage.get(&slot).unwrap().present_value,
-            value,
-            "Storage value should be preserved"
-        );
-    }
-
-    #[test]
-    fn test_normalize_bundle_for_prestate_preserves_account_info() {
-        let addr = address!("0000000000000000000000000000000000000001");
-        let balance = uint!(12345_U256);
-        let nonce = 99;
-
-        let mut bundle = BundleState::default();
-        bundle.state.insert(
-            addr,
-            BundleAccount {
-                info: Some(create_account(balance, nonce)),
-                original_info: None,
-                storage: Default::default(),
-                status: AccountStatus::InMemoryChange,
-            },
-        );
-
-        let normalized = normalize_bundle_for_prestate(bundle);
-
-        let account = normalized.state.get(&addr).unwrap();
-        let info = account.info.as_ref().unwrap();
-        assert_eq!(info.balance, balance, "Balance should be preserved");
-        assert_eq!(info.nonce, nonce, "Nonce should be preserved");
     }
 
     #[test]

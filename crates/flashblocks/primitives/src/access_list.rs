@@ -4,7 +4,7 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
-    db::{AccountStatus, BundleAccount, TransitionState, states::StorageSlot},
+    db::{AccountStatus, BundleAccount, states::StorageSlot},
     primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
@@ -58,30 +58,8 @@ impl FlashblockAccessList {
         // Rebuild the sorted vector
         self.changes = merged.into_values().collect();
     }
-
-    pub fn transitions(&self) -> Vec<TransitionState> {
-        // (self.max_tx_index as usize..self.min_tx_index as usize + 1)
-        //     .into_par_iter()
-        //     .map(|i| {
-        //         let mut transition = TransitionState::default();
-        //         transition
-        //     })
-        //     .collect()
-        let len = (self.max_tx_index - self.min_tx_index + 1) as usize;
-        let mut transitions = vec![TransitionState::default(); len];
-        for account in &self.changes {
-            for slot in &account.storage_changes {
-                for storage in &slot.changes {
-                    let transition = &mut transitions[storage.block_access_index as usize];
-                    let _transition_account =
-                        transition.transitions.entry(account.address).or_default();
-                    // transition_account.info
-                }
-            }
-        }
-        transitions
-    }
 }
+
 /// Helper function to merge two [`AccountChanges`] preserving lexicographic order.
 fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) {
     let mut storage_map: BTreeMap<B256, BTreeMap<u64, StorageChange>> = BTreeMap::new();
@@ -146,6 +124,12 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
         code_map.insert(change.block_access_index, change.clone());
     }
     existing.code_changes = code_map.into_values().collect();
+}
+
+/// Computes the Keccak256 hash of the RLP-Encoding of a [`FlashblockAccessList`]
+pub fn compute_access_list_hash(access_list: &FlashblockAccessList) -> B256 {
+    let rlp_encoded = alloy_rlp::encode(access_list);
+    alloy_primitives::keccak256(&rlp_encoded)
 }
 
 /// Conversion from a [`FlashblockAccessList`] to a HashMap of Bundle Accounts.

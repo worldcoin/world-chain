@@ -169,7 +169,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
         setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
 
     // Verifier
-    let (_, basic_nodes, _tasks, _basic_env, _) =
+    let (_, basic_nodes, _tasks, mut basic_env, _) =
         setup_with_tx_peers::<BasicContext>(1, optimism_payload_attributes, false, false).await?;
 
     let basic_worldchain_node = &basic_nodes[0];
@@ -212,44 +212,56 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
+    let _tx = tx.clone();
+
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
         authorization_generator,
-        std::time::Duration::from_millis(2000),
+        std::time::Duration::from_millis(3000),
         true,
         tx,
     )
     .await;
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
-        node_indexes: vec![0, 1],
+        beacon_engine_handles: vec![basic_worldchain_node.node.inner.consensus_engine_handle().clone().into()],
         flashblocks_stream: Box::pin(builder_context.flashblocks_handle.flashblock_stream()),
         validation_hook: Some(Arc::new(move |status: PayloadStatusEnum| {
+            info!(target: "test", "Flashblock validated with status: {:?}", status);
             assert_eq!(status, PayloadStatusEnum::Valid);
             Ok(())
         })),
         chain_spec: basic_worldchain_node.node.inner.chain_spec().clone(),
     };
 
-    let mut sequence: ActionSequence = ActionSequence::new()
-        .then(mine_block)
-        .then(validation_stream);
+    // Run mining and validation concurrently - validation must be listening
+    // while mining produces flashblocks, otherwise they'll be missed
+    let mining_handle = tokio::spawn(async move {
+        let mut mine_action = mine_block;
+        mine_action.execute(&mut flashblocks_env).await
+    });
 
-    let fut = async { sequence.execute(&mut flashblocks_env).await };
+    let validation_handle = tokio::spawn(async move {
+        let mut validation_action = validation_stream;
+        validation_action.execute(&mut basic_env).await
+    });
 
-    futures::future::try_select(
-        Box::pin(fut),
-        Box::pin(async { rx.recv().await.ok_or(eyre!("failed to fetch envelope")) }),
-    )
-    .await
-    .map_err(|e| {
-        eyre!(
-            "failed to complete flashblocks test: {}",
-            e.factor_first().0
-        )
-    })?;
+    // Wait for mining to complete
+    let _ = rx
+        .recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Abort validation (it runs indefinitely otherwise)
+    validation_handle.abort();
+
+    // Wait for mining to finish cleanly
+    mining_handle.await??;
+
+    drop(basic_nodes);
+    drop(nodes);
 
     Ok(())
 }

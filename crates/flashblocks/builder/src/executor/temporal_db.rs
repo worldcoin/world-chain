@@ -123,6 +123,12 @@ pub struct TemporalDb<DB: DatabaseRef> {
 }
 
 impl<DB: DatabaseRef> TemporalDb<DB> {
+    pub fn set_index(&mut self, index: u64) {
+        self.index = index;
+    }
+}
+
+impl<DB: DatabaseRef> TemporalDb<DB> {
     pub fn new(db: Arc<DB>, cache: Arc<TemporalState>, index: u64) -> Self {
         TemporalDb { db, cache, index }
     }
