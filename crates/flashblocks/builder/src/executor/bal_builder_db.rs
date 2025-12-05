@@ -34,6 +34,16 @@ pub struct BalBuilderDb<DB> {
     handle: JoinHandle<Result<FlashblockAccessListConstruction, BlockExecutionError>>,
 }
 
+impl<DB> BalBuilderDb<DB> {
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
+
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
+    }
+}
+
 #[derive(Clone, Debug)]
 struct BalBuilder<DB: DatabaseRef> {
     /// Underlying cached database.
@@ -55,7 +65,7 @@ impl<DB> BalBuilderDb<DB> {
     /// Creates a new builder around a writable DB plus a dummy mirror that
     /// the background thread uses to compare state when deriving changes. The dummy will
     /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync + 'static>(
+    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync>(
         db: DB,
         dummy_db: DDB,
     ) -> Self {

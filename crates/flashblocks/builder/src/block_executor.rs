@@ -240,6 +240,7 @@ where
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let counter = BlockAccessIndexCounter::new(transactions.len() as u16);
+        
         (
             Self {
                 inner: BasicBlockBuilder {
@@ -403,7 +404,7 @@ impl BlockAccessIndexCounter {
         }
     }
 
-    fn next_index(&mut self) -> u16 {
+    pub fn next_index(&mut self) -> u16 {
         let index = self.current_index;
         self.current_index += 1;
         index
@@ -413,7 +414,7 @@ impl BlockAccessIndexCounter {
         self.current_index = self.start_index;
     }
 
-    fn finish(self) -> (u16, u16) {
+    pub fn finish(self) -> (u16, u16) {
         (self.start_index, self.current_index)
     }
 }
