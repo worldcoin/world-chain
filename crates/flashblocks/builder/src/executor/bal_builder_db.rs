@@ -59,13 +59,14 @@ enum BalBuilderMsg {
     StorageRead(Address, StorageKey),
     Commit(HashMap<Address, revm::state::Account>),
     SetIndex(u16),
+    MergeAcccessList(FlashblockAccessListConstruction),
 }
 
 impl<DB> BalBuilderDb<DB> {
     /// Creates a new builder around a writable DB plus a dummy mirror that
     /// the background thread uses to compare state when deriving changes. The dummy will
     /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync>(
+    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync + 'static>(
         db: DB,
         dummy_db: DDB,
     ) -> Self {
@@ -80,6 +81,13 @@ impl<DB> BalBuilderDb<DB> {
         let _ = self.tx.send(BalBuilderMsg::SetIndex(index));
     }
 
+    /// Merges another access list into the current one.
+    pub fn merge_access_list(&mut self, access_list: FlashblockAccessListConstruction) {
+        let _ = self
+            .tx
+            .send(BalBuilderMsg::MergeAcccessList(access_list));
+    }
+
     /// Signals the background thread to finish and returns the constructed
     /// access list.
     pub fn finish(self) -> Result<FlashblockAccessListConstruction, BlockExecutionError> {
@@ -89,7 +97,7 @@ impl<DB> BalBuilderDb<DB> {
     }
 }
 
-impl<DB> BalBuilder<DB>
+impl<'a, DB> BalBuilder<DB>
 where
     DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static,
     DB::Error: Send + Sync + 'static,
@@ -119,6 +127,9 @@ where
                     }
                     BalBuilderMsg::SetIndex(index) => {
                         bal_builder.index = index;
+                    }
+                    BalBuilderMsg::MergeAcccessList(access_list) => {
+                        bal_builder.access_list.merge(access_list);
                     }
                 }
             }

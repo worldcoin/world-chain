@@ -19,7 +19,7 @@ use reth::{
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
-    block::{BlockExecutionError, BlockValidationError},
+    block::{BlockExecutionError, BlockValidationError, StateDB},
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
 };
@@ -39,7 +39,7 @@ use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::PoolTransaction;
-use revm::context::BlockEnv;
+use revm::{DatabaseCommit, context::BlockEnv};
 use revm_primitives::{Address, U256};
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
@@ -212,11 +212,11 @@ where
             .create_block_builder(evm, self.inner.parent(), execution_ctx))
     }
 
-    fn execute_sequencer_transactions<'a, DB>(
+    fn execute_sequencer_transactions<'a>(
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor: BlockExecutor<Evm: Evm< DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError>
     where
@@ -229,7 +229,7 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
+    fn execute_best_transactions<'a, Pool, Txs, Builder>(
         &self,
         pool: Pool,
         info: &mut ExecutionInfo,
@@ -239,11 +239,9 @@ where
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+                Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>, BlockEnv = BlockEnv>>,
             >,
         Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,

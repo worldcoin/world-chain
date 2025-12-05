@@ -1,33 +1,30 @@
 //! A block executor and builder for flashblocks that constructs a BAL (Block Access List) sidecar.
 
-use alloy_op_evm::{OpBlockExecutor, block::receipt_builder::OpReceiptBuilder};
+use alloy_op_evm::{
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+    block::receipt_builder::OpReceiptBuilder,
+};
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, StateDB},
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, StateDB},
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_payload_primitives::BuiltPayload;
 use reth_provider::BlockExecutionResult;
 use revm::{
     DatabaseCommit,
     context::{BlockEnv, TxEnv, result::ResultAndState},
+    database::BundleState,
 };
-
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvmFactory};
-use reth_evm::{
-    EvmFactory,
-    block::{BlockExecutorFactory, BlockExecutorFor},
-};
-use reth_optimism_evm::OpRethReceiptBuilder;
-use revm::database::BundleState;
 use revm_database_interface::DBErrorMarker;
 
-use crate::executor::bal_builder::BalBuilderBlockExecutor;
-
-use alloy_consensus::{Block, Header};
-use alloy_primitives::Address;
+use crate::{access_list::BlockAccessIndex, executor::bal_builder_db::BalBuilderDb};
+use alloy_consensus::{Block, BlockHeader, Header, Transaction, transaction::TxHashRef};
+use alloy_primitives::{Address, FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use reth::revm::State;
 use reth_evm::{
@@ -37,7 +34,7 @@ use reth_evm::{
     },
     op_revm::OpHaltReason,
 };
-use reth_optimism_node::OpBlockAssembler;
+use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{
@@ -45,8 +42,6 @@ use revm::{
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
 use std::{borrow::Cow, collections::HashSet, sync::Arc};
-
-use crate::executor::bal_builder_db::BalBuilderDb;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BalExecutorError {
@@ -80,6 +75,16 @@ where
     ) -> Self {
         let inner = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
         Self { inner }
+    }
+
+    pub fn with_gas_used(mut self, gas_used: u64) -> Self {
+        self.inner.gas_used = gas_used;
+        self
+    }
+
+    pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
+        self.inner.receipts = receipts;
+        self
     }
 }
 
@@ -240,7 +245,6 @@ where
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let counter = BlockAccessIndexCounter::new(transactions.len() as u16);
-        
         (
             Self {
                 inner: BasicBlockBuilder {
@@ -416,5 +420,86 @@ impl BlockAccessIndexCounter {
 
     pub fn finish(self) -> (u16, u16) {
         (self.start_index, self.current_index)
+    }
+}
+
+
+#[derive(Default, Debug, Clone)]
+
+pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
+    pub gas_used: u64,
+    pub fees: U256,
+    pub bundle: BundleState,
+    pub receipts: Vec<(BlockAccessIndex, R::Receipt)>,
+    pub transactions: Vec<(BlockAccessIndex, Recovered<R::Transaction>)>,
+}
+
+impl<R> CommittedState<R>
+where
+    R: OpReceiptBuilder + Default,
+{
+    pub fn transactions_iter(&self) -> impl Iterator<Item = &'_ Recovered<R::Transaction>> + '_ {
+        self.transactions.iter().map(|(_, tx)| tx)
+    }
+
+    pub fn transaction_hashes_iter(&self) -> impl Iterator<Item = FixedBytes<32>> + '_
+    where
+        R::Transaction: Clone + TxHashRef,
+    {
+        self.transactions.iter().map(|(_, tx)| tx.tx_hash()).copied()
+    }
+
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &'_ R::Receipt> + '_ {
+        self.receipts.iter().map(|(_, r)| r)
+    }
+}
+
+impl<R> TryFrom<Option<&OpBuiltPayload>> for CommittedState<R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+{
+    type Error = BalExecutorError;
+
+    fn try_from(value: Option<&OpBuiltPayload>) -> Result<Self, Self::Error> {
+        if let Some(value) = value {
+            let executed_block = value.executed_block().unwrap(); // TODO:
+
+            let gas_used = executed_block.recovered_block.gas_used();
+            let bundle = executed_block.execution_output.bundle.clone();
+            let fees = value.fees();
+
+            let transactions: Vec<_> = executed_block
+                .recovered_block
+                .clone_transactions_recovered()
+                .enumerate()
+                .map(|(index, tx)| (index as BlockAccessIndex, tx))
+                .collect();
+
+            let receipts: Vec<_> = executed_block
+                .execution_output
+                .receipts()
+                .iter()
+                .flatten()
+                .cloned()
+                .enumerate()
+                .map(|(index, r)| (index as BlockAccessIndex, r))
+                .collect();
+
+            Ok(Self {
+                transactions,
+                receipts,
+                gas_used,
+                fees,
+                bundle,
+            })
+        } else {
+            Ok(Self {
+                transactions: vec![],
+                receipts: vec![],
+                gas_used: 0,
+                fees: U256::ZERO,
+                bundle: BundleState::default(),
+            })
+        }
     }
 }

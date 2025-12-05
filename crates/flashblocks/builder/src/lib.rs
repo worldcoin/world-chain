@@ -5,14 +5,14 @@ use reth_optimism_payload_builder::config::OpBuilderConfig;
 
 pub mod access_list;
 pub mod assembler;
-pub mod block_builder;
+// pub mod block_builder;
 pub mod block_executor;
+pub mod block_validator;
 pub mod coordinator;
 pub mod executor;
 pub mod payload_builder;
 pub mod payload_txns;
 pub mod traits;
-pub mod block_validator;
 
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {

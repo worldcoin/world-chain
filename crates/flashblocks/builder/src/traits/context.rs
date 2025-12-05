@@ -4,7 +4,10 @@ use op_alloy_consensus::EIP1559ParamError;
 use reth::{builder::PayloadBuilderError, payload::PayloadId, revm::State};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    ConfigureEvm, Evm, EvmEnv, block::BlockExecutor, execute::BlockBuilder, op_revm::OpSpecId,
+    ConfigureEvm, Database, Evm, EvmEnv,
+    block::{BlockExecutor, StateDB},
+    execute::BlockBuilder,
+    op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -22,7 +25,7 @@ use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
 use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::BlockEnv;
+use revm::{DatabaseCommit, context::BlockEnv};
 
 use crate::traits::context_builder::PayloadBuilderCtxBuilder;
 
@@ -121,21 +124,18 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// For Optimism, this typically includes L1 deposit transactions that represent
     /// funds being bridged from L1 to L2. These transactions cannot fail and must
     /// be processed in the exact order specified by the L1 chain.
-    fn execute_sequencer_transactions<'a, DB>(
+    fn execute_sequencer_transactions<'a>(
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>
-    where
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static;
+    ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
     /// Processes user transactions from the mempool until `gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
-    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
+    fn execute_best_transactions<'a, Pool, Txs, Builder>(
         &self,
         pool: Pool,
         info: &mut ExecutionInfo,
@@ -145,11 +145,14 @@ pub trait PayloadBuilderCtx: Send + Sync {
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+                Executor: BlockExecutor<
+                    Evm: Evm<
+                        DB: StateDB + DatabaseCommit + reth_evm::Database,
+                        BlockEnv = BlockEnv,
+                    >,
+                >,
             >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;
 
@@ -246,7 +249,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     /// Processes user transactions from the mempool until `gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
-    fn execute_best_transactions<'a, Pool, Txs, DB, Builder>(
+    fn execute_best_transactions<'a, Pool, Txs, Builder>(
         &self,
         _pool: Pool,
         info: &mut ExecutionInfo,
@@ -256,11 +259,11 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+                Executor: BlockExecutor<
+                    Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>,
+                >,
             >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
     {
@@ -319,17 +322,13 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         }
     }
 
-    fn execute_sequencer_transactions<'a, DB>(
+    fn execute_sequencer_transactions(
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>>>,
+            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
-    ) -> Result<ExecutionInfo, PayloadBuilderError>
-    where
-        DB: reth_evm::Database + 'a,
-        DB::Error: Send + Sync + 'static,
-    {
+    ) -> Result<ExecutionInfo, PayloadBuilderError> {
         self.execute_sequencer_transactions(builder)
     }
 }

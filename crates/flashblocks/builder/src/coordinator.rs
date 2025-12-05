@@ -17,7 +17,13 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use tracing::{error, trace};
 
-use crate::executor::bal_executor::BalBlockValidator;
+use crate::{
+    block_executor::CommittedState,
+    block_validator::{
+        FlashblockBlockValidator, FlashblocksBlockValidator, FlashblocksValidatorCtx,
+        decode_transactions,
+    },
+};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The current state of all known pre confirmations received over the P2P layer
@@ -251,29 +257,34 @@ where
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
     let sealed_header = Arc::new(sealed_header);
 
-    let block_validator = BalBlockValidator::new(
-        chain_spec.clone(),
-        execution_context.clone(),
-        latest_payload.as_ref().map(|(p, _)| p.clone()),
-        evm_env,
-        evm_config.clone(),
-        OpRethReceiptBuilder::default(),
-        diff.clone(),
+    let committed_state =
+        CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
+            .unwrap();
+
+    let executor_transactions = decode_transactions(
+        &flashblock.diff().transactions,
+        committed_state.transactions.len() as u16 + 1,
     )?;
+    let validation_ctx = FlashblocksValidatorCtx {
+        chain_spec: chain_spec.clone(),
+        evm_config: evm_config.clone(),
+        execution_context: execution_context.clone(),
+        executor_transactions: executor_transactions.clone(),
+        committed_state: committed_state,
+        evm_env: evm_env.clone(),
+    };
+
+    let block_validator = FlashblocksBlockValidator::new(validation_ctx);
 
     let payload = if flashblock.diff().access_list_data.is_some() {
-        block_validator.validate_and_execute_diff_parallel(
+        block_validator.validate_flashblock_parallel(
             state_provider.clone(),
             diff.clone(),
             &sealed_header,
             *flashblock.payload_id(),
         )?
     } else {
-        block_validator.validate_and_execute_diff_linear(
-            state_provider.clone(),
-            &sealed_header,
-            *flashblock.payload_id(),
-        )?
+        todo!()
     };
 
     // construct the full payload
