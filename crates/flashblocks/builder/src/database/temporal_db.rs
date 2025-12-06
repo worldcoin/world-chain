@@ -6,7 +6,7 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 
-use crate::executor::temporal_map::TemporalMap;
+use super::temporal_map::TemporalMap;
 
 /// Represents the temporal state of accounts, storage, and contracts
 #[derive(Clone, Debug, Default)]

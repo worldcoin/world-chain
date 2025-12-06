@@ -29,7 +29,7 @@ use reth_primitives::TransactionSigned;
 use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::setup::execution_data_from_from_reduced_flashblock;
 
@@ -240,7 +240,7 @@ pub struct FlashblocksValidatonStream {
 impl Action<OpEngineTypes> for FlashblocksValidatonStream {
     fn execute<'a>(
         &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
+        _env: &'a mut Environment<OpEngineTypes>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let chain_spec = self.chain_spec.clone();

@@ -26,7 +26,6 @@ reth-optimism-primitives.workspace = true
 # alloy
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
-alloy-rlp.workspace = true
 
 # tokio
 tokio.workspace = true

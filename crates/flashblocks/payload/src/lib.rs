@@ -1,5 +1,4 @@
-#![warn(unused_crate_dependencies)]
-#![allow(clippy::type_complexity)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod generator;
 pub mod job;

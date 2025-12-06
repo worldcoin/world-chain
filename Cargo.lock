@@ -3947,7 +3947,6 @@ name = "flashblocks-payload"
 version = "1.9.3"
 dependencies = [
  "alloy-primitives 1.4.1",
- "alloy-rlp",
  "color-eyre",
  "flashblocks-builder",
  "flashblocks-p2p",
@@ -14297,7 +14296,6 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth",
  "reth-basic-payload-builder",
- "reth-chain-state",
  "reth-evm",
  "reth-optimism-chainspec",
  "reth-optimism-forks",

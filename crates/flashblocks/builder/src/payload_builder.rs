@@ -1,7 +1,7 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
-    block_executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
-    executor::bal_builder_db::AsyncBalBuilderDb,
+    database::bal_builder_db::AsyncBalBuilderDb,
+    executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,

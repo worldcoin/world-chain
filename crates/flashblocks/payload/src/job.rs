@@ -1,19 +1,18 @@
 use std::{
-    fmt::format,
     future::Future,
     pin::{Pin, pin},
     task::{Context, Poll},
     time::Duration,
 };
 
-use alloy_primitives::{B256, keccak256, ruint::aliases::U256};
+use alloy_primitives::{B256, ruint::aliases::U256};
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData, compute_access_list_hash},
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
     flashblocks::Flashblock,
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
@@ -25,7 +24,6 @@ use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{BlockBody, BuiltPayload, PayloadBuilderError, PayloadKind},
-    core::primitives::AlloyBlockHeader,
     network::types::Encodable2718,
     payload::{KeepPayloadJobAlive, PayloadJob},
     revm::{cached::CachedReads, cancelled::CancelOnDrop},
@@ -214,7 +212,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: compute_access_list_hash(&access_list),
+            access_list_hash: flashblocks_primitives::access_list::access_list_hash(&access_list),
             access_list,
         });
         match state {

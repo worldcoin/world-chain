@@ -18,8 +18,8 @@ use tokio::sync::broadcast;
 use tracing::{error, info, trace};
 
 use crate::{
-    block_executor::CommittedState,
-    block_validator::{
+    executor::CommittedState,
+    validator::{
         FlashblockBlockValidator, FlashblocksBlockValidator, FlashblocksValidatorCtx,
         decode_transactions,
     },

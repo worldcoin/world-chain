@@ -6,11 +6,10 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
     DatabaseRef,
     db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
-    primitives::KECCAK_EMPTY,
     state::{AccountInfo, Bytecode},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
@@ -241,7 +240,7 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
 }
 
 /// Computes the Keccak256 hash of the RLP-Encoding of a [`FlashblockAccessList`]
-pub fn compute_access_list_hash(access_list: &FlashblockAccessList) -> B256 {
+pub fn access_list_hash(access_list: &FlashblockAccessList) -> B256 {
     let rlp_encoded = alloy_rlp::encode(access_list);
     alloy_primitives::keccak256(&rlp_encoded)
 }
@@ -249,8 +248,8 @@ pub fn compute_access_list_hash(access_list: &FlashblockAccessList) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::address;
-    use reth::revm::db::AccountStatus;
+    use alloy_primitives::{address, map::HashMap};
+    use reth::revm::{db::AccountStatus, primitives::KECCAK_EMPTY};
     use std::convert::Infallible;
 
     /// Mock database for testing that can be configured with initial account state

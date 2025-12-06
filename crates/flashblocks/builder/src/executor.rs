@@ -20,9 +20,8 @@ use revm::{
     context::{BlockEnv, TxEnv, result::ResultAndState},
     database::BundleState,
 };
-use tracing::trace;
 
-use crate::{access_list::BlockAccessIndex, executor::bal_builder_db::AsyncBalBuilderDb};
+use crate::{access_list::BlockAccessIndex, database::bal_builder_db::AsyncBalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -538,20 +537,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::{
-        primitives::KECCAK_EMPTY,
-        state::{AccountInfo, Bytecode},
-    };
-
-    // Helper to create an account info
-    fn create_account(balance: U256, nonce: u64) -> AccountInfo {
-        AccountInfo {
-            balance,
-            nonce,
-            code_hash: KECCAK_EMPTY,
-            code: Some(Bytecode::default()),
-        }
-    }
 
     #[test]
     fn test_block_access_index_counter_new() {

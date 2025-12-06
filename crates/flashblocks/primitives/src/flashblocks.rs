@@ -1,5 +1,5 @@
 use crate::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData, compute_access_list_hash},
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use alloy_consensus::{
@@ -7,7 +7,7 @@ use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder,
 };
 use alloy_eips::{Decodable2718, Encodable2718, merge::BEACON_NONCE};
-use alloy_primitives::{U256, keccak256};
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
@@ -93,7 +93,7 @@ impl Flashblock {
         };
 
         let access_list_data = if let Some(access_list) = access_list {
-            let hash = compute_access_list_hash(&access_list);
+            let hash = crate::access_list::access_list_hash(&access_list);
             Some(FlashblockAccessListData {
                 access_list,
                 access_list_hash: hash,

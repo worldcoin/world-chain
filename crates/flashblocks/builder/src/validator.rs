@@ -43,12 +43,12 @@ use tracing::{error, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
-    block_executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
-    executor::{
+    database::{
         bal_builder_db::AsyncBalBuilderDb,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
+    executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
 };
 
 pub trait FlashblockBlockValidator {
@@ -194,7 +194,7 @@ where
             .map_err(BalExecutorError::other)?;
 
         let computed_access_list_hash =
-            flashblocks_primitives::access_list::compute_access_list_hash(&computed_access_list);
+            flashblocks_primitives::access_list::access_list_hash(&computed_access_list);
 
         // 5. Verify computed results
         if computed_access_list_hash != access_list_hash {
