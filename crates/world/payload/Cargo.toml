@@ -19,7 +19,6 @@ world-chain-rpc.workspace = true
 # reth
 reth.workspace = true
 reth-basic-payload-builder.workspace = true
-reth-chain-state.workspace = true
 reth-evm.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
@@ -53,6 +52,7 @@ eyre.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 semaphore-rs.workspace = true
+either.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

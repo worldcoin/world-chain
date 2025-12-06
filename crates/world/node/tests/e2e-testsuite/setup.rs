@@ -179,7 +179,7 @@ where
                 .with_http(),
         )
         .with_payload_builder(PayloadBuilderArgs {
-            deadline: Duration::from_secs(4),
+            deadline: Duration::from_secs(12),
             max_payload_tasks: 20,
             gas_limit: Some(30_000_000),
             interval: Duration::from_millis(200),

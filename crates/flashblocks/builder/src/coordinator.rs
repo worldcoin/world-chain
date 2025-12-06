@@ -15,9 +15,15 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
-use crate::executor::bal_executor::BalBlockValidator;
+use crate::{
+    executor::CommittedState,
+    validator::{
+        FlashblockBlockValidator, FlashblocksBlockValidator, FlashblocksValidatorCtx,
+        decode_transactions,
+    },
+};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The current state of all known pre confirmations received over the P2P layer
@@ -193,7 +199,12 @@ where
         // Already processed this flashblock. This happens when set directly
         // from publish_build_payload. Since we already built the payload, no need
         // to do it again.
-        pending_block.send_replace(latest_payload.0.executed_block());
+        pending_block.send_replace(
+            latest_payload
+                .0
+                .executed_block()
+                .map(|p| p.into_executed_payload()),
+        );
         return Ok(());
     }
 
@@ -244,31 +255,45 @@ where
     };
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
+
     let sealed_header = Arc::new(sealed_header);
 
-    let block_validator = BalBlockValidator::new(
-        chain_spec.clone(),
-        execution_context.clone(),
-        latest_payload.as_ref().map(|(p, _)| p.clone()),
-        evm_env,
-        evm_config.clone(),
-        OpRethReceiptBuilder::default(),
-        diff.clone(),
-    )?;
+    let committed_state =
+        CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
+            .unwrap();
+
+    let start_index = if committed_state.transactions.is_empty() {
+        0
+    } else {
+        committed_state.transactions.len() as u16 + 1
+    };
+
+    let executor_transactions = decode_transactions(&flashblock.diff().transactions, start_index)?;
+
+    let validation_ctx = FlashblocksValidatorCtx {
+        chain_spec: chain_spec.clone(),
+        evm_config: evm_config.clone(),
+        execution_context: execution_context.clone(),
+        executor_transactions: executor_transactions.clone(),
+        committed_state,
+        evm_env: evm_env.clone(),
+    };
+
+    let block_validator = FlashblocksBlockValidator::new(validation_ctx);
 
     let payload = if flashblock.diff().access_list_data.is_some() {
-        block_validator.validate_and_execute_diff_parallel(
+        block_validator.validate_flashblock_parallel(
             state_provider.clone(),
             diff.clone(),
             &sealed_header,
             *flashblock.payload_id(),
         )?
     } else {
-        block_validator.validate_and_execute_diff_linear(
-            state_provider.clone(),
-            &sealed_header,
-            *flashblock.payload_id(),
-        )?
+        info!(
+            target: "flashblocks::state_executor",
+            "building payload without access list"
+        );
+        todo!()
     };
 
     // construct the full payload
@@ -276,7 +301,7 @@ where
 
     flashblocks.push(flashblock)?;
 
-    pending_block.send_replace(payload.executed_block());
+    pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
 
     trace!(
         target: "flashblocks::state_executor",

@@ -29,6 +29,7 @@ reth-optimism-rpc.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-evm.workspace = true
+reth-optimism-flashblocks.workspace = true
 
 # alloy
 alloy-primitives.workspace = true

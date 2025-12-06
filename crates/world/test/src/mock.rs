@@ -318,18 +318,6 @@ impl TransactionsProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let lock = self.blocks.lock();
-        let mut current_tx_number: TxNumber = 0;
-        for block in lock.values() {
-            if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
-                return Ok(Some(block.header.number));
-            }
-            current_tx_number += block.body.transactions.len() as TxNumber;
-        }
-        Ok(None)
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,

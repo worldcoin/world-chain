@@ -6,7 +6,7 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 
-use crate::executor::temporal_map::TemporalMap;
+use super::temporal_map::TemporalMap;
 
 /// Represents the temporal state of accounts, storage, and contracts
 #[derive(Clone, Debug, Default)]
@@ -24,19 +24,19 @@ pub struct TemporalState {
 
 /// A factory for creating TemporalDb instances at specific BlockAccessIndices
 #[derive(Clone, Debug)]
-pub struct TemporalDbFactory<'a, DB: DatabaseRef> {
+pub struct TemporalDbFactory<DB: DatabaseRef> {
     /// Layer 0: Cached Pre-State from the BAL
     pub cache: TemporalState,
     /// Layer 1: The underlying database
-    pub db: &'a DB,
+    pub db: DB,
 }
 
-impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
+impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
     /// Build a new TemporalDbFactory from a FlashblockAccessList
     ///
     /// This will prepopulate the cache with the changes from the access list
     /// so that TemporalDb instances can be created for specific indices.
-    pub fn new(db: &'a DB, list: FlashblockAccessList) -> Self {
+    pub fn new(db: DB, list: FlashblockAccessList) -> Self {
         let mut cache = TemporalState::default();
 
         for change in list.changes {
@@ -101,32 +101,38 @@ impl<'a, DB: DatabaseRef> TemporalDbFactory<'a, DB> {
             }
         }
 
-        TemporalDbFactory { db, cache }
+        TemporalDbFactory { db, cache: cache }
     }
 
     /// Creates a new [`TemporalDb`] at a given [`BlockAccessIndex`]
-    pub fn db(&'a self, index: u64) -> TemporalDb<'a, DB> {
-        TemporalDb::new(self.db, &self.cache, index)
+    pub fn db(&self, index: u64) -> TemporalDb<DB> {
+        TemporalDb::new(self.db.clone(), self.cache.clone(), index)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct TemporalDb<'a, DB: DatabaseRef> {
+pub struct TemporalDb<DB: DatabaseRef> {
     /// Layer 0: Cached Pre-State from the BAL
-    pub cache: &'a TemporalState,
+    pub cache: TemporalState,
     /// Layer 1: The underlying database
-    pub db: &'a DB,
+    pub db: DB,
     /// The index being referenced inside the [`TemporalState`]
     pub index: u64,
 }
 
-impl<'a, DB: DatabaseRef> TemporalDb<'a, DB> {
-    pub fn new(db: &'a DB, cache: &'a TemporalState, index: u64) -> Self {
+impl<DB: DatabaseRef> TemporalDb<DB> {
+    pub fn set_index(&mut self, index: u64) {
+        self.index = index;
+    }
+}
+
+impl<DB: DatabaseRef> TemporalDb<DB> {
+    pub fn new(db: DB, cache: TemporalState, index: u64) -> Self {
         TemporalDb { db, cache, index }
     }
 }
 
-impl<'a, DB: DatabaseRef> DatabaseRef for TemporalDb<'a, DB> {
+impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
@@ -211,7 +217,7 @@ mod tests {
         };
 
         let db = EmptyDB::new();
-        let factory = TemporalDbFactory::new(&db, access_list);
+        let factory = TemporalDbFactory::new(db, access_list);
 
         // Check storage at different indices
         let temporal_db_1 = factory.db(1);
@@ -268,7 +274,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_account_info(addr, initial_account);
 
-        let factory = TemporalDbFactory::new(&db, access_list);
+        let factory = TemporalDbFactory::new(db, access_list);
         // Before the change
         let temporal_db_1 = factory.db(1);
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
@@ -316,7 +322,7 @@ mod tests {
 
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_account_info(addr, initial_account);
-        let factory = TemporalDbFactory::new(&db, access_list);
+        let factory = TemporalDbFactory::new(db, access_list);
         // Before the change
         let temporal_db_1 = factory.db(1);
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
@@ -361,7 +367,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_account_info(addr, initial_account);
 
-        let factory = TemporalDbFactory::new(&db, access_list);
+        let factory = TemporalDbFactory::new(db, access_list);
 
         // Before the change
         let temporal_db_1 = factory.db(1);
@@ -418,7 +424,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_account_info(addr, initial_account);
 
-        let factory = TemporalDbFactory::new(&db, access_list);
+        let factory = TemporalDbFactory::new(db, access_list);
 
         // At index 4, all changes should be visible
         let temporal_db = factory.db(4);
@@ -446,7 +452,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_account_info(other_addr, account_info.clone());
 
-        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+        let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
         let temporal_db = factory.db(0);
 
         // Address not in cache should fall back to DB
@@ -467,7 +473,7 @@ mod tests {
 
         let mut db = CacheDB::new(EmptyDB::new());
         let _ = db.insert_account_storage(addr, slot.into(), value);
-        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+        let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
         let temporal_db = factory.db(0);
         let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
         assert_eq!(result, value);
@@ -480,7 +486,7 @@ mod tests {
 
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_contract(&mut account);
-        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+        let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
         let temporal_db = factory.db(0);
         let result = temporal_db.code_by_hash_ref(account.code_hash).unwrap();
         // Check that the bytecode starts with the expected code
@@ -496,7 +502,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         let _ = db.insert_account_storage(addr, slot.into(), value);
 
-        let factory = TemporalDbFactory::new(&db, FlashblockAccessList::default());
+        let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
 
         let temporal_db = factory.db(0);
         // No storage in cache for this address, should fall back to DB
@@ -1477,7 +1483,7 @@ mod tests {
         let access_list = serde_json::from_value::<FlashblockAccessListData>(access_list).unwrap();
         let database = InMemoryDB::default();
 
-        let database = TemporalDbFactory::new(&database, access_list.access_list.clone());
+        let database = TemporalDbFactory::new(database, access_list.access_list.clone());
 
         // Test at block access index 3 - should see values < 3 (i.e., indices 0, 1, 2)
         let db = database.db(3);
