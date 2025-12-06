@@ -45,7 +45,7 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     block_executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
     executor::{
-        bal_builder_db::BalBuilderDb,
+        bal_builder_db::AsyncBalBuilderDb,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
@@ -135,7 +135,7 @@ where
             .with_bundle_update()
             .build();
 
-        let database = BalBuilderDb::new(&mut state);
+        let database = AsyncBalBuilderDb::new(&mut state, state_dummy);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -341,7 +341,7 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'static,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             BlockEnv = BlockEnv,
@@ -398,7 +398,7 @@ impl<'a, DbRef, R, E> BlockBuilder for BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -489,7 +489,7 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-        let access_list = db.finish().build(self.index_range);
+        let access_list = db.finish()?.build(self.index_range);
 
         self.access_list_sender
             .send(access_list)
@@ -520,7 +520,7 @@ impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -597,7 +597,7 @@ where
             .db_mut()
             .apply_transition(merged_result.transitions);
 
-        // merge the aggregated access list into the BalBuilderDb
+        // merge the aggregated access list into the AsyncBalBuilderDb
         database.merge_access_list(merged_result.access_list);
 
         // append the accumulated receipts and gas used into the executor
@@ -674,7 +674,13 @@ where
         .with_bundle_update()
         .build();
 
-    let mut database = BalBuilderDb::new(state);
+    let dummy = State::builder()
+        .with_database_ref(temporal_db.clone())
+        .with_bundle_prestate(bundle_state.clone()) // TODO: Switch to BundleDb
+        .with_bundle_update()
+        .build();
+
+    let mut database = AsyncBalBuilderDb::new(state, dummy);
     database.set_index(index);
 
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
@@ -710,7 +716,7 @@ where
         .map(|t| t.take())
         .unwrap_or_default();
 
-    let access_list = db.finish();
+    let access_list = db.finish()?;
 
     Ok(ParalleExecutionResult {
         transitions: transitions.transitions,
