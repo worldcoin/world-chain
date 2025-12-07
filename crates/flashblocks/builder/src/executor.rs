@@ -1,27 +1,26 @@
 //! A block executor and builder for flashblocks that constructs a BAL (Block Access List) sidecar.
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
-    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, StateDB},
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
+    block::{BlockExecutionError, BlockExecutor, StateDB},
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
-use reth_provider::BlockExecutionResult;
 use revm::{
     DatabaseCommit,
-    context::{BlockEnv, TxEnv, result::ResultAndState},
+    context::{BlockEnv, TxEnv},
     database::BundleState,
 };
 
-use crate::{access_list::BlockAccessIndex, database::bal_builder_db::AsyncBalBuilderDb};
+use crate::{access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -72,167 +71,12 @@ impl BalExecutorError {
     }
 }
 
-pub struct BalBlockExecutor<E, R: OpReceiptBuilder> {
-    pub inner: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
-}
-
-impl<E, R> BalBlockExecutor<E, R>
-where
-    E: Evm,
-    R: OpReceiptBuilder,
-{
-    /// Creates a new [`OpBlockExecutor`].
-    pub fn new(
-        evm: E,
-        ctx: OpBlockExecutionCtx,
-        spec: Arc<OpChainSpec>,
-        receipt_builder: R,
-    ) -> Self {
-        let inner = OpBlockExecutor::new(evm, ctx, spec, receipt_builder);
-        Self { inner }
-    }
-
-    pub fn with_gas_used(mut self, gas_used: u64) -> Self {
-        self.inner.gas_used = gas_used;
-        self
-    }
-
-    pub fn with_receipts(mut self, receipts: Vec<R::Receipt>) -> Self {
-        self.inner.receipts = receipts;
-        self
-    }
-}
-
-impl<E, DB, R> BlockExecutor for BalBlockExecutor<E, R>
-where
-    DB: StateDB + DatabaseCommit + Database,
-    E: Evm<DB = DB, Tx = OpTransaction<TxEnv>, Spec = OpSpecId, BlockEnv = BlockEnv>,
-    OpTransaction<TxEnv>: FromTxWithEncoded<R::Transaction> + FromRecoveredTx<R::Transaction>,
-    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
-{
-    type Evm = E;
-    type Receipt = R::Receipt;
-    type Transaction = R::Transaction;
-
-    fn apply_pre_execution_changes(&mut self) -> Result<(), reth_evm::block::BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
-    }
-
-    fn evm(&self) -> &Self::Evm {
-        self.inner.evm()
-    }
-
-    fn evm_mut(&mut self) -> &mut Self::Evm {
-        self.inner.evm_mut()
-    }
-
-    fn execute_transaction(
-        &mut self,
-        tx: impl reth_evm::block::ExecutableTx<Self>,
-    ) -> Result<u64, reth_evm::block::BlockExecutionError> {
-        self.inner.execute_transaction(tx)
-    }
-
-    fn execute_transaction_without_commit(
-        &mut self,
-        tx: impl reth_evm::block::ExecutableTx<Self>,
-    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
-        self.inner.execute_transaction_without_commit(tx)
-    }
-
-    fn commit_transaction(
-        &mut self,
-        output: revm::context::result::ResultAndState<<Self::Evm as reth_evm::Evm>::HaltReason>,
-        tx: impl reth_evm::block::ExecutableTx<Self>,
-    ) -> Result<u64, reth_evm::block::BlockExecutionError> {
-        self.inner.commit_transaction(output, tx)
-    }
-
-    fn apply_post_execution_changes(
-        self,
-    ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
-    where
-        Self: Sized,
-    {
-        self.inner.apply_post_execution_changes()
-    }
-
-    fn finish(
-        self,
-    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
-        self.inner.finish()
-    }
-
-    fn set_state_hook(&mut self, hook: Option<Box<dyn reth_evm::OnStateHook>>) {
-        self.inner.set_state_hook(hook)
-    }
-}
-
-/// Ethereum block executor factory.
-#[derive(Debug, Clone)]
-pub struct BalBlockExecutorFactory {
-    inner: OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-}
-
-impl BalBlockExecutorFactory {
-    /// Creates a new [`OpBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
-    /// [`OpReceiptBuilder`].
-    pub const fn new(
-        receipt_builder: OpRethReceiptBuilder,
-        spec: OpChainSpec,
-        evm_factory: OpEvmFactory,
-    ) -> Self {
-        Self {
-            inner: OpBlockExecutorFactory::new(receipt_builder, spec, evm_factory),
-        }
-    }
-
-    /// Exposes the chain specification.
-    pub const fn spec(&self) -> &OpChainSpec {
-        self.inner.spec()
-    }
-
-    /// Exposes the EVM factory.
-    pub const fn evm_factory(&self) -> &OpEvmFactory {
-        self.inner.evm_factory()
-    }
-}
-
-impl BlockExecutorFactory for BalBlockExecutorFactory {
-    type EvmFactory = OpEvmFactory;
-    type ExecutionCtx<'a> = OpBlockExecutionCtx;
-    type Transaction = OpTransactionSigned;
-    type Receipt = OpReceipt;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        self.inner.evm_factory()
-    }
-
-    fn create_executor<'a, DB, I>(
-        &'a self,
-        evm: <OpEvmFactory as EvmFactory>::Evm<DB, I>,
-        ctx: Self::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
-    where
-        DB: StateDB + Database + DatabaseCommit + 'a,
-        I: revm::Inspector<<OpEvmFactory as EvmFactory>::Context<DB>> + 'a,
-        OpEvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
-    {
-        BalBlockExecutor::new(
-            evm,
-            ctx,
-            self.spec().clone().into(),
-            OpRethReceiptBuilder::default(),
-        )
-    }
-}
-
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
-        BalBlockExecutorFactory,
-        BalBlockExecutor<Evm, R>,
+        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
+        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
@@ -244,19 +88,14 @@ impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: StateDB + DatabaseCommit + Database + 'a,
-    E: Evm<
-            DB = AsyncBalBuilderDb<DB>,
-            Tx = OpTransaction<TxEnv>,
-            Spec = OpSpecId,
-            BlockEnv = BlockEnv,
-        >,
+    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId, BlockEnv = BlockEnv>,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: BalBlockExecutor<E, R>,
+        executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
@@ -286,7 +125,7 @@ where
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
         let next_index = self.counter.next_index();
 
-        let db = self.inner.executor.inner.evm_mut().db_mut();
+        let db = self.inner.executor.evm_mut().db_mut();
         db.set_index(next_index);
         Ok(())
     }
@@ -302,7 +141,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB = AsyncBalBuilderDb<DB>,
+            DB = BalBuilderDb<DB>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -313,7 +152,7 @@ where
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = N;
-    type Executor = BalBlockExecutor<E, R>;
+    type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -377,7 +216,7 @@ where
         let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            BalBlockExecutorFactory,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
         >::new(
             evm_env,
             self.inner.ctx,
@@ -391,7 +230,7 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db.finish()?.build(self.counter.finish());
+        let access_list = db.finish().build(self.counter.finish());
 
         self.access_list_sender
             .send(access_list)

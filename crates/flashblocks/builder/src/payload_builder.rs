@@ -1,7 +1,7 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
-    database::bal_builder_db::AsyncBalBuilderDb,
-    executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
+    database::bal_builder_db::BalBuilderDb,
+    executor::{BalBlockBuilder, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -13,7 +13,8 @@ use reth_evm::{EvmFactory, block::StateDB};
 use alloy_consensus::{BlockHeader, Header};
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpEvm, OpEvmFactory, block::receipt_builder::OpReceiptBuilder,
+    OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory,
+    block::receipt_builder::OpReceiptBuilder,
 };
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use op_alloy_consensus::OpTxEnvelope;
@@ -334,15 +335,7 @@ where
         .with_bundle_update()
         .build();
 
-    let state_provider_database = StateProviderDatabase::new(state_provider.clone());
-
-    let dummy_state = State::builder()
-        .with_database(state_provider_database)
-        .with_bundle_prestate(bundle_state.clone())
-        .with_bundle_update()
-        .build();
-
-    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state);
+    let bal_builder_db = BalBuilderDb::new(&mut state);
 
     let visited_transactions = committed_state
         .transaction_hashes_iter()
@@ -461,14 +454,14 @@ where
 }
 
 fn block_builder<'a, Ctx, DB, R, N, Tx>(
-    state: AsyncBalBuilderDb<DB>,
+    state: BalBuilderDb<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    BalBlockBuilder<'a, R, N, OpEvm<AsyncBalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
+    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where
@@ -479,21 +472,24 @@ where
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
         >,
-    DB: StateDB + DatabaseCommit + reth_evm::Database + 'a,
-    DB::Error: Send + Sync + 'a,
+    DB: StateDB + DatabaseCommit + DatabaseRef + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
 
-    let executor = BalBlockExecutor::new(
+    let mut executor = OpBlockExecutor::<
+        OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>,
+        R,
+        Arc<OpChainSpec>,
+    >::new(
         evm,
         execution_context.clone(),
         ctx.spec().clone().into(),
         R::default(),
-    )
-    .with_gas_used(committed_state.gas_used)
-    .with_receipts(committed_state.receipts_iter().cloned().collect());
+    );
+    executor.gas_used = committed_state.gas_used;
+    executor.receipts = committed_state.receipts_iter().cloned().collect();
 
     let builder = BalBlockBuilder::new(
         execution_context,

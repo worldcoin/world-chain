@@ -2,7 +2,10 @@ use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
-use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory, block::receipt_builder::OpReceiptBuilder};
+use alloy_op_evm::{
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+    block::receipt_builder::OpReceiptBuilder,
+};
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_primitives::{
@@ -24,7 +27,7 @@ use reth_evm::{
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig};
+use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
@@ -44,11 +47,11 @@ use tracing::{error, trace};
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     database::{
-        bal_builder_db::AsyncBalBuilderDb,
+        bal_builder_db::BalBuilderDb,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    executor::{BalBlockExecutor, BalBlockExecutorFactory, BalExecutorError, CommittedState},
+    executor::{BalExecutorError, CommittedState},
 };
 
 pub trait FlashblockBlockValidator {
@@ -129,13 +132,7 @@ where
             .with_bundle_update()
             .build();
 
-        let state_dummy = State::builder()
-            .with_database_ref(temporal_db_factory.db(index_range.0 as u64))
-            .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
-            .with_bundle_update()
-            .build();
-
-        let database = AsyncBalBuilderDb::new(&mut state, state_dummy);
+        let database = BalBuilderDb::new(&mut state);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -158,14 +155,15 @@ where
 
         let evm = OpEvmFactory::default().create_evm(database, self.ctx.evm_env.clone());
 
-        let executor = BalBlockExecutor::new(
+        let mut executor = OpBlockExecutor::new(
             evm,
             self.ctx.execution_context.clone(),
             self.ctx.chain_spec.clone(),
             R::default(),
-        )
-        .with_receipts(self.ctx.committed_state.receipts_iter().cloned().collect())
-        .with_gas_used(self.ctx.committed_state.gas_used);
+        );
+
+        executor.gas_used = self.ctx.committed_state.gas_used;
+        executor.receipts = self.ctx.committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
             self.ctx.execution_context.clone(),
@@ -299,6 +297,7 @@ where
         todo!()
     }
 }
+
 /// Result of executing a single transaction in parallel.
 ///
 /// This struct accumulates execution artifacts that will be merged
@@ -323,8 +322,8 @@ pub struct ParalleExecutionResult {
 pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuilder, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
-        BalBlockExecutorFactory,
-        BalBlockExecutor<Evm, R>,
+        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
+        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
         OpBlockAssembler<OpChainSpec>,
         OpPrimitives,
     >,
@@ -341,7 +340,7 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'static,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DB>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             BlockEnv = BlockEnv,
@@ -352,7 +351,7 @@ where
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
-        executor: BalBlockExecutor<E, R>,
+        executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
         transactions: Vec<Recovered<OpTransactionSigned>>,
         chain_spec: Arc<OpChainSpec>,
         temporal_db_factory: TemporalDbFactory<DB>,
@@ -385,7 +384,7 @@ where
 
     /// Prepares the underlying temporal database for execution.
     pub fn prepare_database(&mut self, index: u16) -> Result<(), BlockExecutionError> {
-        let db = self.inner.executor.inner.evm_mut().db_mut();
+        let db = self.inner.executor.evm_mut().db_mut();
         // Set the temporal db index
         db.db_mut().database.0.set_index(index as u64);
         // Set the bal builder db index
@@ -398,7 +397,7 @@ impl<'a, DbRef, R, E> BlockBuilder for BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -409,7 +408,7 @@ where
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
-    type Executor = BalBlockExecutor<E, R>;
+    type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -476,7 +475,7 @@ where
         let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            BalBlockExecutorFactory,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
         >::new(
             evm_env,
             self.inner.ctx,
@@ -489,7 +488,7 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-        let access_list = db.finish()?.build(self.index_range);
+        let access_list = db.finish().build(self.index_range);
 
         self.access_list_sender
             .send(access_list)
@@ -520,7 +519,7 @@ impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Send + Sync + std::fmt::Debug + Clone + 'a,
     E: Evm<
-            DB = AsyncBalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
+            DB = BalBuilderDb<&'a mut State<WrapDatabaseRef<TemporalDb<DbRef>>>>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -541,11 +540,11 @@ where
         > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
         + Clone,
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
-        let spec = self.inner.executor.inner.spec.clone();
-        let receipt_builder: R = self.inner.executor.inner.receipt_builder.clone();
+        let spec = self.inner.executor.spec.clone();
+        let receipt_builder: R = self.inner.executor.receipt_builder.clone();
         let execution_context = self.inner.ctx.clone();
         let evm_env = self.evm_env.clone();
-        let gas_used = self.inner.executor.inner.gas_used;
+        let gas_used = self.inner.executor.gas_used;
 
         let db_factory = &self.temporal_db_factory;
 
@@ -556,7 +555,7 @@ where
         );
 
         // TODO: Remove this in favor of using BundleDb directly
-        let bundle_state = self.inner.executor.inner.evm.db().bundle_state().clone();
+        let bundle_state = self.inner.executor.evm.db().bundle_state().clone();
 
         // Execute each transaction in parallel over a temporal view of the database
         // formed from the BAL provided. We reduce the results to aggregate the state transitions,
@@ -585,7 +584,7 @@ where
         let merged_result = merge_transaction_results(results, gas_used);
 
         // If we have no pre-loaded receipts then we need to apply pre-execution changes
-        if self.inner.executor.inner.receipts.is_empty() {
+        if self.inner.executor.receipts.is_empty() {
             self.prepare_database(0)?;
             self.apply_pre_execution_changes()?;
         }
@@ -597,17 +596,16 @@ where
             .db_mut()
             .apply_transition(merged_result.transitions);
 
-        // merge the aggregated access list into the AsyncBalBuilderDb
+        // merge the aggregated access list into the BalBuilderDb
         database.merge_access_list(merged_result.access_list);
 
         // append the accumulated receipts and gas used into the executor
         self.inner
             .executor
-            .inner
             .receipts
             .extend_from_slice(&merged_result.receipts);
 
-        self.inner.executor.inner.gas_used = merged_result.gas_used;
+        self.inner.executor.gas_used = merged_result.gas_used;
 
         // append the _executed_ transactions into the executor
         self.inner.transactions.extend_from_slice(
@@ -674,18 +672,12 @@ where
         .with_bundle_update()
         .build();
 
-    let dummy = State::builder()
-        .with_database_ref(temporal_db.clone())
-        .with_bundle_prestate(bundle_state.clone()) // TODO: Switch to BundleDb
-        .with_bundle_update()
-        .build();
-
-    let mut database = AsyncBalBuilderDb::new(state, dummy);
+    let mut database = BalBuilderDb::new(state);
     database.set_index(index);
 
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
 
-    let mut executor = BalBlockExecutor::new(
+    let mut executor = OpBlockExecutor::new(
         evm,
         execution_context.clone(),
         spec.clone(),
@@ -716,7 +708,7 @@ where
         .map(|t| t.take())
         .unwrap_or_default();
 
-    let access_list = db.finish()?;
+    let access_list = db.finish();
 
     Ok(ParalleExecutionResult {
         transitions: transitions.transitions,
