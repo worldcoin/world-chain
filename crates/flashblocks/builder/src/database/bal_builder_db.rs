@@ -2,7 +2,6 @@ use std::thread::JoinHandle;
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
-use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_evm::block::{BlockExecutionError, StateDB};
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
@@ -41,7 +40,7 @@ pub struct BalBuilderDb<DB> {
 
 impl<DB> BalBuilderDb<DB>
 where
-    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
+    DB: DatabaseCommit + Database,
 {
     /// Creates a new BalBuilderDb around the given database.
     pub fn new(db: DB) -> Self {
@@ -96,7 +95,7 @@ where
         // what's changed should be published to the access list.
         changes
             .iter()
-            .par_bridge()
+            // .par_bridge()
             .try_for_each(|(address, account)| {
                 let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
@@ -104,7 +103,7 @@ where
                 // back. This would result in appending a value to the access list that isn't strctly
                 // required. For this reason we should dedup consecutive identical entries when
                 // finalizing the access list.
-                match self.db.basic_ref(*address)? {
+                match self.db.basic(*address)? {
                     Some(previous) => {
                         if previous.balance != account.info.balance {
                             acc_changes
@@ -119,7 +118,7 @@ where
                         if previous.code_hash != account.info.code_hash {
                             let bytecode = match account.info.code.clone() {
                                 Some(code) => code,
-                                None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                                None => self.db.code_by_hash(account.info.code_hash)?,
                             };
                             acc_changes.code_changes.insert(self.index, bytecode);
                         }
@@ -133,14 +132,14 @@ where
                             .insert(self.index, account.info.nonce);
                         let bytecode = match account.info.code.clone() {
                             Some(code) => code,
-                            None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                            None => self.db.code_by_hash(account.info.code_hash)?,
                         };
                         acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
 
                 account.storage.iter().try_for_each(|(key, value)| {
-                    let previous_value = self.db.storage_ref(*address, *key)?;
+                    let previous_value = self.db.storage(*address, *key)?;
                     if previous_value != value.present_value {
                         acc_changes
                             .storage_changes
@@ -167,7 +166,7 @@ where
 
 impl<DB> Database for BalBuilderDb<DB>
 where
-    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
+    DB: DatabaseCommit + Database,
 {
     type Error = <DB as Database>::Error;
 
@@ -195,7 +194,7 @@ where
 
 impl<DB: DatabaseCommit> DatabaseCommit for BalBuilderDb<DB>
 where
-    DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
+    DB: DatabaseCommit + Database,
 {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // TODO: perhaps we should store an optional error inside the struct
@@ -208,12 +207,7 @@ where
 
 impl<DB> StateDB for BalBuilderDb<DB>
 where
-    DB: StateDB
-        + DatabaseCommit
-        + Database
-        + DatabaseRef<Error = <DB as Database>::Error>
-        + Send
-        + Sync,
+    DB: StateDB + DatabaseCommit + Database,
 {
     fn bundle_state(&self) -> &BundleState {
         self.db.bundle_state()
