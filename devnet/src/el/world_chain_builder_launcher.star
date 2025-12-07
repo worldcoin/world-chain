@@ -172,7 +172,7 @@ def launch(
         plan, service_name, RPC_PORT_ID
     )
 
-    metrics_info = observability.new_metrics_info(observability_helper, service)
+    metrics_info = observability.new_metrics_info(observability_helper, service, metrics_path="/metrics")
 
     http_url = "http://{0}:{1}".format(service.ip_address, RPC_PORT_NUM)
 

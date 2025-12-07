@@ -225,7 +225,7 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    fn execute_best_transactions<'a, Pool, Txs, Builder>(
+    fn execute_best_transactions<Pool, Txs, Builder>(
         &self,
         pool: Pool,
         info: &mut ExecutionInfo,

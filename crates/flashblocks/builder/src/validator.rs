@@ -648,7 +648,7 @@ fn merge_transaction_results(
     )
 }
 
-pub fn execute_transaction<'a, R, DBRef>(
+pub fn execute_transaction<R, DBRef>(
     (index, tx): (BlockAccessIndex, Recovered<OpTransactionSigned>),
     receipt_builder: R,
     spec: Arc<OpChainSpec>,

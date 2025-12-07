@@ -460,7 +460,6 @@ where
     }
 }
 
-#[expect(clippy::type_complexity)]
 fn block_builder<'a, Ctx, DB, R, N, Tx>(
     state: AsyncBalBuilderDb<DB>,
     execution_context: OpBlockExecutionCtx,

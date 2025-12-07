@@ -39,7 +39,7 @@ pub struct BalBuilderDb<DB> {
     index: u16,
 }
 
-impl<'a, DB> BalBuilderDb<DB>
+impl<DB> BalBuilderDb<DB>
 where
     DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {

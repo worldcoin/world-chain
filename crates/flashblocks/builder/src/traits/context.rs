@@ -124,7 +124,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// For Optimism, this typically includes L1 deposit transactions that represent
     /// funds being bridged from L1 to L2. These transactions cannot fail and must
     /// be processed in the exact order specified by the L1 chain.
-    fn execute_sequencer_transactions<'a>(
+    fn execute_sequencer_transactions(
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
@@ -135,7 +135,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// Processes user transactions from the mempool until `gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
-    fn execute_best_transactions<'a, Pool, Txs, Builder>(
+    fn execute_best_transactions<Pool, Txs, Builder>(
         &self,
         pool: Pool,
         info: &mut ExecutionInfo,
@@ -249,7 +249,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     /// Processes user transactions from the mempool until `gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
-    fn execute_best_transactions<'a, Pool, Txs, Builder>(
+    fn execute_best_transactions<Pool, Txs, Builder>(
         &self,
         _pool: Pool,
         info: &mut ExecutionInfo,

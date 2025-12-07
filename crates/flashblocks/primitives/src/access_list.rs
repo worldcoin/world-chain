@@ -100,9 +100,7 @@ impl FlashblockAccessList {
 
             // Apply balance changes
             let balance_changes = account_changes.balance_changes();
-            let latest_change = balance_changes
-                .into_iter()
-                .max_by_key(|b| b.block_access_index);
+            let latest_change = balance_changes.iter().max_by_key(|b| b.block_access_index);
 
             if let Some(change) = latest_change {
                 if let Some(info) = &mut bundle_account.info {
@@ -119,9 +117,7 @@ impl FlashblockAccessList {
 
             // Apply nonce changes
             let nonce_changes = account_changes.nonce_changes();
-            let latest_nonce_change = nonce_changes
-                .into_iter()
-                .max_by_key(|n| n.block_access_index);
+            let latest_nonce_change = nonce_changes.iter().max_by_key(|n| n.block_access_index);
 
             if let Some(change) = latest_nonce_change {
                 if let Some(info) = &mut bundle_account.info {
@@ -138,9 +134,7 @@ impl FlashblockAccessList {
 
             // Apply code changes
             let code_changes = account_changes.code_changes();
-            let latest_code_change = code_changes
-                .into_iter()
-                .max_by_key(|c| c.block_access_index);
+            let latest_code_change = code_changes.iter().max_by_key(|c| c.block_access_index);
 
             if let Some(change) = latest_code_change {
                 let bytecode = Bytecode::new_raw(change.new_code().clone());
@@ -372,7 +366,7 @@ mod tests {
 
         // Empty bundle - account does NOT exist here
         let mut bundle = BundleState::default();
-        assert!(bundle.state.get(&account).is_none());
+        assert!(!bundle.state.contains_key(&account));
 
         // Create access list with a balance change for the account
         let mut access_list = FlashblockAccessList::default();

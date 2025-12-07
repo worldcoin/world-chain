@@ -101,7 +101,7 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
             }
         }
 
-        TemporalDbFactory { db, cache: cache }
+        TemporalDbFactory { db, cache }
     }
 
     /// Creates a new [`TemporalDb`] at a given [`BlockAccessIndex`]
