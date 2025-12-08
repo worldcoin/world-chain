@@ -7,7 +7,7 @@ use alloy_op_evm::{
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, StateDB},
+    block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError, StateDB},
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -235,7 +235,10 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db.finish()?.build(self.counter.finish());
+        let access_list = db
+            .finish()
+            .map_err(|e| InternalBlockExecutionError::other(e))?
+            .build(self.counter.finish());
 
         self.access_list_sender
             .send(access_list)
