@@ -11,7 +11,7 @@ use crate::access_list::BlockAccessIndex;
 /// `get(index, key)` returns the value last set at or before `index`.
 #[derive(Clone, Debug, Default)]
 pub struct TemporalMap<K, V, I = BlockAccessIndex> {
-    inner: HashMap<K, BTreeMap<I, V>>,
+    pub inner: HashMap<K, BTreeMap<I, V>>,
 }
 
 impl<K, V, I> TemporalMap<K, V, I>
@@ -47,6 +47,11 @@ where
         self.inner
             .get(key)
             .and_then(|versions| versions.range((Unbounded, Included(index))).next_back())
+    }
+
+    /// Returns an iterator over all keys in the map.
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.inner.keys()
     }
 }
 

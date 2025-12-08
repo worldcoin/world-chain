@@ -1,6 +1,6 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
-    database::bal_builder_db::AsyncBalBuilderDb,
+    database::bal_builder_db::{AsyncBalBuilderDb, BalDbIndex},
     executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
@@ -8,7 +8,10 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use reth_evm::{EvmFactory, block::StateDB};
+use reth_evm::{
+    EvmFactory,
+    block::{BlockExecutor, StateDB},
+};
 
 use alloy_consensus::{BlockHeader, Header};
 
@@ -99,7 +102,7 @@ where
         &self,
         args: BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
         best: impl Fn(BestTransactionsAttributes) -> T + Send + Sync + 'a,
-        committed_payload: Option<&OpBuiltPayload>,
+        committed_payload: Option<(u16, &OpBuiltPayload)>,
     ) -> Result<(BuildOutcome<OpBuiltPayload>, Option<FlashblockAccessList>), PayloadBuilderError>
     where
         T: PayloadTransactions<Transaction = <Pool as TransactionPool>::Transaction>,
@@ -229,7 +232,7 @@ where
             <Self as PayloadBuilder>::Attributes,
             <Self as PayloadBuilder>::BuiltPayload,
         >,
-        committed_payload: Option<&<Self as PayloadBuilder>::BuiltPayload>,
+        committed_payload: Option<(u16, &<Self as PayloadBuilder>::BuiltPayload)>,
     ) -> Result<
         (
             BuildOutcome<<Self as PayloadBuilder>::BuiltPayload>,
@@ -255,7 +258,7 @@ fn build<'a, Txs, Ctx, Pool>(
     _db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
     state_provider: impl StateProvider + Clone + 'static,
     ctx: &Ctx,
-    committed_payload: Option<&OpBuiltPayload>,
+    committed_payload: Option<(u16, &OpBuiltPayload)>,
     bal_enabled: bool,
 ) -> Result<
     (
@@ -316,6 +319,8 @@ where
         .context_for_next_block(ctx.parent(), attributes)
         .map_err(PayloadBuilderError::other)?;
 
+    let (index, committed_payload) = committed_payload.map_or((0u16, None), |(i, p)| (i, Some(p)));
+
     let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(committed_payload)
         .map_err(PayloadBuilderError::other)?;
 
@@ -342,7 +347,15 @@ where
         .with_bundle_update()
         .build();
 
-    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state);
+    let min_index = if committed_state.transactions.len() == 0 {
+        0
+    } else {
+        committed_state.transactions.len() + 1
+    };
+
+    let index = Box::new(BalDbIndex::new(min_index as u16));
+
+    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state, index.current());
 
     let visited_transactions = committed_state
         .transaction_hashes_iter()
@@ -358,6 +371,7 @@ where
         &committed_state,
         ctx,
         tx.clone(),
+        index,
     )?;
 
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
@@ -467,6 +481,7 @@ fn block_builder<'a, Ctx, DB, R, N, Tx>(
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
+    index: Box<BalDbIndex>,
 ) -> Result<
     BalBlockBuilder<'a, R, N, OpEvm<AsyncBalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
@@ -493,7 +508,8 @@ where
         R::default(),
     )
     .with_gas_used(committed_state.gas_used)
-    .with_receipts(committed_state.receipts_iter().cloned().collect());
+    .with_receipts(committed_state.receipts_iter().cloned().collect())
+    .with_state_hook(Some(index.clone()));
 
     let builder = BalBlockBuilder::new(
         execution_context,
@@ -502,6 +518,7 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
+        index,
     );
 
     Ok(builder)

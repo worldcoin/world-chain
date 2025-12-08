@@ -1,7 +1,13 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicU16, Ordering},
+};
+
 use alloy_primitives::{Address, B256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use revm::{
     DatabaseRef,
+    bytecode::bitvec::store::BitStore,
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
@@ -40,15 +46,7 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
         let mut cache = TemporalState::default();
 
         for change in list.changes {
-            // First Grab the current account
-            let acc_at = |cache: &TemporalState, index| {
-                cache
-                    .account_info
-                    .get(index, &change.address)
-                    .cloned()
-                    .unwrap_or_default()
-            };
-
+            // First process storage changes (these don't affect account info)
             for storage_change in change.storage_changes {
                 for slot in storage_change.changes {
                     let storage_entry = cache.account_storage.entry(change.address).or_default();
@@ -63,41 +61,80 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
                     );
                 }
             }
-            // TODO: We can prewarm these
-            // for storage_reads in change.storage_reads {}
-            for balance_change in change.balance_changes {
-                let mut acc = acc_at(&cache, balance_change.block_access_index + 1);
-                acc.balance = balance_change.post_balance;
-                cache.account_info.insert(
-                    balance_change.block_access_index + 1,
-                    change.address,
-                    acc,
-                );
+
+            // Collect all account info changes with their indices
+            // We need to process them in order of block_access_index to correctly
+            // propagate values (e.g., nonce changes should be visible to later balance changes)
+            let mut indexed_changes: Vec<(
+                u64,
+                Option<alloy_primitives::U256>,
+                Option<u64>,
+                Option<(B256, Bytecode)>,
+            )> = Vec::new();
+
+            for balance_change in &change.balance_changes {
+                indexed_changes.push((
+                    balance_change.block_access_index,
+                    Some(balance_change.post_balance),
+                    None,
+                    None,
+                ));
             }
 
-            for nonce_change in change.nonce_changes {
-                let mut acc = acc_at(&cache, nonce_change.block_access_index + 1);
-                acc.nonce = nonce_change.new_nonce;
-                cache
-                    .account_info
-                    .insert(nonce_change.block_access_index + 1, change.address, acc);
+            for nonce_change in &change.nonce_changes {
+                indexed_changes.push((
+                    nonce_change.block_access_index,
+                    None,
+                    Some(nonce_change.new_nonce),
+                    None,
+                ));
             }
 
-            for code_change in change.code_changes {
+            for code_change in &change.code_changes {
                 let bytecode = Bytecode::new_raw(code_change.new_code.clone());
                 let hash = bytecode.hash_slow();
+                indexed_changes.push((
+                    code_change.block_access_index,
+                    None,
+                    None,
+                    Some((hash, bytecode)),
+                ));
+            }
 
-                let mut acc = acc_at(&cache, code_change.block_access_index + 1);
-                acc.code = Some(bytecode.clone());
-                acc.code_hash = hash;
+            // Sort by index to process in order
+            indexed_changes.sort_by_key(|(idx, _, _, _)| *idx);
 
+            // Helper to get the current account state at a given index
+            let acc_at = |cache: &TemporalState, index| {
                 cache
-                    .contracts
-                    .insert(code_change.block_access_index + 1, hash, bytecode);
+                    .account_info
+                    .get(index, &change.address)
+                    .cloned()
+                    .unwrap_or_else(|| db.basic_ref(change.address).unwrap().unwrap_or_default())
+            };
+
+            // Process changes in order of block_access_index
+            for (index, balance, nonce, code) in indexed_changes {
+                let storage_index = index + 1;
+                let mut acc = acc_at(&cache, storage_index);
+
+                if let Some(new_balance) = balance {
+                    acc.balance = new_balance;
+                }
+
+                if let Some(new_nonce) = nonce {
+                    acc.nonce = new_nonce;
+                }
+
+                if let Some((hash, bytecode)) = code {
+                    acc.code = Some(bytecode.clone());
+                    acc.code_hash = hash;
+                    cache.contracts.insert(storage_index, hash, bytecode);
+                }
 
                 cache
                     .account_info
-                    .insert(code_change.block_access_index + 1, change.address, acc);
+                    .insert(storage_index, change.address, acc);
             }
         }
 
@@ -105,7 +142,7 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
     }
 
     /// Creates a new [`TemporalDb`] at a given [`BlockAccessIndex`]
-    pub fn db(&self, index: u64) -> TemporalDb<DB> {
+    pub fn db(&self, index: Arc<AtomicU16>) -> TemporalDb<DB> {
         TemporalDb::new(self.db.clone(), self.cache.clone(), index)
     }
 }
@@ -117,17 +154,17 @@ pub struct TemporalDb<DB: DatabaseRef> {
     /// Layer 1: The underlying database
     pub db: DB,
     /// The index being referenced inside the [`TemporalState`]
-    pub index: u64,
+    pub index: Arc<AtomicU16>,
 }
 
 impl<DB: DatabaseRef> TemporalDb<DB> {
     pub fn set_index(&mut self, index: u64) {
-        self.index = index;
+        self.index.store(index as u16, Ordering::SeqCst);
     }
 }
 
 impl<DB: DatabaseRef> TemporalDb<DB> {
-    pub fn new(db: DB, cache: TemporalState, index: u64) -> Self {
+    pub fn new(db: DB, cache: TemporalState, index: Arc<AtomicU16>) -> Self {
         TemporalDb { db, cache, index }
     }
 }
@@ -136,14 +173,20 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        match self.cache.account_info.get_with_index(self.index, &address) {
+        let index = self.index.load_value();
+        match self
+            .cache
+            .account_info
+            .get_with_index(index as u64, &address)
+        {
             Some((_, acc)) => Ok(Some(acc.clone())),
             None => self.db.basic_ref(address),
         }
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        match self.cache.contracts.get(self.index, &code_hash) {
+        let index: u16 = self.index.load_value();
+        match self.cache.contracts.get(index as u64, &code_hash) {
             Some(entry) => Ok(entry.clone()),
             None => self.db.code_by_hash_ref(code_hash),
         }
@@ -154,9 +197,10 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
         address: Address,
         index: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
-        // TODO: check this impl
+        let db_index = self.index.load_value() as u64;
+
         match self.cache.account_storage.get(&address) {
-            Some(storage) => match storage.get(self.index, &index) {
+            Some(storage) => match storage.get(db_index, &index) {
                 Some(val) => Ok(*val),
                 None => self.db.storage_ref(address, index),
             },
@@ -177,6 +221,7 @@ mod tests {
     };
     use alloy_primitives::{U256, address, b256, bytes};
     use flashblocks_primitives::access_list::FlashblockAccessListData;
+    use lazy_static::lazy_static;
     use reth::revm::State;
     use revm::{
         database::{CacheDB, EmptyDB, InMemoryDB},
@@ -184,6 +229,9 @@ mod tests {
     };
     use serde_json::json;
 
+    lazy_static! {
+        static ref INDEX: Arc<AtomicU16> = Arc::new(AtomicU16::new(0));
+    }
     #[test]
     fn test_temporal_db_factory_with_storage_changes() {
         let addr = address!("0000000000000000000000000000000000000001");
@@ -220,22 +268,22 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // Check storage at different indices
-        let temporal_db_1 = factory.db(1);
+        let temporal_db_1 = factory.db(Arc::new(AtomicU16::new(1)));
         assert_eq!(temporal_db_1.storage_ref(addr, slot.into()).unwrap(), 0);
 
-        let temporal_db_2 = factory.db(2);
+        let temporal_db_2 = factory.db(Arc::new(AtomicU16::new(2)));
         assert_eq!(
             temporal_db_2.storage_ref(addr, slot.into()).unwrap(),
             value1
         );
 
-        let temporal_db_3 = factory.db(3);
+        let temporal_db_3 = factory.db(Arc::new(AtomicU16::new(3)));
         assert_eq!(
             temporal_db_3.storage_ref(addr, slot.into()).unwrap(),
             value1
         );
 
-        let temporal_db_4 = factory.db(4);
+        let temporal_db_4 = factory.db(Arc::new(AtomicU16::new(4)));
         assert_eq!(
             temporal_db_4.storage_ref(addr, slot.into()).unwrap(),
             value2
@@ -275,18 +323,19 @@ mod tests {
         db.insert_account_info(addr, initial_account);
 
         let factory = TemporalDbFactory::new(db, access_list);
+
         // Before the change
-        let temporal_db_1 = factory.db(1);
+        let temporal_db_1 = factory.db(INDEX.clone());
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.balance, initial_balance);
 
         // At the change index
-        let temporal_db_2 = factory.db(2);
+        let temporal_db_2 = factory.db(INDEX.clone());
         let account_2 = temporal_db_2.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_2.balance, initial_balance);
 
         // After the change
-        let temporal_db_3 = factory.db(3);
+        let temporal_db_3 = factory.db(INDEX.clone());
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.balance, new_balance);
     }
@@ -324,12 +373,12 @@ mod tests {
         db.insert_account_info(addr, initial_account);
         let factory = TemporalDbFactory::new(db, access_list);
         // Before the change
-        let temporal_db_1 = factory.db(1);
+        let temporal_db_1 = factory.db(Arc::new(AtomicU16::new(1)));
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.nonce, initial_nonce);
 
         // After the change
-        let temporal_db_3 = factory.db(3);
+        let temporal_db_3 = factory.db(Arc::new(AtomicU16::new(3)));
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.nonce, new_nonce);
     }
@@ -370,12 +419,12 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // Before the change
-        let temporal_db_1 = factory.db(1);
+        let temporal_db_1 = factory.db(Arc::new(AtomicU16::new(1)));
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.code_hash, KECCAK_EMPTY);
 
         // After the change
-        let temporal_db_3 = factory.db(3);
+        let temporal_db_3 = factory.db(Arc::new(AtomicU16::new(3)));
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.code_hash, new_code_hash);
         assert!(account_3.code.is_some());
@@ -427,7 +476,7 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // At index 4, all changes should be visible
-        let temporal_db = factory.db(4);
+        let temporal_db = factory.db(Arc::new(AtomicU16::new(4)));
         dbg!(&temporal_db);
         let account = temporal_db.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account.balance, U256::from(500));
@@ -453,7 +502,7 @@ mod tests {
         db.insert_account_info(other_addr, account_info.clone());
 
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(0);
+        let temporal_db = factory.db(Arc::new(AtomicU16::new(0)));
 
         // Address not in cache should fall back to DB
         let result = temporal_db.basic_ref(other_addr).unwrap().unwrap();
@@ -474,7 +523,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         let _ = db.insert_account_storage(addr, slot.into(), value);
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(0);
+        let temporal_db = factory.db(Arc::new(AtomicU16::new(0)));
         let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
         assert_eq!(result, value);
     }
@@ -487,7 +536,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_contract(&mut account);
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(0);
+        let temporal_db = factory.db(Arc::new(AtomicU16::new(0)));
         let result = temporal_db.code_by_hash_ref(account.code_hash).unwrap();
         // Check that the bytecode starts with the expected code
         assert!(result.bytecode().starts_with(&code));
@@ -504,7 +553,7 @@ mod tests {
 
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
 
-        let temporal_db = factory.db(0);
+        let temporal_db = factory.db(Arc::new(AtomicU16::new(0)));
         // No storage in cache for this address, should fall back to DB
         let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
         assert_eq!(result, value);
@@ -1486,7 +1535,7 @@ mod tests {
         let database = TemporalDbFactory::new(database, access_list.access_list.clone());
 
         // Test at block access index 3 - should see values < 3 (i.e., indices 0, 1, 2)
-        let db = database.db(3);
+        let db = database.db(Arc::new(AtomicU16::new(3)));
         let state = State::builder().with_database_ref(&db).build();
 
         // Address with multiple balance changes - should have balance at index 2 (last one < 3)
@@ -1548,7 +1597,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 0 - should see NO values (< 0 means nothing)
-        let db_0 = database.db(0);
+        let db_0 = database.db(Arc::new(AtomicU16::new(3)));
         let state_0 = State::builder().with_database_ref(&db_0).build();
 
         // Even index 0 addresses should not be visible
@@ -1560,7 +1609,7 @@ mod tests {
         assert!(state_0.basic_ref(account).unwrap().is_none());
 
         // Test at block access index 1 - should see only index 0
-        let db_1 = database.db(1);
+        let db_1 = database.db(Arc::new(AtomicU16::new(1)));
         let state_1 = State::builder().with_database_ref(&db_1).build();
 
         let account = address!("0x000f3df6d732807ef1319fb7b8bb8522d0beac02");
@@ -1570,7 +1619,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 10 (0xa) - should see values < 10 (i.e., indices 0-9)
-        let db_10 = database.db(10);
+        let db_10 = database.db(Arc::new(AtomicU16::new(10)));
         let state_10 = State::builder().with_database_ref(&db_10).build();
 
         // Address with change at index 9 - should be visible
@@ -1618,7 +1667,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 11 (0xb) - should see values < 11 (i.e., indices 0-10)
-        let db_11 = database.db(11);
+        let db_11 = database.db(Arc::new(AtomicU16::new(11)));
         let state_11 = State::builder().with_database_ref(&db_11).build();
 
         // Sender at index 10 - should be visible
@@ -1666,7 +1715,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test querying at an index between changes - db(5) sees indices 0-4
-        let db_5 = database.db(5);
+        let db_5 = database.db(Arc::new(AtomicU16::new(5)));
         let state_5 = State::builder().with_database_ref(&db_5).build();
 
         // Should see index 4 state (last < 5)
@@ -1708,7 +1757,7 @@ mod tests {
         assert!(state_5.basic_ref(account).unwrap().is_none());
 
         // Test at block access index 12 - should see all values (indices 0-11)
-        let db_12 = database.db(12);
+        let db_12 = database.db(Arc::new(AtomicU16::new(12)));
         let state_12 = State::builder().with_database_ref(&db_12).build();
 
         // Should see the last transaction at index 11
@@ -1750,5 +1799,91 @@ mod tests {
             U256::from_str_radix("e44c212944400", 16).unwrap()
         ); // index 11
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
+    }
+
+    /// Test the exact scenario from proptest: new contract deployed at index 1, queried at index 2
+    #[test]
+    fn test_new_contract_deployment_at_index_1_query_at_index_2() {
+        // This simulates the exact proptest scenario:
+        // - tx1 at index 1 deploys new ChaosTest at 0x2e63...
+        // - tx2 at index 2 needs to see and execute this code via DELEGATECALL
+
+        let deployed_addr = address!("2e63c703ce06b779ed2e7250825c5a810be4ccc6");
+        let new_code = bytes!(
+            "6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056"
+        );
+        let new_bytecode = Bytecode::new_raw(new_code.clone());
+        let expected_code_hash = new_bytecode.hash_slow();
+
+        let access_list = FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: deployed_addr,
+                storage_changes: vec![],
+                storage_reads: vec![],
+                balance_changes: vec![],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 1,
+                    new_nonce: 1,
+                }],
+                code_changes: vec![CodeChange {
+                    block_access_index: 1,
+                    new_code: new_code.clone(),
+                }],
+            }],
+            min_tx_index: 0,
+            max_tx_index: 3,
+        };
+
+        // Empty DB - the contract doesn't exist initially
+        let db = EmptyDB::new();
+        let factory = TemporalDbFactory::new(db, access_list);
+
+        // Verify the cache was populated correctly
+        assert!(
+            factory
+                .cache
+                .account_info
+                .keys()
+                .any(|&a| a == deployed_addr),
+            "Cache should contain the deployed address"
+        );
+
+        // Query at index 1 - the deploying transaction itself
+        // It should NOT see its own code yet (code is available AFTER index 1, i.e., at storage_index = 2)
+        let temporal_db_1 = factory.db(Arc::new(AtomicU16::new(1)));
+        let account_at_1 = temporal_db_1.basic_ref(deployed_addr).unwrap();
+        assert!(
+            account_at_1.is_none(),
+            "At index 1, the contract should not exist yet (it's being created)"
+        );
+
+        // Query at index 2 - the next transaction should see the deployed code
+        let temporal_db_2 = factory.db(Arc::new(AtomicU16::new(2)));
+        let account_at_2 = temporal_db_2.basic_ref(deployed_addr).unwrap();
+        assert!(
+            account_at_2.is_some(),
+            "At index 2, the deployed contract should be visible"
+        );
+
+        let account_info = account_at_2.unwrap();
+        assert_eq!(
+            account_info.code_hash, expected_code_hash,
+            "Code hash should match deployed code"
+        );
+        assert!(
+            account_info.code.is_some(),
+            "Account should have code attached"
+        );
+        assert_eq!(
+            account_info.nonce, 1,
+            "Nonce should be 1 after contract creation"
+        );
+
+        // Verify bytecode lookup works
+        let bytecode = temporal_db_2.code_by_hash_ref(expected_code_hash).unwrap();
+        assert!(
+            bytecode.bytecode().starts_with(&new_code),
+            "Bytecode should match deployed code"
+        );
     }
 }

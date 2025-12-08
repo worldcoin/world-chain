@@ -6,8 +6,11 @@ use alloy_op_evm::{
 };
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
-    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, StateDB},
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
+    block::{
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
+        StateChangeSource, StateDB,
+    },
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -18,10 +21,13 @@ use reth_provider::BlockExecutionResult;
 use revm::{
     DatabaseCommit,
     context::{BlockEnv, TxEnv, result::ResultAndState},
-    database::BundleState,
+    database::{BundleState, states::StateChangeset},
 };
 
-use crate::{access_list::BlockAccessIndex, database::bal_builder_db::AsyncBalBuilderDb};
+use crate::{
+    access_list::BlockAccessIndex,
+    database::bal_builder_db::{AsyncBalBuilderDb, BalDbIndex},
+};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -39,7 +45,38 @@ use revm::{
     context::result::ExecutionResult,
     database::states::{bundle_state::BundleRetention, reverts::Reverts},
 };
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    sync::{Arc, OnceLock, atomic::AtomicU16},
+};
+
+/// Errors that occur during block validation (hash/root comparisons).
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub enum ValidationError {
+    #[error("State root mismatch: expected {expected:?}, got {got:?}")]
+    StateRootMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
+    #[error("Receipts root mismatch: expected {expected:?}, got {got:?}")]
+    ReceiptsRootMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
+    #[error("Access list hash mismatch: expected {expected:?}, got {got:?}")]
+    AccessListHashMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+        expected_access_list: FlashblockAccessList,
+        constructed_access_list: FlashblockAccessList,
+    },
+    #[error("Block hash mismatch: expected {expected:?}, got {got:?}")]
+    BlockHashMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum BalExecutorError {
@@ -47,22 +84,13 @@ pub enum BalExecutorError {
     BlockExecutionError(#[from] BlockExecutionError),
     #[error("Missing executed block in built payload")]
     MissingExecutedBlock,
-    #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
-    StateRootMismatch {
-        expected: FixedBytes<32>,
-        got: FixedBytes<32>,
-    },
-    #[error("Receipts Root Mismatch: expected {expected:?}, got: {got:?}")]
-    ReceiptsRootMismatch {
-        expected: FixedBytes<32>,
-        got: FixedBytes<32>,
-    },
-    #[error("Bal Hash Mismatch: expected {expected:?}, got {got:?}")]
-    BalHashMismatch {
-        expected: FixedBytes<32>,
-        got: FixedBytes<32>,
-    },
-    #[error("Inernal Error: {0}")]
+    #[error("Missing access list data in flashblock diff")]
+    MissingAccessListData,
+    #[error("Validation failed: {0}")]
+    Validation(#[from] ValidationError),
+    #[error("Channel error: {0}")]
+    ChannelError(String),
+    #[error("Internal error: {0}")]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
@@ -237,7 +265,7 @@ pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
         N,
     >,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
-    pub counter: BlockAccessIndexCounter,
+    pub db_index: Box<BalDbIndex>,
 }
 
 impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
@@ -252,7 +280,16 @@ where
         >,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
-    /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
+    /// Creates a new [`BalBlockBuilder`] with the given executor factory and assembler.
+    ///
+    /// The `base_index` parameter sets the starting index for this segment.
+    /// The index is automatically managed by the [`BalIndexHook`] which should be
+    /// set on the executor before calling this.
+    ///
+    /// Index pattern:
+    /// - Pre-execution: `base_index`
+    /// - Transactions: `base_index + 1`, `base_index + 2`, etc.
+    /// - Post-execution: `base_index + tx_count + 1`
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
@@ -260,16 +297,8 @@ where
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
+        index: Box<BalDbIndex>,
     ) -> Self {
-        let start_index = if transactions.is_empty() {
-            0
-        } else {
-            // pre-execution changes + txns + post-execution changes
-            transactions.len() as u16 + 1
-        };
-
-        let counter = BlockAccessIndexCounter::new(start_index);
-
         Self {
             inner: BasicBlockBuilder {
                 executor,
@@ -279,16 +308,8 @@ where
                 transactions,
             },
             access_list_sender: tx,
-            counter,
+            db_index: index,
         }
-    }
-
-    pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
-        let next_index = self.counter.next_index();
-
-        let db = self.inner.executor.inner.evm_mut().db_mut();
-        db.set_index(next_index);
-        Ok(())
     }
 }
 
@@ -326,16 +347,13 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.prepare_database()?;
         self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
     fn finish(
-        mut self,
+        self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        self.prepare_database()?;
-
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
@@ -391,7 +409,7 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db.finish()?.build(self.counter.finish());
+        let access_list = db.finish()?.build(self.db_index.finish());
 
         self.access_list_sender
             .send(access_list)
@@ -415,30 +433,6 @@ where
 
     fn into_executor(self) -> Self::Executor {
         self.inner.into_executor()
-    }
-}
-
-pub struct BlockAccessIndexCounter {
-    current_index: u16,
-    start_index: u16,
-}
-
-impl BlockAccessIndexCounter {
-    pub fn new(start_index: u16) -> Self {
-        Self {
-            current_index: start_index,
-            start_index,
-        }
-    }
-
-    pub fn next_index(&mut self) -> u16 {
-        let index = self.current_index;
-        self.current_index += 1;
-        index
-    }
-
-    pub fn finish(self) -> (u16, u16) {
-        (self.start_index, self.current_index)
     }
 }
 
@@ -537,35 +531,4 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_block_access_index_counter_new() {
-        let counter = BlockAccessIndexCounter::new(10);
-        let (start, end) = counter.finish();
-
-        assert_eq!(start, 10);
-        assert_eq!(end, 10, "No indices consumed yet");
-    }
-
-    #[test]
-    fn test_block_access_index_counter_next_index() {
-        let mut counter = BlockAccessIndexCounter::new(0);
-
-        assert_eq!(counter.next_index(), 0);
-        assert_eq!(counter.next_index(), 1);
-        assert_eq!(counter.next_index(), 2);
-    }
-
-    #[test]
-    fn test_block_access_index_counter_finish() {
-        let mut counter = BlockAccessIndexCounter::new(5);
-
-        counter.next_index(); // 5
-        counter.next_index(); // 6
-        counter.next_index(); // 7
-
-        let (start, end) = counter.finish();
-        assert_eq!(start, 5);
-        assert_eq!(end, 8);
-    }
 }

@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+arbitrary = [
+    "dep:proptest",
+    "dep:proptest-derive",
+    "alloy-primitives/arbitrary",
+]
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
@@ -31,3 +39,7 @@ blake3.workspace = true
 ed25519-dalek.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+
+# Optional dependencies for arbitrary/proptest support
+proptest = { version = "1.4", optional = true }
+proptest-derive = { version = "0.5", optional = true }

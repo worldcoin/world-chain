@@ -319,6 +319,8 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
 
+        let index = self.block_index as u16;
+
         self.executor.spawn_blocking(Box::pin(async move {
             let _permit = guard.acquire().await;
             let args = BuildArguments {
@@ -328,7 +330,9 @@ where
                 best_payload,
             };
 
-            let result = builder.try_build_with_precommit(args, committed_payload.payload());
+            let committed = committed_payload.payload().map(|p| (index as u16 - 1, p));
+
+            let result = builder.try_build_with_precommit(args, committed);
             let _ = tx.send(result);
         }));
 

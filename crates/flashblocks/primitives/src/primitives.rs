@@ -6,6 +6,9 @@ use alloy_rpc_types_engine::PayloadId;
 use alloy_rpc_types_eth::Withdrawal;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+#[cfg(feature = "arbitrary")]
+use proptest_derive::Arbitrary;
+
 use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetadata};
 
 /// Represents the modified portions of an execution payload within a flashblock.
@@ -16,6 +19,7 @@ use crate::{access_list::FlashblockAccessListData, flashblocks::FlashblockMetada
 #[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
 #[rlp(trailing)]
 pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The state root of the block.
@@ -32,10 +36,12 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     /// The transactions of the block.
     pub transactions: Vec<Bytes>,
     /// Array of [`Withdrawal`] enabled with V2
+    #[cfg_attr(feature = "arbitrary", proptest(value = "Vec::new()"))]
     pub withdrawals: Vec<Withdrawal>,
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
     /// Optional [`FlashblockAccessList`] and associated Hash
+    #[cfg_attr(feature = "arbitrary", proptest(value = "None"))]
     pub access_list_data: Option<FlashblockAccessListData>,
 }
 

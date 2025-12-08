@@ -262,11 +262,17 @@ where
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .unwrap();
 
-    let start_index = if committed_state.transactions.is_empty() {
-        0
-    } else {
-        committed_state.transactions.len() as u16 + 1
-    };
+    let start_index = diff
+        .access_list_data
+        .as_ref()
+        .map(|a| {
+            if a.access_list.min_tx_index == 0 {
+                1
+            } else {
+                a.access_list.min_tx_index
+            }
+        })
+        .unwrap_or(0);
 
     let executor_transactions = decode_transactions(&flashblock.diff().transactions, start_index)?;
 

@@ -94,15 +94,22 @@ impl AccountChangesConstruction {
     /// Merges another [`AccountChangesConstruction`] into this one
     pub fn merge(&mut self, other: Self) {
         for (slot, other_tx_map) in other.storage_changes {
-            self.storage_changes
-                .entry(slot)
-                .and_modify(|existing_tx_map| existing_tx_map.extend(other_tx_map.clone()))
-                .or_insert(other_tx_map);
+            let tx_map = self.storage_changes.entry(slot).or_default();
+            for (tx_index, value) in other_tx_map {
+                tx_map.insert(tx_index, value);
+            }
         }
         self.storage_reads.extend(other.storage_reads);
-        self.balance_changes.extend(other.balance_changes);
-        self.nonce_changes.extend(other.nonce_changes);
-        self.code_changes.extend(other.code_changes);
+        
+        for (tx_index, value) in other.balance_changes {
+            self.balance_changes.insert(tx_index, value);
+        }
+        for (tx_index, value) in other.nonce_changes {
+            self.nonce_changes.insert(tx_index, value);
+        }
+        for (tx_index, value) in other.code_changes {
+            self.code_changes.insert(tx_index, value);
+        }
     }
 
     /// Consumes the builder and produces an [`AccountChanges`] for the given address
@@ -191,445 +198,363 @@ impl AccountChangesConstruction {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::collections::HashSet;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
 
-//     use crate::executor::bal_builder::BalBuilderBlockExecutor;
-//     use alloy_consensus::{TxEip1559, constants::KECCAK_EMPTY};
-//     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
-//     use alloy_genesis::{Genesis, GenesisAccount};
-//     use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
-//     use alloy_primitives::{Address, Bytes, FixedBytes, TxKind, U256, address, bytes, keccak256};
+    /// Strategy for generating random U256 values
+    fn arb_u256() -> impl Strategy<Value = U256> {
+        any::<[u8; 32]>().prop_map(|bytes| U256::from_be_bytes(bytes))
+    }
 
-//     use alloy_signer_local::PrivateKeySigner;
-//     use alloy_sol_types::{SolCall, sol};
-//     use flashblocks_primitives::access_list::FlashblockAccessList;
-//     use lazy_static::lazy_static;
-//     use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
-//     use op_alloy_network::TxSignerSync;
-//     use reth::revm::State;
-//     use reth_evm::{ConfigureEvm, Evm, EvmFactory, block::BlockExecutor};
-//     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-//     use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
-//     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-//     use reth_primitives::{Recovered, transaction::SignedTransaction};
-//     use reth_provider::BlockExecutionResult;
-//     use revm::{
-//         database::{
-//             BundleAccount, BundleState, InMemoryDB,
-//             states::{bundle_state::BundleRetention, reverts::Reverts},
-//         },
-//         state::{AccountInfo, Bytecode},
-//     };
+    /// Strategy for generating random addresses
+    fn arb_address() -> impl Strategy<Value = Address> {
+        any::<[u8; 20]>().prop_map(Address::from)
+    }
 
-//     sol! {
-//         #[sol(bytecode = "0x6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063efc81a8c14602a575b5f5ffd5b60306032565b005b5f604051603d90605a565b604051809103905ff0801580156055573d5f5f3e3d5ffd5b505050565b61013e806100688339019056fe6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
-//         contract SomeContractFactory {
-//             constructor() {}
+    /// Strategy for generating random block access indices (0..1000)
+    fn arb_block_access_index() -> impl Strategy<Value = BlockAccessIndex> {
+        0u16..1000u16
+    }
 
-//             function create() external {
-//                 address newContract = address(new SomeContract());
-//             }
-//         }
+    /// Strategy for generating storage changes: HashMap<U256, HashMap<BlockAccessIndex, U256>>
+    fn arb_storage_changes() -> impl Strategy<Value = HashMap<U256, HashMap<BlockAccessIndex, U256>>>
+    {
+        prop::collection::hash_map(
+            arb_u256(),
+            prop::collection::hash_map(arb_block_access_index(), arb_u256(), 0..5),
+            0..10,
+        )
+    }
 
-//         #[sol(bytecode = "608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056")]
-//         contract SomeContract {
-//             mapping(uint256 => bool) public map;
-//             uint256 public nonce;
+    /// Strategy for generating storage reads
+    fn arb_storage_reads() -> impl Strategy<Value = HashSet<U256>> {
+        prop::collection::hash_set(arb_u256(), 0..10)
+    }
 
-//             constructor() {}
+    /// Strategy for generating balance changes
+    fn arb_balance_changes() -> impl Strategy<Value = HashMap<BlockAccessIndex, U256>> {
+        prop::collection::hash_map(arb_block_access_index(), arb_u256(), 0..5)
+    }
 
-//             function sstore() external {
-//                 for (uint256 i = 0; i < 100; i++) {
-//                     nonce += 1;
-//                     bool value = map[nonce];
-//                     map[nonce] = !value;
-//                 }
-//             }
-//         }
-//     }
+    /// Strategy for generating nonce changes
+    fn arb_nonce_changes() -> impl Strategy<Value = HashMap<BlockAccessIndex, u64>> {
+        prop::collection::hash_map(arb_block_access_index(), any::<u64>(), 0..5)
+    }
 
-//     lazy_static! {
-//         static ref ALICE: PrivateKeySigner =
-//             PrivateKeySigner::from_bytes(&[1u8; 32].into()).unwrap();
-//         static ref BOB: PrivateKeySigner = PrivateKeySigner::from_bytes(&[2u8; 32].into()).unwrap();
-//         static ref FACTORY: Address = address!("0x1234567890123456789012345678901234567890");
-//         static ref GENESIS: Genesis = Genesis::default()
-//             .extend_accounts(vec![
-//                 (
-//                     ALICE.address(),
-//                     GenesisAccount::default()
-//                         .with_balance(U256::from(10_u128.pow(21)))
-//                         .with_nonce(Some(0))
-//                 ),
-//                 (
-//                     BOB.address(),
-//                     GenesisAccount::default()
-//                         .with_balance(U256::ONE)
-//                         .with_nonce(Some(0))
-//                 ),
-//             ])
-//             .with_base_fee(Some(1))
-//             .with_gas_limit(u64::MAX);
-//         static ref CHAIN_SPEC: OpChainSpec = OpChainSpecBuilder::default()
-//             .chain(GENESIS.config.chain_id.into())
-//             .genesis(GENESIS.clone())
-//             .ecotone_activated()
-//             .build();
-//         static ref EVM_CONFIG: OpEvmConfig =
-//             OpEvmConfig::new(CHAIN_SPEC.clone().into(), OpRethReceiptBuilder::default());
-//     }
+    /// Strategy for generating AccountChangesConstruction
+    fn arb_account_changes_construction() -> impl Strategy<Value = AccountChangesConstruction> {
+        (
+            arb_storage_changes(),
+            arb_storage_reads(),
+            arb_balance_changes(),
+            arb_nonce_changes(),
+        )
+            .prop_map(
+                |(storage_changes, storage_reads, balance_changes, nonce_changes)| {
+                    AccountChangesConstruction {
+                        storage_changes,
+                        storage_reads,
+                        balance_changes,
+                        nonce_changes,
+                        code_changes: HashMap::new(), // Skip code changes for simplicity
+                    }
+                },
+            )
+    }
 
-//     #[derive(Debug)]
-//     pub struct AccessListTest {
-//         pub txs: Vec<Recovered<OpTransactionSigned>>,
-//         pub expected: FlashblockAccessList,
-//         pub db: State<InMemoryDB>,
-//     }
+    /// Strategy for generating FlashblockAccessListConstruction with multiple addresses
+    fn arb_access_list_construction() -> impl Strategy<Value = FlashblockAccessListConstruction> {
+        prop::collection::vec((arb_address(), arb_account_changes_construction()), 0..10).prop_map(
+            |entries| {
+                let construction = FlashblockAccessListConstruction::new();
+                for (addr, changes) in entries {
+                    construction.changes.insert(addr, changes);
+                }
+                construction
+            },
+        )
+    }
 
-//     impl AccessListTest {
-//         pub fn new() -> Self {
-//             let mut db = InMemoryDB::default();
-//             for account in GENESIS.alloc.clone() {
-//                 db.insert_account_info(
-//                     account.0,
-//                     AccountInfo {
-//                         balance: account.1.balance,
-//                         nonce: account.1.nonce.unwrap_or_default(),
-//                         code_hash: account
-//                             .1
-//                             .code
-//                             .as_ref()
-//                             .map(keccak256)
-//                             .unwrap_or(KECCAK_EMPTY),
-//                         code: account.1.code.map(Bytecode::new_legacy),
-//                     },
-//                 )
-//             }
-//             Self {
-//                 db: State::builder()
-//                     .with_database(db)
-//                     .with_bundle_update()
-//                     .build(),
-//                 txs: Vec::new(),
-//                 expected: FlashblockAccessList::default(),
-//             }
-//         }
+    /// Strategy for generating index ranges
+    fn arb_index_range() -> impl Strategy<Value = (u16, u16)> {
+        (0u16..100u16).prop_flat_map(|min| (Just(min), min..min.saturating_add(100)))
+    }
 
-//         pub fn with_tx(
-//             mut self,
-//             from: PrivateKeySigner,
-//             to: Option<Address>,
-//             value: U256,
-//             input: Bytes,
-//         ) -> Self {
-//             let mut tx = TxEip1559 {
-//                 chain_id: CHAIN_SPEC.chain().id(),
-//                 nonce: self
-//                     .db
-//                     .cache
-//                     .accounts
-//                     .get(&from.address())
-//                     .map(|info| info.account.as_ref().map(|a| a.info.nonce).unwrap_or(0))
-//                     .unwrap_or(0),
-//                 max_fee_per_gas: CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1) as u128,
-//                 to: to.map(TxKind::Call).unwrap_or(TxKind::Create),
-//                 gas_limit: 500_000,
-//                 value,
-//                 input,
-//                 ..Default::default()
-//             };
+    proptest! {
+        /// Merging with an empty AccountChangesConstruction should be identity
+        #[test]
+        fn prop_account_merge_with_empty_is_identity(
+            acc in arb_account_changes_construction()
+        ) {
+            let original = acc.clone();
+            let mut merged = acc;
+            merged.merge(AccountChangesConstruction::default());
 
-//             let signed = from.sign_transaction_sync(&mut tx).unwrap();
+            prop_assert_eq!(merged.storage_changes, original.storage_changes);
+            prop_assert_eq!(merged.storage_reads, original.storage_reads);
+            prop_assert_eq!(merged.balance_changes, original.balance_changes);
+            prop_assert_eq!(merged.nonce_changes, original.nonce_changes);
+        }
 
-//             let typed = OpTypedTransaction::Eip1559(tx);
-//             let recovered = OpTxEnvelope::from((typed, signed))
-//                 .try_into_recovered()
-//                 .unwrap();
+        /// Merging two AccountChangesConstruction should combine all storage slots
+        #[test]
+        fn prop_account_merge_combines_storage_slots(
+            acc1 in arb_account_changes_construction(),
+            acc2 in arb_account_changes_construction()
+        ) {
+            let mut merged = acc1.clone();
+            merged.merge(acc2.clone());
 
-//             self.txs.push(recovered);
-//             self
-//         }
+            // All storage slots from both should be present
+            for slot in acc1.storage_changes.keys() {
+                prop_assert!(merged.storage_changes.contains_key(slot));
+            }
+            for slot in acc2.storage_changes.keys() {
+                prop_assert!(merged.storage_changes.contains_key(slot));
+            }
+        }
 
-//         pub fn with_contract(mut self, contract: Address, code: Bytes) -> Self {
-//             let code = Bytecode::new_legacy(code.clone());
-//             self.db.insert_account(
-//                 contract,
-//                 AccountInfo {
-//                     balance: U256::ZERO,
-//                     nonce: 0,
-//                     code_hash: keccak256(code.bytes()),
-//                     code: Some(code),
-//                 },
-//             );
-//             self
-//         }
+        /// Merging should combine all storage reads
+        #[test]
+        fn prop_account_merge_combines_storage_reads(
+            acc1 in arb_account_changes_construction(),
+            acc2 in arb_account_changes_construction()
+        ) {
+            let mut merged = acc1.clone();
+            merged.merge(acc2.clone());
 
-//         pub fn with_expected(mut self, expected: FlashblockAccessList) -> Self {
-//             self.expected = expected;
-//             self
-//         }
+            // All storage reads from both should be present
+            for slot in &acc1.storage_reads {
+                prop_assert!(merged.storage_reads.contains(slot));
+            }
+            for slot in &acc2.storage_reads {
+                prop_assert!(merged.storage_reads.contains(slot));
+            }
+        }
 
-//         pub fn test(
-//             mut self,
-//         ) -> (
-//             BundleState,
-//             BlockExecutionResult<OpReceipt>,
-//             FlashblockAccessList,
-//             u64,
-//             u64,
-//         ) {
-//             let evm_env = EVM_CONFIG.evm_env(CHAIN_SPEC.genesis_header()).unwrap();
-//             let evm = OpEvmFactory::default().create_evm(&mut self.db, evm_env);
-//             let ctx = OpBlockExecutionCtx {
-//                 parent_beacon_block_root: Some(FixedBytes::ZERO),
-//                 parent_hash: CHAIN_SPEC.genesis_hash(),
-//                 ..Default::default()
-//             };
+        /// Building AccountChanges should sort storage slots
+        #[test]
+        fn prop_account_build_sorts_storage_slots(
+            acc in arb_account_changes_construction(),
+            addr in arb_address()
+        ) {
+            let built = acc.build(addr);
 
-//             let mut executor = BalBuilderBlockExecutor::new(
-//                 evm,
-//                 ctx,
-//                 CHAIN_SPEC.clone().into(),
-//                 OpRethReceiptBuilder::default(),
-//             );
+            // Verify storage changes are sorted by slot
+            let slots: Vec<_> = built.storage_changes.iter().map(|s| s.slot).collect();
+            let mut sorted_slots = slots.clone();
+            sorted_slots.sort();
+            prop_assert_eq!(slots, sorted_slots, "Storage slots should be sorted");
+        }
 
-//             let _ = executor.apply_pre_execution_changes();
+        /// Building AccountChanges should sort changes within each slot by tx index
+        #[test]
+        fn prop_account_build_sorts_changes_by_tx_index(
+            acc in arb_account_changes_construction(),
+            addr in arb_address()
+        ) {
+            let built = acc.build(addr);
 
-//             for tx in self.txs {
-//                 executor.execute_transaction(tx).unwrap();
-//             }
+            // Verify each slot's changes are sorted by block_access_index
+            for slot_changes in &built.storage_changes {
+                let indices: Vec<_> = slot_changes.changes.iter()
+                    .map(|c| c.block_access_index)
+                    .collect();
+                let mut sorted_indices = indices.clone();
+                sorted_indices.sort();
+                prop_assert_eq!(indices, sorted_indices,
+                    "Storage changes within slot should be sorted by tx index");
+            }
+        }
 
-//             let finish_result = executor.finish_with_access_list().unwrap();
-//             let access_list = finish_result.access_list_data.access_list;
+        /// Building AccountChanges should sort balance changes by tx index
+        #[test]
+        fn prop_account_build_sorts_balance_changes(
+            acc in arb_account_changes_construction(),
+            addr in arb_address()
+        ) {
+            let built = acc.build(addr);
 
-//             let (db, _) = finish_result.evm.finish();
+            let indices: Vec<_> = built.balance_changes.iter()
+                .map(|c| c.block_access_index)
+                .collect();
+            let mut sorted_indices = indices.clone();
+            sorted_indices.sort();
+            prop_assert_eq!(indices, sorted_indices,
+                "Balance changes should be sorted by tx index");
+        }
 
-//             assert_eq!(
-//                 access_list, self.expected,
-//                 "Access list does not match got {:#?}, expected {:#?}",
-//                 access_list, self.expected
-//             );
+        /// Building AccountChanges should sort nonce changes by tx index
+        #[test]
+        fn prop_account_build_sorts_nonce_changes(
+            acc in arb_account_changes_construction(),
+            addr in arb_address()
+        ) {
+            let built = acc.build(addr);
 
-//             // merge all transitions into bundle state
-//             db.merge_transitions(BundleRetention::Reverts);
+            let indices: Vec<_> = built.nonce_changes.iter()
+                .map(|c| c.block_access_index)
+                .collect();
+            let mut sorted_indices = indices.clone();
+            sorted_indices.sort();
+            prop_assert_eq!(indices, sorted_indices,
+                "Nonce changes should be sorted by tx index");
+        }
 
-//             // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-//             // which represent a single atomic state transition. therefore reverts should have length 1
-//             // we only retain the first occurance of a revert for any given account.
-//             let flattened = db
-//                 .bundle_state
-//                 .reverts
-//                 .iter()
-//                 .flatten()
-//                 .scan(HashSet::new(), |visited, (acc, revert)| {
-//                     if visited.insert(acc) {
-//                         Some((*acc, revert.clone()))
-//                     } else {
-//                         None
-//                     }
-//                 })
-//                 .collect();
+        /// Building AccountChanges should sort storage reads
+        #[test]
+        fn prop_account_build_sorts_storage_reads(
+            acc in arb_account_changes_construction(),
+            addr in arb_address()
+        ) {
+            let built = acc.build(addr);
 
-//             db.bundle_state.reverts = Reverts::new(vec![flattened]);
+            let reads: Vec<_> = built.storage_reads.clone();
+            let mut sorted_reads = reads.clone();
+            sorted_reads.sort();
+            prop_assert_eq!(reads, sorted_reads, "Storage reads should be sorted");
+        }
+    }
 
-//             (
-//                 db.bundle_state.clone(),
-//                 finish_result.execution_result,
-//                 access_list,
-//                 finish_result.min_tx_index,
-//                 finish_result.max_tx_index,
-//             )
-//         }
-//     }
+    proptest! {
+        /// Merging with empty FlashblockAccessListConstruction should be identity
+        #[test]
+        fn prop_bal_merge_with_empty_is_identity(
+            bal in arb_access_list_construction()
+        ) {
+            let original_addrs: HashSet<_> = bal.changes.iter()
+                .map(|e| *e.key())
+                .collect();
 
-//     #[test]
-//     #[ignore = "incorrect assertions"]
-//     fn test_bal_balance_changes() {
-//         AccessListTest::new()
-//             .with_tx(
-//                 ALICE.clone(),
-//                 Some(BOB.address()),
-//                 U256::from(100),
-//                 Bytes::default(),
-//             )
-//             .with_expected(FlashblockAccessList {
-//                 changes: vec![
-//                     AccountChanges {
-//                         address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 1,
-//                             post_balance: U256::from_str_radix("999999999999999978900", 10)
-//                                 .unwrap(),
-//                         }],
-//                         nonce_changes: vec![NonceChange {
-//                             block_access_index: 1,
-//                             new_nonce: 1,
-//                         }],
-//                         ..Default::default()
-//                     },
-//                     AccountChanges {
-//                         address: address!("0x4200000000000000000000000000000000000019"),
+            let mut merged = bal;
+            merged.merge(FlashblockAccessListConstruction::new());
 
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 1,
-//                             post_balance: U256::from(21000),
-//                         }],
-//                         ..Default::default()
-//                     },
-//                     AccountChanges {
-//                         address: address!("0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"),
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 1,
-//                             post_balance: U256::from(101),
-//                         }],
-//                         ..Default::default()
-//                     },
-//                 ],
-//                 min_tx_index: 0,
-//                 max_tx_index: 1,
-//             })
-//             .test();
-//     }
+            let merged_addrs: HashSet<_> = merged.changes.iter()
+                .map(|e| *e.key())
+                .collect();
 
-//     #[test]
-//     #[ignore = "incorrect assertions"]
-//     fn test_bal_code_changes() {
-//         AccessListTest::new()
-//             .with_contract(*FACTORY, SomeContractFactory::BYTECODE.clone())
-//             .with_tx(
-//                 ALICE.clone(),
-//                 Some(*FACTORY),
-//                 U256::ZERO,
-//                 SomeContractFactory::createCall::SELECTOR.into(),
-//             )
-//             .with_expected(FlashblockAccessList {
-//     changes: vec![
-//         AccountChanges {
-//             address: address!("0x1234567890123456789012345678901234567890"),
-//             nonce_changes: vec![
-//                 NonceChange {
-//                     block_access_index: 1,
-//                     new_nonce: 1,
-//                 },
-//             ],
-//             code_changes: vec![
-//                 CodeChange {
-//                     block_access_index: 1,
-//                     new_code: bytes!("6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063efc81a8c14602a575b5f5ffd5b60306032565b005b5f604051603d90605a565b604051809103905ff0801580156055573d5f5f3e3d5ffd5b505050565b61013e806100688339019056fe6080604052348015600e575f5ffd5b506101228061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056"),
-//                 },
-//             ],
-//             ..Default::default()
-//         },
-//         AccountChanges {
-//             address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
-//             balance_changes: vec![
-//                 BalanceChange {
-//                     block_access_index: 1,
-//                     post_balance: U256::from_str_radix("999999999999999888515", 10).unwrap(),
-//                 },
-//             ],
-//             nonce_changes: vec![
-//                 NonceChange {
-//                     block_access_index: 1,
-//                     new_nonce: 1,
-//                 },
-//             ],
-//             ..Default::default()
-//         },
-//         AccountChanges {
-//             address: address!("0x4200000000000000000000000000000000000019"),
-//             balance_changes: vec![
-//                 BalanceChange {
-//                     block_access_index: 1,
-//                     post_balance: U256::from(111485),
-//                 },
-//             ],
-//           ..Default::default()
-//         },
-//         AccountChanges {
-//             address: address!("0xf831de50f3884cf0f8550bb129032a80cb5a26b7"),
-//             nonce_changes: vec![
-//                 NonceChange {
-//                     block_access_index: 1,
-//                     new_nonce: 1,
-//                 },
-//             ],
-//             code_changes: vec![
-//                 CodeChange {
-//                     block_access_index: 1,
-//                     new_code: bytes!("0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063703c2d1a14610043578063affed0e01461004d578063b8dda9c714610069575b5f5ffd5b61004b61009b565b005b61005660015481565b6040519081526020015b60405180910390f35b61008b6100773660046100e6565b5f6020819052908152604090205460ff1681565b6040519015158152602001610060565b5f5b60648110156100e3576001805f8282546100b791906100fd565b9091555050600180545f908152602081905260409020805460ff19811660ff909116151790550161009d565b50565b5f602082840312156100f6575f5ffd5b5035919050565b8082018082111561011c57634e487b7160e01b5f52601160045260245ffd5b9291505056"),
-//                 },
-//             ],
-//             ..Default::default()
-//         },
-//     ],
-//     min_tx_index: 0,
-//     max_tx_index: 1,
-// })
-//             .test();
-//     }
+            prop_assert_eq!(original_addrs, merged_addrs);
+        }
 
-//     #[test]
-//     #[ignore = "incorrect assertions"]
-//     fn test_bal_state_root_computation() {
-//         let (expected_bundle, _, access_list, _, _) = AccessListTest::new()
-//             .with_tx(
-//                 ALICE.clone(),
-//                 Some(BOB.address()),
-//                 U256::ONE,
-//                 Bytes::default(),
-//             )
-//             .with_expected(FlashblockAccessList {
-//                 changes: vec![
-//                     AccountChanges {
-//                         address: address!("0x1a642f0e3c3af545e7acbd38b07251b3990914f1"),
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 2,
-//                             post_balance: U256::from_str_radix("999999999999999978999", 10)
-//                                 .unwrap(),
-//                         }],
-//                         nonce_changes: vec![NonceChange {
-//                             block_access_index: 1,
-//                             new_nonce: 1,
-//                         }],
-//                         ..Default::default()
-//                     },
-//                     AccountChanges {
-//                         address: address!("0x4200000000000000000000000000000000000019"),
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 1,
-//                             post_balance: U256::from(111485),
-//                         }],
-//                         ..Default::default()
-//                     },
-//                     AccountChanges {
-//                         address: address!("0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c"),
-//                         balance_changes: vec![BalanceChange {
-//                             block_access_index: 1,
-//                             post_balance: U256::from(2),
-//                         }],
-//                         ..Default::default()
-//                     },
-//                 ],
-//                 min_tx_index: 0,
-//                 max_tx_index: 1,
-//             })
-//             .test();
+        /// Merging two FlashblockAccessListConstruction should combine all addresses
+        #[test]
+        fn prop_bal_merge_combines_addresses(
+            bal1 in arb_access_list_construction(),
+            bal2 in arb_access_list_construction()
+        ) {
+            let addrs1: HashSet<_> = bal1.changes.iter().map(|e| *e.key()).collect();
+            let addrs2: HashSet<_> = bal2.changes.iter().map(|e| *e.key()).collect();
 
-//         let bundle: alloy_primitives::map::HashMap<Address, BundleAccount> = access_list.into();
+            let mut merged = bal1;
+            merged.merge(bal2);
 
-//         for (address, account) in bundle.iter() {
-//             let expected = expected_bundle.state.get(address).unwrap();
-//             assert_eq!(
-//                 account.info, expected.info,
-//                 "Account Info mismatch for account {address:?}"
-//             );
-//             assert_eq!(
-//                 account.storage, expected.storage,
-//                 "Storage mismatch for account {address:?}"
-//             );
-//         }
-//     }
-// }
+            // All addresses from both should be present
+            for addr in &addrs1 {
+                prop_assert!(merged.changes.contains_key(addr));
+            }
+            for addr in &addrs2 {
+                prop_assert!(merged.changes.contains_key(addr));
+            }
+        }
+
+        /// Building FlashblockAccessList should sort addresses lexicographically
+        #[test]
+        fn prop_bal_build_sorts_addresses(
+            bal in arb_access_list_construction(),
+            range in arb_index_range()
+        ) {
+            let built = bal.build(range);
+
+            let addrs: Vec<_> = built.changes.iter().map(|c| c.address).collect();
+            let mut sorted_addrs = addrs.clone();
+            sorted_addrs.sort();
+            prop_assert_eq!(addrs, sorted_addrs, "Addresses should be sorted lexicographically");
+        }
+
+        /// Building FlashblockAccessList should preserve index range
+        #[test]
+        fn prop_bal_build_preserves_index_range(
+            bal in arb_access_list_construction(),
+            range in arb_index_range()
+        ) {
+            let built = bal.build(range);
+
+            prop_assert_eq!(built.min_tx_index, range.0);
+            prop_assert_eq!(built.max_tx_index, range.1);
+        }
+
+        /// Building FlashblockAccessList should preserve address count
+        #[test]
+        fn prop_bal_build_preserves_address_count(
+            bal in arb_access_list_construction(),
+            range in arb_index_range()
+        ) {
+            let original_count = bal.changes.len();
+            let built = bal.build(range);
+
+            prop_assert_eq!(built.changes.len(), original_count);
+        }
+    }
+
+
+    #[test]
+    fn test_empty_account_changes_is_empty() {
+        let acc = AccountChangesConstruction::default();
+        assert!(acc.is_empty());
+    }
+
+    #[test]
+    fn test_account_changes_with_storage_not_empty() {
+        let mut acc = AccountChangesConstruction::default();
+        acc.storage_changes
+            .insert(U256::from(1), HashMap::from([(0u16, U256::from(100))]));
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn test_account_changes_with_balance_not_empty() {
+        let mut acc = AccountChangesConstruction::default();
+        acc.balance_changes.insert(0, U256::from(100));
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn test_bal_construction_map_account_change() {
+        let bal = FlashblockAccessListConstruction::new();
+        let addr = Address::ZERO;
+
+        bal.map_account_change(addr, |acc| {
+            acc.balance_changes.insert(0, U256::from(100));
+        });
+
+        assert!(bal.changes.contains_key(&addr));
+        let acc = bal.changes.get(&addr).unwrap();
+        assert_eq!(acc.balance_changes.get(&0), Some(&U256::from(100)));
+    }
+
+    #[test]
+    fn test_bal_merge_overlapping_address() {
+        let mut bal1 = FlashblockAccessListConstruction::new();
+        let bal2 = FlashblockAccessListConstruction::new();
+        let addr = Address::ZERO;
+
+        // bal1 has balance change at index 0
+        bal1.map_account_change(addr, |acc| {
+            acc.balance_changes.insert(0, U256::from(100));
+        });
+
+        // bal2 has balance change at index 1
+        bal2.map_account_change(addr, |acc| {
+            acc.balance_changes.insert(1, U256::from(200));
+        });
+
+        bal1.merge(bal2);
+
+        let acc = bal1.changes.get(&addr).unwrap();
+        assert_eq!(acc.balance_changes.len(), 2);
+        assert_eq!(acc.balance_changes.get(&0), Some(&U256::from(100)));
+        assert_eq!(acc.balance_changes.get(&1), Some(&U256::from(200)));
+    }
+}

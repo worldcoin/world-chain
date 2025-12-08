@@ -1,16 +1,26 @@
-use std::thread::JoinHandle;
+use std::{
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicU16, Ordering},
+    },
+    thread::JoinHandle,
+    u16,
+};
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::Sender;
-use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_evm::block::{BlockExecutionError, StateDB};
+use reth_evm::{
+    OnStateHook,
+    block::{BlockExecutionError, StateChangeSource, StateDB},
+};
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
+    bytecode::bitvec::store::BitStore,
     database::{BundleState, states::bundle_state::BundleRetention},
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
-use tracing::error;
+use tracing::{error, info};
 
 use crate::access_list::FlashblockAccessListConstruction;
 
@@ -18,17 +28,16 @@ use crate::access_list::FlashblockAccessListConstruction;
 enum BalBuilderMsg {
     StorageRead(Address, StorageKey),
     Commit(HashMap<Address, revm::state::Account>),
-    SetIndex(u16),
     MergeAcccessList(FlashblockAccessListConstruction),
+    SetIndex(u16),
 }
 
 /// A wrapper around a database that builds a Flashblock
 /// Access List during execution.
 ///
-/// Commiting to this DB will both construct the underlying access list
-/// and commit to the inner database. Between transactions, call
-/// [`BalBuilderDb::set_index`] with the block-local transaction index so changes can be
-/// attributed correctly.
+/// The current index is read from a [`SharedBlockIndex`] which is updated
+/// by a [`BalIndexHook`] during EVM execution. This ensures the index is
+/// always synchronized with the execution phase.
 #[derive(Clone, Debug)]
 pub struct BalBuilderDb<DB> {
     /// Underlying cached database.
@@ -36,19 +45,19 @@ pub struct BalBuilderDb<DB> {
     /// The Flashblock Access List under construction.
     access_list: FlashblockAccessListConstruction,
     /// The current index being built
-    index: u16,
+    index: Arc<AtomicU16>,
 }
 
 impl<DB> BalBuilderDb<DB>
 where
     DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
-    /// Creates a new BalBuilderDb around the given database.
-    pub fn new(db: DB) -> Self {
+    /// Creates a new BalBuilderDb around the given database with a shared index.
+    pub fn new(db: DB, index: Arc<AtomicU16>) -> Self {
         Self {
             db,
             access_list: Default::default(),
-            index: 0,
+            index,
         }
     }
 
@@ -60,11 +69,6 @@ where
     /// Returns a mutable reference to the underlying database.
     pub fn db_mut(&mut self) -> &mut DB {
         &mut self.db
-    }
-
-    /// Updates the current transaction index used to tag future changes.
-    pub fn set_index(&mut self, index: u16) {
-        self.index = index;
     }
 
     /// Merges the access lists
@@ -84,75 +88,93 @@ where
         &mut self,
         changes: HashMap<Address, revm::state::Account>,
     ) -> Result<(), <DB as Database>::Error> {
-        // Pre-load all accounts into the cache using the mutable `basic` method.
-        // This is required because `State::commit` expects all accounts to be present
-        // in the cache (it panics with "All accounts should be present inside cache" otherwise).
-        // The `DatabaseRef::basic_ref` method does NOT populate the cache, only `Database::basic` does.
-        for address in changes.keys() {
-            let _ = self.db.basic(*address)?;
-        }
+        let index = self.index.load(Ordering::SeqCst);
+        eprintln!("index in try_commit {index}");
 
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
-        changes
-            .iter()
-            .par_bridge()
-            .try_for_each(|(address, account)| {
-                let mut acc_changes = self.access_list.changes.entry(*address).or_default();
+        changes.iter().try_for_each(|(address, account)| {
+            let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
-                // There is an edge case here where we could change an account, then change it
-                // back. This would result in appending a value to the access list that isn't strctly
-                // required. For this reason we should dedup consecutive identical entries when
-                // finalizing the access list.
-                match self.db.basic_ref(*address)? {
-                    Some(previous) => {
-                        if previous.balance != account.info.balance {
+            // There is an edge case here where we could change an account, then change it
+            // back. This would result in appending a value to the access list that isn't strctly
+            // required. For this reason we should dedup consecutive identical entries when
+            // finalizing the access list.
+            match self.db.basic(*address)? {
+                Some(previous) => {
+                    if previous.balance != account.info.balance {
+                        let latest = acc_changes
+                            .balance_changes
+                            .get(&index)
+                            .unwrap_or(&U256::ZERO);
+
+                        if *latest != account.info.balance {
                             acc_changes
                                 .balance_changes
-                                .insert(self.index, account.info.balance);
-                        }
-                        if previous.nonce != account.info.nonce {
-                            acc_changes
-                                .nonce_changes
-                                .insert(self.index, account.info.nonce);
-                        }
-                        if previous.code_hash != account.info.code_hash {
-                            let bytecode = match account.info.code.clone() {
-                                Some(code) => code,
-                                None => self.db.code_by_hash_ref(account.info.code_hash)?,
-                            };
-                            acc_changes.code_changes.insert(self.index, bytecode);
+                                .insert(index, account.info.balance);
                         }
                     }
-                    None => {
-                        acc_changes
-                            .balance_changes
-                            .insert(self.index, account.info.balance);
-                        acc_changes
-                            .nonce_changes
-                            .insert(self.index, account.info.nonce);
+
+                    if previous.nonce != account.info.nonce {
+                        let latest = acc_changes.nonce_changes.get(&index).unwrap_or(&0);
+                        if *latest != account.info.nonce {
+                            acc_changes.nonce_changes.insert(index, account.info.nonce);
+                        }
+                    }
+
+                    if previous.code_hash != account.info.code_hash {
                         let bytecode = match account.info.code.clone() {
                             Some(code) => code,
                             None => self.db.code_by_hash_ref(account.info.code_hash)?,
                         };
-                        acc_changes.code_changes.insert(self.index, bytecode);
+
+                        let latest = acc_changes
+                            .code_changes
+                            .get(&index)
+                            .cloned()
+                            .unwrap_or_default();
+
+                        if latest != bytecode {
+                            acc_changes.code_changes.insert(index, bytecode);
+                        }
                     }
                 }
-
-                account.storage.iter().try_for_each(|(key, value)| {
-                    let previous_value = self.db.storage_ref(*address, *key)?;
-                    if previous_value != value.present_value {
+                None => {
+                    if !account.info.balance.is_zero() {
                         acc_changes
-                            .storage_changes
-                            .entry(*key)
-                            .or_default()
-                            .insert(self.index, value.present_value);
+                            .balance_changes
+                            .insert(index, account.info.balance);
                     }
-                    Result::<(), <DB as Database>::Error>::Ok(())
-                })?;
 
-                Ok(())
+                    if account.info.nonce != 0 {
+                        acc_changes.nonce_changes.insert(index, account.info.nonce);
+                    }
+
+                    let bytecode = match account.info.code.clone() {
+                        Some(code) => code,
+                        None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                    };
+
+                    if !bytecode.is_empty() {
+                        acc_changes.code_changes.insert(index, bytecode);
+                    }
+                }
+            }
+
+            account.storage.iter().try_for_each(|(key, value)| {
+                let previous_value = self.db.storage_ref(*address, *key)?;
+                if previous_value != value.present_value {
+                    acc_changes
+                        .storage_changes
+                        .entry(*key)
+                        .or_default()
+                        .insert(index, value.present_value);
+                }
+                Result::<(), <DB as Database>::Error>::Ok(())
             })?;
+
+            Ok(())
+        })?;
 
         self.db.commit(changes);
 
@@ -233,26 +255,29 @@ where
 }
 
 /// An asynchronous Flashblock Access List builder around a database.
-///  
-/// commiting to this database will both commit to the inner database
+///
+/// Commiting to this database will both commit to the inner database
 /// and update the access list under construction in a background thread.
-/// Between transactions, call [`AsyncBalBuilderDb::set_index`] with the block-local
-/// transaction index so changes can be attributed correctly.
+///
+/// The current index is managed via a [`SharedBlockIndex`] which is updated
+/// by a [`BalIndexHook`] during EVM execution.
 #[derive(Debug)]
 pub struct AsyncBalBuilderDb<DB> {
     /// The underlying read/write database.
     db: DB,
     /// The sender to the builder thread.
     tx: Sender<BalBuilderMsg>,
-    /// Join hande for the builder thread
+    /// Join handle for the builder thread
     handle: JoinHandle<Result<FlashblockAccessListConstruction, BlockExecutionError>>,
 }
 
 impl<DB> AsyncBalBuilderDb<DB> {
     /// Creates a new builder around a writable DB plus a dummy mirror that
-    /// the background thread uses to compare state when deriving changes. The dummy will
-    /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB>(db: DB, dummy_db: DDB) -> Self
+    /// the background thread uses to compare state when deriving changes.
+    ///
+    /// The `shared_index` is shared with a [`BalIndexHook`] which updates the
+    /// index based on EVM execution phase (pre-execution, transaction, post-execution).
+    pub fn new<DDB>(db: DB, dummy_db: DDB, index: Arc<AtomicU16>) -> Self
     where
         DDB: Database
             + DatabaseRef<Error = <DDB as Database>::Error>
@@ -263,7 +288,7 @@ impl<DB> AsyncBalBuilderDb<DB> {
         <DDB as Database>::Error: Send + Sync + 'static,
     {
         let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
-        let mut bal_builder = BalBuilderDb::new(dummy_db);
+        let mut bal_builder = BalBuilderDb::new(dummy_db, index);
 
         let handle = std::thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
@@ -276,11 +301,11 @@ impl<DB> AsyncBalBuilderDb<DB> {
                             .try_commit(changes)
                             .map_err(BlockExecutionError::other)?;
                     }
-                    BalBuilderMsg::SetIndex(index) => {
-                        bal_builder.set_index(index);
-                    }
                     BalBuilderMsg::MergeAcccessList(access_list) => {
                         bal_builder.merge_access_list(access_list);
+                    }
+                    BalBuilderMsg::SetIndex(index) => {
+                        // bal_builder.set_index(index);
                     }
                 }
             }
@@ -376,16 +401,67 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BalDbIndex {
+    current: Arc<AtomicU16>,
+    min_tx_index: Arc<AtomicU16>,
+}
+
+impl BalDbIndex {
+    pub fn new(min_tx_index: u16) -> Self {
+        Self {
+            current: Arc::new(AtomicU16::new(min_tx_index)),
+            min_tx_index: Arc::new(AtomicU16::new(min_tx_index)),
+        }
+    }
+}
+impl BalDbIndex {
+    pub fn current(&self) -> Arc<AtomicU16> {
+        self.current.clone()
+    }
+
+    pub fn set(&self, index: u16) {
+        self.current
+            .store(index, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn get(&self) -> u16 {
+        self.current.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn finish(self) -> (u16, u16) {
+        (
+            self.min_tx_index.load_value(),
+            self.current.load_value() + 1,
+        )
+    }
+}
+
+impl OnStateHook for BalDbIndex {
+    fn on_state(
+        &mut self,
+        source: reth_evm::block::StateChangeSource,
+        _state: &revm::state::EvmState,
+    ) {
+        self.set(self.current().load_value() + 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{U256, address, b256, uint};
+    use lazy_static::lazy_static;
     use revm::{
         Database, DatabaseCommit,
         database::InMemoryDB,
         primitives::{HashMap, KECCAK_EMPTY},
         state::{Account, AccountInfo, AccountStatus, Bytecode, EvmStorageSlot},
     };
+
+    lazy_static! {
+        static ref BAL_INDEX: Arc<AtomicU16> = Arc::new(AtomicU16::new(0));
+    }
 
     // Helper function to create a simple account
     fn create_account(balance: U256, nonce: u64, code: Option<Bytecode>) -> AccountInfo {
@@ -399,7 +475,7 @@ mod tests {
 
     fn bal_db_with_mirror(db: InMemoryDB) -> AsyncBalBuilderDb<InMemoryDB> {
         let read_db = db.clone();
-        AsyncBalBuilderDb::new(db, read_db)
+        AsyncBalBuilderDb::new(db, read_db, BAL_INDEX.clone())
     }
 
     #[test]
@@ -419,6 +495,7 @@ mod tests {
         let addr = address!("0000000000000000000000000000000000000001");
         let mut bal_db = bal_db_with_mirror(db);
 
+        // Set index via set_index method
         bal_db.set_index(10);
         let mut changes = HashMap::default();
         changes.insert(
@@ -432,6 +509,7 @@ mod tests {
         );
         bal_db.commit(changes);
 
+        // Set different index
         bal_db.set_index(20);
         let mut changes = HashMap::default();
         changes.insert(
