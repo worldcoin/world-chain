@@ -19,7 +19,9 @@ use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
     Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, StateDB},
+    block::{
+        BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError, StateDB,
+    },
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
@@ -494,7 +496,10 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-        let access_list = db.finish()?.build(self.index_range);
+        let access_list = db
+            .finish()
+            .map_err(|e| InternalBlockExecutionError::other(e))?
+            .build(self.index_range);
 
         self.access_list_sender
             .send(access_list)
@@ -720,7 +725,7 @@ where
         .map(|t| t.take())
         .unwrap_or_default();
 
-    let access_list = db.finish()?;
+    let access_list = db.finish().map_err(|e| BalExecutorError::other(e))?;
 
     Ok(ParalleExecutionResult {
         transitions: transitions.transitions,
