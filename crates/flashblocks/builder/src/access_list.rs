@@ -195,7 +195,7 @@ impl AccountChangesConstruction {
 // mod tests {
 //     use std::collections::HashSet;
 
-//     use crate::executor::bal_builder::BalBuilderBlockExecutor;
+//     use crate::executor::bal_builder::AsyncBalBuilderBlockExecutor;
 //     use alloy_consensus::{TxEip1559, constants::KECCAK_EMPTY};
 //     use alloy_eip7928::{AccountChanges, BalanceChange, CodeChange, NonceChange};
 //     use alloy_genesis::{Genesis, GenesisAccount};
@@ -388,7 +388,7 @@ impl AccountChangesConstruction {
 //                 ..Default::default()
 //             };
 
-//             let mut executor = BalBuilderBlockExecutor::new(
+//             let mut executor = AsyncBalBuilderBlockExecutor::new(
 //                 evm,
 //                 ctx,
 //                 CHAIN_SPEC.clone().into(),
