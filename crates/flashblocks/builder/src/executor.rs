@@ -20,7 +20,7 @@ use revm::{
     database::BundleState,
 };
 
-use crate::{access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb};
+use crate::{access_list::BlockAccessIndex, database::bal_builder_db::AsyncBalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -88,7 +88,12 @@ impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: StateDB + DatabaseCommit + Database + 'a,
-    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: Evm<
+            DB = AsyncBalBuilderDb<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
@@ -141,7 +146,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB = BalBuilderDb<DB>,
+            DB = AsyncBalBuilderDb<DB>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -230,7 +235,7 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db.finish().build(self.counter.finish());
+        let access_list = db.finish()?.build(self.counter.finish());
 
         self.access_list_sender
             .send(access_list)
