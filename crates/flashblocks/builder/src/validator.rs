@@ -56,24 +56,13 @@ use crate::{
     executor::{BalExecutorError, CommittedState},
 };
 
-/// Context required for flashblocks block validation.
-pub struct FlashblocksValidatorCtx<R: OpReceiptBuilder + Default> {
+pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
     pub chain_spec: Arc<OpChainSpec>,
     pub committed_state: CommittedState<R>,
     pub evm_env: EvmEnvFor<OpEvmConfig>,
     pub evm_config: OpEvmConfig,
     pub execution_context: OpBlockExecutionCtx,
     pub executor_transactions: Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>,
-}
-
-pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
-    pub ctx: FlashblocksValidatorCtx<R>,
-}
-
-impl<R: OpReceiptBuilder + Default> FlashblocksBlockValidator<R> {
-    pub fn new(ctx: FlashblocksValidatorCtx<R>) -> Self {
-        Self { ctx }
-    }
 }
 
 impl<R> FlashblocksBlockValidator<R>
@@ -103,20 +92,20 @@ where
 
         let bundle_db = BundleDb::new(
             state_provider_database.clone(),
-            self.ctx.committed_state.bundle.clone(),
+            self.committed_state.bundle.clone(),
         );
 
         let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
 
         let mut state = State::builder()
             .with_database_ref(temporal_db_factory.db(index_range.0 as u64))
-            .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
+            .with_bundle_prestate(self.committed_state.bundle.clone())
             .with_bundle_update()
             .build();
 
         let dummy = State::builder()
             .with_database_ref(temporal_db_factory.db(index_range.0 as u64))
-            .with_bundle_prestate(self.ctx.committed_state.bundle.clone())
+            .with_bundle_prestate(self.committed_state.bundle.clone())
             .with_bundle_update()
             .build();
 
@@ -127,7 +116,7 @@ where
 
         // The full bundle we expect to compute after execution
         // [committed bundle + access list changes]
-        let mut state_root_bundle = self.ctx.committed_state.bundle.clone();
+        let mut state_root_bundle = self.committed_state.bundle.clone();
         access_list
             .extend_bundle(&mut state_root_bundle, &state_provider_database)
             .map_err(BalExecutorError::other)?;
@@ -141,39 +130,33 @@ where
             let _ = state_root_sender.send(result);
         });
 
-        let evm = OpEvmFactory::default().create_evm(database, self.ctx.evm_env.clone());
+        let evm = OpEvmFactory::default().create_evm(database, self.evm_env.clone());
 
         let mut executor = OpBlockExecutor::new(
             evm,
-            self.ctx.execution_context.clone(),
-            self.ctx.chain_spec.clone(),
+            self.execution_context.clone(),
+            self.chain_spec.clone(),
             R::default(),
         );
 
-        executor.gas_used = self.ctx.committed_state.gas_used;
-        executor.receipts = self.ctx.committed_state.receipts_iter().cloned().collect();
+        executor.gas_used = self.committed_state.gas_used;
+        executor.receipts = self.committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
-            self.ctx.execution_context.clone(),
+            self.execution_context.clone(),
             parent,
             executor,
-            self.ctx
-                .committed_state
-                .transactions_iter()
-                .cloned()
-                .collect(),
-            self.ctx.chain_spec.clone(),
+            self.committed_state.transactions_iter().cloned().collect(),
+            self.chain_spec.clone(),
             temporal_db_factory,
             state_root_receiver,
-            self.ctx.evm_env.clone(),
+            self.evm_env.clone(),
             index_range,
         );
 
         // 4. Compute the block using BAL in parallel
-        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) = validator.execute_block(
-            state_provider.clone(),
-            self.ctx.executor_transactions.clone(),
-        )?;
+        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) =
+            validator.execute_block(state_provider.clone(), self.executor_transactions.clone())?;
 
         let computed_access_list = access_list_receiver
             .recv()

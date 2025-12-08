@@ -19,7 +19,7 @@ use tracing::{error, info, trace};
 
 use crate::{
     executor::CommittedState,
-    validator::{FlashblocksBlockValidator, FlashblocksValidatorCtx, decode_transactions},
+    validator::{FlashblocksBlockValidator, decode_transactions},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
@@ -267,7 +267,7 @@ where
 
     let executor_transactions = decode_transactions(&flashblock.diff().transactions, start_index)?;
 
-    let validation_ctx = FlashblocksValidatorCtx {
+    let block_validator = FlashblocksBlockValidator {
         chain_spec: chain_spec.clone(),
         evm_config: evm_config.clone(),
         execution_context: execution_context.clone(),
@@ -275,8 +275,6 @@ where
         committed_state,
         evm_env: evm_env.clone(),
     };
-
-    let block_validator = FlashblocksBlockValidator::new(validation_ctx);
 
     let payload = if flashblock.diff().access_list_data.is_some() {
         block_validator.validate(
