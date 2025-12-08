@@ -1,6 +1,6 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
-    database::bal_builder_db::{AsyncBalBuilderDb, BalDbIndex},
+    database::bal_builder_db::{AccessIndex, AsyncBalBuilderDb},
     executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
     payload_txns::BestPayloadTxns,
     traits::{
@@ -353,9 +353,9 @@ where
         committed_state.transactions.len() + 1
     };
 
-    let index = Box::new(BalDbIndex::new(min_index as u16));
+    let index = AccessIndex::new(min_index as u16);
 
-    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state, index.current());
+    let bal_builder_db = AsyncBalBuilderDb::new(&mut state, dummy_state, index.clone());
 
     let visited_transactions = committed_state
         .transaction_hashes_iter()
@@ -481,7 +481,7 @@ fn block_builder<'a, Ctx, DB, R, N, Tx>(
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
-    index: Box<BalDbIndex>,
+    index: AccessIndex,
 ) -> Result<
     BalBlockBuilder<'a, R, N, OpEvm<AsyncBalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
@@ -509,7 +509,7 @@ where
     )
     .with_gas_used(committed_state.gas_used)
     .with_receipts(committed_state.receipts_iter().cloned().collect())
-    .with_state_hook(Some(index.clone()));
+    .with_state_hook(Some(Box::new(index.clone())));
 
     let builder = BalBlockBuilder::new(
         execution_context,
@@ -518,7 +518,7 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
-        index,
+        index.clone(),
     );
 
     Ok(builder)

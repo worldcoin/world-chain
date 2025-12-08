@@ -26,7 +26,7 @@ use revm::{
 
 use crate::{
     access_list::BlockAccessIndex,
-    database::bal_builder_db::{AsyncBalBuilderDb, BalDbIndex},
+    database::bal_builder_db::{AccessIndex, AsyncBalBuilderDb},
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
@@ -52,7 +52,7 @@ use std::{
 };
 
 /// Errors that occur during block validation (hash/root comparisons).
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ValidationError {
     #[error("State root mismatch: expected {expected:?}, got {got:?}")]
     StateRootMismatch {
@@ -265,7 +265,7 @@ pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
         N,
     >,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
-    pub db_index: Box<BalDbIndex>,
+    pub indexes: (u16, AccessIndex),
 }
 
 impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
@@ -297,7 +297,7 @@ where
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
-        index: Box<BalDbIndex>,
+        index: AccessIndex,
     ) -> Self {
         Self {
             inner: BasicBlockBuilder {
@@ -308,7 +308,7 @@ where
                 transactions,
             },
             access_list_sender: tx,
-            db_index: index,
+            indexes: (index.load_value(), index),
         }
     }
 }
@@ -409,7 +409,9 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db.finish()?.build(self.db_index.finish());
+        let access_list = db
+            .finish()?
+            .build((self.indexes.0, self.indexes.1.load_value()));
 
         self.access_list_sender
             .send(access_list)

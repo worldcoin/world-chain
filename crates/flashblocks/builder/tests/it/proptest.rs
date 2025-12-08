@@ -5,6 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_builder::{
+    database::bal_builder_db::AccessIndex,
     executor::{BalExecutorError, CommittedState},
     validator::{
         FlashblockBlockValidator, FlashblocksBlockValidator, FlashblocksValidatorCtx,
@@ -16,7 +17,7 @@ use proptest::prelude::*;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use reth_provider::StateProvider;
-use revm::database::BundleState;
+use revm::{bytecode::bitvec::store::BitStore, database::BundleState};
 
 use crate::fixtures::{
     BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, arb_execution_payload,
@@ -29,14 +30,24 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    let start_index = diff
+    let index = if diff
         .access_list_data
         .as_ref()
         .unwrap()
         .access_list
-        .min_tx_index;
+        .min_tx_index
+        == 0
+    {
+        1
+    } else {
+        diff.access_list_data
+            .as_ref()
+            .unwrap()
+            .access_list
+            .min_tx_index
+    };
 
-    let executor_transactions = decode_transactions(&diff.transactions, start_index as u16)?;
+    let executor_transactions = decode_transactions(&diff.transactions, index as u16)?;
 
     let validation_ctx = FlashblocksValidatorCtx {
         chain_spec: CHAIN_SPEC.clone(),
@@ -75,20 +86,27 @@ fn unwrap_committed_state(
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+
     use super::*;
     use std::path::PathBuf;
 
-    fn debug_output<T: std::fmt::Debug>(value: &T) {
+    #[allow(dead_code)]
+    fn debug_output<T: Serialize>(value: &T) {
         let dir: PathBuf = env!("CARGO_MANIFEST_DIR").into();
         let file_path = dir.join("tests/proptest-regressions/debug_output.txt");
-        std::fs::write(file_path, format!("{:#?}", value)).expect("Unable to write debug output");
+        std::fs::write(
+            file_path,
+            serde_json::to_string_pretty(value).expect("Serialization failed"),
+        )
+        .expect("Unable to write debug output");
     }
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(1))]
 
         #[test]
-        fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(4, 2) })) {
+        fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(5, 1) })) {
 
             for (diff, committed_state) in payloads.into_iter(){
                 let committed = unwrap_committed_state(committed_state);
@@ -96,7 +114,13 @@ mod tests {
 
                 if let Err(e) = &payload {
                     if let Some(bal_err) = e.downcast_ref::<BalExecutorError>() {
-                        debug_output(bal_err);
+                        if let BalExecutorError::Validation(e) = bal_err {
+                            // if let Validation::AccessListHashMismatch {
+
+                            // } = e;
+
+                            debug_output(e);
+                        }
                     }
                 }
 
@@ -113,7 +137,9 @@ mod tests {
 
             if let Err(e) = &payload {
                 if let Some(bal_err) = e.downcast_ref::<BalExecutorError>() {
-                    debug_output(bal_err);
+                    if let BalExecutorError::Validation(e) = bal_err {
+                        debug_output(e);
+                    }
                 }
             }
 

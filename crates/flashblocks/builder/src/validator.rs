@@ -50,7 +50,7 @@ use tracing::trace;
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     database::{
-        bal_builder_db::{AsyncBalBuilderDb, BalBuilderDb, BalDbIndex},
+        bal_builder_db::{AccessIndex, AsyncBalBuilderDb, BalBuilderDb},
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
@@ -75,7 +75,7 @@ impl<DB: DatabaseRef + Clone + Send + Sync + 'static> StateFactory<DB> {
         }
     }
     /// Creates a new State instance with bundle updates enabled.
-    pub fn create_state_at(&self, index: Arc<AtomicU16>) -> State<WrapDatabaseRef<TemporalDb<DB>>> {
+    pub fn create_state_at(&self, index: AccessIndex) -> State<WrapDatabaseRef<TemporalDb<DB>>> {
         State::builder()
             .with_database_ref(self.temporal_db_factory.db(index))
             .with_bundle_update()
@@ -85,7 +85,7 @@ impl<DB: DatabaseRef + Clone + Send + Sync + 'static> StateFactory<DB> {
     /// Creates both a primary and dummy state for AsyncBalBuilderDb.
     pub fn create_state_pair_at(
         &self,
-        index: Arc<AtomicU16>,
+        index: AccessIndex,
     ) -> (
         State<WrapDatabaseRef<TemporalDb<DB>>>,
         State<WrapDatabaseRef<TemporalDb<DB>>>,
@@ -98,7 +98,7 @@ impl<DB: DatabaseRef + Clone + Send + Sync + 'static> StateFactory<DB> {
 
     pub fn async_bal_db_at(
         &self,
-        index: Arc<AtomicU16>,
+        index: AccessIndex,
     ) -> AsyncBalBuilderDb<&mut State<WrapDatabaseRef<TemporalDb<DB>>>> {
         let (state, state_dummy) = self.create_state_pair_at(index.clone());
         AsyncBalBuilderDb::new(Box::leak(state.into()), state_dummy, index)
@@ -229,14 +229,14 @@ where
             self.ctx.committed_state.bundle.clone(),
         );
 
-        let index = Box::new(BalDbIndex::new(index_range.0 as u16));
-
         let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
         let state_factory = StateFactory::new(temporal_db_factory);
 
-        let (mut state, state_dummy) = state_factory.create_state_pair_at(index.current());
+        let index = AccessIndex::new(index_range.0);
 
-        let database = AsyncBalBuilderDb::new(&mut state, state_dummy, index.current());
+        let (mut state, state_dummy) = state_factory.create_state_pair_at(index.clone());
+
+        let database = AsyncBalBuilderDb::new(&mut state, state_dummy, index.clone());
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
@@ -267,8 +267,7 @@ where
             R::default(),
         )
         .with_receipts(self.ctx.committed_state.receipts_iter().cloned().collect())
-        .with_gas_used(self.ctx.committed_state.gas_used)
-        .with_state_hook(Some(index.clone()));
+        .with_gas_used(self.ctx.committed_state.gas_used);
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
             self.ctx.execution_context.clone(),
@@ -284,7 +283,6 @@ where
             state_root_receiver,
             self.ctx.evm_env.clone(),
             index_range,
-            index,
         );
 
         // 4. Execute the block using BAL in parallel
@@ -381,7 +379,6 @@ pub struct BalBlockValidator<'a, DB: DatabaseRef + 'static, R: OpReceiptBuilder,
     pub state_factory: StateFactory<DB>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
-    pub index: Box<BalDbIndex>,
 }
 
 impl<'a, DB, R, E> BalBlockValidator<'a, DB, R, E>
@@ -409,7 +406,6 @@ where
         >,
         evm_env: EvmEnv<OpSpecId>,
         index_range: (u16, u16),
-        index: Box<BalDbIndex>,
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
@@ -427,7 +423,6 @@ where
                 state_factory,
                 evm_env,
                 index_range,
-                index,
             },
             rx,
         )
@@ -595,7 +590,6 @@ where
         // Apply pre-execution changes first if needed (for first flashblock).
         // This runs system transactions like L1Block deposit before user transactions.
         if self.inner.executor.inner.receipts.is_empty() {
-            self.index.set(0);
             self.apply_pre_execution_changes()?;
         }
 
@@ -651,7 +645,12 @@ where
                 .collect::<Vec<_>>(),
         );
 
-        self.index.set(self.inner.transactions.len() as u16 + 1);
+        self.inner
+            .executor
+            .inner
+            .evm_mut()
+            .db_mut()
+            .set_index(self.index_range.1);
 
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
@@ -701,10 +700,13 @@ where
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
-    let db_index = BalDbIndex::new(index);
-    db_index.set(index);
-
-    let database = state_factory.async_bal_db_at(db_index.current());
+    let access_index = AccessIndex::new(index);
+    eprintln!(
+        "Executing transaction in parallel {:?} at access index {:?}",
+        tx.tx_hash(),
+        access_index
+    );
+    let database = state_factory.async_bal_db_at(access_index);
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
 
     let mut executor = BalBlockExecutor::new(
@@ -746,7 +748,7 @@ where
         gas_used: result.gas_used,
         fees,
         access_list,
-        index: db_index.current().load_value(),
+        index,
     })
 }
 

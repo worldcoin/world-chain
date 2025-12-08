@@ -1,198 +1,352 @@
-Validation(
-    AccessListHashMismatch {
-        expected: 0x643afdeb22c36e32978d5636bd273d1d05d67051c3d80660764c0713c7bcab9f,
-        got: 0x57e29e9188263041002640cc848d02ffe1c70fe658907e7dbe057474aecba2ba,
-        expected_access_list: FlashblockAccessList {
-            changes: [
-                AccountChanges {
-                    address: 0x0000000000000000000000000000000000000000,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 2,
-                            post_balance: 21000,
-                        },
-                    ],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x000f3df6d732807ef1319fb7b8bb8522d0beac02,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x1a642f0e3c3af545e7acbd38b07251b3990914f1,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 2,
-                            post_balance: 999999999999999245591,
-                        },
-                    ],
-                    nonce_changes: [
-                        NonceChange {
-                            block_access_index: 2,
-                            new_nonce: 1,
-                        },
-                    ],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x4200000000000000000000000000000000000015,
-                    storage_changes: [],
-                    storage_reads: [
-                        0x0000000000000000000000000000000000000000000000000000000000000001,
-                        0x0000000000000000000000000000000000000000000000000000000000000003,
-                        0x0000000000000000000000000000000000000000000000000000000000000005,
-                        0x0000000000000000000000000000000000000000000000000000000000000007,
-                        0x0000000000000000000000000000000000000000000000000000000000000008,
-                    ],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x4200000000000000000000000000000000000019,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x420000000000000000000000000000000000001a,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x420000000000000000000000000000000000001b,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 2,
-                            post_balance: 1000000000000000733409,
-                        },
-                    ],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-            ],
-            min_tx_index: 0,
-            max_tx_index: 4,
+{
+  "AccessListHashMismatch": {
+    "expected": "0xedb782d6a181d1687beee49484bd591ee3408e42d3c6ffd1762ac0c655655edb",
+    "got": "0x5e322342ad8cef7dbf35e111894b8e97027e8280c0f561611564244d4cf79db8",
+    "expected_access_list": {
+      "changes": [
+        {
+          "address": "0x0000000000000000000000000000000000000000",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0xa410"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "postBalance": "0x25946"
+            }
+          ],
+          "nonceChanges": [],
+          "codeChanges": []
         },
-        constructed_access_list: FlashblockAccessList {
-            changes: [
-                AccountChanges {
-                    address: 0x0000000000000000000000000000000000000000,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 0,
-                            post_balance: 21000,
-                        },
-                    ],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x000f3df6d732807ef1319fb7b8bb8522d0beac02,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x1a642f0e3c3af545e7acbd38b07251b3990914f1,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 0,
-                            post_balance: 999999999999999245591,
-                        },
-                    ],
-                    nonce_changes: [
-                        NonceChange {
-                            block_access_index: 0,
-                            new_nonce: 1,
-                        },
-                    ],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x4200000000000000000000000000000000000015,
-                    storage_changes: [],
-                    storage_reads: [
-                        0x0000000000000000000000000000000000000000000000000000000000000001,
-                        0x0000000000000000000000000000000000000000000000000000000000000003,
-                        0x0000000000000000000000000000000000000000000000000000000000000005,
-                        0x0000000000000000000000000000000000000000000000000000000000000007,
-                        0x0000000000000000000000000000000000000000000000000000000000000008,
-                    ],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x4200000000000000000000000000000000000019,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x420000000000000000000000000000000000001a,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x420000000000000000000000000000000000001b,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-                AccountChanges {
-                    address: 0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c,
-                    storage_changes: [],
-                    storage_reads: [],
-                    balance_changes: [
-                        BalanceChange {
-                            block_access_index: 0,
-                            post_balance: 1000000000000000733409,
-                        },
-                    ],
-                    nonce_changes: [],
-                    code_changes: [],
-                },
-            ],
-            min_tx_index: 0,
-            max_tx_index: 4,
+        {
+          "address": "0x000f3df6d732807ef1319fb7b8bb8522d0beac02",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
         },
+        {
+          "address": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x3635c9adc5de98ac62"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "postBalance": "0x3635c9adc5de96f72c"
+            }
+          ],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "newNonce": "0x1"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x2"
+            }
+          ],
+          "codeChanges": []
+        },
+        {
+          "address": "0x2e63c703ce06b779ed2e7250825c5a810be4ccc6",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x1"
+            }
+          ],
+          "codeChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newCode": "0x6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056"
+            }
+          ]
+        },
+        {
+          "address": "0x3325a78425f17a7e487eb5666b2bfd93abb06c70",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x3635c9adc5de9135f6"
+            }
+          ],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "newNonce": "0x1"
+            }
+          ],
+          "codeChanges": []
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000015",
+          "storageChanges": [],
+          "storageReads": [
+            "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "0x0000000000000000000000000000000000000000000000000000000000000003",
+            "0x0000000000000000000000000000000000000000000000000000000000000005",
+            "0x0000000000000000000000000000000000000000000000000000000000000007",
+            "0x0000000000000000000000000000000000000000000000000000000000000008"
+          ],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000019",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x420000000000000000000000000000000000001a",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x420000000000000000000000000000000000001b",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x3635c9adc5deb57998"
+            }
+          ],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0xca05000000000000000000000000000000000002",
+          "storageChanges": [
+            {
+              "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+              "changes": [
+                {
+                  "blockAccessIndex": "0x3",
+                  "newValue": "0x0000000000000000000000002e63c703ce06b779ed2e7250825c5a810be4ccc6"
+                }
+              ]
+            }
+          ],
+          "storageReads": [
+            "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+          ],
+          "balanceChanges": [],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x2"
+            }
+          ],
+          "codeChanges": []
+        }
+      ],
+      "min_tx_index": 0,
+      "max_tx_index": 4
     },
-)
+    "constructed_access_list": {
+      "changes": [
+        {
+          "address": "0x0000000000000000000000000000000000000000",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x1",
+              "postBalance": "0x5208"
+            },
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x5208"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "postBalance": "0x25946"
+            }
+          ],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x000f3df6d732807ef1319fb7b8bb8522d0beac02",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x3635c9adc5de98ac62"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "postBalance": "0x3635c9adc5de96f72c"
+            }
+          ],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x2",
+              "newNonce": "0x1"
+            },
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x2"
+            }
+          ],
+          "codeChanges": []
+        },
+        {
+          "address": "0x2e63c703ce06b779ed2e7250825c5a810be4ccc6",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x1"
+            }
+          ],
+          "codeChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newCode": "0x6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056"
+            }
+          ]
+        },
+        {
+          "address": "0x3325a78425f17a7e487eb5666b2bfd93abb06c70",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x1",
+              "postBalance": "0x3635c9adc5de9135f6"
+            }
+          ],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x1",
+              "newNonce": "0x1"
+            }
+          ],
+          "codeChanges": []
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000015",
+          "storageChanges": [],
+          "storageReads": [
+            "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "0x0000000000000000000000000000000000000000000000000000000000000003",
+            "0x0000000000000000000000000000000000000000000000000000000000000005",
+            "0x0000000000000000000000000000000000000000000000000000000000000007",
+            "0x0000000000000000000000000000000000000000000000000000000000000008"
+          ],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000019",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x420000000000000000000000000000000000001a",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x420000000000000000000000000000000000001b",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+          "storageChanges": [],
+          "storageReads": [],
+          "balanceChanges": [
+            {
+              "blockAccessIndex": "0x1",
+              "postBalance": "0x3635c9adc5deae7802"
+            },
+            {
+              "blockAccessIndex": "0x2",
+              "postBalance": "0x3635c9adc5dea70196"
+            }
+          ],
+          "nonceChanges": [],
+          "codeChanges": []
+        },
+        {
+          "address": "0xca05000000000000000000000000000000000002",
+          "storageChanges": [
+            {
+              "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+              "changes": [
+                {
+                  "blockAccessIndex": "0x3",
+                  "newValue": "0x0000000000000000000000002e63c703ce06b779ed2e7250825c5a810be4ccc6"
+                }
+              ]
+            }
+          ],
+          "storageReads": [
+            "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+          ],
+          "balanceChanges": [],
+          "nonceChanges": [
+            {
+              "blockAccessIndex": "0x3",
+              "newNonce": "0x2"
+            }
+          ],
+          "codeChanges": []
+        }
+      ],
+      "min_tx_index": 0,
+      "max_tx_index": 4
+    }
+  }
+}

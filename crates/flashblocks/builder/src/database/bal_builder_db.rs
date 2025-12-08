@@ -11,7 +11,7 @@ use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::Sender;
 use reth_evm::{
     OnStateHook,
-    block::{BlockExecutionError, StateChangeSource, StateDB},
+    block::{BlockExecutionError, StateChangePostBlockSource, StateChangeSource, StateDB},
 };
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
@@ -20,9 +20,65 @@ use revm::{
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
-use tracing::{error, info};
+use tracing::error;
 
 use crate::access_list::FlashblockAccessListConstruction;
+
+/// A thread safe shared counter tracking the current transaction index in the block.
+#[derive(Debug, Clone, Default)]
+pub struct AccessIndex(Arc<AtomicU16>, bool);
+
+impl AccessIndex {
+    /// Creates a new AccessIndex starting at zero.
+    pub fn new(index: u16) -> Self {
+        Self(Arc::new(AtomicU16::new(index)), false)
+    }
+
+    /// Returns a clone of the internal Arc<AtomicU16>.
+    pub fn inner(&self) -> Arc<AtomicU16> {
+        self.0.clone()
+    }
+
+    /// Sets the current index value.
+    pub fn set(&self, index: u16) {
+        self.0.store(index, Ordering::SeqCst);
+    }
+
+    /// Returns the current index value.
+    pub fn load_value(&self) -> u16 {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    /// Increments the index and returns the new value.
+    pub fn increment(&self) -> u16 {
+        self.0.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn lock(&mut self) {
+        self.1 = true;
+    }
+
+    fn locked(&self) -> bool {
+        self.1
+    }
+}
+
+impl OnStateHook for AccessIndex {
+    fn on_state(&mut self, source: StateChangeSource, _state: &revm::state::EvmState) {
+        if matches!(source, StateChangeSource::PreBlock(_)) {
+            self.set(0);
+        }
+
+        if matches!(source, StateChangeSource::Transaction(_)) {
+            self.increment();
+        }
+
+        if matches!(source, StateChangeSource::PostBlock(_)) && !self.locked() {
+            self.increment();
+            self.lock();
+        }
+    }
+}
 
 /// Messages sent to the background builder for recording reads/writes.
 enum BalBuilderMsg {
@@ -45,7 +101,7 @@ pub struct BalBuilderDb<DB> {
     /// The Flashblock Access List under construction.
     access_list: FlashblockAccessListConstruction,
     /// The current index being built
-    index: Arc<AtomicU16>,
+    index: AccessIndex,
 }
 
 impl<DB> BalBuilderDb<DB>
@@ -53,7 +109,7 @@ where
     DB: DatabaseCommit + Database + DatabaseRef<Error = <DB as Database>::Error> + Send + Sync,
 {
     /// Creates a new BalBuilderDb around the given database with a shared index.
-    pub fn new(db: DB, index: Arc<AtomicU16>) -> Self {
+    pub fn new(db: DB, index: AccessIndex) -> Self {
         Self {
             db,
             access_list: Default::default(),
@@ -88,7 +144,7 @@ where
         &mut self,
         changes: HashMap<Address, revm::state::Account>,
     ) -> Result<(), <DB as Database>::Error> {
-        let index = self.index.load(Ordering::SeqCst);
+        let index = self.index.load_value();
         eprintln!("index in try_commit {index}");
 
         // When we commit new account state we must first load the previous account state. Only
@@ -277,7 +333,7 @@ impl<DB> AsyncBalBuilderDb<DB> {
     ///
     /// The `shared_index` is shared with a [`BalIndexHook`] which updates the
     /// index based on EVM execution phase (pre-execution, transaction, post-execution).
-    pub fn new<DDB>(db: DB, dummy_db: DDB, index: Arc<AtomicU16>) -> Self
+    pub fn new<DDB>(db: DB, dummy_db: DDB, index: AccessIndex) -> Self
     where
         DDB: Database
             + DatabaseRef<Error = <DDB as Database>::Error>
@@ -305,7 +361,7 @@ impl<DB> AsyncBalBuilderDb<DB> {
                         bal_builder.merge_access_list(access_list);
                     }
                     BalBuilderMsg::SetIndex(index) => {
-                        // bal_builder.set_index(index);
+                        bal_builder.index.set(index);
                     }
                 }
             }
@@ -400,68 +456,16 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
         self.db.set_state_clear_flag(has_state_clear);
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct BalDbIndex {
-    current: Arc<AtomicU16>,
-    min_tx_index: Arc<AtomicU16>,
-}
-
-impl BalDbIndex {
-    pub fn new(min_tx_index: u16) -> Self {
-        Self {
-            current: Arc::new(AtomicU16::new(min_tx_index)),
-            min_tx_index: Arc::new(AtomicU16::new(min_tx_index)),
-        }
-    }
-}
-impl BalDbIndex {
-    pub fn current(&self) -> Arc<AtomicU16> {
-        self.current.clone()
-    }
-
-    pub fn set(&self, index: u16) {
-        self.current
-            .store(index, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn get(&self) -> u16 {
-        self.current.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    pub fn finish(self) -> (u16, u16) {
-        (
-            self.min_tx_index.load_value(),
-            self.current.load_value() + 1,
-        )
-    }
-}
-
-impl OnStateHook for BalDbIndex {
-    fn on_state(
-        &mut self,
-        source: reth_evm::block::StateChangeSource,
-        _state: &revm::state::EvmState,
-    ) {
-        self.set(self.current().load_value() + 1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{U256, address, b256, uint};
-    use lazy_static::lazy_static;
     use revm::{
         Database, DatabaseCommit,
         database::InMemoryDB,
         primitives::{HashMap, KECCAK_EMPTY},
         state::{Account, AccountInfo, AccountStatus, Bytecode, EvmStorageSlot},
     };
-
-    lazy_static! {
-        static ref BAL_INDEX: Arc<AtomicU16> = Arc::new(AtomicU16::new(0));
-    }
 
     // Helper function to create a simple account
     fn create_account(balance: U256, nonce: u64, code: Option<Bytecode>) -> AccountInfo {
@@ -475,7 +479,7 @@ mod tests {
 
     fn bal_db_with_mirror(db: InMemoryDB) -> AsyncBalBuilderDb<InMemoryDB> {
         let read_db = db.clone();
-        AsyncBalBuilderDb::new(db, read_db, BAL_INDEX.clone())
+        AsyncBalBuilderDb::new(db, read_db, AccessIndex::default())
     }
 
     #[test]

@@ -1,34 +1,34 @@
-use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, TxEip1559};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpEvmFactory};
-use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, hex, keccak256};
+use alloy_primitives::{hex, keccak256, Address, Bytes, FixedBytes, TxKind, B256, U256};
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{SolCall, sol};
+use alloy_sol_types::{sol, SolCall};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
-    database::bal_builder_db::{AsyncBalBuilderDb, BalDbIndex},
+    database::bal_builder_db::{AccessIndex, AsyncBalBuilderDb},
     executor::{BalBlockBuilder, BalBlockExecutor, CommittedState},
 };
 use flashblocks_primitives::{
-    access_list::{FlashblockAccessListData, access_list_hash},
+    access_list::{access_list_hash, FlashblockAccessListData},
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
 use proptest::prelude::*;
-use reth::revm::{State, database::StateProviderDatabase};
+use reth::revm::{database::StateProviderDatabase, State};
 use reth_evm::{
-    ConfigureEvm, EvmEnv, EvmFactory,
     block::CommitChanges,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     op_revm::OpSpecId,
+    ConfigureEvm, EvmEnv, EvmFactory,
 };
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
+use reth_primitives::{transaction::SignedTransaction, Account, Recovered, SealedHeader};
 use reth_provider::{BytecodeReader, StateProvider};
 use reth_trie_common::HashedPostState;
 use revm::{
@@ -37,7 +37,7 @@ use revm::{
 };
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, atomic::AtomicU16},
+    sync::{atomic::AtomicU16, Arc},
 };
 
 lazy_static::lazy_static! {
@@ -495,10 +495,13 @@ pub fn build_chained_payloads(
     let chunk_size = (sequence.len() / max_flashblocks).max(1);
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
 
-    for (index, sequence) in sequences.into_iter().enumerate() {
-        let db_index = Box::new(BalDbIndex::new(
-            prev_outcome.as_ref().map_or(0, |p| p.0.block.transaction_count() as u16 + 1),
-        ));
+    for (_, sequence) in sequences.into_iter().enumerate() {
+        let index = prev_outcome
+            .as_ref()
+            .map_or(0, |o| o.0.block.transaction_count() + 1);
+
+        let db_index = AccessIndex::new(index as u16);
+
         // Convert chaos ops to signed transactions
         let transactions = transaction_op_sequence_to_transactions(sequence);
 
@@ -582,7 +585,7 @@ pub fn create_test_state_provider() -> Arc<TestStateProvider> {
 pub fn execute_serial(
     prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
     transactions: &[Recovered<OpTransactionSigned>],
-    index: Box<BalDbIndex>,
+    index: AccessIndex,
 ) -> Result<
     (
         BlockBuilderOutcome<OpPrimitives>,
@@ -612,7 +615,7 @@ pub fn execute_serial(
         .with_bundle_update()
         .build();
 
-    let database = AsyncBalBuilderDb::new(&mut state, dummy_state, index.current());
+    let database = AsyncBalBuilderDb::new(&mut state, dummy_state, index.clone());
 
     let evm = OpEvmFactory::default().create_evm(database, EVM_ENV.clone());
 
@@ -630,7 +633,7 @@ pub fn execute_serial(
     .with_receipts(prev_outcome.as_ref().map_or(Default::default(), |o| {
         o.0.execution_result.receipts.clone()
     }))
-    .with_state_hook(Some(index.clone()));
+    .with_state_hook(Some(Box::new(index.clone())));
 
     let (access_list_tx, access_list_rx) = bounded(1);
 
@@ -645,7 +648,7 @@ pub fn execute_serial(
         prev_transaction.unwrap_or(Vec::default()),
         CHAIN_SPEC.clone(),
         access_list_tx,
-        index,
+        index.clone(),
     );
 
     if prev_outcome.is_none() {
