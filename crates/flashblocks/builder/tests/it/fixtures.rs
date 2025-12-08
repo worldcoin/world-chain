@@ -494,13 +494,11 @@ pub fn build_chained_payloads(
     // Ensure chunk_size is at least 1 to avoid panic
     let chunk_size = (sequence.len() / max_flashblocks).max(1);
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
+    let mut start_index = 0;
 
     for (_, sequence) in sequences.into_iter().enumerate() {
-        let index = prev_outcome
-            .as_ref()
-            .map_or(0, |o| o.0.block.transaction_count() + 1);
 
-        let db_index = AccessIndex::new(index as u16);
+        let db_index = AccessIndex::new(start_index as u16);
 
         // Convert chaos ops to signed transactions
         let transactions = transaction_op_sequence_to_transactions(sequence);
@@ -508,6 +506,8 @@ pub fn build_chained_payloads(
         // Execute with the previous outcome for chaining
         let (outcome, bal_data, bundle_state) =
             execute_serial(prev_outcome.clone(), &transactions, db_index.clone())?;
+
+        start_index = db_index.load_value();
 
         // Encode transactions for the payload
         let encoded_txs = transaction_sequence_to_encoded(sequence);

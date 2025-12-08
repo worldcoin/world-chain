@@ -69,8 +69,8 @@ impl OnStateHook for AccessIndex {
             self.set(0);
         }
 
-        if matches!(source, StateChangeSource::Transaction(_)) {
-            self.increment();
+        if let StateChangeSource::Transaction(index) = source {
+            self.set(index as u16 + 1);
         }
 
         if matches!(source, StateChangeSource::PostBlock(_)) && !self.locked() {

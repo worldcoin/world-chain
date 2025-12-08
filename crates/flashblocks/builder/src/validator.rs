@@ -267,7 +267,8 @@ where
             R::default(),
         )
         .with_receipts(self.ctx.committed_state.receipts_iter().cloned().collect())
-        .with_gas_used(self.ctx.committed_state.gas_used);
+        .with_gas_used(self.ctx.committed_state.gas_used)
+        .with_state_hook(Some(Box::new(index.clone())));
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
             self.ctx.execution_context.clone(),
@@ -644,13 +645,6 @@ where
                 .map(|(_, tx)| tx)
                 .collect::<Vec<_>>(),
         );
-
-        self.inner
-            .executor
-            .inner
-            .evm_mut()
-            .db_mut()
-            .set_index(self.index_range.1);
 
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
