@@ -56,26 +56,6 @@ use crate::{
     executor::{BalExecutorError, CommittedState},
 };
 
-pub trait FlashblockBlockValidator {
-    /// Validates a block in parallel using BAL.
-    fn validate_flashblock_parallel(
-        &self,
-        state_provider: Arc<dyn StateProvider>,
-        diff: ExecutionPayloadFlashblockDeltaV1,
-        parent: &SealedHeader<Header>,
-        payload_id: PayloadId,
-    ) -> Result<OpBuiltPayload, BalExecutorError>;
-
-    /// Validates a block sequentially without using BAL.
-    fn validate_flashblock_sequential(
-        &self,
-        state_provider: Arc<dyn StateProvider>,
-        diff: ExecutionPayloadFlashblockDeltaV1,
-        parent: &SealedHeader<Header>,
-        payload_id: PayloadId,
-    ) -> Result<OpBuiltPayload, BalExecutorError>;
-}
-
 /// Context required for flashblocks block validation.
 pub struct FlashblocksValidatorCtx<R: OpReceiptBuilder + Default> {
     pub chain_spec: Arc<OpChainSpec>,
@@ -96,7 +76,7 @@ impl<R: OpReceiptBuilder + Default> FlashblocksBlockValidator<R> {
     }
 }
 
-impl<R> FlashblockBlockValidator for FlashblocksBlockValidator<R>
+impl<R> FlashblocksBlockValidator<R>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>
         + Default
@@ -104,7 +84,7 @@ where
         + Send
         + Sync,
 {
-    fn validate_flashblock_parallel(
+    pub fn validate(
         &self,
         state_provider: Arc<dyn StateProvider>,
         diff: ExecutionPayloadFlashblockDeltaV1,
@@ -293,16 +273,6 @@ where
         );
 
         Ok(payload)
-    }
-
-    fn validate_flashblock_sequential(
-        &self,
-        _state_provider: Arc<dyn StateProvider>,
-        _diff: ExecutionPayloadFlashblockDeltaV1,
-        _parent: &SealedHeader<Header>,
-        _payload_id: PayloadId,
-    ) -> Result<OpBuiltPayload, BalExecutorError> {
-        todo!()
     }
 }
 
