@@ -12,8 +12,6 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 
-use crate::database::bal_builder_db::AccessIndex;
-
 use super::temporal_map::TemporalMap;
 
 /// Represents the temporal state of accounts, storage, and contracts
@@ -144,7 +142,7 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
     }
 
     /// Creates a new [`TemporalDb`] at a given [`BlockAccessIndex`]
-    pub fn db(&self, index: AccessIndex) -> TemporalDb<DB> {
+    pub fn db(&self, index: u16) -> TemporalDb<DB> {
         TemporalDb::new(self.db.clone(), self.cache.clone(), index)
     }
 }
@@ -156,17 +154,17 @@ pub struct TemporalDb<DB: DatabaseRef> {
     /// Layer 1: The underlying database
     pub db: DB,
     /// The index being referenced inside the [`TemporalState`]
-    pub index: AccessIndex,
+    pub index: u16,
 }
 
 impl<DB: DatabaseRef> TemporalDb<DB> {
-    pub fn set_index(&mut self, index: u64) {
-        self.index.set(index as u16);
+    pub fn set_index(&mut self, index: u16) {
+        self.index = index
     }
 }
 
 impl<DB: DatabaseRef> TemporalDb<DB> {
-    pub fn new(db: DB, cache: TemporalState, index: AccessIndex) -> Self {
+    pub fn new(db: DB, cache: TemporalState, index: u16) -> Self {
         TemporalDb { db, cache, index }
     }
 }
@@ -175,11 +173,10 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
     type Error = DB::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let index = self.index.load_value();
         match self
             .cache
             .account_info
-            .get_with_index(index as u64, &address)
+            .get_with_index(self.index as u64, &address)
         {
             Some((_, acc)) => Ok(Some(acc.clone())),
             None => self.db.basic_ref(address),
@@ -187,8 +184,7 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let index: u16 = self.index.load_value();
-        match self.cache.contracts.get(index as u64, &code_hash) {
+        match self.cache.contracts.get(self.index as u64, &code_hash) {
             Some(entry) => Ok(entry.clone()),
             None => self.db.code_by_hash_ref(code_hash),
         }
@@ -199,10 +195,8 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
         address: Address,
         index: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
-        let db_index = self.index.load_value() as u64;
-
         match self.cache.account_storage.get(&address) {
-            Some(storage) => match storage.get(db_index, &index) {
+            Some(storage) => match storage.get(self.index as u64, &index) {
                 Some(val) => Ok(*val),
                 None => self.db.storage_ref(address, index),
             },
@@ -267,22 +261,22 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // Check storage at different indices
-        let temporal_db_1 = factory.db(AccessIndex::new(1));
+        let temporal_db_1 = factory.db(1);
         assert_eq!(temporal_db_1.storage_ref(addr, slot.into()).unwrap(), 0);
 
-        let temporal_db_2 = factory.db(AccessIndex::new(2));
+        let temporal_db_2 = factory.db(2);
         assert_eq!(
             temporal_db_2.storage_ref(addr, slot.into()).unwrap(),
             value1
         );
 
-        let temporal_db_3 = factory.db(AccessIndex::new(3));
+        let temporal_db_3 = factory.db(3);
         assert_eq!(
             temporal_db_3.storage_ref(addr, slot.into()).unwrap(),
             value1
         );
 
-        let temporal_db_4 = factory.db(AccessIndex::new(4));
+        let temporal_db_4 = factory.db(4);
         assert_eq!(
             temporal_db_4.storage_ref(addr, slot.into()).unwrap(),
             value2
@@ -324,17 +318,17 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // Before the change
-        let temporal_db_1 = factory.db(AccessIndex::default());
+        let temporal_db_1 = factory.db(0);
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.balance, initial_balance);
 
         // At the change index
-        let temporal_db_2 = factory.db(AccessIndex::default());
+        let temporal_db_2 = factory.db(0);
         let account_2 = temporal_db_2.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_2.balance, initial_balance);
 
         // After the change
-        let temporal_db_3 = factory.db(AccessIndex::new(3));
+        let temporal_db_3 = factory.db(3);
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.balance, new_balance);
     }
@@ -372,12 +366,12 @@ mod tests {
         db.insert_account_info(addr, initial_account);
         let factory = TemporalDbFactory::new(db, access_list);
         // Before the change
-        let temporal_db_1 = factory.db(AccessIndex::new(1));
+        let temporal_db_1 = factory.db(1);
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.nonce, initial_nonce);
 
         // After the change
-        let temporal_db_3 = factory.db(AccessIndex::new(3));
+        let temporal_db_3 = factory.db(3);
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.nonce, new_nonce);
     }
@@ -418,12 +412,12 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // Before the change
-        let temporal_db_1 = factory.db(AccessIndex::new(1));
+        let temporal_db_1 = factory.db(1);
         let account_1 = temporal_db_1.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_1.code_hash, KECCAK_EMPTY);
 
         // After the change
-        let temporal_db_3 = factory.db(AccessIndex::new(3));
+        let temporal_db_3 = factory.db(3);
         let account_3 = temporal_db_3.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account_3.code_hash, new_code_hash);
         assert!(account_3.code.is_some());
@@ -475,7 +469,7 @@ mod tests {
         let factory = TemporalDbFactory::new(db, access_list);
 
         // At index 4, all changes should be visible
-        let temporal_db = factory.db(AccessIndex::new(4));
+        let temporal_db = factory.db(4);
         dbg!(&temporal_db);
         let account = temporal_db.basic_ref(addr).unwrap().unwrap();
         assert_eq!(account.balance, U256::from(500));
@@ -501,7 +495,7 @@ mod tests {
         db.insert_account_info(other_addr, account_info.clone());
 
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(AccessIndex::new(0));
+        let temporal_db = factory.db(0);
 
         // Address not in cache should fall back to DB
         let result = temporal_db.basic_ref(other_addr).unwrap().unwrap();
@@ -522,7 +516,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         let _ = db.insert_account_storage(addr, slot.into(), value);
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(AccessIndex::new(0));
+        let temporal_db = factory.db(0);
         let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
         assert_eq!(result, value);
     }
@@ -535,7 +529,7 @@ mod tests {
         let mut db = CacheDB::new(EmptyDB::new());
         db.insert_contract(&mut account);
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
-        let temporal_db = factory.db(AccessIndex::new(0));
+        let temporal_db = factory.db(0);
         let result = temporal_db.code_by_hash_ref(account.code_hash).unwrap();
         // Check that the bytecode starts with the expected code
         assert!(result.bytecode().starts_with(&code));
@@ -552,7 +546,7 @@ mod tests {
 
         let factory = TemporalDbFactory::new(db, FlashblockAccessList::default());
 
-        let temporal_db = factory.db(AccessIndex::new(0));
+        let temporal_db = factory.db(0);
         // No storage in cache for this address, should fall back to DB
         let result = temporal_db.storage_ref(addr, slot.into()).unwrap();
         assert_eq!(result, value);
@@ -1534,7 +1528,7 @@ mod tests {
         let database = TemporalDbFactory::new(database, access_list.access_list.clone());
 
         // Test at block access index 3 - should see values < 3 (i.e., indices 0, 1, 2)
-        let db = database.db(AccessIndex::new(3));
+        let db = database.db(3);
         let state = State::builder().with_database_ref(&db).build();
 
         // Address with multiple balance changes - should have balance at index 2 (last one < 3)
@@ -1596,7 +1590,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 0 - should see NO values (< 0 means nothing)
-        let db_0 = database.db(AccessIndex::new(0));
+        let db_0 = database.db(0);
         let state_0 = State::builder().with_database_ref(&db_0).build();
 
         // Even index 0 addresses should not be visible
@@ -1608,7 +1602,7 @@ mod tests {
         assert!(state_0.basic_ref(account).unwrap().is_none());
 
         // Test at block access index 1 - should see only index 0
-        let db_1 = database.db(AccessIndex::new(1));
+        let db_1 = database.db(1);
         let state_1 = State::builder().with_database_ref(&db_1).build();
 
         let account = address!("0x000f3df6d732807ef1319fb7b8bb8522d0beac02");
@@ -1618,7 +1612,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 10 (0xa) - should see values < 10 (i.e., indices 0-9)
-        let db_10 = database.db(AccessIndex::new(10));
+        let db_10 = database.db(10);
         let state_10 = State::builder().with_database_ref(&db_10).build();
 
         // Address with change at index 9 - should be visible
@@ -1666,7 +1660,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test at block access index 11 (0xb) - should see values < 11 (i.e., indices 0-10)
-        let db_11 = database.db(AccessIndex::new(11));
+        let db_11 = database.db(11);
         let state_11 = State::builder().with_database_ref(&db_11).build();
 
         // Sender at index 10 - should be visible
@@ -1714,7 +1708,7 @@ mod tests {
         assert_eq!(account_info.code_hash, KECCAK_EMPTY);
 
         // Test querying at an index between changes - db(5) sees indices 0-4
-        let db_5 = database.db(AccessIndex::new(5));
+        let db_5 = database.db(5);
         let state_5 = State::builder().with_database_ref(&db_5).build();
 
         // Should see index 4 state (last < 5)
@@ -1756,7 +1750,7 @@ mod tests {
         assert!(state_5.basic_ref(account).unwrap().is_none());
 
         // Test at block access index 12 - should see all values (indices 0-11)
-        let db_12 = database.db(AccessIndex::new(12));
+        let db_12 = database.db(12);
         let state_12 = State::builder().with_database_ref(&db_12).build();
 
         // Should see the last transaction at index 11
@@ -1849,7 +1843,7 @@ mod tests {
 
         // Query at index 1 - the deploying transaction itself
         // It should NOT see its own code yet (code is available AFTER index 1, i.e., at storage_index = 2)
-        let temporal_db_1 = factory.db(AccessIndex::new(1));
+        let temporal_db_1 = factory.db(1);
         let account_at_1 = temporal_db_1.basic_ref(deployed_addr).unwrap();
         assert!(
             account_at_1.is_none(),
@@ -1857,7 +1851,7 @@ mod tests {
         );
 
         // Query at index 2 - the next transaction should see the deployed code
-        let temporal_db_2 = factory.db(AccessIndex::new(2));
+        let temporal_db_2 = factory.db(2);
         let account_at_2 = temporal_db_2.basic_ref(deployed_addr).unwrap();
         assert!(
             account_at_2.is_some(),

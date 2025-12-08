@@ -26,56 +26,54 @@ use crate::access_list::FlashblockAccessListConstruction;
 
 /// A thread safe shared counter tracking the current transaction index in the block.
 #[derive(Debug, Clone, Default)]
-pub struct AccessIndex(Arc<AtomicU16>, bool);
+pub struct AccessIndex {
+    /// The current index of the transaction being processed.
+    ///
+    /// If we're currently building the 0th tx, this will be 0.
+    /// If we're reading the 0th
+    index: Arc<AtomicU16>,
+    is_init: bool,
+}
 
 impl AccessIndex {
     /// Creates a new AccessIndex starting at zero.
     pub fn new(index: u16) -> Self {
-        Self(Arc::new(AtomicU16::new(index)), false)
+        Self {
+            index: Arc::new(AtomicU16::new(index)),
+            is_init: true,
+        }
     }
 
     /// Returns a clone of the internal Arc<AtomicU16>.
-    pub fn inner(&self) -> Arc<AtomicU16> {
-        self.0.clone()
+    pub fn index(&self) -> u16 {
+        self.index.load(Ordering::SeqCst)
     }
 
     /// Sets the current index value.
     pub fn set(&self, index: u16) {
-        self.0.store(index, Ordering::SeqCst);
-    }
-
-    /// Returns the current index value.
-    pub fn load_value(&self) -> u16 {
-        self.0.load(Ordering::SeqCst)
+        self.index.store(index, Ordering::SeqCst);
     }
 
     /// Increments the index and returns the new value.
     pub fn increment(&self) -> u16 {
-        self.0.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
-    fn lock(&mut self) {
-        self.1 = true;
-    }
-
-    fn locked(&self) -> bool {
-        self.1
+        self.index.fetch_add(1, Ordering::SeqCst) + 1
     }
 }
 
 impl OnStateHook for AccessIndex {
     fn on_state(&mut self, source: StateChangeSource, _state: &revm::state::EvmState) {
-        if matches!(source, StateChangeSource::PreBlock(_)) {
-            self.set(0);
-        }
-
-        if let StateChangeSource::Transaction(index) = source {
-            self.set(index as u16 + 1);
-        }
-
-        if matches!(source, StateChangeSource::PostBlock(_)) && !self.locked() {
-            self.increment();
-            self.lock();
+        match source {
+            StateChangeSource::Transaction(_) => {
+                if self.is_init {
+                    self.is_init = false
+                } else {
+                    self.increment();
+                }
+            }
+            StateChangeSource::PreBlock(_) => {
+                self.set(0);
+            }
+            _ => {}
         }
     }
 }
@@ -144,7 +142,7 @@ where
         &mut self,
         changes: HashMap<Address, revm::state::Account>,
     ) -> Result<(), <DB as Database>::Error> {
-        let index = self.index.load_value();
+        let index = self.index.index();
         eprintln!("index in try_commit {index}");
 
         // When we commit new account state we must first load the previous account state. Only

@@ -308,7 +308,7 @@ where
                 transactions,
             },
             access_list_sender: tx,
-            indexes: (index.load_value(), index),
+            indexes: (index.index(), index),
         }
     }
 }
@@ -409,9 +409,7 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db
-            .finish()?
-            .build((self.indexes.0, self.indexes.1.load_value()));
+        let access_list = db.finish()?.build((self.indexes.0, self.indexes.1.index()));
 
         self.access_list_sender
             .send(access_list)

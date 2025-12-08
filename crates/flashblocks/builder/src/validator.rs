@@ -75,7 +75,7 @@ impl<DB: DatabaseRef + Clone + Send + Sync + 'static> StateFactory<DB> {
         }
     }
     /// Creates a new State instance with bundle updates enabled.
-    pub fn create_state_at(&self, index: AccessIndex) -> State<WrapDatabaseRef<TemporalDb<DB>>> {
+    pub fn create_state_at(&self, index: u16) -> State<WrapDatabaseRef<TemporalDb<DB>>> {
         State::builder()
             .with_database_ref(self.temporal_db_factory.db(index))
             .with_bundle_update()
@@ -85,22 +85,19 @@ impl<DB: DatabaseRef + Clone + Send + Sync + 'static> StateFactory<DB> {
     /// Creates both a primary and dummy state for AsyncBalBuilderDb.
     pub fn create_state_pair_at(
         &self,
-        index: AccessIndex,
+        index: u16,
     ) -> (
         State<WrapDatabaseRef<TemporalDb<DB>>>,
         State<WrapDatabaseRef<TemporalDb<DB>>>,
     ) {
-        (
-            self.create_state_at(index.clone()),
-            self.create_state_at(index),
-        )
+        (self.create_state_at(index), self.create_state_at(index))
     }
 
     pub fn async_bal_db_at(
         &self,
         index: AccessIndex,
     ) -> AsyncBalBuilderDb<&mut State<WrapDatabaseRef<TemporalDb<DB>>>> {
-        let (state, state_dummy) = self.create_state_pair_at(index.clone());
+        let (state, state_dummy) = self.create_state_pair_at(index.index());
         AsyncBalBuilderDb::new(Box::leak(state.into()), state_dummy, index)
     }
 }
@@ -234,7 +231,7 @@ where
 
         let index = AccessIndex::new(index_range.0);
 
-        let (mut state, state_dummy) = state_factory.create_state_pair_at(index.clone());
+        let (mut state, state_dummy) = state_factory.create_state_pair_at(index_range.0);
 
         let database = AsyncBalBuilderDb::new(&mut state, state_dummy, index.clone());
 
