@@ -370,8 +370,8 @@ pub fn arb_sender() -> impl Strategy<Value = PrivateKeySigner> {
 /// Strategy for generating a single chaos operation
 pub fn arb_transaction_op() -> impl Strategy<Value = TxOp> {
     prop_oneof![
-        1 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: Address::random(), value: U256::from(1_000_000_000u64) }),
-        3 => (arb_sender(), 2u64..15u64, prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]).prop_map(|(from, n, target)| TxOp::Fib {
+        3 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: Address::random(), value: U256::from(1_000_000_000u64) }),
+        2 => (arb_sender(), 2u64..15u64, prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]).prop_map(|(from, n, target)| TxOp::Fib {
             from,
             n,
             target
