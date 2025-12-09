@@ -22,7 +22,7 @@ use reth::revm::{State, database::StateProviderDatabase};
 use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     block::CommitChanges,
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutorTx},
     op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
@@ -605,7 +605,7 @@ pub fn execute_serial(
     }
 
     for tx in transactions {
-        builder.execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
+        builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
     let outcome = builder.finish(state_provider)?;

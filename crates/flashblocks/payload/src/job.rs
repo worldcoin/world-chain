@@ -328,6 +328,7 @@ where
                 best_payload,
             };
 
+            info!(target: "flashblocks::payload_builder", id = %args.config.payload_id(), committed = ?committed_payload.payload().is_none(), "starting payload build task");
             let result = builder.try_build_with_precommit(args, committed_payload.payload());
             let _ = tx.send(result);
         }));

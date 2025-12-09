@@ -117,7 +117,7 @@ where
         let start_index = if transactions.is_empty() {
             0
         } else {
-            transactions.len() + 1
+            transactions.len() + 1 // TODO:
         };
 
         executor.evm_mut().db_mut().set_index(start_index as u16);
@@ -295,7 +295,7 @@ impl BlockAccessIndexCounter {
     }
 
     pub fn finish(self) -> (u16, u16) {
-        (self.start_index, self.current_index)
+        (self.start_index, self.current_index + 1)
     }
 }
 

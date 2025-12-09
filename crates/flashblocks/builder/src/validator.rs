@@ -39,26 +39,24 @@ use revm::{
     DatabaseRef,
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::{
-        BundleAccount, BundleState,
+        BundleAccount, BundleState, TransitionState,
         states::{bundle_state::BundleRetention, reverts::Reverts},
     },
 };
-use revm_database_interface::WrapDatabaseRef;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     database::{
         bal_builder_db::{BalBuilderDb, BalValidationState},
         bundle_db::BundleDb,
-        temporal_db::{TemporalDb, TemporalDbFactory},
+        temporal_db::TemporalDbFactory,
     },
     executor::{BalExecutorError, BalValidationError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
-pub type ValidatorDb<'a, DB> =
-    BalBuilderDb<&'a mut BalValidationState<WrapDatabaseRef<TemporalDb<DB>>>>;
+pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut BalValidationState<DB>>;
 
 pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
     pub chain_spec: Arc<OpChainSpec>,
@@ -89,8 +87,6 @@ where
             access_list_hash,
         } = diff.access_list_data.unwrap();
 
-        let index_range = (access_list.min_tx_index, access_list.max_tx_index);
-
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());
 
@@ -101,9 +97,8 @@ where
 
         let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
 
-        let mut state = BalValidationState::new(WrapDatabaseRef(
-            temporal_db_factory.db(index_range.0 as u64),
-        ));
+        let mut state =
+            BalValidationState::new(temporal_db_factory.db(access_list.min_tx_index as u64));
 
         let database = BalBuilderDb::new(&mut state);
 
@@ -147,7 +142,7 @@ where
             temporal_db_factory,
             state_root_receiver,
             self.evm_env.clone(),
-            index_range,
+            (access_list.min_tx_index, access_list.max_tx_index),
         );
 
         // 4. Compute the block using BAL in parallel
@@ -282,6 +277,7 @@ pub struct ParalleExecutionResult {
     pub access_list: FlashblockAccessListConstruction,
     /// Transaction index within the block
     pub index: BlockAccessIndex,
+    pub transitions: Option<TransitionState>,
 }
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
@@ -426,7 +422,7 @@ where
             state_root,
             trie_updates,
             hashed_state,
-            bundle,
+            bundle: _,
         } = self
             .state_root_receiver
             .recv()
@@ -449,12 +445,13 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(&bundle),
+            Cow::Borrowed(db.bundle_state()),
             &state,
             state_root,
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
+
         let access_list = db
             .finish()
             .map_err(InternalBlockExecutionError::other)?
@@ -533,7 +530,7 @@ where
             .into_par_iter()
             .map(|(index, tx)| {
                 let tx = tx.clone();
-                eprintln!(
+                info!(
                     "Executing tx at index {} hash {}",
                     index,
                     tx.clone().into_encoded().encoded_bytes().clone()
@@ -555,7 +552,7 @@ where
         let merged_result = merge_transaction_results(results, gas_used);
 
         // If we have no pre-loaded receipts then we need to apply pre-execution changes
-        if self.inner.executor.receipts.is_empty() {
+        if self.index_range.0 == 0 {
             self.prepare_database(0)?;
             self.apply_pre_execution_changes()?;
         }
@@ -564,6 +561,14 @@ where
 
         // merge the aggregated access list into the AsyncBalBuilderDb
         database.merge_access_list(merged_result.access_list);
+
+        if let Some(t) = merged_result.transitions {
+            database
+                .db_mut()
+                .transition_state
+                .get_or_insert_with(|| TransitionState::default())
+                .add_transitions(t.transitions);
+        }
 
         // append the accumulated receipts and gas used into the executor
         self.inner
@@ -597,7 +602,11 @@ fn merge_transaction_results(
         },
         |mut acc, mut res| {
             acc.gas_used += res.gas_used;
-
+            if let Some(transitions) = res.transitions.take() {
+                acc.transitions
+                    .get_or_insert_with(|| TransitionState::default())
+                    .add_transitions(transitions.transitions);
+            }
             if let Some(mut receipt) = res.receipts.pop() {
                 receipt.as_receipt_mut().cumulative_gas_used = acc.gas_used;
                 acc.receipts.push(receipt);
@@ -630,7 +639,7 @@ where
 {
     let temporal_db = db_factory.db(index as u64);
 
-    let state = BalValidationState::new(WrapDatabaseRef(temporal_db));
+    let state = BalValidationState::new(temporal_db);
 
     let mut database = BalBuilderDb::new(state);
     database.set_index(index);
@@ -659,8 +668,8 @@ where
             .expect("fee is always valid; execution succeeded")
     };
 
-    let (db, _evm_env) = evm.finish();
-
+    let (mut db, _evm_env) = evm.finish();
+    let transitions = db.db_mut().transition_state.take();
     let access_list = db.finish().map_err(BalExecutorError::other)?;
 
     Ok(ParalleExecutionResult {
@@ -669,6 +678,7 @@ where
         fees,
         access_list,
         index,
+        transitions,
     })
 }
 

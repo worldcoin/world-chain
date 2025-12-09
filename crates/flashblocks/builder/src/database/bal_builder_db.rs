@@ -1,17 +1,24 @@
-use std::thread::JoinHandle;
+use std::{
+    collections::{btree_map, hash_map},
+    thread::JoinHandle,
+};
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
 use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
-    database::{BundleState, states::bundle_state::BundleRetention},
+    database::{
+        BundleState, CacheState, TransitionState,
+        states::{CacheAccount, bundle_state::BundleRetention},
+    },
     primitives::{HashMap, StorageKey, StorageValue},
     state::{Account, AccountInfo, Bytecode},
 };
+use revm_database_interface::WrapDatabaseRef;
 use tracing::error;
 
-use crate::access_list::FlashblockAccessListConstruction;
+use crate::{access_list::FlashblockAccessListConstruction, database::temporal_db::TemporalDb};
 
 /// Messages sent to the background builder for recording reads/writes.
 enum BalBuilderMsg {
@@ -370,27 +377,68 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
 }
 
 #[derive(Debug)]
-pub struct BalValidationState<DB> {
+pub struct BalValidationState<DB: DatabaseRef> {
+    /// Cached state contains both changed from evm execution and cached/loaded account/storages
+    /// from database
+    ///
+    /// This allows us to have only one layer of cache where we can fetch data.
+    ///
+    /// Additionally, we can introduce some preloading of data from database.
+    pub cache: CacheState,
     /// Optional database that we use to fetch data from
     ///
     /// If database is not present, we will return not existing account and storage.
     ///
     /// **Note**: It is marked as Send so database can be shared between threads.
-    pub database: DB,
-    bundle_state: BundleState,
+    pub database: WrapDatabaseRef<TemporalDb<DB>>,
+    /// Block state, it aggregates transactions transitions into one state
+    ///
+    /// Build reverts and state that gets applied to the state.
+    pub transition_state: Option<TransitionState>,
+    /// After block is finishes we merge those changes inside bundle
+    ///
+    /// Bundle is used to update database and create changesets.
+    ///
+    /// Bundle state can be set on initialization if we want to use preloaded bundle.
+    pub bundle_state: BundleState,
 }
 
-impl<DB> BalValidationState<DB> {
+impl<DB: DatabaseRef> BalValidationState<DB> {
     /// Creates a new BalValidationState with the given database.
-    pub fn new(database: DB) -> Self {
+    pub fn new(database: TemporalDb<DB>) -> Self {
+        /// TODO: Pre-warm
         Self {
-            database,
+            cache: CacheState::default(),
+            database: WrapDatabaseRef(database),
+            transition_state: None,
             bundle_state: BundleState::default(),
+        }
+    }
+
+    /// Get a mutable reference to the [`CacheAccount`] for the given address.
+    ///
+    /// If the account is not found in the cache, it will be loaded from the
+    /// database and inserted into the cache.
+    pub fn load_cache_account(&mut self, address: Address) -> Result<&mut CacheAccount, DB::Error> {
+        match self.cache.accounts.entry(address) {
+            hash_map::Entry::Vacant(entry) => {
+                // If not found in bundle, load it from database
+                let info = self.database.basic(address)?;
+                let account = match info {
+                    None => CacheAccount::new_loaded_not_existing(),
+                    Some(acc) if acc.is_empty() => {
+                        CacheAccount::new_loaded_empty_eip161(HashMap::default())
+                    }
+                    Some(acc) => CacheAccount::new_loaded(acc, HashMap::default()),
+                };
+                Ok(entry.insert(account))
+            }
+            hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
         }
     }
 }
 
-impl<DB: Database> StateDB for BalValidationState<DB> {
+impl<DB: DatabaseRef> StateDB for BalValidationState<DB> {
     fn bundle_state(&self) -> &BundleState {
         &self.bundle_state
     }
@@ -399,24 +447,39 @@ impl<DB: Database> StateDB for BalValidationState<DB> {
         &mut self.bundle_state
     }
 
-    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
-        // np op
-    }
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {}
 
-    fn merge_transitions(&mut self, _retention: BundleRetention) {
-        // no op
+    /// Take all transitions and merge them inside bundle state.
+    ///
+    /// This action will create final post state and all reverts so that
+    /// we at any time revert state of bundle to the state before transition
+    /// is applied.
+    fn merge_transitions(&mut self, retention: BundleRetention) {
+        if let Some(transition_state) = self.transition_state.as_mut().map(TransitionState::take) {
+            self.bundle_state
+                .apply_transitions_and_create_reverts(transition_state, retention);
+        }
     }
 }
 
-impl<DB: Database> Database for BalValidationState<DB> {
+impl<DB: DatabaseRef> Database for BalValidationState<DB> {
     type Error = DB::Error;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.database.basic(address)
+        self.load_cache_account(address).map(|a| a.account_info())
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.database.code_by_hash(code_hash)
+        let res = match self.cache.contracts.entry(code_hash) {
+            hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
+            hash_map::Entry::Vacant(entry) => {
+                // If not found in bundle ask database
+                let code = self.database.code_by_hash(code_hash)?;
+                entry.insert(code.clone());
+                Ok(code)
+            }
+        };
+        res
     }
 
     fn storage(
@@ -424,7 +487,36 @@ impl<DB: Database> Database for BalValidationState<DB> {
         address: Address,
         index: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
-        self.database.storage(address, index)
+        // If account is not found in cache, it will be loaded from database.
+        let account = if let Some(account) = self.cache.accounts.get_mut(&address) {
+            account
+        } else {
+            self.load_cache_account(address)?;
+            // safe to unwrap as account is loaded a line above.
+            self.cache.accounts.get_mut(&address).unwrap()
+        };
+
+        // Account will always be some, but if it is not, StorageValue::ZERO will be returned.
+        let is_storage_known = account.status.is_storage_known();
+        Ok(account
+            .account
+            .as_mut()
+            .map(|account| match account.storage.entry(index) {
+                hash_map::Entry::Occupied(entry) => Ok(*entry.get()),
+                hash_map::Entry::Vacant(entry) => {
+                    // If account was destroyed or account is newly built
+                    // we return zero and don't ask database.
+                    let value = if is_storage_known {
+                        StorageValue::ZERO
+                    } else {
+                        self.database.storage(address, index)?
+                    };
+                    entry.insert(value);
+                    Ok(value)
+                }
+            })
+            .transpose()?
+            .unwrap_or_default())
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
@@ -432,34 +524,19 @@ impl<DB: Database> Database for BalValidationState<DB> {
     }
 }
 
-impl<DB: Database> DatabaseCommit for BalValidationState<DB> {
-    fn commit(&mut self, _changes: HashMap<Address, Account>) {}
-    fn commit_iter(&mut self, _changes: impl IntoIterator<Item = (Address, Account)>) {
-        // np op
-    }
-}
-
-impl<DB: DatabaseRef> DatabaseRef for BalValidationState<DB> {
-    type Error = DB::Error;
-
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.database.basic_ref(address)
+impl<DB: DatabaseRef> DatabaseCommit for BalValidationState<DB> {
+    fn commit(&mut self, changes: HashMap<Address, Account>) {
+        let transitions = self.cache.apply_evm_state(changes);
+        if let Some(s) = self.transition_state.as_mut() {
+            s.add_transitions(transitions)
+        }
     }
 
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.database.code_by_hash_ref(code_hash)
-    }
-
-    fn storage_ref(
-        &self,
-        address: Address,
-        index: StorageKey,
-    ) -> Result<StorageValue, Self::Error> {
-        self.database.storage_ref(address, index)
-    }
-
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.database.block_hash_ref(number)
+    fn commit_iter(&mut self, changes: impl IntoIterator<Item = (Address, Account)>) {
+        let transitions = self.cache.apply_evm_state(changes);
+        if let Some(s) = self.transition_state.as_mut() {
+            s.add_transitions(transitions)
+        }
     }
 }
 

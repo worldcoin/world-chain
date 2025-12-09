@@ -92,7 +92,7 @@ mod tests {
         #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn prop_validate_many(payloads in (1usize..100, 1usize..10).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
+        fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
             for (diff, committed_state) in payloads.into_iter(){
                 let committed = unwrap_committed_state(committed_state);
                 let payload = validate(&diff, committed);
