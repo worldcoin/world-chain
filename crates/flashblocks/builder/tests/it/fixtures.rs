@@ -15,7 +15,6 @@ use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
-use revm::DatabaseRef;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
 use proptest::prelude::*;
@@ -33,6 +32,7 @@ use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTrans
 use reth_provider::{BytecodeReader, StateProvider};
 use reth_trie_common::HashedPostState;
 use revm::{
+    DatabaseRef,
     database::{BundleState, InMemoryDB},
     state::AccountInfo,
 };
