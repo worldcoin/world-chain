@@ -74,7 +74,7 @@ mod tests {
     use std::io::Write;
 
     use crate::{
-        fixtures::{arb_execution_payload, arb_execution_payload_sequence},
+        fixtures::{arb_execution_payload, arb_execution_payload_sequence, build_chained_payloads, TxOp, ChaosTarget, ALICE, BOB},
         proptest::{unwrap_committed_state, validate},
     };
 
@@ -85,6 +85,74 @@ mod tests {
 
         let mut writer = std::io::BufWriter::new(file);
         writeln!(writer, "{:#?}", value).expect("Unable to write debug output");
+    }
+
+    /// Test that validates transactions across multiple flashblocks where the same sender
+    /// makes transactions in both flashblocks. This tests that nonce handling is correct
+    /// when the validator processes the second flashblock with committed state from the first.
+    #[test]
+    fn test_multi_flashblock_same_sender() {
+        // Create a sequence where ALICE sends transactions in both flashblocks
+        // Flashblock 1: ALICE sends tx with nonce 0, 1, 2, 3
+        // Flashblock 2: ALICE sends tx with nonce 4, 5, 6, 7
+        let sequence: Vec<(TxOp, u64)> = vec![
+            // Flashblock 1 transactions
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 0),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 1),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 2),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 3),
+            // Flashblock 2 transactions
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 4),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 5),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 6),
+            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 7),
+        ];
+
+        // Build payloads with 2 flashblocks (4 txs each)
+        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+
+        assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
+
+        // Validate each flashblock
+        for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
+            let committed = unwrap_committed_state(committed_state);
+            eprintln!("Validating flashblock {} with {} committed txs", i, committed.transactions.len());
+
+            let result = validate(&diff, committed);
+            if let Err(err) = &result {
+                debug_output(&err.downcast_ref::<BalExecutorError>());
+                panic!("Flashblock {} validation failed: {:?}", i, err);
+            }
+        }
+    }
+
+    /// Test with fib calls that involve storage operations across multiple flashblocks
+    #[test]
+    fn test_multi_flashblock_with_storage() {
+        // Create a sequence where we call fib() which modifies storage
+        let sequence: Vec<(TxOp, u64)> = vec![
+            // Flashblock 1: ALICE calls fib(5) on the proxy, BOB does a transfer
+            (TxOp::Fib { from: ALICE.clone(), n: 5, target: ChaosTarget::Proxy }, 0),
+            (TxOp::Transfer { from: BOB.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 0),
+            // Flashblock 2: ALICE calls fib(8) on the proxy (should see storage from fib(5))
+            (TxOp::Fib { from: ALICE.clone(), n: 8, target: ChaosTarget::Proxy }, 1),
+            (TxOp::Transfer { from: BOB.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 1),
+        ];
+
+        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+
+        assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
+
+        for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
+            let committed = unwrap_committed_state(committed_state);
+            eprintln!("Validating flashblock {} with {} committed txs", i, committed.transactions.len());
+
+            let result = validate(&diff, committed);
+            if let Err(err) = &result {
+                debug_output(&err.downcast_ref::<BalExecutorError>());
+                panic!("Flashblock {} validation failed: {:?}", i, err);
+            }
+        }
     }
 
     proptest! {

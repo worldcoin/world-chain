@@ -14,7 +14,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::{revm::database::StateProviderDatabase, rpc::api::eth::bundle};
+use reth::revm::database::StateProviderDatabase;
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
@@ -82,7 +82,6 @@ where
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
-
         let FlashblockAccessListData {
             access_list,
             access_list_hash,
@@ -95,17 +94,13 @@ where
         // This ensures the BundleDb provides the pre-state for the current flashblock.
         let base_bundle = self.committed_state.bundle.clone();
 
-        let bundle_db = BundleDb::new(
-            state_provider_database.clone(),
-            base_bundle.clone(),
-        );
+        let bundle_db = BundleDb::new(state_provider_database.clone(), base_bundle.clone());
 
         let start_index = self.committed_state.transactions.len() as u16;
 
         let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
 
-        let mut state =
-            BalValidationState::new(temporal_db_factory.db(start_index as u64));
+        let mut state = BalValidationState::new(temporal_db_factory.db(start_index as u64));
 
         let mut database = BalBuilderDb::new(&mut state);
         database.set_index(start_index);
@@ -119,7 +114,7 @@ where
         access_list
             .extend_bundle(&mut state_root_bundle, &state_provider_database)
             .map_err(BalExecutorError::other)?;
-        
+
         let state_bundle_clone = state_root_bundle.clone();
 
         let state_provider_clone = state_provider.clone();
@@ -153,7 +148,7 @@ where
             state_root_receiver,
             self.evm_env.clone(),
             (access_list.min_tx_index, access_list.max_tx_index),
-            state_bundle_clone.clone()
+            state_bundle_clone.clone(),
         );
 
         // 4. Compute the block using BAL in parallel
@@ -306,7 +301,7 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuild
     pub temporal_db_factory: TemporalDbFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
-    pub bundle_state: BundleState
+    pub bundle_state: BundleState,
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -352,7 +347,7 @@ where
                 temporal_db_factory,
                 evm_env,
                 index_range,
-                bundle_state: bundle
+                bundle_state: bundle,
             },
             rx,
         )
@@ -435,7 +430,6 @@ where
             state_root,
             trie_updates,
             hashed_state,
-            bundle: bundle,
         } = self
             .state_root_receiver
             .recv()
@@ -598,7 +592,7 @@ where
                 .map(|(_, tx)| tx)
                 .collect::<Vec<_>>(),
         );
-        
+
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
 }
@@ -700,7 +694,6 @@ pub struct StateRootResult {
     pub state_root: B256,
     pub trie_updates: TrieUpdates,
     pub hashed_state: HashedPostState,
-    pub bundle: BundleState,
 }
 
 pub fn compute_state_root(
@@ -719,10 +712,6 @@ pub fn compute_state_root(
         state_root,
         trie_updates,
         hashed_state,
-        bundle: BundleState {
-            state: bundle_state.clone(),
-            ..Default::default()
-        },
     })
 }
 
