@@ -41,11 +41,7 @@ use revm::{
 use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 #[derive(thiserror::Error, Debug)]
-pub enum BalExecutorError {
-    #[error("Block execution error: {0}")]
-    BlockExecutionError(#[from] BlockExecutionError),
-    #[error("Missing executed block in built payload")]
-    MissingExecutedBlock,
+pub enum BalValidationError {
     #[error("Block execution error")]
     BalHashMismatch {
         expected: FixedBytes<32>,
@@ -63,6 +59,22 @@ pub enum BalExecutorError {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
     },
+}
+
+impl BalValidationError {
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BalExecutorError {
+    #[error("Block execution error: {0}")]
+    BlockExecutionError(#[from] BlockExecutionError),
+    #[error("Missing executed block in built payload")]
+    MissingExecutedBlock,
+    #[error(transparent)]
+    BalValidationError(#[from] Box<BalValidationError>),
     #[error("Inernal Error: {0}")]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }

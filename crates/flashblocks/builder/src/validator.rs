@@ -53,7 +53,7 @@ use crate::{
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    executor::{BalExecutorError, CommittedState},
+    executor::{BalExecutorError, BalValidationError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -172,12 +172,14 @@ where
                 "Access list hash mismatch"
             );
 
-            return Err(BalExecutorError::BalHashMismatch {
+            return Err(BalValidationError::BalHashMismatch {
                 expected: access_list_hash,
                 got: computed_access_list_hash,
                 expected_bal: access_list,
                 got_bal: computed_access_list,
-            });
+            }
+            .boxed()
+            .into());
         }
 
         if outcome.block.receipts_root != diff.receipts_root {
@@ -188,10 +190,12 @@ where
                 "Receipts root mismatch"
             );
 
-            return Err(BalExecutorError::ReceiptsRootMismatch {
+            return Err(BalValidationError::ReceiptsRootMismatch {
                 expected: diff.receipts_root,
                 got: outcome.block.receipts_root,
-            });
+            }
+            .boxed()
+            .into());
         }
 
         if outcome.block.state_root != diff.state_root {
@@ -202,10 +206,12 @@ where
                 "State root mismatch"
             );
 
-            return Err(BalExecutorError::StateRootMismatch {
+            return Err(BalValidationError::StateRootMismatch {
                 expected: diff.state_root,
                 got: outcome.block.state_root,
-            });
+            }
+            .boxed()
+            .into());
         }
 
         if outcome.block.hash() != diff.block_hash {
@@ -216,12 +222,14 @@ where
                 "Block hash mismatch"
             );
 
-            return Err(BalExecutorError::BalHashMismatch {
+            return Err(BalValidationError::BalHashMismatch {
                 expected: diff.block_hash,
                 got: outcome.block.hash(),
                 expected_bal: access_list,
                 got_bal: computed_access_list,
-            });
+            }
+            .boxed()
+            .into());
         }
 
         // 6. Seal the block

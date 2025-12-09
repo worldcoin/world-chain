@@ -15,6 +15,7 @@ use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
+use revm::DatabaseRef;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
 use proptest::prelude::*;
@@ -609,7 +610,7 @@ pub fn execute_serial(
 
     let outcome = builder.finish(state_provider)?;
 
-    let mut access_list = access_list_rx.recv()?;
+    let access_list = access_list_rx.recv()?;
 
     let hash = access_list_hash(&access_list);
 
@@ -795,12 +796,7 @@ impl StateProvider for TestStateProvider {
         account: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> reth_provider::ProviderResult<Option<alloy_primitives::StorageValue>> {
-        use revm::DatabaseRef;
-        Ok(self
-            .db
-            .storage_ref(account, storage_key.into())
-            .ok()
-            .map(|v| v))
+        Ok(self.db.storage_ref(account, storage_key.into()).ok())
     }
 }
 
@@ -809,7 +805,6 @@ impl reth_provider::AccountReader for TestStateProvider {
         &self,
         address: &Address,
     ) -> reth_provider::ProviderResult<Option<reth_primitives::Account>> {
-        use revm::DatabaseRef;
         Ok(self
             .db
             .basic_ref(*address)
