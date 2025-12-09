@@ -275,7 +275,7 @@ where
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .unwrap();
 
-    let transactions_offset = committed_state.transactions.len() as u16 + 1;
+    let transactions_offset = committed_state.transactions.len() as u16;
 
     let start = Instant::now();
     let payload = if flashblock.diff().access_list_data.is_some() {

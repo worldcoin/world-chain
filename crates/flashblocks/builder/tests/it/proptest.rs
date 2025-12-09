@@ -25,10 +25,9 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // min_tx_index is the start_index from BlockAccessIndexCounter, but actual
-    // transaction indices start at start_index + 1 because next_index() increments
-    // before returning.
-    let transactions_offset = committed_state.transactions.len() as u16 + 1;
+    // The transaction offset is the number of previously committed transactions.
+    // This matches the builder's start_index which is set to transactions.len().
+    let transactions_offset = committed_state.transactions.len() as u16;
 
     let executor_transactions =
         decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
