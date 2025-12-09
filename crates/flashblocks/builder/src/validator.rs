@@ -14,7 +14,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::revm::database::StateProviderDatabase;
+use reth::{revm::database::StateProviderDatabase, rpc::api::eth::bundle};
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
@@ -82,6 +82,7 @@ where
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
+
         let FlashblockAccessListData {
             access_list,
             access_list_hash,
@@ -90,27 +91,36 @@ where
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());
 
+        // The base bundle contains state changes from prior flashblocks only.
+        // This ensures the BundleDb provides the pre-state for the current flashblock.
+        let base_bundle = self.committed_state.bundle.clone();
+
         let bundle_db = BundleDb::new(
             state_provider_database.clone(),
-            self.committed_state.bundle.clone(),
+            base_bundle.clone(),
         );
+
+        let start_index = self.committed_state.transactions.len() as u16;
 
         let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
 
         let mut state =
-            BalValidationState::new(temporal_db_factory.db(access_list.min_tx_index as u64));
+            BalValidationState::new(temporal_db_factory.db(start_index as u64));
 
-        let database = BalBuilderDb::new(&mut state);
+        let mut database = BalBuilderDb::new(&mut state);
+        database.set_index(start_index);
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
 
-        // The full bundle we expect to compute after execution
-        // [committed bundle + access list changes]
-        let mut state_root_bundle = self.committed_state.bundle.clone();
+        // The cumulative bundle for state root computation contains all state changes
+        // from prior flashblocks plus the current access list.
+        let mut state_root_bundle = base_bundle;
         access_list
             .extend_bundle(&mut state_root_bundle, &state_provider_database)
             .map_err(BalExecutorError::other)?;
+        
+        let state_bundle_clone = state_root_bundle.clone();
 
         let state_provider_clone = state_provider.clone();
 
@@ -143,6 +153,7 @@ where
             state_root_receiver,
             self.evm_env.clone(),
             (access_list.min_tx_index, access_list.max_tx_index),
+            state_bundle_clone.clone()
         );
 
         // 4. Compute the block using BAL in parallel
@@ -238,7 +249,7 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            state.take_bundle(),
+            state_bundle_clone.clone(),
             vec![execution_result.receipts.clone()],
             block.number(),
             Vec::new(),
@@ -295,6 +306,7 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuild
     pub temporal_db_factory: TemporalDbFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
+    pub bundle_state: BundleState
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -322,6 +334,7 @@ where
         >,
         evm_env: EvmEnv<OpSpecId>,
         index_range: (u16, u16),
+        bundle: BundleState,
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
@@ -339,6 +352,7 @@ where
                 temporal_db_factory,
                 evm_env,
                 index_range,
+                bundle_state: bundle
             },
             rx,
         )
@@ -391,7 +405,6 @@ where
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
         self.prepare_database(self.index_range.1)?;
-
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
@@ -422,7 +435,7 @@ where
             state_root,
             trie_updates,
             hashed_state,
-            bundle: _,
+            bundle: bundle,
         } = self
             .state_root_receiver
             .recv()
@@ -445,7 +458,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(db.bundle_state()),
+            Cow::Borrowed(&self.bundle_state),
             &state,
             state_root,
         ))?;
@@ -585,7 +598,7 @@ where
                 .map(|(_, tx)| tx)
                 .collect::<Vec<_>>(),
         );
-
+        
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
 }

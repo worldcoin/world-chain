@@ -114,11 +114,7 @@ where
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
     ) -> Self {
-        let start_index = if transactions.is_empty() {
-            0
-        } else {
-            transactions.len() + 1 // TODO:
-        };
+        let start_index = transactions.len();
 
         executor.evm_mut().db_mut().set_index(start_index as u16);
 
@@ -170,9 +166,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let res = self.inner.apply_pre_execution_changes();
-        self.prepare_database()?;
-        res
+        self.inner.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -188,9 +182,11 @@ where
     }
 
     fn finish(
-        self,
+        mut self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        self.prepare_database()?;
+
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 

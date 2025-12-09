@@ -406,11 +406,11 @@ pub struct BalValidationState<DB: DatabaseRef> {
 impl<DB: DatabaseRef> BalValidationState<DB> {
     /// Creates a new BalValidationState with the given database.
     pub fn new(database: TemporalDb<DB>) -> Self {
-        /// TODO: Pre-warm
+        // TODO: Pre-warm
         Self {
             cache: CacheState::default(),
             database: WrapDatabaseRef(database),
-            transition_state: None,
+            transition_state: Some(TransitionState::default()),
             bundle_state: BundleState::default(),
         }
     }
@@ -433,7 +433,15 @@ impl<DB: DatabaseRef> BalValidationState<DB> {
                 };
                 Ok(entry.insert(account))
             }
-            hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            hash_map::Entry::Occupied(entry) => {
+                let account = entry.into_mut();
+                let info = self.database.basic(address)?;
+                if let Some(acc_info) = info {
+                    account.account.as_mut().map(|a| a.info = acc_info);
+                }
+
+                Ok(account)
+            }
         }
     }
 }
