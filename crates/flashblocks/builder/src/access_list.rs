@@ -54,11 +54,15 @@ impl FlashblockAccessListConstruction {
 
         changes.par_sort_unstable_by_key(|a| a.address);
 
-        FlashblockAccessList {
+        let mut access_list = FlashblockAccessList {
             changes,
             min_tx_index,
             max_tx_index,
-        }
+        };
+
+        access_list.dedup();
+
+        access_list
     }
 
     /// Maps a mutable reference to the [`AccountChangesConstruction`] corresponding to `address` at the given closure.

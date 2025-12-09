@@ -367,21 +367,11 @@ pub fn arb_sender() -> impl Strategy<Value = PrivateKeySigner> {
     ]
 }
 
-/// Strategy for selecting a chaos target (direct or proxy)
-pub fn arb_target() -> impl Strategy<Value = ChaosTarget> {
-    prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]
-}
-
-/// Strategy for generating fibonacci n values (keep small to avoid gas issues)
-pub fn arb_fib_n() -> impl Strategy<Value = u64> {
-    2u64..15u64
-}
-
 /// Strategy for generating a single chaos operation
 pub fn arb_transaction_op() -> impl Strategy<Value = TxOp> {
     prop_oneof![
-        // 1 => (arb_transfer_value()).prop_map(|v| TxOp::Transfer { from: ALICE.clone(), to: BOB.address(), value: v }),
-        3 => (arb_sender(), arb_fib_n(), arb_target()).prop_map(|(from, n, target)| TxOp::Fib {
+        1 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: Address::random(), value: U256::from(1_000_000_000u64) }),
+        3 => (arb_sender(), 2u64..15u64, prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]).prop_map(|(from, n, target)| TxOp::Fib {
             from,
             n,
             target
@@ -451,7 +441,7 @@ pub fn arb_execution_payload_sequence(
     )
 }
 
-/// Builds a sequence of chained payloads from multiple chaos sequences.
+/// Builds a sequence of chained payloads from multiple tx sequences.
 ///
 /// Each flashblock builds on the previous one's outcome, creating a realistic
 /// sequence of incremental flashblock payloads within a single block.
@@ -620,7 +610,6 @@ pub fn execute_serial(
     let outcome = builder.finish(state_provider)?;
 
     let mut access_list = access_list_rx.recv()?;
-    access_list.dedup();
 
     let hash = access_list_hash(&access_list);
 

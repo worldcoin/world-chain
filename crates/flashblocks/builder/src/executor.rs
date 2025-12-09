@@ -381,7 +381,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    
 
     // #[test]
     // fn test_block_access_index_counter_new() {

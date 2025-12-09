@@ -39,7 +39,7 @@ use revm::{
     DatabaseRef,
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::{
-        BundleAccount,
+        BundleAccount, BundleState,
         states::{bundle_state::BundleRetention, reverts::Reverts},
     },
 };
@@ -154,12 +154,9 @@ where
         let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) =
             validator.execute_block(state_provider.clone(), self.executor_transactions.clone())?;
 
-        let mut computed_access_list = access_list_receiver
+        let computed_access_list = access_list_receiver
             .recv()
             .map_err(BalExecutorError::other)?;
-
-        // dedup the computed access list
-        computed_access_list.dedup();
 
         let computed_access_list_hash =
             flashblocks_primitives::access_list::access_list_hash(&computed_access_list);
@@ -421,6 +418,7 @@ where
             state_root,
             trie_updates,
             hashed_state,
+            bundle,
         } = self
             .state_root_receiver
             .recv()
@@ -443,7 +441,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(db.bundle_state()),
+            Cow::Borrowed(&bundle),
             &state,
             state_root,
         ))?;
@@ -671,6 +669,7 @@ pub struct StateRootResult {
     pub state_root: B256,
     pub trie_updates: TrieUpdates,
     pub hashed_state: HashedPostState,
+    pub bundle: BundleState,
 }
 
 pub fn compute_state_root(
@@ -689,6 +688,10 @@ pub fn compute_state_root(
         state_root,
         trie_updates,
         hashed_state,
+        bundle: BundleState {
+            state: bundle_state.clone(),
+            ..Default::default()
+        },
     })
 }
 
