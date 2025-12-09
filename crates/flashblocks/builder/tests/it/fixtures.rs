@@ -22,7 +22,7 @@ use reth::revm::{State, database::StateProviderDatabase};
 use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     block::CommitChanges,
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    execute::{BlockBuilder, BlockBuilderOutcome},
     op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};

@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
-use flashblocks_builder::{
-    executor::CommittedState,
-    validator::{FlashblocksBlockValidator, decode_transactions},
-};
+use flashblocks_builder::{executor::CommittedState, validator::FlashblocksBlockValidator};
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
 use reth_optimism_evm::OpRethReceiptBuilder;

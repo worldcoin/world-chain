@@ -1,8 +1,4 @@
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    sync::Arc,
-};
+use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
