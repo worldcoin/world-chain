@@ -368,8 +368,9 @@ where
             _ => return Err(eyre::eyre::eyre!("unexpected build outcome")),
         }
     };
+
     let duration = Instant::now().duration_since(start);
-    metrics::histogram!("flashblocks.validate_bal",)
+    metrics::histogram!("flashblocks.validate", "access_list" => flashblock.diff().access_list_data.is_some().to_string())
         .record(duration.as_micros() as f64 / 1_000_000.0);
 
     // construct the full payload
