@@ -8,7 +8,6 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use rand::Rng as _;
 use reth_evm::{EvmFactory, block::StateDB};
 
 use alloy_consensus::{BlockHeader, Header};
@@ -133,7 +132,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                rand::rng().random_bool(0.5),
+                true,
             )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
@@ -144,7 +143,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                rand::rng().random_bool(0.5),
+                true,
             )
         }
         .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
