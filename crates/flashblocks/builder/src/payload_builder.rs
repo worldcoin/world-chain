@@ -127,7 +127,7 @@ where
         if ctx.attributes().no_tx_pool {
             build(
                 best,
-                self.pool.clone(),
+                Some(self.pool.clone()),
                 db,
                 state_provider.clone(),
                 &ctx,
@@ -138,7 +138,7 @@ where
             // sequencer mode we can reuse cachedreads from previous runs
             build(
                 best,
-                self.pool.clone(),
+                Some(self.pool.clone()),
                 db,
                 state_provider.clone(),
                 &ctx,
@@ -252,7 +252,8 @@ where
 /// Builds the payload on top of the state.
 pub fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-    pool: Pool,
+    // TODO: undo optional
+    pool: Option<Pool>,
     _db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
     state_provider: impl StateProvider + Clone + 'static,
     ctx: &Ctx,
@@ -372,7 +373,9 @@ where
 
     // 5. Execute transactions from the tx-pool, draining any transactions seen in previous
     // flashblocks
-    if !ctx.attributes().no_tx_pool {
+    if let Some(pool) = pool
+        && !ctx.attributes().no_tx_pool
+    {
         let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
         let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(visited_transactions);
 
