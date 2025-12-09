@@ -1,7 +1,7 @@
-set positional-arguments
+set positional-arguments := true
 
 # default recipe to display help information
-default:
+_default:
     @just --list
 
 # Spawns the devnet
@@ -13,7 +13,7 @@ devnet-down:
     kurtosis enclave rm -f world-chain
     kurtosis clean
 
-fmt: 
+fmt:
     kurtosis lint --format
 
 stress-test *args='':
