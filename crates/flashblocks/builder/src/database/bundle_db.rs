@@ -52,10 +52,27 @@ impl<DB: DatabaseRef> DatabaseRef for BundleDb<DB> {
         if let Some(account) = self.bundle.account(&address)
             && let Some(storage) = account.storage_slot(index)
         {
+            tracing::trace!(
+                target: "flashblocks::bundle_db",
+                ?address,
+                ?index,
+                value = ?storage,
+                source = "bundle",
+                "BundleDb storage read from bundle"
+            );
             return Ok(storage);
         }
 
-        self.db.storage_ref(address, index)
+        let val = self.db.storage_ref(address, index)?;
+        tracing::trace!(
+            target: "flashblocks::bundle_db",
+            ?address,
+            ?index,
+            value = ?val,
+            source = "fallback_db",
+            "BundleDb storage read from fallback db"
+        );
+        Ok(val)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {

@@ -1,7 +1,4 @@
-use std::{
-    collections::{btree_map, hash_map},
-    thread::JoinHandle,
-};
+use std::{collections::hash_map, thread::JoinHandle};
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
@@ -148,8 +145,22 @@ where
                     }
                 }
 
-                account.storage.iter().try_for_each(|(key, value)| {
-                    let previous_value = self.db.storage(*address, *key)?;
+                account.storage.iter().for_each(|(key, value)| {
+                    // Use the original_value from the EvmStorageSlot, which is the value
+                    // that was read from the database before any modifications in this transaction.
+                    // This is critical because self.db.storage() would return the cached/mutated
+                    // value, not the pre-transaction value.
+                    let previous_value = value.original_value;
+                    tracing::trace!(
+                        target: "flashblocks::bal_builder_db",
+                        address = ?address,
+                        slot = ?key,
+                        previous_value = ?previous_value,
+                        new_value = ?value.present_value,
+                        index = self.index,
+                        will_record = previous_value != value.present_value,
+                        "try_commit storage comparison"
+                    );
                     if previous_value != value.present_value {
                         acc_changes
                             .storage_changes
@@ -157,8 +168,7 @@ where
                             .or_default()
                             .insert(self.index, value.present_value);
                     }
-                    Result::<(), <DB as Database>::Error>::Ok(())
-                })?;
+                });
 
                 Ok(())
             })?;
@@ -506,18 +516,53 @@ impl<DB: DatabaseRef> Database for BalValidationState<DB> {
 
         // Account will always be some, but if it is not, StorageValue::ZERO will be returned.
         let is_storage_known = account.status.is_storage_known();
+        let account_status = account.status;
         Ok(account
             .account
             .as_mut()
             .map(|account| match account.storage.entry(index) {
-                hash_map::Entry::Occupied(entry) => Ok(*entry.get()),
+                hash_map::Entry::Occupied(entry) => {
+                    let val = *entry.get();
+                    tracing::trace!(
+                        target: "flashblocks::bal_validation_state",
+                        ?address,
+                        ?index,
+                        value = ?val,
+                        ?account_status,
+                        ?is_storage_known,
+                        source = "cache",
+                        "BalValidationState storage read from cache"
+                    );
+                    Ok(val)
+                }
                 hash_map::Entry::Vacant(entry) => {
                     // If account was destroyed or account is newly built
                     // we return zero and don't ask database.
                     let value = if is_storage_known {
+                        tracing::trace!(
+                            target: "flashblocks::bal_validation_state",
+                            ?address,
+                            ?index,
+                            value = ?StorageValue::ZERO,
+                            ?account_status,
+                            ?is_storage_known,
+                            source = "storage_known_zero",
+                            "BalValidationState storage returning ZERO (storage known)"
+                        );
                         StorageValue::ZERO
                     } else {
-                        self.database.storage(address, index)?
+                        let db_val = self.database.storage(address, index)?;
+                        tracing::trace!(
+                            target: "flashblocks::bal_validation_state",
+                            ?address,
+                            ?index,
+                            value = ?db_val,
+                            ?account_status,
+                            ?is_storage_known,
+                            source = "database",
+                            "BalValidationState storage read from database"
+                        );
+                        db_val
                     };
                     entry.insert(value);
                     Ok(value)

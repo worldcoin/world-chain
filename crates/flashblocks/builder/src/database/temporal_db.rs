@@ -159,13 +159,47 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
         address: Address,
         index: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
-        // TODO: check this impl
         match self.cache.account_storage.get(&address) {
             Some(storage) => match storage.get(self.index, &index) {
-                Some(val) => Ok(*val),
-                None => self.db.storage_ref(address, index),
+                Some(val) => {
+                    tracing::trace!(
+                        target: "flashblocks::temporal_db",
+                        ?address,
+                        ?index,
+                        temporal_index = self.index,
+                        value = ?val,
+                        source = "temporal_cache",
+                        "TemporalDb storage read from cache"
+                    );
+                    Ok(*val)
+                }
+                None => {
+                    let val = self.db.storage_ref(address, index)?;
+                    tracing::trace!(
+                        target: "flashblocks::temporal_db",
+                        ?address,
+                        ?index,
+                        temporal_index = self.index,
+                        value = ?val,
+                        source = "fallback_db_slot_not_in_cache",
+                        "TemporalDb storage read from fallback (slot not in cache)"
+                    );
+                    Ok(val)
+                }
             },
-            None => self.db.storage_ref(address, index),
+            None => {
+                let val = self.db.storage_ref(address, index)?;
+                tracing::trace!(
+                    target: "flashblocks::temporal_db",
+                    ?address,
+                    ?index,
+                    temporal_index = self.index,
+                    value = ?val,
+                    source = "fallback_db_account_not_in_cache",
+                    "TemporalDb storage read from fallback (account not in cache)"
+                );
+                Ok(val)
+            }
         }
     }
 

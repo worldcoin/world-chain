@@ -109,11 +109,17 @@ impl FlashblockAccessList {
             // Apply storage changes
             for slot_changes in &account_changes.storage_changes {
                 let slot: U256 = slot_changes.slot.into();
+
                 for change in &slot_changes.changes {
+                    let original_value = db
+                        .storage_ref(account_changes.address, slot)
+                        .ok()
+                        .unwrap_or(U256::ZERO);
+                    
                     bundle_account.storage.insert(
                         slot,
                         StorageSlot {
-                            previous_or_original_value: U256::ZERO, // Original value tracking can be added if needed
+                            previous_or_original_value: original_value, // Original value tracking can be added if needed
                             present_value: change.new_value.into(),
                         },
                     );
