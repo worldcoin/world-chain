@@ -1,10 +1,11 @@
-use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use parking_lot::RwLock;
+use reth::revm::{State, database::StateProviderDatabase};
 use reth_chain_state::ExecutedBlock;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, EvmFactory, execute::BlockBuilder as _};
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -21,8 +22,10 @@ use tokio::sync::broadcast;
 use tracing::{error, info, trace};
 
 use crate::{
-    executor::CommittedState,
-    validator::{FlashblocksBlockValidator, decode_transactions},
+    database::bal_builder_db::{AsyncBalBuilderDb, BalBuilderDb},
+    executor::{BalBlockBuilder, CommittedState},
+    payload_builder::build,
+    validator::{FlashblocksBlockValidator, decode_transactions, decode_transactions_with_indices},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
@@ -268,19 +271,20 @@ where
         committed_state.transactions.len() as u16 + 1
     };
 
-    let executor_transactions = decode_transactions(&flashblock.diff().transactions, start_index)?;
-
-    let block_validator = FlashblocksBlockValidator {
-        chain_spec: chain_spec.clone(),
-        evm_config: evm_config.clone(),
-        execution_context: execution_context.clone(),
-        executor_transactions: executor_transactions.clone(),
-        committed_state,
-        evm_env: evm_env.clone(),
-    };
-
     let start = Instant::now();
     let payload = if flashblock.diff().access_list_data.is_some() {
+        let executor_transactions =
+            decode_transactions_with_indices(&flashblock.diff().transactions, start_index)?;
+
+        let block_validator = FlashblocksBlockValidator {
+            chain_spec: chain_spec.clone(),
+            evm_config: evm_config.clone(),
+            execution_context: execution_context.clone(),
+            executor_transactions: executor_transactions.clone(),
+            committed_state,
+            evm_env: evm_env.clone(),
+        };
+
         block_validator.validate(
             state_provider.clone(),
             diff.clone(),
@@ -288,11 +292,54 @@ where
             *flashblock.payload_id(),
         )?
     } else {
-        info!(
-            target: "flashblocks::state_executor",
-            "building payload without access list"
+        // TODO: We don't actually want to build a bal here.
+        // Lots of dup code we can remove here. WIP
+        let executor_transactions = decode_transactions(&flashblock.diff().transactions)?;
+        let db = StateProviderDatabase::new(state_provider.clone());
+
+        let mut state = State::builder()
+            .with_database(db.clone())
+            .with_bundle_prestate(committed_state.bundle.clone())
+            .with_bundle_update()
+            .build();
+
+        let db = BalBuilderDb::new(&mut state);
+
+        let evm = OpEvmFactory::default().create_evm(db, evm_env);
+
+        let mut executor = OpBlockExecutor::new(
+            evm,
+            execution_context,
+            chain_spec.clone(),
+            OpRethReceiptBuilder::default(),
         );
-        todo!()
+        let (tx, rx) = crossbeam_channel::unbounded();
+
+        let builder = BalBlockBuilder::new(
+            execution_context.clone(),
+            &sealed_header,
+            executor,
+            executor_transactions.clone(),
+            chain_spec.clone(),
+            tx,
+        );
+
+        // Only execute the sequencer transactions on the first payload. The sequencer transactions
+        // will already be in the [`BundleState`] at this point if the `best_payload` is set.
+        if latest_payload.is_none() {
+            // 3. apply pre-execution changes
+            builder.apply_pre_execution_changes()?;
+
+            // // 4. Execute Deposit transactions
+            // ctx.execute_sequencer_transactions(&mut builder)
+            //     .map_err(PayloadBuilderError::other)?
+        }
+
+        builder
+            .build()
+            .map_err(|e| eyre::eyre::eyre!("error building BAL flashblock payload: {e:?}"))?;
+
+        todo!();
     };
     let duration = Instant::now().duration_since(start);
     metrics::histogram!("flashblocks.validate_bal",)

@@ -697,7 +697,7 @@ pub fn compute_state_root(
 }
 
 /// Decodes transactions from raw bytes and recovers signer addresses.
-pub fn decode_transactions(
+pub fn decode_transactions_with_indices(
     encoded_transactions: &[Bytes],
     start_index: BlockAccessIndex,
 ) -> Result<Vec<(BlockAccessIndex, Recovered<OpTransactionSigned>)>, BalExecutorError> {
@@ -713,6 +713,26 @@ pub fn decode_transactions(
                 .map_err(BalExecutorError::other)?;
 
             Ok((start_index + i as BlockAccessIndex, recovered))
+        })
+        .collect()
+}
+
+/// Decodes transactions from raw bytes and recovers signer addresses.
+pub fn decode_transactions(
+    encoded_transactions: &[Bytes],
+) -> Result<Vec<Recovered<OpTransactionSigned>>, BalExecutorError> {
+    encoded_transactions
+        .iter()
+        .enumerate()
+        .map(|(i, tx)| {
+            let tx_envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
+                .map_err(BalExecutorError::other)?;
+
+            let recovered = tx_envelope
+                .try_clone_into_recovered()
+                .map_err(BalExecutorError::other)?;
+
+            Ok(recovered)
         })
         .collect()
 }

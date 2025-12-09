@@ -250,7 +250,7 @@ where
 }
 
 /// Builds the payload on top of the state.
-fn build<'a, Txs, Ctx, Pool>(
+pub fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Pool,
     _db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
@@ -453,7 +453,7 @@ where
     }
 }
 
-fn block_builder<'a, Ctx, DB, R, N, Tx>(
+pub fn block_builder<'a, Ctx, DB, R, N, Tx>(
     state: BalBuilderDb<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
