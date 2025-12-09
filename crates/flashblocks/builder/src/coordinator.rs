@@ -275,17 +275,13 @@ where
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .unwrap();
 
-    let start_index = if committed_state.transactions.is_empty() {
-        0
-    } else {
-        committed_state.transactions.len() as u16 + 1
-    };
+    let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
     let start = Instant::now();
     let payload = if flashblock.diff().access_list_data.is_some() {
         let sealed_header = Arc::new(sealed_header);
         let executor_transactions =
-            decode_transactions_with_indices(&flashblock.diff().transactions, start_index)?;
+            decode_transactions_with_indices(&flashblock.diff().transactions, transactions_offset)?;
 
         let block_validator = FlashblocksBlockValidator {
             chain_spec: chain_spec.clone(),
