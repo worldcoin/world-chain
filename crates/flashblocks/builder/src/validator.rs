@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashSet},
+    collections::HashSet,
     sync::Arc,
 };
 
@@ -18,7 +18,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::revm::{State, database::StateProviderDatabase};
+use reth::revm::database::StateProviderDatabase;
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
@@ -43,12 +43,12 @@ use revm::{
     DatabaseRef,
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::{
-        BundleAccount, BundleState, CacheState, TransitionAccount,
+        BundleAccount,
         states::{bundle_state::BundleRetention, reverts::Reverts},
     },
 };
 use revm_database_interface::WrapDatabaseRef;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
@@ -57,7 +57,7 @@ use crate::{
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    executor::{BalExecutorError, CommittedState, ValidationError},
+    executor::{BalExecutorError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -179,14 +179,12 @@ where
                 "Access list hash mismatch"
             );
 
-            return Err(BalExecutorError::ValidationError(
-                ValidationError::BalHashMismatch {
-                    expected: access_list_hash,
-                    got: computed_access_list_hash,
-                    expected_bal: access_list,
-                    got_bal: computed_access_list,
-                },
-            ));
+            return Err(BalExecutorError::BalHashMismatch {
+                expected: access_list_hash,
+                got: computed_access_list_hash,
+                expected_bal: access_list,
+                got_bal: computed_access_list,
+            });
         }
 
         if outcome.block.receipts_root != diff.receipts_root {
@@ -225,14 +223,12 @@ where
                 "Block hash mismatch"
             );
 
-            return Err(BalExecutorError::ValidationError(
-                ValidationError::BalHashMismatch {
-                    expected: diff.block_hash,
-                    got: outcome.block.hash(),
-                    expected_bal: access_list,
-                    got_bal: computed_access_list,
-                },
-            ));
+            return Err(BalExecutorError::BalHashMismatch {
+                expected: diff.block_hash,
+                got: outcome.block.hash(),
+                expected_bal: access_list,
+                got_bal: computed_access_list,
+            });
         }
 
         // 6. Seal the block
@@ -459,7 +455,7 @@ where
         let block = RecoveredBlock::new_unhashed(block, senders);
         let access_list = db
             .finish()
-            .map_err(|e| InternalBlockExecutionError::other(e))?
+            .map_err(InternalBlockExecutionError::other)?
             .build(self.index_range);
 
         self.access_list_sender
@@ -535,7 +531,11 @@ where
             .into_par_iter()
             .map(|(index, tx)| {
                 let tx = tx.clone();
-                eprintln!("Executing tx at index {} hash {}", index, tx.clone().into_encoded().encoded_bytes().clone());
+                eprintln!(
+                    "Executing tx at index {} hash {}",
+                    index,
+                    tx.clone().into_encoded().encoded_bytes().clone()
+                );
                 execute_transaction(
                     (index, tx),
                     receipt_builder.clone(),
@@ -657,9 +657,9 @@ where
             .expect("fee is always valid; execution succeeded")
     };
 
-    let (mut db, _evm_env) = evm.finish();
+    let (db, _evm_env) = evm.finish();
 
-    let access_list = db.finish().map_err(|e| BalExecutorError::other(e))?;
+    let access_list = db.finish().map_err(BalExecutorError::other)?;
 
     Ok(ParalleExecutionResult {
         receipts: result.receipts,

@@ -20,10 +20,7 @@ use revm::{
     database::BundleState,
 };
 
-use crate::{
-    access_list::BlockAccessIndex,
-    database::bal_builder_db::{AsyncBalBuilderDb, BalBuilderDb},
-};
+use crate::{access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -43,8 +40,12 @@ use revm::{
 };
 use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
-#[derive(thiserror::Error, Debug, serde::Serialize)]
-pub enum ValidationError {
+#[derive(thiserror::Error, Debug)]
+pub enum BalExecutorError {
+    #[error("Block execution error: {0}")]
+    BlockExecutionError(#[from] BlockExecutionError),
+    #[error("Missing executed block in built payload")]
+    MissingExecutedBlock,
     #[error("Block execution error")]
     BalHashMismatch {
         expected: FixedBytes<32>,
@@ -52,16 +53,6 @@ pub enum ValidationError {
         expected_bal: FlashblockAccessList,
         got_bal: FlashblockAccessList,
     },
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum BalExecutorError {
-    #[error("Block execution error: {0}")]
-    BlockExecutionError(#[from] BlockExecutionError),
-    #[error("validation error: {0}")]
-    ValidationError(#[from] ValidationError),
-    #[error("Missing executed block in built payload")]
-    MissingExecutedBlock,
     #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
     StateRootMismatch {
         expected: FixedBytes<32>,
@@ -71,13 +62,6 @@ pub enum BalExecutorError {
     ReceiptsRootMismatch {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
-    },
-    #[error("Bal Hash Mismatch: expected {expected:?}, got {got:?}")]
-    BalHashMismatch {
-        expected: FixedBytes<32>,
-        got: FixedBytes<32>,
-        expected_bal: FlashblockAccessList,
-        got_bal: FlashblockAccessList,
     },
     #[error("Inernal Error: {0}")]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
@@ -118,7 +102,7 @@ where
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
     ) -> Self {
-        let start_index = if transactions.len() == 0 {
+        let start_index = if transactions.is_empty() {
             0
         } else {
             transactions.len() + 1
@@ -252,7 +236,7 @@ where
 
         let access_list = db
             .finish()
-            .map_err(|e| InternalBlockExecutionError::other(e))?
+            .map_err(InternalBlockExecutionError::other)?
             .build(self.counter.finish());
 
         self.access_list_sender
@@ -397,7 +381,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     // #[test]
     // fn test_block_access_index_counter_new() {

@@ -1,10 +1,8 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
-    balance_change,
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use eyre::owo_colors::OwoColorize;
 use reth::revm::{
     DatabaseRef,
     db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
@@ -61,7 +59,7 @@ impl FlashblockAccessList {
             }
         }
     }
-    
+
     pub fn extend(&mut self, other: &FlashblockAccessList) {
         // Create a map to merge AccountChanges by address
         let mut merged: BTreeMap<Address, AccountChanges> = BTreeMap::new();

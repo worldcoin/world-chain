@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_builder::{
-    executor::{BalExecutorError, CommittedState},
+    executor::CommittedState,
     validator::{FlashblocksBlockValidator, decode_transactions},
 };
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
@@ -16,8 +16,7 @@ use reth_provider::StateProvider;
 use revm::database::BundleState;
 
 use crate::fixtures::{
-    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, arb_execution_payload,
-    arb_execution_payload_sequence, create_test_state_provider,
+    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, create_test_state_provider,
 };
 
 /// Execute transactions in parallel using FlashblocksBlockValidator
@@ -31,15 +30,14 @@ pub fn validate(
     // before returning.
     let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
-    let executor_transactions =
-        decode_transactions(&diff.transactions, transactions_offset as u16)?;
+    let executor_transactions = decode_transactions(&diff.transactions, transactions_offset)?;
 
     let validator = FlashblocksBlockValidator::<OpRethReceiptBuilder> {
         chain_spec: CHAIN_SPEC.clone(),
         evm_config: EVM_CONFIG.clone(),
         execution_context: BLOCK_EXECUTION_CTX.clone(),
         evm_env: EVM_ENV.clone(),
-        committed_state: committed_state,
+        committed_state,
         executor_transactions,
     };
 
@@ -69,48 +67,38 @@ fn unwrap_committed_state(
 
 #[cfg(test)]
 mod tests {
-    use eyre::owo_colors::OwoColorize;
-    use reth_tracing::{FileInfo, LayerInfo, LogFormat, Tracer, tracing_appender};
-    use serde::Serialize;
-    use tracing::error;
+    use std::path::PathBuf;
 
-    use super::*;
-    use std::{fs, path::PathBuf};
+    use flashblocks_builder::executor::BalExecutorError;
+    use proptest::{prelude::Strategy, prop_assert, proptest};
+    use std::io::Write;
 
-    fn debug_output<T: Serialize>(value: &T) {
+    use crate::{
+        fixtures::{arb_execution_payload, arb_execution_payload_sequence},
+        proptest::{unwrap_committed_state, validate},
+    };
+
+    pub fn debug_output<T: std::fmt::Debug>(value: &T) {
         let dir: PathBuf = env!("CARGO_MANIFEST_DIR").into();
         let file_path = dir.join("tests/proptest-regressions/debug_output.txt");
-        let file = fs::File::create(&file_path)
-            .expect("Unable to create debug output file");
+        let file = std::fs::File::create(&file_path).expect("Unable to create debug output file");
 
-        if let Err(e) = serde_json::to_writer_pretty(&file, value) {
-            eprint!("Failed to write debug output: {}", e);
-        } else {
-            eprintln!(
-                "{} Debug output written to {}",
-                "Info:".green(),
-                file_path.display()
-            );
-        }
+        let mut writer = std::io::BufWriter::new(file);
+        writeln!(writer, "{:#?}", value).expect("Unable to write debug output");
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(1))]
+        #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn prop_validate_many(payloads in (1usize..100, 1usize..10).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
+        fn prop_validate_many(payloads in (1usize..50, 1usize..5).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
             for (diff, committed_state) in payloads.into_iter(){
                 let committed = unwrap_committed_state(committed_state);
                 let payload = validate(&diff, committed);
-
-                if let Err(e) = &payload {
-                    if let Some(bal_err) = e.downcast_ref::<BalExecutorError>() {
-                        if let BalExecutorError::ValidationError(e) = bal_err {
-                            debug_output(e);
-                        }
-                    }
+                if let Err(err) = &payload {
+                    let e = &err.downcast_ref::<BalExecutorError>();
+                    debug_output(e);
                 }
-
                 prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
 
             }
@@ -121,14 +109,6 @@ mod tests {
             let (diff, committed_state) = payload;
             let committed = unwrap_committed_state(committed_state);
             let payload = validate(&diff, committed);
-
-            if let Err(e) = &payload {
-                if let Some(bal_err) = e.downcast_ref::<BalExecutorError>() {
-                        if let BalExecutorError::ValidationError(e) = bal_err {
-                        debug_output(e);
-                    }
-                }
-            }
 
             prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
         }

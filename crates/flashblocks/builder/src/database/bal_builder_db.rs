@@ -1,23 +1,17 @@
-use std::{
-    collections::{BTreeMap, btree_map, hash_map},
-    convert::Infallible,
-    thread::JoinHandle,
-};
+use std::thread::JoinHandle;
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
-use reth::revm::cached::CachedAccount;
 use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
     database::{
-        BundleState, CacheDB, CacheState, TransitionState,
-        states::{CacheAccount, bundle_state::BundleRetention},
+        BundleState,
+        states::bundle_state::BundleRetention,
     },
-    primitives::{BLOCK_HASH_HISTORY, HashMap, StorageKey, StorageValue},
+    primitives::{HashMap, StorageKey, StorageValue},
     state::{Account, AccountInfo, Bytecode},
 };
-use revm_database_interface::EmptyDBTyped;
 use tracing::error;
 
 use crate::access_list::FlashblockAccessListConstruction;
@@ -442,9 +436,8 @@ impl<DB: Database> Database for BalValidationState<DB> {
 }
 
 impl<DB: Database> DatabaseCommit for BalValidationState<DB> {
-    fn commit(&mut self, changes: HashMap<Address, Account>) {}
-
-    fn commit_iter(&mut self, changes: impl IntoIterator<Item = (Address, Account)>) {
+    fn commit(&mut self, _changes: HashMap<Address, Account>) {}
+    fn commit_iter(&mut self, _changes: impl IntoIterator<Item = (Address, Account)>) {
         // np op
     }
 }

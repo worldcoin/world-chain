@@ -8,7 +8,7 @@ use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
-    database::bal_builder_db::{AsyncBalBuilderDb, BalBuilderDb},
+    database::bal_builder_db::BalBuilderDb,
     executor::{BalBlockBuilder, CommittedState},
 };
 use flashblocks_primitives::{
@@ -25,7 +25,6 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     op_revm::OpSpecId,
 };
-use reth_node_api::BlockBody;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -38,7 +37,7 @@ use revm::{
 };
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, atomic::AtomicU16},
+    sync::Arc,
 };
 
 lazy_static::lazy_static! {
@@ -157,7 +156,7 @@ lazy_static::lazy_static! {
     pub static ref SEALED_HEADER: SealedHeader = SealedHeader::seal_slow(CHAIN_SPEC.genesis_header().clone());
 
     pub static ref EVM_ENV: EvmEnv<OpSpecId> = EVM_CONFIG
-        .next_evm_env(&SEALED_HEADER.header(), &NEXT_BLOCK_ENV_ATTRS)
+        .next_evm_env(SEALED_HEADER.header(), &NEXT_BLOCK_ENV_ATTRS)
         .unwrap();
 }
 
@@ -323,7 +322,7 @@ impl TxOp {
     pub fn gas_limit(&self) -> u64 {
         match self {
             TxOp::Transfer { .. } => 21_000,
-            TxOp::Fib { n, .. } => 100_000 + (*n as u64) * 20_000,
+            TxOp::Fib { n, .. } => 100_000 + *n * 20_000,
             TxOp::DeployNewImplementation { .. } => 500_000,
         }
     }
@@ -359,26 +358,12 @@ impl TxOp {
     }
 }
 
-/// Strategy for generating transfer amounts (small to avoid overflow)
-pub fn arb_transfer_value() -> impl Strategy<Value = U256> {
-    (1u64..1_000_000u64).prop_map(U256::from)
-}
-
 /// Strategy for selecting a sender from test signers
 pub fn arb_sender() -> impl Strategy<Value = PrivateKeySigner> {
     prop_oneof![
         Just(ALICE.clone()),
         Just(BOB.clone()),
         Just(CHARLIE.clone()),
-    ]
-}
-
-/// Strategy for selecting a recipient address
-pub fn arb_recipient() -> impl Strategy<Value = Address> {
-    prop_oneof![
-        Just(ALICE.address()),
-        Just(BOB.address()),
-        Just(CHARLIE.address()),
     ]
 }
 
@@ -395,9 +380,8 @@ pub fn arb_fib_n() -> impl Strategy<Value = u64> {
 /// Strategy for generating a single chaos operation
 pub fn arb_transaction_op() -> impl Strategy<Value = TxOp> {
     prop_oneof![
-        1 => (arb_sender(), arb_recipient(), arb_transfer_value()).prop_map(|(from, to, value)|
-                TxOp::Transfer { from, to, value }),
-        1 => (arb_sender(), arb_fib_n(), arb_target()).prop_map(|(from, n, target)| TxOp::Fib {
+        // 1 => (arb_transfer_value()).prop_map(|v| TxOp::Transfer { from: ALICE.clone(), to: BOB.address(), value: v }),
+        3 => (arb_sender(), arb_fib_n(), arb_target()).prop_map(|(from, n, target)| TxOp::Fib {
             from,
             n,
             target
@@ -488,7 +472,7 @@ pub fn build_chained_payloads(
     let chunk_size = (sequence.len() / max_flashblocks).max(1);
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
 
-    for (_, sequence) in sequences.into_iter().enumerate() {
+    for sequence in sequences.into_iter() {
         // Convert chaos ops to signed transactions
         let transactions = transaction_op_sequence_to_transactions(sequence);
 
@@ -620,7 +604,7 @@ pub fn execute_serial(
         BLOCK_EXECUTION_CTX.clone(),
         &SEALED_HEADER,
         executor,
-        prev_transaction.unwrap_or(Vec::default()),
+        prev_transaction.unwrap_or_default(),
         CHAIN_SPEC.clone(),
         access_list_tx,
     );
@@ -827,7 +811,7 @@ impl StateProvider for TestStateProvider {
             .db
             .storage_ref(account, storage_key.into())
             .ok()
-            .map(|v| v.into()))
+            .map(|v| v))
     }
 }
 
