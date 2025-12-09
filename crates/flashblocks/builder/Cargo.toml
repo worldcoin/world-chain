@@ -59,7 +59,6 @@ rayon.workspace = true
 dashmap.workspace = true
 thiserror.workspace = true
 either.workspace = true
-serde.workspace = true
 metrics.workspace = true
 
 [dev-dependencies]
@@ -77,4 +76,3 @@ alloy-trie.workspace = true
 world-chain-pool.workspace = true
 world-chain-payload.workspace = true
 tracing-subscriber.workspace = true
-

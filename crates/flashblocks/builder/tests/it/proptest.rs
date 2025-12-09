@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
-use flashblocks_builder::{executor::CommittedState, validator::FlashblocksBlockValidator};
+use flashblocks_builder::{
+    executor::CommittedState,
+    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+};
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
 use reth_optimism_evm::OpRethReceiptBuilder;
@@ -27,7 +30,8 @@ pub fn validate(
     // before returning.
     let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
-    let executor_transactions = decode_transactions(&diff.transactions, transactions_offset)?;
+    let executor_transactions =
+        decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
 
     let validator = FlashblocksBlockValidator::<OpRethReceiptBuilder> {
         chain_spec: CHAIN_SPEC.clone(),
