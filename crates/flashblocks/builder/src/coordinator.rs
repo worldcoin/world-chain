@@ -13,7 +13,10 @@ use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_provider::{HeaderProvider, StateProviderFactory};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::broadcast;
 use tracing::{error, info, trace};
 
@@ -276,6 +279,7 @@ where
         evm_env: evm_env.clone(),
     };
 
+    let start = Instant::now();
     let payload = if flashblock.diff().access_list_data.is_some() {
         block_validator.validate(
             state_provider.clone(),
@@ -290,6 +294,9 @@ where
         );
         todo!()
     };
+    let duration = Instant::now().duration_since(start);
+    metrics::histogram!("flashblocks.validate_bal",)
+        .record(duration.as_micros() as f64 / 1_000_000.0);
 
     // construct the full payload
     *latest_payload = Some((payload.clone(), index));

@@ -3802,6 +3802,7 @@ dependencies = [
  "flashblocks-primitives",
  "futures",
  "lazy_static",
+ "metrics",
  "op-alloy-consensus",
  "op-alloy-network",
  "parking_lot",
