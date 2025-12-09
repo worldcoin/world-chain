@@ -1,5 +1,5 @@
 use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
+use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
@@ -17,29 +17,24 @@ use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
-use reth_optimism_node::{
-    OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes, OpPoolBuilder,
-};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_payload_util::BestPayloadTransactions;
 use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
-use reth_transaction_pool::{
-    EthPooledTransaction, blobstore::DiskFileBlobStore, noop::NoopTransactionPool,
-};
+use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{
-    database::bal_builder_db::{AsyncBalBuilderDb, BalBuilderDb},
-    executor::{BalBlockBuilder, CommittedState},
+    executor::CommittedState,
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
-    validator::{FlashblocksBlockValidator, decode_transactions, decode_transactions_with_indices},
+    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
