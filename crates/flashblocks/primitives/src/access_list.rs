@@ -1,8 +1,10 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    balance_change,
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use eyre::owo_colors::OwoColorize;
 use reth::revm::{
     DatabaseRef,
     db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
@@ -36,6 +38,30 @@ pub struct FlashblockAccessList {
 }
 
 impl FlashblockAccessList {
+    /// Removes duplicate entries by key, keeping the last occurrence (highest block_access_index).
+    /// Results are re-ordered ascending by block_access_index.
+    pub fn dedup(&mut self) {
+        for change in &mut self.changes {
+            change.balance_changes.reverse();
+            change.balance_changes.dedup_by_key(|n| n.post_balance());
+            change.balance_changes.sort_by_key(|n| n.block_access_index);
+
+            change.nonce_changes.reverse();
+            change.nonce_changes.dedup_by_key(|n| n.new_nonce());
+            change.nonce_changes.sort_by_key(|n| n.block_access_index);
+
+            change.code_changes.reverse();
+            change.code_changes.dedup_by_key(|c| c.new_code().clone());
+            change.code_changes.sort_by_key(|c| c.block_access_index);
+
+            for slot_changes in &mut change.storage_changes {
+                slot_changes.changes.reverse();
+                slot_changes.changes.dedup_by_key(|s| s.new_value);
+                slot_changes.changes.sort_by_key(|s| s.block_access_index);
+            }
+        }
+    }
+    
     pub fn extend(&mut self, other: &FlashblockAccessList) {
         // Create a map to merge AccountChanges by address
         let mut merged: BTreeMap<Address, AccountChanges> = BTreeMap::new();

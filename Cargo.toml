@@ -182,7 +182,7 @@ alloy-signer-local = { version = "1.1.2", default-features = false, features = [
 alloy-sol-types = "1.4.1"
 alloy-serde = { version = "1.1.2", default-features = false }
 alloy-hardforks = { version = "0.4.4", default-features = false }
-
+alloy-trie = { version = "0.9.1", default-features = false, features = ["ethereum"] }
 # revm
 revm = { version = "33.1.0", default-features = false }
 revm-bytecode = { version = "7.1.1", default-features = false }

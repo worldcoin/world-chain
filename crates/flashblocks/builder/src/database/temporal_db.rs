@@ -46,7 +46,12 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
                     .account_info
                     .get(index, &change.address)
                     .cloned()
-                    .unwrap_or_default()
+                    .unwrap_or_else(|| {
+                        db.basic_ref(change.address)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default()
+                    })
             };
 
             for storage_change in change.storage_changes {

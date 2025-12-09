@@ -1,14 +1,23 @@
-use std::thread::JoinHandle;
+use std::{
+    collections::{BTreeMap, btree_map, hash_map},
+    convert::Infallible,
+    thread::JoinHandle,
+};
 
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
+use reth::revm::cached::CachedAccount;
 use reth_evm::block::StateDB;
 use revm::{
-    Database, DatabaseCommit,
-    database::{BundleState, states::bundle_state::BundleRetention},
-    primitives::{HashMap, StorageKey, StorageValue},
-    state::{AccountInfo, Bytecode},
+    Database, DatabaseCommit, DatabaseRef,
+    database::{
+        BundleState, CacheDB, CacheState, TransitionState,
+        states::{CacheAccount, bundle_state::BundleRetention},
+    },
+    primitives::{BLOCK_HASH_HISTORY, HashMap, StorageKey, StorageValue},
+    state::{Account, AccountInfo, Bytecode},
 };
+use revm_database_interface::EmptyDBTyped;
 use tracing::error;
 
 use crate::access_list::FlashblockAccessListConstruction;
@@ -166,6 +175,7 @@ where
         if let Some(e) = self.error {
             return Err(e);
         }
+
         Ok(self.access_list)
     }
 }
@@ -365,6 +375,101 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
 
     fn set_state_clear_flag(&mut self, has_state_clear: bool) {
         self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
+#[derive(Debug)]
+pub struct BalValidationState<DB> {
+    /// Optional database that we use to fetch data from
+    ///
+    /// If database is not present, we will return not existing account and storage.
+    ///
+    /// **Note**: It is marked as Send so database can be shared between threads.
+    pub database: DB,
+    bundle_state: BundleState,
+}
+
+impl<DB> BalValidationState<DB> {
+    /// Creates a new BalValidationState with the given database.
+    pub fn new(database: DB) -> Self {
+        Self {
+            database,
+            bundle_state: BundleState::default(),
+        }
+    }
+}
+
+impl<DB: Database> StateDB for BalValidationState<DB> {
+    fn bundle_state(&self) -> &BundleState {
+        &self.bundle_state
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle_state
+    }
+
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
+        // np op
+    }
+
+    fn merge_transitions(&mut self, _retention: BundleRetention) {
+        // no op
+    }
+}
+
+impl<DB: Database> Database for BalValidationState<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.database.basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.database.code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.database.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.database.block_hash(number)
+    }
+}
+
+impl<DB: Database> DatabaseCommit for BalValidationState<DB> {
+    fn commit(&mut self, changes: HashMap<Address, Account>) {}
+
+    fn commit_iter(&mut self, changes: impl IntoIterator<Item = (Address, Account)>) {
+        // np op
+    }
+}
+
+impl<DB: DatabaseRef> DatabaseRef for BalValidationState<DB> {
+    type Error = DB::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.database.basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.database.code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.database.storage_ref(address, index)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.database.block_hash_ref(number)
     }
 }
 

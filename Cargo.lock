@@ -3790,8 +3790,10 @@ dependencies = [
  "alloy-op-evm",
  "alloy-primitives 1.4.1",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "alloy-signer-local",
  "alloy-sol-types 1.4.1",
+ "alloy-trie",
  "color-eyre",
  "crossbeam-channel",
  "dashmap 6.1.0",
@@ -3803,6 +3805,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "parking_lot",
+ "proptest",
  "rayon",
  "reth",
  "reth-basic-payload-builder",
@@ -3826,10 +3829,14 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "revm-database-interface",
+ "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.22",
+ "world-chain-payload",
+ "world-chain-pool",
 ]
 
 [[package]]

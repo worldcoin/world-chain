@@ -11,3 +11,4 @@ contracts/sepolia_load_test.json
 /diagnostics
 .DS_Store
 **/.DS_Store
+/crates/flashblocks/builder/tests/proptest-regressions/*
