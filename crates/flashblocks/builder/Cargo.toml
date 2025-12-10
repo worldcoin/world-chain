@@ -60,7 +60,6 @@ dashmap.workspace = true
 thiserror.workspace = true
 either.workspace = true
 metrics.workspace = true
-rand.workspace = true
 
 [dev-dependencies]
 serde.workspace = true

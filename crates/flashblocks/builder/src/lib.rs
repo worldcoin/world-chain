@@ -39,7 +39,6 @@
 //! ### Supporting Modules
 //!
 //! - [`access_list`] - BAL construction and serialization utilities
-//! - [`assembler`] - Block assembly from execution results
 //! - [`traits`] - Abstractions for payload building contexts and builders
 //! - [`payload_txns`] - Transaction iteration with deduplication for incremental builds
 //!
@@ -140,9 +139,6 @@
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
-
-/// Block assembler for flashblocks.
-pub mod assembler;
 
 /// Underlying block executor and builder with BAL construction.
 pub mod executor;
