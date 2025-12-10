@@ -124,8 +124,8 @@ where
             transactions.len() as u16 + 1
         };
 
-        executor.evm_mut().db_mut().set_index(start_index as u16);
-        let counter = BlockAccessIndexCounter::new(start_index as u16);
+        executor.evm_mut().db_mut().set_index(start_index);
+        let counter = BlockAccessIndexCounter::new(start_index);
 
         trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
 

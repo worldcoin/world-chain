@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use alloy_consensus::{BlockHeader, Header, Transaction, transaction};
+use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
@@ -19,9 +19,7 @@ use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
     Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    block::{
-        BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError, StateDB,
-    },
+    block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
@@ -38,17 +36,14 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
     DatabaseRef,
     context::{BlockEnv, TxEnv, result::ExecutionResult},
-    database::{
-        BundleAccount, BundleState, TransitionState,
-        states::{bundle_state::BundleRetention, reverts::Reverts},
-    },
+    database::{BundleAccount, BundleState},
 };
 use tracing::{error, info, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     database::{
-        bal_builder_db::{BalBuilderDb, BalValidationState, NoOpCommitDB},
+        bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
@@ -131,7 +126,7 @@ where
             R::default(),
         );
 
-        executor.gas_used = self.committed_state.gas_used.clone();
+        executor.gas_used = self.committed_state.gas_used;
         executor.receipts = self.committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(

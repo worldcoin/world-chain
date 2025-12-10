@@ -1,4 +1,4 @@
-//! Test utilities for high entropy property-based testing of Block Level Access Lists (BAL)
+// Test utilities for high entropy property-based testing of Block Level Access Lists (BAL)
 use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
@@ -40,6 +40,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
+use tracing::error;
 
 lazy_static::lazy_static! {
     /// Test signer with deterministic private key
@@ -469,6 +470,20 @@ pub fn build_chained_payloads(
         let (outcome, bal_data, bundle_state) =
             execute_serial(prev_outcome.clone(), &transactions)?;
 
+        for receipt in outcome.execution_result.receipts.iter() {
+            if !receipt.as_receipt().status.coerce_status() {
+                error!(
+                    "Transaction failed in execution: {:?}",
+                    receipt.as_receipt()
+                );
+
+                return Err(format!(
+                    "Transaction failed in execution: {:?}",
+                    receipt.as_receipt()
+                )
+                .into());
+            }
+        }
         // Encode transactions for the payload
         let encoded_txs = transaction_sequence_to_encoded(sequence);
 

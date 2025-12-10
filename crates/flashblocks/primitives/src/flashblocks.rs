@@ -58,7 +58,7 @@ impl Flashblock {
                 gas_limit: block.gas_limit(),
                 timestamp: config.attributes.payload_attributes.timestamp,
                 extra_data: block.extra_data().clone(),
-                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(),
+                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
             })
         } else {
             None

@@ -1,6 +1,5 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
-    balance_change,
 };
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -42,22 +41,22 @@ impl FlashblockAccessList {
     pub fn flush(&mut self) {
         let ret_non_empty = |c: &mut Vec<AccountChanges>| {
             c.retain_mut(|change: &mut AccountChanges| {
-                let mut balance_changes = change
+                let balance_changes = change
                     .balance_changes
                     .iter()
                     .filter(|b| b.post_balance() != U256::ZERO)
                     .count();
-                let mut nonce_changes = change
+                let nonce_changes = change
                     .nonce_changes
                     .iter()
                     .filter(|n| n.new_nonce() != 0)
                     .count();
-                let mut code_changes = change
+                let code_changes = change
                     .code_changes
                     .iter()
                     .filter(|c| *c.new_code() != Bytes::default())
                     .count();
-                let mut storage_changes = change
+                let storage_changes = change
                     .storage_changes
                     .iter()
                     .filter(|slot_changes| {

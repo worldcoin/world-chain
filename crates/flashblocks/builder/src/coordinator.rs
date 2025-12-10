@@ -28,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     executor::CommittedState,
@@ -259,6 +259,14 @@ where
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
+
+    info!(
+        target: "flashblocks::state_executor",
+        id = %flashblock.flashblock.payload_id,
+        index = %flashblock.flashblock.index,
+        execution_context = ?execution_context,
+        "building payload from flashblock"
+    );
 
     let next_block_context = OpNextBlockEnvAttributes {
         timestamp: base.timestamp,

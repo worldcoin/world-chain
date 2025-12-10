@@ -66,11 +66,11 @@ fn unwrap_committed_state(
 }
 
 mod property_tests {
-    use std::{ops::Deref, path::PathBuf};
+    use std::path::PathBuf;
 
-    use flashblocks_builder::executor::{BalExecutorError, BalValidationError};
+    use flashblocks_builder::executor::BalExecutorError;
     use proptest::{prelude::Strategy, prop_assert, proptest};
-    use serde::Serialize;
+
     use std::io::Write;
 
     use crate::{
@@ -81,11 +81,6 @@ mod property_tests {
         proptest::{unwrap_committed_state, validate},
     };
 
-    /// Writes debug output to a file when `PROPTEST_DEBUG_OUTPUT` env var is set.
-    ///
-    /// Usage:
-    /// - `PROPTEST_DEBUG_OUTPUT=1 cargo test` - enables debug output
-    /// - `PROPTEST_DEBUG_OUTPUT=/path/to/file.txt cargo test` - writes to custom path
     pub fn debug_output<T: serde::Serialize>(value: &T) {
         let dir: PathBuf = env!("CARGO_MANIFEST_DIR").into();
         let path: PathBuf = dir.join("tests/proptest-regressions/debug_error.json");
@@ -189,11 +184,9 @@ mod property_tests {
 
             let result = validate(&diff, committed);
             if let Err(err) = &result {
-                err.downcast_ref::<BalExecutorError>().map(|e| {
-                    if let BalExecutorError::BalValidationError(e) = e {
-                        debug_output(e);
-                    }
-                });
+                if let Some(e) = err.downcast_ref::<BalExecutorError>() {
+                    debug_output(e);
+                }
 
                 panic!("Flashblock {} validation failed: {:?}", i, err);
             }
@@ -255,11 +248,9 @@ mod property_tests {
 
             let result = validate(&diff, committed);
             if let Err(err) = &result {
-                err.downcast_ref::<BalExecutorError>().map(|e| {
-                    if let BalExecutorError::BalValidationError(e) = e {
-                        debug_output(e);
-                    }
-                });
+                if let Some(e) = err.downcast_ref::<BalExecutorError>() {
+                    debug_output(e);
+                }
 
                 panic!("Flashblock {} validation failed: {:?}", i, err);
             }
@@ -267,39 +258,31 @@ mod property_tests {
     }
 
     proptest! {
-            #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
+                #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
 
-            #[test]
-            fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
-                for (diff, committed_state) in payloads.into_iter(){
+                #[test]
+                fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
+                    for (diff, committed_state) in payloads.into_iter(){
+                        let committed = unwrap_committed_state(committed_state);
+                       let payload = validate(&diff, committed);
+                        if let Err(err) = &payload
+                            && let Some(e) = err.downcast_ref::<BalExecutorError>() {
+                                debug_output(e);
+                            }
+                        prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
+                    }
+                }
+
+                #[test]
+                fn prop_validate_single(payload in arb_execution_payload(10)) {
+                    let (diff, committed_state) = payload;
                     let committed = unwrap_committed_state(committed_state);
                     let payload = validate(&diff, committed);
-                    if let Err(err) = &payload {
-                            err.downcast_ref::<BalExecutorError>().map(|e| {
-                            if let BalExecutorError::BalValidationError(e) = e {
-                                debug_output(e);
-                            }
-                            eprintln!("Error: {:#?}", e);
-                        });
-                    }
+                    if let Err(err) = &payload
+                        && let Some(e) = err.downcast_ref::<BalExecutorError>() {
+                            debug_output(e);
+                        }
                     prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
                 }
-            }
-
-            #[test]
-            fn prop_validate_single(payload in arb_execution_payload(10)) {
-                let (diff, committed_state) = payload;
-                let committed = unwrap_committed_state(committed_state);
-                let payload = validate(&diff, committed);
-                 if let Err(err) = &payload {
-                            err.downcast_ref::<BalExecutorError>().map(|e| {
-                            if let BalExecutorError::BalValidationError(e) = e {
-                                debug_output(e);
-                            }
-                            eprintln!("Error: {:#?}", e);
-                        });
-                    }
-                prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
-            }
-        }
+    }
 }

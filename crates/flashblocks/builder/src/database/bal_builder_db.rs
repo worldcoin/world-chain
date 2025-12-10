@@ -514,8 +514,10 @@ impl<DB: DatabaseRef> BalValidationState<DB> {
             hash_map::Entry::Occupied(entry) => {
                 let account = entry.into_mut();
                 let info = self.database.basic(address)?;
-                if let Some(acc_info) = info {
-                    account.account.as_mut().map(|a| a.info = acc_info);
+                if let Some(a) = account.account.as_mut()
+                    && let Some(info) = info
+                {
+                    a.info = info;
                 }
 
                 Ok(account)
@@ -556,7 +558,7 @@ impl<DB: DatabaseRef> Database for BalValidationState<DB> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let res = match self.cache.contracts.entry(code_hash) {
+        match self.cache.contracts.entry(code_hash) {
             hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
             hash_map::Entry::Vacant(entry) => {
                 // If not found in bundle ask database
@@ -564,8 +566,7 @@ impl<DB: DatabaseRef> Database for BalValidationState<DB> {
                 entry.insert(code.clone());
                 Ok(code)
             }
-        };
-        res
+        }
     }
 
     fn storage(

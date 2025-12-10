@@ -8,7 +8,6 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use crossbeam_channel::at;
 use reth_evm::{EvmFactory, block::StateDB};
 
 use alloy_consensus::{BlockHeader, Header};
