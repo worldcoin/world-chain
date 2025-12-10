@@ -61,6 +61,7 @@ thiserror.workspace = true
 either.workspace = true
 metrics.workspace = true
 rand.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 serde.workspace = true
@@ -77,3 +78,7 @@ alloy-trie.workspace = true
 world-chain-pool.workspace = true
 world-chain-payload.workspace = true
 tracing-subscriber.workspace = true
+
+[[test]]
+name = "proptest"
+path = "tests/it/main.rs"

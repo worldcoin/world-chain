@@ -12,7 +12,7 @@ use reth::{
 };
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
-use reth_evm::{ConfigureEvm, op_revm::api::exec};
+use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -285,7 +285,7 @@ where
             &flashblock.diff().transactions,
             transactions_offset as u16,
         )?;
-        
+
         let block_validator = FlashblocksBlockValidator {
             chain_spec: chain_spec.clone(),
             evm_config: evm_config.clone(),
