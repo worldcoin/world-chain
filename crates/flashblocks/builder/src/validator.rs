@@ -14,7 +14,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::{revm::database::StateProviderDatabase};
+use reth::revm::database::StateProviderDatabase;
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{

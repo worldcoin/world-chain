@@ -41,8 +41,7 @@ use revm::{
 };
 use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
-#[derive(thiserror::Error, Debug)]
-#[derive(serde::Serialize)]
+#[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
     #[error("Block execution error")]
     BalHashMismatch {
@@ -70,18 +69,17 @@ impl BalValidationError {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-#[derive(serde::Serialize)]
+#[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalExecutorError {
     #[error(transparent)]
-    #[ serde(skip_serializing)]
+    #[serde(skip_serializing)]
     BlockExecutionError(#[from] BlockExecutionError),
     #[error("Missing executed block in built payload")]
     MissingExecutedBlock,
     #[error(transparent)]
     BalValidationError(#[from] Box<BalValidationError>),
     #[error("Inernal Error: {0}")]
-    #[ serde(skip_serializing)]
+    #[serde(skip_serializing)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
