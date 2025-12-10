@@ -53,6 +53,7 @@ pub enum BalValidationError {
     StateRootMismatch {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
+        bundle_state: BundleState,
     },
     #[error("Receipts Root Mismatch: expected {expected:?}, got: {got:?}")]
     ReceiptsRootMismatch {
@@ -114,10 +115,13 @@ where
         chain_spec: Arc<OpChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
     ) -> Self {
-        let start_index = transactions.len();
+        let start_index = if transactions.is_empty() {
+            0
+        } else {
+            transactions.len() as u16 + 1
+        };
 
         executor.evm_mut().db_mut().set_index(start_index as u16);
-
         let counter = BlockAccessIndexCounter::new(start_index as u16);
 
         Self {
@@ -166,7 +170,10 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        let res = self.inner.apply_pre_execution_changes();
+        // prepare the transaction index for the next transaction 1
+        self.prepare_database()?;
+        res
     }
 
     fn execute_transaction_with_commit_condition(
@@ -177,15 +184,25 @@ where
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+        // prepare the transaction index for the next transaction
+        debug_assert_eq!(
+            self.inner.executor.receipts.len() as u16,
+            self.counter.current_index,
+            "Transaction index should be one more than the number of executed transactions"
+        );
         self.prepare_database()?;
         res
     }
 
     fn finish(
-        mut self,
+        self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        self.prepare_database()?;
+        debug_assert_eq!(
+            self.inner.executor.receipts.len() as u16 + 1,
+            self.counter.current_index,
+            "Transaction index should be one more than the number of executed transactions"
+        );
 
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -291,7 +308,7 @@ impl BlockAccessIndexCounter {
     }
 
     pub fn finish(self) -> (u16, u16) {
-        (self.start_index, self.current_index + 1)
+        (self.start_index, self.current_index)
     }
 }
 

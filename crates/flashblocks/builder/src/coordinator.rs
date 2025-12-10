@@ -12,7 +12,7 @@ use reth::{
 };
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, op_revm::api::exec};
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
@@ -275,14 +275,17 @@ where
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .unwrap();
 
-    let transactions_offset = committed_state.transactions.len() as u16;
-
+    let transactions_offset = committed_state.transactions.len() + 1;
     let start = Instant::now();
+
     let payload = if flashblock.diff().access_list_data.is_some() {
         let sealed_header = Arc::new(sealed_header);
-        let executor_transactions =
-            decode_transactions_with_indices(&flashblock.diff().transactions, transactions_offset)?;
 
+        let executor_transactions = decode_transactions_with_indices(
+            &flashblock.diff().transactions,
+            transactions_offset as u16,
+        )?;
+        
         let block_validator = FlashblocksBlockValidator {
             chain_spec: chain_spec.clone(),
             evm_config: evm_config.clone(),

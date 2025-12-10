@@ -39,11 +39,13 @@ impl FlashblockAccessList {
     /// Removes duplicate entries by key, keeping the last occurrence (highest block_access_index).
     /// Results are re-ordered ascending by block_access_index.
     pub fn dedup(&mut self) {
-        for change in &mut self.changes {
+        self.changes.retain_mut(|change| {
+            // TODO: Check if elements on the BAL are empty. If they _all_ are remove the item
             change.balance_changes.reverse();
             change.balance_changes.dedup_by_key(|n| n.post_balance());
             change.balance_changes.sort_by_key(|n| n.block_access_index);
 
+            
             change.nonce_changes.reverse();
             change.nonce_changes.dedup_by_key(|n| n.new_nonce());
             change.nonce_changes.sort_by_key(|n| n.block_access_index);
@@ -57,7 +59,14 @@ impl FlashblockAccessList {
                 slot_changes.changes.dedup_by_key(|s| s.new_value);
                 slot_changes.changes.sort_by_key(|s| s.block_access_index);
             }
-        }
+
+            if !(change.storage_changes.is_empty()
+                && change.balance_changes.is_empty()
+                && change.nonce_changes.is_empty()
+                && change.code_changes.is_empty())
+            {}
+            false
+        });
     }
 
     pub fn extend(&mut self, other: &FlashblockAccessList) {
@@ -115,7 +124,7 @@ impl FlashblockAccessList {
                         .storage_ref(account_changes.address, slot)
                         .ok()
                         .unwrap_or(U256::ZERO);
-                    
+
                     bundle_account.storage.insert(
                         slot,
                         StorageSlot {

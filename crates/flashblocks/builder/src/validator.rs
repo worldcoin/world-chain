@@ -14,7 +14,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::revm::database::StateProviderDatabase;
+use reth::{revm::database::StateProviderDatabase, rpc::api::eth::bundle};
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
@@ -48,15 +48,15 @@ use tracing::{error, info, trace};
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     database::{
-        bal_builder_db::{BalBuilderDb, BalValidationState},
+        bal_builder_db::{BalBuilderDb, BalValidationState, NoOpCommitDB},
         bundle_db::BundleDb,
-        temporal_db::TemporalDbFactory,
+        temporal_db::{TemporalDb, TemporalDbFactory},
     },
     executor::{BalExecutorError, BalValidationError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
-pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut BalValidationState<DB>>;
+pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
 
 pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
     pub chain_spec: Arc<OpChainSpec>,
@@ -89,40 +89,36 @@ where
 
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());
-
-        // The base bundle contains state changes from prior flashblocks only.
-        // This ensures the BundleDb provides the pre-state for the current flashblock.
-        let base_bundle = self.committed_state.bundle.clone();
-
-        let bundle_db = BundleDb::new(state_provider_database.clone(), base_bundle.clone());
-
-        let start_index = self.committed_state.transactions.len() as u16;
-
-        let temporal_db_factory = TemporalDbFactory::new(Arc::new(bundle_db), access_list.clone());
-
-        let mut state = BalValidationState::new(temporal_db_factory.db(start_index as u64));
-
-        let mut database = BalBuilderDb::new(&mut state);
-        database.set_index(start_index);
+        let block_access_index = access_list.min_tx_index;
 
         // 2. Create channel for state root computation
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
 
+        let mut bundle_state = self.committed_state.bundle.clone();
+
+        let bundle_database =
+            BundleDb::new(state_provider_database.clone(), bundle_state.clone().into());
+
+        let temporal_db_factory = TemporalDbFactory::new(bundle_database, access_list.clone());
+        let temporal_db = temporal_db_factory.db(block_access_index as u64);
+
         // The cumulative bundle for state root computation contains all state changes
         // from prior flashblocks plus the current access list.
-        let mut state_root_bundle = base_bundle;
         access_list
-            .extend_bundle(&mut state_root_bundle, &state_provider_database)
+            .extend_bundle(&mut bundle_state, &state_provider_database)
             .map_err(BalExecutorError::other)?;
 
-        let state_bundle_clone = state_root_bundle.clone();
+        let mut state = NoOpCommitDB::new(temporal_db);
 
+        let mut database = BalBuilderDb::new(&mut state);
+        database.set_index(block_access_index);
+
+        let bundle_clone = bundle_state.clone();
         let state_provider_clone = state_provider.clone();
 
         // 3. Spawn the state root computation in a separate thread
         rayon::spawn(move || {
-            let result =
-                compute_state_root(state_provider_clone, state_root_bundle.clone().state());
+            let result = compute_state_root(state_provider_clone.clone(), &bundle_clone.state);
             let _ = state_root_sender.send(result);
         });
 
@@ -135,20 +131,20 @@ where
             R::default(),
         );
 
-        executor.gas_used = self.committed_state.gas_used;
+        executor.gas_used = self.committed_state.gas_used.clone();
         executor.receipts = self.committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
             self.execution_context.clone(),
             parent,
             executor,
+            bundle_state.clone().into(),
             self.committed_state.transactions_iter().cloned().collect(),
             self.chain_spec.clone(),
             temporal_db_factory,
             state_root_receiver,
             self.evm_env.clone(),
             (access_list.min_tx_index, access_list.max_tx_index),
-            state_bundle_clone.clone(),
         );
 
         // 4. Compute the block using BAL in parallel
@@ -204,12 +200,14 @@ where
                 target: "flashblocks::state_executor",
                 got = ?outcome.block.state_root,
                 expected = ?diff.state_root,
+                expected_bundle = ?bundle_state,
                 "State root mismatch"
             );
 
             return Err(BalValidationError::StateRootMismatch {
                 expected: diff.state_root,
                 got: outcome.block.state_root,
+                bundle_state: bundle_state.clone(),
             }
             .boxed()
             .into());
@@ -244,7 +242,7 @@ where
         let sealed_block = Arc::new(block.sealed_block().clone());
 
         let execution_outcome = ExecutionOutcome::new(
-            state_bundle_clone.clone(),
+            bundle_state.clone(),
             vec![execution_result.receipts.clone()],
             block.number(),
             Vec::new(),
@@ -283,7 +281,6 @@ pub struct ParalleExecutionResult {
     pub access_list: FlashblockAccessListConstruction,
     /// Transaction index within the block
     pub index: BlockAccessIndex,
-    pub transitions: Option<TransitionState>,
 }
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
@@ -295,13 +292,13 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuild
         OpBlockAssembler<OpChainSpec>,
         OpPrimitives,
     >,
+    pub bundle_state: Arc<BundleState>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub state_root_receiver:
         crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
     pub temporal_db_factory: TemporalDbFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
-    pub bundle_state: BundleState,
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -321,6 +318,7 @@ where
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
         executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
+        bundle_state: Arc<BundleState>,
         transactions: Vec<Recovered<OpTransactionSigned>>,
         chain_spec: Arc<OpChainSpec>,
         temporal_db_factory: TemporalDbFactory<DBRef>,
@@ -329,7 +327,6 @@ where
         >,
         evm_env: EvmEnv<OpSpecId>,
         index_range: (u16, u16),
-        bundle: BundleState,
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
@@ -342,12 +339,12 @@ where
                     parent,
                     transactions,
                 },
+                bundle_state,
                 access_list_sender: tx,
                 state_root_receiver,
                 temporal_db_factory,
                 evm_env,
                 index_range,
-                bundle_state: bundle,
             },
             rx,
         )
@@ -357,7 +354,7 @@ where
     pub fn prepare_database(&mut self, index: u16) -> Result<(), BlockExecutionError> {
         let db = self.inner.executor.evm_mut().db_mut();
         // Set the temporal db index
-        db.db_mut().database.0.set_index(index as u64);
+        db.db_mut().db_mut().set_index(index as u64);
         // Set the bal builder db index
         db.set_index(index);
         Ok(())
@@ -396,34 +393,11 @@ where
     }
 
     fn finish(
-        mut self,
+        self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
-        self.prepare_database(self.index_range.1)?;
         let (evm, result) = self.inner.executor.finish()?;
-        let (mut db, evm_env) = evm.finish();
-
-        // merge all transitions into bundle state
-        db.merge_transitions(BundleRetention::Reverts);
-
-        // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-        // which represent a single atomic state transition. therefore reverts should have length 1
-        // we only retain the first occurance of a revert for any given account.
-        let flattened = db
-            .bundle_state()
-            .reverts
-            .iter()
-            .flatten()
-            .scan(HashSet::new(), |visited, (acc, revert)| {
-                if visited.insert(acc) {
-                    Some((*acc, revert.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        db.bundle_state_mut().reverts = Reverts::new(vec![flattened]);
+        let (db, evm_env) = evm.finish();
 
         // Wait for the state root result from the async computation
         let StateRootResult {
@@ -452,13 +426,12 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(&self.bundle_state),
+            Cow::Borrowed(self.bundle_state.as_ref()),
             &state,
             state_root,
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-
         let access_list = db
             .finish()
             .map_err(InternalBlockExecutionError::other)?
@@ -514,6 +487,9 @@ where
         > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
         + Clone,
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
+        self.prepare_database(self.index_range.0)?;
+        self.apply_pre_execution_changes()?;
+
         let spec = self.inner.executor.spec.clone();
         let receipt_builder: R = self.inner.executor.receipt_builder.clone();
         let execution_context = self.inner.ctx.clone();
@@ -557,32 +533,16 @@ where
         results.sort_unstable_by_key(|r| r.index);
 
         let merged_result = merge_transaction_results(results, gas_used);
-
-        // If we have no pre-loaded receipts then we need to apply pre-execution changes
-        if self.index_range.0 == 0 {
-            self.prepare_database(0)?;
-            self.apply_pre_execution_changes()?;
-        }
-
         let database = self.inner.executor_mut().evm_mut().db_mut();
 
         // merge the aggregated access list into the AsyncBalBuilderDb
         database.merge_access_list(merged_result.access_list);
-
-        if let Some(t) = merged_result.transitions {
-            database
-                .db_mut()
-                .transition_state
-                .get_or_insert_with(|| TransitionState::default())
-                .add_transitions(t.transitions);
-        }
 
         // append the accumulated receipts and gas used into the executor
         self.inner
             .executor
             .receipts
             .extend_from_slice(&merged_result.receipts);
-
         self.inner.executor.gas_used = merged_result.gas_used;
 
         // append the _executed_ transactions into the executor
@@ -592,6 +552,15 @@ where
                 .map(|(_, tx)| tx)
                 .collect::<Vec<_>>(),
         );
+
+        debug_assert_eq!(
+            merged_result.index + 1,
+            self.index_range.1,
+            "Final transaction index should match the expected range"
+        );
+
+        // finalize the database index
+        self.prepare_database(self.index_range.1)?;
 
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
@@ -609,11 +578,6 @@ fn merge_transaction_results(
         },
         |mut acc, mut res| {
             acc.gas_used += res.gas_used;
-            if let Some(transitions) = res.transitions.take() {
-                acc.transitions
-                    .get_or_insert_with(|| TransitionState::default())
-                    .add_transitions(transitions.transitions);
-            }
             if let Some(mut receipt) = res.receipts.pop() {
                 receipt.as_receipt_mut().cumulative_gas_used = acc.gas_used;
                 acc.receipts.push(receipt);
@@ -621,7 +585,7 @@ fn merge_transaction_results(
 
             acc.access_list.merge(res.access_list);
             acc.fees += res.fees;
-            acc.index = res.index;
+            acc.index = acc.index.max(res.index);
             acc
         },
     )
@@ -645,10 +609,9 @@ where
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     let temporal_db = db_factory.db(index as u64);
-
-    let state = BalValidationState::new(temporal_db);
-
+    let state = NoOpCommitDB::new(temporal_db);
     let mut database = BalBuilderDb::new(state);
+
     database.set_index(index);
 
     let evm = OpEvmFactory::default().create_evm(database, evm_env);
@@ -675,8 +638,7 @@ where
             .expect("fee is always valid; execution succeeded")
     };
 
-    let (mut db, _evm_env) = evm.finish();
-    let transitions = db.db_mut().transition_state.take();
+    let (db, _evm_env) = evm.finish();
     let access_list = db.finish().map_err(BalExecutorError::other)?;
 
     Ok(ParalleExecutionResult {
@@ -685,7 +647,6 @@ where
         fees,
         access_list,
         index,
-        transitions,
     })
 }
 

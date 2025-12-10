@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use alloy_primitives::{Address, B256};
 use revm::{
     DatabaseRef,
@@ -10,14 +12,14 @@ use revm::{
 #[derive(Clone, Debug)]
 pub struct BundleDb<DB: DatabaseRef> {
     /// Layer 1: Underlying [`BundleState`] from prior flashblocks _or_ the pre-execution changes.
-    pub bundle: BundleState,
+    pub bundle: Arc<BundleState>,
     /// Layer 2: The underlying database
     pub db: DB,
 }
 
 impl<DB: DatabaseRef> BundleDb<DB> {
     /// Creates a new [`BundleDb`] from the given bundle state and underlying database.
-    pub fn new(db: DB, bundle: BundleState) -> Self {
+    pub fn new(db: DB, bundle: Arc<BundleState>) -> Self {
         Self { bundle, db }
     }
 }
