@@ -160,7 +160,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    const TRANSACTIONS_PER_FLASHBLOCK: u64 = 1;
+    const TRANSACTIONS_PER_FLASHBLOCK: u64 = 20;
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

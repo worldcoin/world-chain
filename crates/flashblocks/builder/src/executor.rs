@@ -19,6 +19,7 @@ use revm::{
     context::{BlockEnv, TxEnv},
     database::BundleState,
 };
+use tracing::trace;
 
 use crate::{access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
@@ -41,6 +42,7 @@ use revm::{
 use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 #[derive(thiserror::Error, Debug)]
+#[derive(serde::Serialize)]
 pub enum BalValidationError {
     #[error("Block execution error")]
     BalHashMismatch {
@@ -69,14 +71,17 @@ impl BalValidationError {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[derive(serde::Serialize)]
 pub enum BalExecutorError {
-    #[error("Block execution error: {0}")]
+    #[error(transparent)]
+    #[ serde(skip_serializing)]
     BlockExecutionError(#[from] BlockExecutionError),
     #[error("Missing executed block in built payload")]
     MissingExecutedBlock,
     #[error(transparent)]
     BalValidationError(#[from] Box<BalValidationError>),
     #[error("Inernal Error: {0}")]
+    #[ serde(skip_serializing)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
@@ -124,6 +129,8 @@ where
         executor.evm_mut().db_mut().set_index(start_index as u16);
         let counter = BlockAccessIndexCounter::new(start_index as u16);
 
+        trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
+
         Self {
             inner: BasicBlockBuilder {
                 executor,
@@ -138,10 +145,11 @@ where
     }
 
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
+        let length = self.inner.transactions.len() as u16;
         let db = self.inner.executor.evm_mut().db_mut();
         let current = self.counter.inc();
+        trace!(target: "bal_executor", block_access_index = %current,  receipts_length = %length, "Preparing database for next transaction with index");
         db.set_index(current);
-
         Ok(())
     }
 }
@@ -185,11 +193,6 @@ where
     ) -> Result<Option<u64>, BlockExecutionError> {
         let res = self.inner.execute_transaction_with_commit_condition(tx, f);
         // prepare the transaction index for the next transaction
-        debug_assert_eq!(
-            self.inner.executor.receipts.len() as u16,
-            self.counter.current_index,
-            "Transaction index should be one more than the number of executed transactions"
-        );
         self.prepare_database()?;
         res
     }
@@ -198,12 +201,6 @@ where
         self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        debug_assert_eq!(
-            self.inner.executor.receipts.len() as u16 + 1,
-            self.counter.current_index,
-            "Transaction index should be one more than the number of executed transactions"
-        );
-
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
@@ -289,6 +286,7 @@ where
     }
 }
 
+/// Simple counter to track sub pre-confirmation block access index bounds.
 pub struct BlockAccessIndexCounter {
     current_index: u16,
     start_index: u16,
@@ -312,13 +310,20 @@ impl BlockAccessIndexCounter {
     }
 }
 
+/// [`CommittedState`] holds all relevant information about the intra block state committment
+/// for which we are executing on top of.
 #[derive(Default, Debug, Clone)]
 
 pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
+    /// The total gas used in previous committed transactions.
     pub gas_used: u64,
+    /// The total fees accumulated in previous committed transactions.
     pub fees: U256,
+    /// The bundle state accumulated so far from the State Transitions
     pub bundle: BundleState,
+    /// Ordered receipts of previous committed transactions.
     pub receipts: Vec<(BlockAccessIndex, R::Receipt)>,
+    /// Ordered transactions which have been executed
     pub transactions: Vec<(BlockAccessIndex, Recovered<R::Transaction>)>,
 }
 
@@ -326,10 +331,12 @@ impl<R> CommittedState<R>
 where
     R: OpReceiptBuilder + Default,
 {
+    /// Iterator over committed transactions
     pub fn transactions_iter(&self) -> impl Iterator<Item = &'_ Recovered<R::Transaction>> + '_ {
         self.transactions.iter().map(|(_, tx)| tx)
     }
 
+    /// Iterator over committed transaction hashes
     pub fn transaction_hashes_iter(&self) -> impl Iterator<Item = FixedBytes<32>> + '_
     where
         R::Transaction: Clone + TxHashRef,
@@ -340,6 +347,7 @@ where
             .copied()
     }
 
+    /// Iterator over committed receipts
     pub fn receipts_iter(&self) -> impl Iterator<Item = &'_ R::Receipt> + '_ {
         self.receipts.iter().map(|(_, r)| r)
     }

@@ -8,6 +8,7 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
+use crossbeam_channel::at;
 use reth_evm::{EvmFactory, block::StateDB};
 
 use alloy_consensus::{BlockHeader, Header};
@@ -35,7 +36,7 @@ use reth_evm::{
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_primitives::NodePrimitives;
-use tracing::warn;
+use tracing::{info, warn};
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -306,6 +307,8 @@ where
             Default::default()
         },
     };
+
+    info!(target: "flashblocks::payload_builder", ?attributes, "prepared next block attributes");
 
     // Prepare EVM environment.
     let evm_env = ctx

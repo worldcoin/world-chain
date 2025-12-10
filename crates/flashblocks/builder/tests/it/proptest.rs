@@ -65,26 +65,35 @@ fn unwrap_committed_state(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
+mod property_tests {
+    use std::{ops::Deref, path::PathBuf};
 
-    use flashblocks_builder::executor::BalExecutorError;
+    use flashblocks_builder::executor::{BalExecutorError, BalValidationError};
     use proptest::{prelude::Strategy, prop_assert, proptest};
+    use serde::Serialize;
     use std::io::Write;
 
     use crate::{
-        fixtures::{arb_execution_payload, arb_execution_payload_sequence, build_chained_payloads, TxOp, ChaosTarget, ALICE, BOB},
+        fixtures::{
+            ALICE, BOB, ChaosTarget, TxOp, arb_execution_payload, arb_execution_payload_sequence,
+            build_chained_payloads,
+        },
         proptest::{unwrap_committed_state, validate},
     };
 
-    pub fn debug_output<T: std::fmt::Debug>(value: &T) {
+    /// Writes debug output to a file when `PROPTEST_DEBUG_OUTPUT` env var is set.
+    ///
+    /// Usage:
+    /// - `PROPTEST_DEBUG_OUTPUT=1 cargo test` - enables debug output
+    /// - `PROPTEST_DEBUG_OUTPUT=/path/to/file.txt cargo test` - writes to custom path
+    pub fn debug_output<T: serde::Serialize>(value: &T) {
         let dir: PathBuf = env!("CARGO_MANIFEST_DIR").into();
-        let file_path = dir.join("tests/proptest-regressions/debug_output.txt");
-        let file = std::fs::File::create(&file_path).expect("Unable to create debug output file");
+        let path: PathBuf = dir.join("tests/proptest-regressions/debug_error.json");
 
+        let file = std::fs::File::create(&path).expect("Unable to create debug output file");
         let mut writer = std::io::BufWriter::new(file);
-        writeln!(writer, "{:#?}", value).expect("Unable to write debug output");
+        serde_json::to_writer_pretty(&mut writer, &value).expect("Unable to write debug output");
+        writer.flush().expect("Unable to flush debug output");
     }
 
     /// Test that validates transactions across multiple flashblocks where the same sender
@@ -97,15 +106,71 @@ mod tests {
         // Flashblock 2: ALICE sends tx with nonce 4, 5, 6, 7
         let sequence: Vec<(TxOp, u64)> = vec![
             // Flashblock 1 transactions
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 0),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 1),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 2),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 3),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                0,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                1,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                2,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                3,
+            ),
             // Flashblock 2 transactions
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 4),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 5),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 6),
-            (TxOp::Transfer { from: ALICE.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 7),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                4,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                5,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                6,
+            ),
+            (
+                TxOp::Transfer {
+                    from: ALICE.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                7,
+            ),
         ];
 
         // Build payloads with 2 flashblocks (4 txs each)
@@ -116,11 +181,22 @@ mod tests {
         // Validate each flashblock
         for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
             let committed = unwrap_committed_state(committed_state);
-            eprintln!("Validating flashblock {} with {} committed txs", i, committed.transactions.len());
+            eprintln!(
+                "Validating flashblock {} with {} committed txs",
+                i,
+                committed.transactions.len()
+            );
 
             let result = validate(&diff, committed);
             if let Err(err) = &result {
-                debug_output(&err.downcast_ref::<BalExecutorError>());
+                err.downcast_ref::<BalExecutorError>().map(|e| {
+                    if let BalExecutorError::BalValidationError(e) = e.deref().clone() {
+                        let downcast = e.deref().clone();
+
+                        debug_output(downcast.clone());
+                    }
+                });
+
                 panic!("Flashblock {} validation failed: {:?}", i, err);
             }
         }
@@ -132,11 +208,39 @@ mod tests {
         // Create a sequence where we call fib() which modifies storage
         let sequence: Vec<(TxOp, u64)> = vec![
             // Flashblock 1: ALICE calls fib(5) on the proxy, BOB does a transfer
-            (TxOp::Fib { from: ALICE.clone(), n: 5, target: ChaosTarget::Proxy }, 0),
-            (TxOp::Transfer { from: BOB.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 0),
+            (
+                TxOp::Fib {
+                    from: ALICE.clone(),
+                    n: 5,
+                    target: ChaosTarget::Proxy,
+                },
+                0,
+            ),
+            (
+                TxOp::Transfer {
+                    from: BOB.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                0,
+            ),
             // Flashblock 2: ALICE calls fib(8) on the proxy (should see storage from fib(5))
-            (TxOp::Fib { from: ALICE.clone(), n: 8, target: ChaosTarget::Proxy }, 1),
-            (TxOp::Transfer { from: BOB.clone(), to: alloy_primitives::Address::random(), value: alloy_primitives::U256::from(100) }, 1),
+            (
+                TxOp::Fib {
+                    from: ALICE.clone(),
+                    n: 8,
+                    target: ChaosTarget::Proxy,
+                },
+                1,
+            ),
+            (
+                TxOp::Transfer {
+                    from: BOB.clone(),
+                    to: alloy_primitives::Address::random(),
+                    value: alloy_primitives::U256::from(100),
+                },
+                1,
+            ),
         ];
 
         let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
@@ -145,18 +249,27 @@ mod tests {
 
         for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
             let committed = unwrap_committed_state(committed_state);
-            eprintln!("Validating flashblock {} with {} committed txs", i, committed.transactions.len());
+            eprintln!(
+                "Validating flashblock {} with {} committed txs",
+                i,
+                committed.transactions.len()
+            );
 
             let result = validate(&diff, committed);
             if let Err(err) = &result {
-                debug_output(&err.downcast_ref::<BalExecutorError>());
+                err.downcast_ref::<BalExecutorError>().map(|e| {
+                    if let BalExecutorError::BalValidationError(e) = e {
+                        debug_output(e);
+                    }
+                });
+
                 panic!("Flashblock {} validation failed: {:?}", i, err);
             }
         }
     }
 
     proptest! {
-        #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
+        #![proptest_config(crate::proptest::ProptestConfig::with_cases(10))]
 
         #[test]
         fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
@@ -164,8 +277,12 @@ mod tests {
                 let committed = unwrap_committed_state(committed_state);
                 let payload = validate(&diff, committed);
                 if let Err(err) = &payload {
-                    let e = &err.downcast_ref::<BalExecutorError>();
-                    debug_output(e);
+                        err.downcast_ref::<BalExecutorError>().map(|e| {
+                        if let BalExecutorError::BalValidationError(e) = e {
+                            debug_output(e);
+                        }
+                        eprintln!("Error: {:#?}", e);
+                    });
                 }
                 prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
 

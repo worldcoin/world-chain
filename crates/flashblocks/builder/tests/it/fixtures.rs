@@ -1,8 +1,9 @@
+//! Test utilities for high entropy property-based testing of Block Level Access Lists (BAL)
 use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
-use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, hex, keccak256};
+use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, bytes, hex, keccak256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
@@ -141,7 +142,7 @@ lazy_static::lazy_static! {
     pub static ref BLOCK_EXECUTION_CTX: OpBlockExecutionCtx = OpBlockExecutionCtx {
         parent_beacon_block_root: Some(FixedBytes::ZERO),
         parent_hash: CHAIN_SPEC.genesis_hash(),
-        ..Default::default()
+        extra_data: bytes!("0x000000000800000002")
     };
 
     pub static ref NEXT_BLOCK_ENV_ATTRS: OpNextBlockEnvAttributes = OpNextBlockEnvAttributes {
@@ -150,7 +151,7 @@ lazy_static::lazy_static! {
         prev_randao: FixedBytes::ZERO,
         gas_limit: CHAIN_SPEC.genesis_header().gas_limit,
         parent_beacon_block_root: Some(FixedBytes::ZERO),
-        extra_data: Bytes::default(),
+        extra_data: bytes!("0x000000000800000002"),
     };
 
     pub static ref SEALED_HEADER: SealedHeader = SealedHeader::seal_slow(CHAIN_SPEC.genesis_header().clone());
@@ -162,7 +163,7 @@ lazy_static::lazy_static! {
 
 sol! {
     #[sol(bytecode = "0x6080604052348015600e575f5ffd5b5060b680601a5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056")]
-    contract ChaosTest {
+    contract Fib {
         constructor() {}
 
         bytes32 constant FIB_BASE =
@@ -197,7 +198,7 @@ sol! {
     }
 
     #[sol(bytecode = "0x6080604052348015600e575f5ffd5b50604051610223380380610223833981016040819052602b916051565b7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc55607c565b5f602082840312156060575f5ffd5b81516001600160a01b03811681146075575f5ffd5b9392505050565b61019a806100895f395ff3fe608060405260043610601e575f3560e01c8063b243cd76146067576024565b36602457005b7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc54365f5f375f5f365f845af490503d5f5f3e8080156061573d5ff35b3d5ffd5b005b3480156071575f5ffd5b5060655f604051607f9060bd565b604051809103905ff0801580156097573d5f5f3e3d5ffd5b507f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc5550565b60d0806100ca8339019056fe6080604052348015600e575f5ffd5b5060b680601a5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056")]
-    contract ChaosTestProxy {
+    contract FibProxy {
         bytes32 constant IMPL_SLOT =
             0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
@@ -287,11 +288,11 @@ impl TxOp {
             TxOp::Transfer { .. } => Bytes::default(),
             TxOp::Fib { n, .. } => {
                 // fib(uint256) selector from generated bindings
-                ChaosTest::fibCall { n: U256::from(*n) }.abi_encode().into()
+                Fib::fibCall { n: U256::from(*n) }.abi_encode().into()
             }
             TxOp::DeployNewImplementation { .. } => {
                 // deployNewImplementation() selector
-                ChaosTestProxy::deployNewImplementationCall {}
+                FibProxy::deployNewImplementationCall {}
                     .abi_encode()
                     .into()
             }
@@ -370,13 +371,15 @@ pub fn arb_sender() -> impl Strategy<Value = PrivateKeySigner> {
 /// Strategy for generating a single chaos operation
 pub fn arb_transaction_op() -> impl Strategy<Value = TxOp> {
     prop_oneof![
-        3 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: Address::random(), value: U256::from(1_000_000_000u64) }),
+        1 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: BOB.address().clone(), value: U256::from(1_000_000_000u64) }),
+        1 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: BOB.clone(), to: ALICE.address().clone(), value: U256::from(1_000_000_000u64) }),
+        1 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: CHARLIE.clone(), to: ALICE.address().clone(), value: U256::from(1_000_000_000u64) }),
         2 => (arb_sender(), 2u64..15u64, prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]).prop_map(|(from, n, target)| TxOp::Fib {
             from,
             n,
             target
         }),
-        1 => arb_sender().prop_map(|from| TxOp::DeployNewImplementation { from }),
+        3 => arb_sender().prop_map(|from| TxOp::DeployNewImplementation { from }),
     ]
 }
 
@@ -458,15 +461,15 @@ pub fn build_chained_payloads(
     let mut payloads = Vec::with_capacity(max_flashblocks);
     let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)> = None;
 
-    // Ensure chunk_size is at least 1 to avoid panic
+    // Split the sequence into determistic chunks - each chunk represents a flashblock
     let chunk_size = (sequence.len() / max_flashblocks).max(1);
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
 
     for sequence in sequences.into_iter() {
-        // Convert chaos ops to signed transactions
+        // Convert transaction ops to signed transactions
         let transactions = transaction_op_sequence_to_transactions(sequence);
 
-        // Execute with the previous outcome for chaining
+        // Execute over the previous outcome, if any
         let (outcome, bal_data, bundle_state) =
             execute_serial(prev_outcome.clone(), &transactions)?;
 
@@ -516,33 +519,7 @@ pub fn build_chained_payloads(
     Ok(payloads)
 }
 
-/// Creates a test database with genesis accounts
-fn create_test_db() -> InMemoryDB {
-    let mut db = InMemoryDB::default();
-    for (address, account) in GENESIS.alloc.clone() {
-        db.insert_account_info(
-            address,
-            AccountInfo {
-                balance: account.balance,
-                nonce: account.nonce.unwrap_or_default(),
-                code_hash: account
-                    .code
-                    .as_ref()
-                    .map(alloy_primitives::keccak256)
-                    .unwrap_or(KECCAK_EMPTY),
-                code: account.code.map(revm::state::Bytecode::new_legacy),
-            },
-        );
-    }
-    db
-}
-
-/// Creates an Arc<dyn StateProvider> from an InMemoryDB
-pub fn create_test_state_provider() -> Arc<TestStateProvider> {
-    Arc::new(TestStateProvider::new())
-}
-
-/// Execute transactions sequentially and build a BAL
+/// Executes a series of transactions serially, building on the previous outcome. 
 pub fn execute_serial(
     prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
     transactions: &[Recovered<OpTransactionSigned>],
@@ -624,7 +601,30 @@ pub fn execute_serial(
 // ============================================================================
 // Mock State Provider with In-Memory Trie
 // ============================================================================
+fn create_test_db() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
+    for (address, account) in GENESIS.alloc.clone() {
+        db.insert_account_info(
+            address,
+            AccountInfo {
+                balance: account.balance,
+                nonce: account.nonce.unwrap_or_default(),
+                code_hash: account
+                    .code
+                    .as_ref()
+                    .map(alloy_primitives::keccak256)
+                    .unwrap_or(KECCAK_EMPTY),
+                code: account.code.map(revm::state::Bytecode::new_legacy),
+            },
+        );
+    }
+    db
+}
 
+/// Creates an Arc<dyn StateProvider> from an InMemoryDB
+pub fn create_test_state_provider() -> Arc<TestStateProvider> {
+    Arc::new(TestStateProvider::new())
+}
 /// Hashed genesis state for computing state roots.
 /// This holds the initial account state in hashed form (keccak256(address) -> Account).
 #[derive(Debug, Clone, Default)]

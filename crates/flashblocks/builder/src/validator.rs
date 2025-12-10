@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
@@ -14,7 +14,7 @@ use flashblocks_primitives::{
 };
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reth::{revm::database::StateProviderDatabase, rpc::api::eth::bundle};
+use reth::{revm::database::StateProviderDatabase};
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{

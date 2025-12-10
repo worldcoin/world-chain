@@ -1,7 +1,8 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    balance_change,
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth::revm::{
     DatabaseRef,
@@ -38,14 +39,50 @@ pub struct FlashblockAccessList {
 impl FlashblockAccessList {
     /// Removes duplicate entries by key, keeping the last occurrence (highest block_access_index).
     /// Results are re-ordered ascending by block_access_index.
-    pub fn dedup(&mut self) {
-        self.changes.retain_mut(|change| {
-            // TODO: Check if elements on the BAL are empty. If they _all_ are remove the item
+    pub fn flush(&mut self) {
+        let ret_non_empty = |c: &mut Vec<AccountChanges>| {
+            c.retain_mut(|change: &mut AccountChanges| {
+                let mut balance_changes = change
+                    .balance_changes
+                    .iter()
+                    .filter(|b| b.post_balance() != U256::ZERO)
+                    .count();
+                let mut nonce_changes = change
+                    .nonce_changes
+                    .iter()
+                    .filter(|n| n.new_nonce() != 0)
+                    .count();
+                let mut code_changes = change
+                    .code_changes
+                    .iter()
+                    .filter(|c| *c.new_code() != Bytes::default())
+                    .count();
+                let mut storage_changes = change
+                    .storage_changes
+                    .iter()
+                    .filter(|slot_changes| {
+                        slot_changes
+                            .changes
+                            .iter()
+                            .any(|s| s.new_value != FixedBytes::<32>::ZERO)
+                    })
+                    .count();
+
+                !(balance_changes == 0
+                    && nonce_changes == 0
+                    && code_changes == 0
+                    && storage_changes == 0)
+            })
+        };
+
+        ret_non_empty(&mut self.changes);
+
+        for change in &mut self.changes {
+            // De-duplicate by ascending block_access_index, keeping the last occurrence
             change.balance_changes.reverse();
             change.balance_changes.dedup_by_key(|n| n.post_balance());
             change.balance_changes.sort_by_key(|n| n.block_access_index);
 
-            
             change.nonce_changes.reverse();
             change.nonce_changes.dedup_by_key(|n| n.new_nonce());
             change.nonce_changes.sort_by_key(|n| n.block_access_index);
@@ -59,16 +96,10 @@ impl FlashblockAccessList {
                 slot_changes.changes.dedup_by_key(|s| s.new_value);
                 slot_changes.changes.sort_by_key(|s| s.block_access_index);
             }
-
-            if !(change.storage_changes.is_empty()
-                && change.balance_changes.is_empty()
-                && change.nonce_changes.is_empty()
-                && change.code_changes.is_empty())
-            {}
-            false
-        });
+        }
     }
 
+    /// Extends this [`FlashblockAccessList`] with another, merging account changes appropriately.
     pub fn extend(&mut self, other: &FlashblockAccessList) {
         // Create a map to merge AccountChanges by address
         let mut merged: BTreeMap<Address, AccountChanges> = BTreeMap::new();

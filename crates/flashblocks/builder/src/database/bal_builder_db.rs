@@ -172,7 +172,7 @@ where
 
                 Ok(())
             })?;
-
+        
         self.db.commit(changes);
 
         Ok(())
