@@ -3829,7 +3829,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",
- "revm-database-interface",
  "serde",
  "serde_json",
  "thiserror 2.0.17",

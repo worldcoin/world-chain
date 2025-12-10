@@ -44,7 +44,6 @@ flashblocks-p2p.workspace = true
 
 # revm
 revm.workspace = true
-revm-database-interface.workspace = true
 
 # tokio
 tokio.workspace = true
