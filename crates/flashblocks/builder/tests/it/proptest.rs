@@ -27,7 +27,7 @@ pub fn validate(
     let state_provider = create_test_state_provider();
     // The transaction offset is the number of previously committed transactions.
     // This matches the builder's start_index which is set to transactions.len().
-    let transactions_offset = committed_state.transactions.len() as u16;
+    let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
     let executor_transactions =
         decode_transactions_with_indices(&diff.transactions, transactions_offset)?;

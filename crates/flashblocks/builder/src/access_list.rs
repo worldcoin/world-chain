@@ -61,7 +61,6 @@ impl FlashblockAccessListConstruction {
         };
 
         access_list.dedup();
-
         access_list
     }
 

@@ -174,7 +174,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let basic_worldchain_node = &basic_nodes[0];
 
-    let [builder_node, _follower_node] = &mut nodes[..] else {
+    let [builder_node, follower_node] = &mut nodes[..] else {
         unreachable!()
     };
 

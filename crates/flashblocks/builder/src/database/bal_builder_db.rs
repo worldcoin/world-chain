@@ -387,7 +387,76 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
 }
 
 #[derive(Debug)]
+pub struct NoOpCommitDB<DB: DatabaseRef> {
+    pub db: DB,
+}
+
+impl<DB: DatabaseRef> NoOpCommitDB<DB> {
+    pub fn new(db: DB) -> Self {
+        Self { db }
+    }
+
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
+    }
+
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
+}
+
+impl<DB: DatabaseRef> Database for NoOpCommitDB<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.db.basic_ref(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.db.code_by_hash_ref(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.db.storage_ref(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.db.block_hash_ref(number)
+    }
+}
+
+impl<DB: DatabaseRef> DatabaseCommit for NoOpCommitDB<DB> {
+    fn commit(&mut self, _changes: HashMap<Address, revm::state::Account>) {
+        // No-op
+    }
+}
+
+impl<DB: DatabaseRef> StateDB for NoOpCommitDB<DB> {
+    fn bundle_state(&self) -> &BundleState {
+        unimplemented!()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        unimplemented!()
+    }
+
+    fn merge_transitions(&mut self, _retention: BundleRetention) {
+        // No-op
+    }
+
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
+        // No-op
+    }
+}
+
+
+#[derive(Debug)]
 pub struct BalValidationState<DB: DatabaseRef> {
+    /// TODO: I actually don't think we need any [`TransitionState`] caching?
     /// Cached state contains both changed from evm execution and cached/loaded account/storages
     /// from database
     ///
@@ -641,7 +710,7 @@ mod tests {
         changes.insert(
             addr,
             Account {
-                info: create_account(uint!(1_U256), 0, None),
+                info: create_account(U256::from(1), 0, None),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
