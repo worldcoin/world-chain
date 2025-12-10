@@ -34,13 +34,15 @@ impl FlashblockAccessListConstruction {
 
     /// Merges another [`FlashblockAccessListConstruction`] into this one
     pub fn merge(&mut self, other: Self) {
-        for entry in other.changes.into_iter() {
-            let (address, other_account_changes) = entry;
-            self.changes
-                .entry(address)
-                .and_modify(|existing| existing.merge(other_account_changes.clone()))
-                .or_insert(other_account_changes);
-        }
+        other
+            .changes
+            .into_par_iter()
+            .for_each(|(address, other_account_changes)| {
+                self.changes
+                    .entry(address)
+                    .and_modify(|existing| existing.merge(other_account_changes.clone()))
+                    .or_insert(other_account_changes);
+            })
     }
 
     /// Consumes the builder and produces a [`FlashblockAccessList`]
