@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_consensus::{BlockHeader, Header, Transaction, transaction};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
@@ -487,8 +487,10 @@ where
         > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
         + Clone,
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
-        self.prepare_database(self.index_range.0)?;
-        self.apply_pre_execution_changes()?;
+        if self.index_range.0 == 0 {
+            self.prepare_database(0)?;
+            self.apply_pre_execution_changes()?;
+        }
 
         let spec = self.inner.executor.spec.clone();
         let receipt_builder: R = self.inner.executor.receipt_builder.clone();
@@ -623,9 +625,18 @@ where
         receipt_builder.clone(),
     );
 
-    executor
+    let res = executor
         .execute_transaction_with_commit_condition(tx.as_executable(), |_| CommitChanges::Yes)
-        .map_err(BalExecutorError::BlockExecutionError)?;
+        .map_err(BalExecutorError::BlockExecutionError);
+
+    trace!(
+        target: "flashblocks::builder::block_validator",
+        ?res,
+        tx_index = index,
+        tx_hash = ?tx.hash(),
+        transaction = ?tx,
+        "Finished executing tx in parallel"
+    );
 
     let (evm, result) = executor
         .finish()

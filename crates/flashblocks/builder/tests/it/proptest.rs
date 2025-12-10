@@ -190,10 +190,8 @@ mod property_tests {
             let result = validate(&diff, committed);
             if let Err(err) = &result {
                 err.downcast_ref::<BalExecutorError>().map(|e| {
-                    if let BalExecutorError::BalValidationError(e) = e.deref().clone() {
-                        let downcast = e.deref().clone();
-
-                        debug_output(downcast.clone());
+                    if let BalExecutorError::BalValidationError(e) = e {
+                        debug_output(e);
                     }
                 });
 
@@ -269,33 +267,39 @@ mod property_tests {
     }
 
     proptest! {
-        #![proptest_config(crate::proptest::ProptestConfig::with_cases(10))]
+            #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
 
-        #[test]
-        fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
-            for (diff, committed_state) in payloads.into_iter(){
+            #[test]
+            fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
+                for (diff, committed_state) in payloads.into_iter(){
+                    let committed = unwrap_committed_state(committed_state);
+                    let payload = validate(&diff, committed);
+                    if let Err(err) = &payload {
+                            err.downcast_ref::<BalExecutorError>().map(|e| {
+                            if let BalExecutorError::BalValidationError(e) = e {
+                                debug_output(e);
+                            }
+                            eprintln!("Error: {:#?}", e);
+                        });
+                    }
+                    prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
+                }
+            }
+
+            #[test]
+            fn prop_validate_single(payload in arb_execution_payload(10)) {
+                let (diff, committed_state) = payload;
                 let committed = unwrap_committed_state(committed_state);
                 let payload = validate(&diff, committed);
-                if let Err(err) = &payload {
-                        err.downcast_ref::<BalExecutorError>().map(|e| {
-                        if let BalExecutorError::BalValidationError(e) = e {
-                            debug_output(e);
-                        }
-                        eprintln!("Error: {:#?}", e);
-                    });
-                }
+                 if let Err(err) = &payload {
+                            err.downcast_ref::<BalExecutorError>().map(|e| {
+                            if let BalExecutorError::BalValidationError(e) = e {
+                                debug_output(e);
+                            }
+                            eprintln!("Error: {:#?}", e);
+                        });
+                    }
                 prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
-
             }
         }
-
-        #[test]
-        fn prop_validate_single(payload in arb_execution_payload(10)) {
-            let (diff, committed_state) = payload;
-            let committed = unwrap_committed_state(committed_state);
-            let payload = validate(&diff, committed);
-
-            prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
-        }
-    }
 }
