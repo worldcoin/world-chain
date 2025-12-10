@@ -44,7 +44,7 @@ impl FlashblockAccessListConstruction {
     }
 
     /// Consumes the builder and produces a [`FlashblockAccessList`]
-    /// 
+    ///
     /// Note: All Empty, and Adjecent changes are removed (favoring the last occurrence)
     pub fn build(self, (min_tx_index, max_tx_index): (u16, u16)) -> FlashblockAccessList {
         // Sort addresses lexicographically

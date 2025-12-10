@@ -292,9 +292,7 @@ impl TxOp {
             }
             TxOp::DeployNewImplementation { .. } => {
                 // deployNewImplementation() selector
-                FibProxy::deployNewImplementationCall {}
-                    .abi_encode()
-                    .into()
+                FibProxy::deployNewImplementationCall {}.abi_encode().into()
             }
         }
     }
@@ -519,7 +517,7 @@ pub fn build_chained_payloads(
     Ok(payloads)
 }
 
-/// Executes a series of transactions serially, building on the previous outcome. 
+/// Executes a series of transactions serially, building on the previous outcome.
 pub fn execute_serial(
     prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
     transactions: &[Recovered<OpTransactionSigned>],

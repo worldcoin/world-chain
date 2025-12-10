@@ -172,7 +172,7 @@ where
 
                 Ok(())
             })?;
-        
+
         self.db.commit(changes);
 
         Ok(())
@@ -452,7 +452,6 @@ impl<DB: DatabaseRef> StateDB for NoOpCommitDB<DB> {
         // No-op
     }
 }
-
 
 #[derive(Debug)]
 pub struct BalValidationState<DB: DatabaseRef> {
