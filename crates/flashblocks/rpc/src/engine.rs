@@ -112,6 +112,11 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
+        // Send an empty authorization to the jobs generator if payload attributes are provided
+        if let Some(to_jobs_gen) = self.to_jobs_generator.as_ref() {
+            to_jobs_gen.send_modify(|b| *b = None)
+        }
+
         self.inner
             .fork_choice_updated_v3(fork_choice_state, payload_attributes)
             .await
