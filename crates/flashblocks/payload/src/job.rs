@@ -310,7 +310,8 @@ where
 
                 trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "committing to best payload");
 
-                if let FlashblocksAuthorization::Authorization(authorization) = &this.authorization {
+                if let FlashblocksAuthorization::Authorization(authorization) = &this.authorization
+                {
                     // publish the new payload to the p2p network
                     if let Err(err) =
                         this.publish_payload(&payload, &this.committed_payload, **authorization)

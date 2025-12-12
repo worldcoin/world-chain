@@ -245,7 +245,8 @@ where
         }
 
         if let (Some(a), Some(to_jobs_gen)) = (authorization, self.to_jobs_generator.as_ref()) {
-            to_jobs_gen.send_modify(|b| *b = Some(FlashblocksAuthorization::Authorization(a.into())))
+            to_jobs_gen
+                .send_modify(|b| *b = Some(FlashblocksAuthorization::Authorization(a.into())))
         }
 
         self.inner

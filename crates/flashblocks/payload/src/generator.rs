@@ -23,7 +23,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use tokio::runtime::Handle;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{job::FlashblocksPayloadJob, metrics::PayloadBuilderMetrics};
 use flashblocks_builder::{
@@ -198,7 +198,6 @@ where
                 .wait_for(|a| {
                     a.as_ref().is_some_and(|a| {
                         if let FlashblocksAuthorization::Authorization(a) = a {
-                            info!(target: "flashblocks::payload_builder", payload_id = %payload_id, "Received authorization for payload");
                             a.payload_id == payload_id
                         } else {
                             true
