@@ -17,7 +17,7 @@ use flashblocks_node::{
     payload_service::FlashblocksPayloadServiceBuilder,
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -309,7 +309,7 @@ where
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksStateExecutor,
-    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>,
     pub authorizer_vk: VerifyingKey,
 }
 

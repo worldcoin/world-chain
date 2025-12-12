@@ -8,7 +8,7 @@ use flashblocks_payload::{
     generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
     metrics::PayloadBuilderMetrics,
 };
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
@@ -30,7 +30,7 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: Option<FlashblocksHandle>,
     flashblocks_state: Option<FlashblocksStateExecutor>,
-    authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
+    authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
     interval: Duration,
     recommitment_interval: Duration,
 }
@@ -41,7 +41,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
         flashblocks_state: Option<FlashblocksStateExecutor>,
-        authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
+        authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
         interval: Duration,
         recommitment_interval: Duration,
     ) -> Self {
