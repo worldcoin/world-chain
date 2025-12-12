@@ -4,7 +4,7 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::p2p::{Authorization, FlashblocksAuthorization};
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{async_trait, server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
@@ -25,7 +25,7 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     /// The inner [`OpEngineApi`] instance that this extension wraps.
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A (optional) watch channel notifier to the jobs generator.
-    to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+    to_jobs_generator: Option<tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -34,7 +34,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     /// Creates a new instance of [`OpEngineApiExt`], and spawns a task to handle incoming flashblocks.
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
-        to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+        to_jobs_generator: Option<tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>>,
     ) -> Self {
         Self {
             inner,
@@ -113,8 +113,9 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         // Send an empty authorization to the jobs generator if payload attributes are provided
-        if let Some(to_jobs_gen) = self.to_jobs_generator.as_ref() {
-            to_jobs_gen.send_modify(|b| *b = None)
+        if let (Some(to_jobs_gen), Some(_)) = (self.to_jobs_generator.as_ref(), &payload_attributes)
+        {
+            to_jobs_gen.send_modify(|b| *b = Some(FlashblocksAuthorization::EmptyAuthorization))
         }
 
         self.inner
@@ -244,10 +245,11 @@ where
         }
 
         if let (Some(a), Some(to_jobs_gen)) = (authorization, self.to_jobs_generator.as_ref()) {
-            to_jobs_gen.send_modify(|b| *b = Some(a))
+            to_jobs_gen.send_modify(|b| *b = Some(FlashblocksAuthorization::Authorization(a.into())))
         }
 
-        self.fork_choice_updated_v3(fork_choice_state, payload_attributes)
+        self.inner
+            .fork_choice_updated_v3(fork_choice_state, payload_attributes)
             .await
     }
 }

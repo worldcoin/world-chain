@@ -85,9 +85,9 @@ def get_service_config(
         "--log-level=debug",
         "--debug-host=0.0.0.0",
         "--debug-server-port={0}".format(DEBUG_PORT_NUM),
-        "--flashblocks",
-        "--flashblocks-builder-vk={0}".format(FLASHBLOCKS_BUILDER_VK),
-        "--flashblocks-authorizer-sk={0}".format(AUTHORIZER_SK),
+        # "--flashblocks",
+        # "--flashblocks-builder-vk={0}".format(FLASHBLOCKS_BUILDER_VK),
+        # "--flashblocks-authorizer-sk={0}".format(AUTHORIZER_SK),
     ]
 
     return ServiceConfig(
