@@ -192,13 +192,14 @@ where
 
         let payload_id = config.attributes.payload_id();
         let mut authorization = self.authorizations.clone();
+
         let pending = async move {
             let _ = authorization
-                .wait_for(|a| a.is_some_and(|auth| auth.payload_id == payload_id))
+                .wait_for(|a| a.map(|auth| auth.payload_id == payload_id).unwrap_or(true))
                 .await
                 .is_ok();
 
-            authorization.borrow().unwrap()
+            *authorization.borrow()
         };
 
         let authorization = tokio::task::block_in_place(|| {
@@ -206,10 +207,12 @@ where
             handle.block_on(pending)
         });
 
-        // Notify the P2P handler to start publishing for this authorization
-        self.p2p_handler
-            .start_publishing(authorization)
-            .map_err(PayloadBuilderError::other)?;
+        if let Some(authorization) = authorization {
+            // Notify the P2P handler to start publishing for this authorization
+            self.p2p_handler
+                .start_publishing(authorization)
+                .map_err(PayloadBuilderError::other)?;
+        }
 
         // Extract pre-built payload from the p2p handler and the latest flashblock index if available
         let (pre_state, index) = maybe_pre_state
