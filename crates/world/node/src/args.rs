@@ -171,20 +171,6 @@ pub struct BuilderArgs {
     pub private_key: PrivateKeySigner,
 }
 
-pub enum NodeContextType {
-    Basic,
-    Flashblocks,
-}
-
-impl From<WorldChainNodeConfig> for NodeContextType {
-    fn from(config: WorldChainNodeConfig) -> Self {
-        match config.args.flashblocks.is_some() {
-            true => Self::Flashblocks,
-            false => Self::Basic,
-        }
-    }
-}
-
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
     let bytes = <[u8; 32]>::from_hex(s.trim())?;
     Ok(SigningKey::from_bytes(&bytes))

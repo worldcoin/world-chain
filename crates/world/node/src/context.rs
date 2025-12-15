@@ -3,11 +3,11 @@
 use std::time::Duration;
 
 use crate::{
-    args::{NodeContextType, WorldChainArgs},
+    args::WorldChainArgs,
     config::WorldChainNodeConfig,
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
-        WorldChainPayloadBuilderBuilder, WorldChainPoolBuilder,
+        WorldChainPoolBuilder,
     },
 };
 use ed25519_dalek::VerifyingKey;
@@ -17,18 +17,18 @@ use flashblocks_node::{
     payload_service::FlashblocksPayloadServiceBuilder,
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     NodeAdapter, NodeComponentsBuilder,
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadServiceBuilder},
+    components::{ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    OpAddOns, OpConsensusBuilder, OpEngineApiBuilder, OpEngineValidatorBuilder, OpExecutorBuilder,
-    OpNetworkBuilder, args::RollupArgs,
+    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
@@ -119,109 +119,9 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct BasicContext(WorldChainNodeConfig);
-
-impl From<WorldChainNodeConfig> for BasicContext {
-    fn from(value: WorldChainNodeConfig) -> Self {
-        Self(value)
-    }
-}
-
-impl From<BasicContext> for NodeContextType {
-    fn from(_val: BasicContext) -> Self {
-        NodeContextType::Basic
-    }
-}
-
-impl<N: FullNodeTypes<Types = WorldChainNode<BasicContext>>> WorldChainNodeContext<N>
-    for BasicContext
-where
-    BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>: PayloadServiceBuilder<
-            N,
-            BasicWorldChainPool<N>,
-            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-        >,
-{
-    type Net = WorldChainNetworkBuilder;
-    type Evm = OpEvmConfig;
-    type PayloadServiceBuilder = BasicPayloadServiceBuilder<WorldChainPayloadBuilderBuilder>;
-
-    type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
-
-    type AddOns = OpAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >;
-
-    type ExtContext = ();
-
-    fn components(&self) -> Self::ComponentsBuilder {
-        let Self(WorldChainNodeConfig {
-            args:
-                WorldChainArgs {
-                    rollup,
-                    builder,
-                    pbh,
-                    tx_peers,
-                    ..
-                },
-            builder_config,
-        }) = self.clone();
-
-        let RollupArgs {
-            disable_txpool_gossip,
-            compute_pending_block,
-            discovery_v4,
-            ..
-        } = rollup;
-
-        let network_builder =
-            WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
-
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(WorldChainPoolBuilder::new(
-                pbh.entrypoint,
-                pbh.signature_aggregator,
-                pbh.world_id,
-            ))
-            .executor(OpExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::new(
-                WorldChainPayloadBuilderBuilder::new(
-                    compute_pending_block,
-                    pbh.verified_blockspace_capacity,
-                    pbh.entrypoint,
-                    pbh.signature_aggregator,
-                    builder.private_key,
-                )
-                .with_da_config(builder_config.inner.da_config),
-            ))
-            .network(network_builder)
-            .consensus(OpConsensusBuilder::default())
-    }
-
-    fn add_ons(&self) -> Self::AddOns {
-        Self::AddOns::builder()
-            .with_sequencer(self.0.args.rollup.sequencer.clone())
-            .with_da_config(self.0.builder_config.inner.da_config.clone())
-            .build()
-    }
-
-    fn ext_context(&self) -> Self::ExtContext {}
-}
-
-#[derive(Clone, Debug)]
 pub struct FlashblocksContext {
     config: WorldChainNodeConfig,
-    components_context: FlashblocksComponentsContext,
-}
-
-impl From<FlashblocksContext> for NodeContextType {
-    fn from(_val: FlashblocksContext) -> Self {
-        NodeContextType::Flashblocks
-    }
+    components_context: Option<FlashblocksComponentsContext>,
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
@@ -251,7 +151,7 @@ where
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
     >;
 
-    type ExtContext = FlashblocksComponentsContext;
+    type ExtContext = Option<FlashblocksComponentsContext>;
 
     fn components(&self) -> Self::ComponentsBuilder {
         let Self {
@@ -280,16 +180,25 @@ where
         let wc_network_builder =
             WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
-        let flashblocks_args = self
-            .config
-            .args
-            .flashblocks
-            .as_ref()
-            .expect("flashblocks args required");
+        let (flashblocks_interval, flashblocks_recommit_interval) =
+            if let Some(flashblocks_args) = self.config.args.flashblocks.as_ref() {
+                (
+                    flashblocks_args.flashblocks_interval,
+                    flashblocks_args.recommit_interval,
+                )
+            } else {
+                // Not important if flashblocks is not enabled. Put some numbers just to make
+                // the compiler work fine.
+                (200, 200)
+            };
 
         let fb_network_builder = FlashblocksNetworkBuilder::new(
             wc_network_builder,
-            components_context.flashblocks_handle.clone(),
+            components_context
+                .as_ref()
+                .map(|flahsblocks_components_ctx| {
+                    flahsblocks_components_ctx.flashblocks_handle.clone()
+                }),
         );
 
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
@@ -310,14 +219,33 @@ where
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,
-                    components_context.flashblocks_state.clone(),
+                    components_context
+                        .as_ref()
+                        .map(|flashblocks_component_ctx| {
+                            flashblocks_component_ctx.flashblocks_state.clone()
+                        }),
                     builder_config,
                 ),
-                components_context.flashblocks_handle.clone(),
-                components_context.flashblocks_state.clone(),
-                components_context.to_jobs_generator.clone().subscribe(),
-                Duration::from_millis(flashblocks_args.flashblocks_interval),
-                Duration::from_millis(flashblocks_args.recommit_interval),
+                components_context
+                    .as_ref()
+                    .map(|flashblocks_components_ctx| {
+                        flashblocks_components_ctx.flashblocks_handle.clone()
+                    }),
+                components_context
+                    .as_ref()
+                    .map(|flashblocks_components_ctx| {
+                        flashblocks_components_ctx.flashblocks_state.clone()
+                    }),
+                components_context
+                    .as_ref()
+                    .map(|flashblocks_components_ctx| {
+                        flashblocks_components_ctx
+                            .to_jobs_generator
+                            .clone()
+                            .subscribe()
+                    }),
+                Duration::from_millis(flashblocks_interval),
+                Duration::from_millis(flashblocks_recommit_interval),
             ))
             .network(fb_network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -326,16 +254,31 @@ where
     fn add_ons(&self) -> Self::AddOns {
         let engine_api_builder = FlashblocksEngineApiBuilder {
             engine_validator_builder: Default::default(),
-            flashblocks_handle: Some(self.components_context.flashblocks_handle.clone()),
-            to_jobs_generator: self.components_context.to_jobs_generator.clone(),
-            authorizer_vk: self.components_context.authorizer_vk,
+            flashblocks_handle: self.components_context.as_ref().map(
+                |flashblocks_components_ctx| flashblocks_components_ctx.flashblocks_handle.clone(),
+            ),
+            to_jobs_generator: self
+                .components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.to_jobs_generator.clone()
+                }),
+            authorizer_vk: self
+                .components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| flashblocks_components_ctx.authorizer_vk),
         };
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let pending_block = self.components_context.flashblocks_state.pending_block();
+        let maybe_pending_block =
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_state.pending_block()
+                });
         let flashblocks_eth_api_builder =
-            FlashblocksEthApiBuilder::new(op_eth_api_builder, pending_block);
+            FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
@@ -366,15 +309,20 @@ where
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
-    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>,
     pub authorizer_vk: VerifyingKey,
 }
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
+        let components_context = value
+            .args
+            .flashblocks
+            .as_ref()
+            .map(|_flashblocks_args| value.clone().into());
         Self {
-            config: value.clone(),
-            components_context: value.into(),
+            config: value,
+            components_context,
         }
     }
 }

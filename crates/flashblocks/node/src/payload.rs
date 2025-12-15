@@ -15,11 +15,10 @@ use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: FlashblocksExecutionCoordinator,
+    pub flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     pub builder_config: FlashblocksPayloadBuilderConfig,
 }
 
@@ -29,7 +28,7 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: FlashblocksExecutionCoordinator,
+        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         builder_config: FlashblocksPayloadBuilderConfig,
     ) -> Self {
         Self {
@@ -76,7 +75,9 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.flashblocks_state.launch::<_>(ctx, evm_config.clone());
+        if let Some(flashblocks_state) = self.flashblocks_state {
+            flashblocks_state.launch(ctx, evm_config.clone());
+        }
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,

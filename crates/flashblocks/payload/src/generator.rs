@@ -6,6 +6,7 @@ use std::{
 use alloy_primitives::B256;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_primitives::access_list::FlashblockAccessList;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
@@ -17,7 +18,7 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
-use flashblocks_primitives::{access_list::FlashblockAccessList, p2p::Authorization};
+use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
@@ -49,7 +50,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
     /// The cached authorizations for payload ids.
-    authorizations: tokio::sync::watch::Receiver<Option<Authorization>>,
+    authorizations: tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>,
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
@@ -68,7 +69,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         config: FlashblocksJobGeneratorConfig,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
-        auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+        auth_rx: tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>,
         flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
@@ -195,6 +196,7 @@ where
 
         let payload_id = config.attributes.payload_id();
         let mut authorization = self.authorizations.clone();
+
         let pending = async move {
             info!(
                 target: "flashblocks::payload_builder",
@@ -202,16 +204,19 @@ where
                 "Waiting for authorization for payload",
             );
             let _ = authorization
-                .wait_for(|a| a.is_some_and(|auth| auth.payload_id == payload_id))
+                .wait_for(|a| {
+                    a.as_ref().is_some_and(|a| {
+                        if let FlashblocksAuthorization::Authorization(a) = a {
+                            a.payload_id == payload_id
+                        } else {
+                            true
+                        }
+                    })
+                })
                 .await
                 .is_ok();
 
-            info!(
-                target: "flashblocks::payload_builder",
-                payload_id = %payload_id,
-                "Received authorization for payload",
-            );
-            authorization.borrow().unwrap()
+            authorization.borrow().as_ref().unwrap().clone()
         };
 
         let authorization = tokio::task::block_in_place(|| {
@@ -219,10 +224,12 @@ where
             handle.block_on(pending)
         });
 
-        // Notify the P2P handler to start publishing for this authorization
-        self.p2p_handler
-            .start_publishing(authorization)
-            .map_err(PayloadBuilderError::other)?;
+        if let FlashblocksAuthorization::Authorization(ref authorization) = authorization {
+            // Notify the P2P handler to start publishing for this authorization
+            self.p2p_handler
+                .start_publishing(**authorization)
+                .map_err(PayloadBuilderError::other)?;
+        }
 
         // Extract pre-built payload from the p2p handler and the latest flashblock index if available
         let (pre_state, index, access_list) = maybe_pre_state

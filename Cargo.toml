@@ -246,6 +246,7 @@ auto_impl = "1"
 async-trait = "0.1.88"
 dashmap = { version = "6.1.0", features = ["rayon"] }
 tower = "0.5.0"
+backon = "1"
 arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.2"
 ed25519-dalek = { version = "2", features = ["serde"] }

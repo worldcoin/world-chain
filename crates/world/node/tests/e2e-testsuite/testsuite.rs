@@ -27,12 +27,10 @@ use std::{
     time::Duration,
 };
 use tracing::info;
-use world_chain_test::utils::account;
-
-use world_chain_node::context::{BasicContext, FlashblocksContext};
+use world_chain_node::context::FlashblocksContext;
 use world_chain_test::{
     node::{raw_pbh_bundle_bytes, tx},
-    utils::signer,
+    utils::{account, signer},
 };
 
 use crate::setup::{
@@ -43,7 +41,7 @@ use crate::setup::{
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -74,7 +72,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -119,7 +117,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -134,7 +132,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<BasicContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 
@@ -166,11 +164,17 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     // Builder and Follower
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
 
     // Verifier
-    let (_, basic_nodes, _tasks, mut basic_env, _) =
-        setup_with_tx_peers::<BasicContext>(1, optimism_payload_attributes, false, false).await?;
+    let (_, basic_nodes, _tasks, mut basic_env, _) = setup_with_tx_peers::<FlashblocksContext>(
+        1,
+        optimism_payload_attributes,
+        false,
+        false,
+        true,
+    )
+    .await?;
 
     let basic_worldchain_node = &basic_nodes[0];
 
@@ -191,6 +195,8 @@ async fn test_flashblocks() -> eyre::Result<()> {
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
         builder_context
+            .clone()
+            .unwrap()
             .flashblocks_handle
             .builder_sk()
             .unwrap()
@@ -225,8 +231,13 @@ async fn test_flashblocks() -> eyre::Result<()> {
     )
     .await;
 
-    let cannon_flashblocks_stream =
-        Box::pin(builder_context.flashblocks_handle.flashblock_stream());
+    let cannon_flashblocks_stream = Box::pin(
+        builder_context
+            .as_ref()
+            .unwrap()
+            .flashblocks_handle
+            .flashblock_stream(),
+    );
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
         beacon_engine_handles: vec![
@@ -271,7 +282,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_, nodes, _tasks, mut env, _spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -279,6 +290,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
         ext_context
+            .unwrap()
             .flashblocks_handle
             .builder_sk()
             .unwrap()
@@ -297,7 +309,12 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
     );
 
-    let cannon_flashblocks_stream = nodes[0].ext_context.flashblocks_handle.flashblock_stream();
+    let cannon_flashblocks_stream = nodes[0]
+        .ext_context
+        .clone()
+        .unwrap()
+        .flashblocks_handle
+        .flashblock_stream();
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
@@ -345,7 +362,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -353,6 +370,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
         ext_context
+            .unwrap()
             .flashblocks_handle
             .builder_sk()
             .unwrap()
@@ -418,7 +436,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, _nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
@@ -438,7 +456,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -446,6 +464,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
         ext_context
+            .unwrap()
             .flashblocks_handle
             .builder_sk()
             .unwrap()
@@ -454,7 +473,12 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
     spammer.spawn(20, nodes[0].node.rpc_url());
 
-    let cannon_flashblocks_stream = nodes[0].ext_context.flashblocks_handle.flashblock_stream();
+    let cannon_flashblocks_stream = nodes[0]
+        .ext_context
+        .clone()
+        .unwrap()
+        .flashblocks_handle
+        .flashblock_stream();
 
     let (sender, mut rx) = tokio::sync::mpsc::channel(1);
     let timestamp = crate::setup::current_timestamp();
@@ -512,7 +536,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 
     // Spin up 3 nodes WITHOUT tx_peers configuration
     let (_, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -586,9 +610,14 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // We disconnect Node 0 from Node 2 to prevent multi-hop forwarding in Part 1
-    let (_, mut nodes, _tasks, _, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, false)
-            .await?;
+    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers::<FlashblocksContext>(
+        3,
+        optimism_payload_attributes,
+        true,
+        false,
+        true,
+    )
+    .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -726,7 +755,7 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_, mut nodes, _tasks, _, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true)
+        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true, true)
             .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
@@ -790,11 +819,18 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
     const TXS_PER_FLASHBLOCK: u64 = 20;
 
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes).await?;
+        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
 
     // Setup: 1 basic verifier node for flashblock validation
     let (_, mut basic_validators, _tasks, _basic_env, _) =
-        setup_with_tx_peers::<BasicContext>(1, optimism_payload_attributes, false, false).await?;
+        setup_with_tx_peers::<FlashblocksContext>(
+            1,
+            optimism_payload_attributes,
+            false,
+            false,
+            true,
+        )
+        .await?;
 
     let basic_validator = &mut basic_validators[0];
 
@@ -818,6 +854,7 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
     let authorization_generator = crate::setup::create_authorization_generator(
         genesis_hash,
         builder_context
+            .unwrap()
             .flashblocks_handle
             .builder_sk()
             .unwrap()
@@ -874,7 +911,7 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
             )
             .with_interval(Duration::from_millis(BLOCK_INTERVAL_MS)),
             DynamicValidateFlashblocks::new(
-                follower_context_0.flashblocks_handle.clone(),
+                follower_context_0.unwrap().flashblocks_handle.clone(),
                 basic_beacon_handle,
                 chain_spec.clone(),
                 state.clone(),

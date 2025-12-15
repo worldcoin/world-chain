@@ -45,7 +45,7 @@ use reth_provider::{
 
 use reth_transaction_pool::{BlobStore, TransactionPool};
 
-use crate::{args::NodeContextType, config::WorldChainNodeConfig};
+use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
 use world_chain_payload::builder::WorldChainPayloadBuilder;
 use world_chain_pool::{
@@ -66,15 +66,7 @@ use world_chain_pool::{
 /// The trait is parameterized by `N`, which must be a `FullNodeTypes` with `Types = WorldChainNode<Self>`,
 /// ensuring type safety between the context and the node it configures.
 pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
-    Into<NodeContextType>
-    + Sized
-    + From<WorldChainNodeConfig>
-    + Clone
-    + Debug
-    + Unpin
-    + Send
-    + Sync
-    + 'static
+    Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
 {
     /// The EVM configuration used for this World Chain node.
     ///

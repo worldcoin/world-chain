@@ -48,7 +48,6 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{broadcast, watch};
-use tracing::info;
 use world_chain_pbh::external_nullifier::ExternalNullifier;
 
 use alloy_eips::eip2718::Encodable2718;
@@ -65,19 +64,19 @@ use reth_network_peers::PeerId;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 
 use world_chain_node::{
-    args::{BuilderArgs, NodeContextType, PbhArgs, WorldChainArgs},
+    args::{BuilderArgs, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
 };
 
-pub fn test_config(context: NodeContextType) -> WorldChainNodeConfig {
-    test_config_with_peers_and_gossip(None, false, context)
+pub fn test_config() -> WorldChainNodeConfig {
+    test_config_with_peers_and_gossip(None, false, true)
 }
 
 /// Creates a test config with optional transaction propagation peers and gossip control
 pub fn test_config_with_peers_and_gossip(
     tx_peers: Option<Vec<PeerId>>,
     disable_txpool_gossip: bool,
-    context: NodeContextType,
+    flashblocks_enabled: bool,
 ) -> WorldChainNodeConfig {
     use reth_optimism_node::args::RollupArgs;
 
@@ -93,14 +92,18 @@ pub fn test_config_with_peers_and_gossip(
         world_id: DEV_WORLD_ID,
     };
 
-    let flashblocks = FlashblocksArgs {
-        enabled: true,
-        spoof_authorizer: false,
-        authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
-        builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
-        recommit_interval: 50,
-        flashblocks_interval: 200,
-        access_list: true,
+    let flashblocks = if flashblocks_enabled {
+        Some(FlashblocksArgs {
+            enabled: true,
+            spoof_authorizer: false,
+            authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
+            builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
+            recommit_interval: 50,
+            flashblocks_interval: 200,
+            access_list: true,
+        })
+    } else {
+        None
     };
 
     let rollup = RollupArgs {
@@ -108,28 +111,17 @@ pub fn test_config_with_peers_and_gossip(
         ..Default::default()
     };
 
-    let bal_enabled = matches!(context, NodeContextType::Flashblocks);
-
-    info!(
-        target: "world_chain::test::node",
-        bal_enabled = bal_enabled,
-    );
-
     WorldChainNodeConfig {
         args: WorldChainArgs {
             rollup,
             builder,
             pbh,
-            flashblocks: if matches!(context, NodeContextType::Flashblocks) {
-                Some(flashblocks)
-            } else {
-                None
-            },
+            flashblocks,
             tx_peers,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
-            bal_enabled: matches!(context, NodeContextType::Flashblocks),
+            bal_enabled: true,
         },
     }
 }

@@ -21,10 +21,10 @@ pub struct FlashblocksNetworkBuilder<T> {
 }
 
 impl<T> FlashblocksNetworkBuilder<T> {
-    pub fn new(inner: T, flashblocks_p2p_handle: FlashblocksHandle) -> Self {
+    pub fn new(inner: T, flashblocks_p2p_handle: Option<FlashblocksHandle>) -> Self {
         Self {
             inner,
-            flashblocks_p2p_handle: Some(flashblocks_p2p_handle),
+            flashblocks_p2p_handle,
         }
     }
 

@@ -8,8 +8,9 @@ use flashblocks_payload::{
     generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
     metrics::PayloadBuilderMetrics,
 };
-use flashblocks_primitives::p2p::Authorization;
+use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
     BuilderContext,
@@ -27,9 +28,9 @@ use reth_transaction_pool::TransactionPool;
 #[derive(Debug)]
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
-    p2p_handler: FlashblocksHandle,
-    flashblocks_state: FlashblocksExecutionCoordinator,
-    authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+    p2p_handler: Option<FlashblocksHandle>,
+    flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+    authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
     interval: Duration,
     recommitment_interval: Duration,
 }
@@ -38,9 +39,9 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     /// Create a new [`FlashblocksPayloadServiceBuilder`].
     pub const fn new(
         pb: PB,
-        p2p_handler: FlashblocksHandle,
-        flashblocks_state: FlashblocksExecutionCoordinator,
-        authorizations_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
+        p2p_handler: Option<FlashblocksHandle>,
+        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+        authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
         interval: Duration,
         recommitment_interval: Duration,
     ) -> Self {
@@ -95,27 +96,57 @@ where
             .max_payload_tasks(conf.max_payload_tasks);
 
         let metrics = PayloadBuilderMetrics::default();
-        let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
+        if let (Some(p2p_handler), Some(authorizations_rx), Some(flashblocks_state)) = (
             self.p2p_handler,
-            self.authorizations_rx.clone(),
-            self.flashblocks_state.clone(),
-            metrics,
-        );
+            self.authorizations_rx,
+            self.flashblocks_state,
+        ) {
+            // flashblocks enabled
+            let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
+                ctx.provider().clone(),
+                ctx.task_executor().clone(),
+                payload_job_config,
+                payload_builder,
+                p2p_handler,
+                authorizations_rx.clone(),
+                flashblocks_state.clone(),
+                metrics,
+            );
 
-        let (payload_service, payload_service_handle) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+            let (payload_service, payload_service_handle) = PayloadBuilderService::new(
+                payload_generator,
+                ctx.provider().canonical_state_stream(),
+            );
 
-        let payload_events = payload_service.payload_events_handle();
-        self.flashblocks_state
-            .register_payload_events(payload_events);
+            let payload_events = payload_service.payload_events_handle();
+            flashblocks_state.register_payload_events(payload_events);
 
-        ctx.task_executor()
-            .spawn_critical("payload builder service", Box::pin(payload_service));
+            ctx.task_executor()
+                .spawn_critical("payload builder service", Box::pin(payload_service));
 
-        Ok(payload_service_handle)
+            Ok(payload_service_handle)
+        } else {
+            // flahsblocks disabled
+            let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+                .interval(conf.interval)
+                .deadline(conf.deadline)
+                .max_payload_tasks(conf.max_payload_tasks);
+
+            let payload_generator = BasicPayloadJobGenerator::with_builder(
+                ctx.provider().clone(),
+                ctx.task_executor().clone(),
+                payload_job_config,
+                payload_builder,
+            );
+            let (payload_service, payload_service_handle) = PayloadBuilderService::new(
+                payload_generator,
+                ctx.provider().canonical_state_stream(),
+            );
+
+            ctx.task_executor()
+                .spawn_critical("payload builder service", Box::pin(payload_service));
+
+            Ok(payload_service_handle)
+        }
     }
 }

@@ -1,4 +1,4 @@
-FROM rust:1.91.1-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.91.1-bookworm AS base
 
 ARG FEATURES
 
@@ -6,7 +6,7 @@ RUN cargo install sccache --version ^0.9
 RUN cargo install cargo-chef --version ^0.1
 
 RUN apt-get update \
-    && apt-get install -y clang libclang-dev gcc
+  && apt-get install -y clang libclang-dev gcc
 
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTC_WRAPPER=sccache
@@ -18,9 +18,9 @@ WORKDIR /app
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef prepare --recipe-path recipe.json
+  --mount=type=cache,target=/usr/local/cargo/git \
+  --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+  cargo chef prepare --recipe-path recipe.json
 
 FROM base AS builder
 WORKDIR /app
@@ -43,28 +43,32 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
-FROM debian:bookworm-slim
+FROM public.ecr.aws/docker/library/debian:bookworm-slim
 WORKDIR /app
 
 # Install wget in the final image
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        unzip \
-        curl \
-        lz4 \
-        wget \
-        jq \
-        netcat-traditional \
-        tzdata && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+  apt-get install -y --no-install-recommends \
+  ca-certificates \
+  unzip \
+  curl \
+  lz4 \
+  wget \
+  jq \
+  netcat-traditional \
+  tzdata && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
 
 # Install AWS CLI v2
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
-    unzip /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+  unzip /tmp/awscliv2.zip -d /tmp && \
+  /tmp/aws/install && \
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# Install s3fcp
+RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.1.4/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
+  chmod +x /usr/local/bin/s3fcp
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"

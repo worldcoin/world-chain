@@ -60,7 +60,6 @@ chrono.workspace = true
 rand.workspace = true
 tokio.workspace = true
 parking_lot.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true
