@@ -5,10 +5,7 @@ use crossbeam_channel::Sender;
 use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
-    database::{
-        BundleState,
-        states::bundle_state::BundleRetention,
-    },
+    database::{BundleState, states::bundle_state::BundleRetention},
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
