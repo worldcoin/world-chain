@@ -1,23 +1,41 @@
+use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_rpc_types_engine::PayloadId;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
+use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
+use reth::{
+    payload::EthPayloadBuilderAttributes,
+    revm::{cancelled::CancelOnDrop, database::StateProviderDatabase},
+};
+use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 
-use reth_provider::{HeaderProvider, StateProviderFactory};
-use std::{sync::Arc, time::Duration};
+use reth_payload_util::BestPayloadTransactions;
+use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
+use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
-use crate::executor::bal_executor::BalBlockValidator;
+use crate::{
+    executor::CommittedState,
+    payload_builder::build,
+    traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
+    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+};
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The current state of all known pre confirmations received over the P2P layer
@@ -166,8 +184,11 @@ fn process_flashblock<Provider>(
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) -> eyre::Result<()>
 where
-    Provider:
-        StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header> + Clone + 'static,
+    Provider: StateProviderFactory
+        + HeaderProvider<Header = alloy_consensus::Header>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone
+        + 'static,
 {
     trace!(
         target: "flashblocks::state_executor",
@@ -193,7 +214,12 @@ where
         // Already processed this flashblock. This happens when set directly
         // from publish_build_payload. Since we already built the payload, no need
         // to do it again.
-        pending_block.send_replace(latest_payload.0.executed_block());
+        pending_block.send_replace(
+            latest_payload
+                .0
+                .executed_block()
+                .map(|p| p.into_executed_payload()),
+        );
         return Ok(());
     }
 
@@ -234,6 +260,14 @@ where
         extra_data: base.extra_data.clone(),
     };
 
+    info!(
+        target: "flashblocks::state_executor",
+        id = %flashblock.flashblock.payload_id,
+        index = %flashblock.flashblock.index,
+        execution_context = ?execution_context,
+        "building payload from flashblock"
+    );
+
     let next_block_context = OpNextBlockEnvAttributes {
         timestamp: base.timestamp,
         suggested_fee_recipient: base.fee_recipient,
@@ -244,39 +278,114 @@ where
     };
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
-    let sealed_header = Arc::new(sealed_header);
 
-    let block_validator = BalBlockValidator::new(
-        chain_spec.clone(),
-        execution_context.clone(),
-        latest_payload.as_ref().map(|(p, _)| p.clone()),
-        evm_env,
-        evm_config.clone(),
-        OpRethReceiptBuilder::default(),
-        diff.clone(),
-    )?;
+    let committed_state =
+        CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
+            .unwrap();
+
+    let transactions_offset = committed_state.transactions.len() + 1;
+    let start = Instant::now();
 
     let payload = if flashblock.diff().access_list_data.is_some() {
-        block_validator.validate_and_execute_diff_parallel(
+        let sealed_header = Arc::new(sealed_header);
+
+        let executor_transactions = decode_transactions_with_indices(
+            &flashblock.diff().transactions,
+            transactions_offset as u16,
+        )?;
+
+        let block_validator = FlashblocksBlockValidator {
+            chain_spec: chain_spec.clone(),
+            evm_config: evm_config.clone(),
+            execution_context: execution_context.clone(),
+            executor_transactions: executor_transactions.clone(),
+            committed_state,
+            evm_env: evm_env.clone(),
+        };
+
+        block_validator.validate(
             state_provider.clone(),
             diff.clone(),
             &sealed_header,
             *flashblock.payload_id(),
         )?
     } else {
-        block_validator.validate_and_execute_diff_linear(
+        // TODO: Lots of dup code we can remove here. WIP
+        let transactions = diff
+            .transactions
+            .iter()
+            .map(|b| {
+                let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
+                eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
+            })
+            .collect::<eyre::Result<Vec<_>>>()?;
+
+        let eth_attrs = EthPayloadBuilderAttributes {
+            id: PayloadId(flashblock.payload_id().to_owned().0),
+            parent: base.parent_hash,
+            timestamp: base.timestamp,
+            suggested_fee_recipient: base.fee_recipient,
+            prev_randao: base.prev_randao,
+            withdrawals: Withdrawals(diff.withdrawals.clone()),
+            parent_beacon_block_root: Some(base.parent_beacon_block_root),
+        };
+
+        let eip1559 = encode_holocene_extra_data(
+            Default::default(),
+            chain_spec.base_fee_params_at_timestamp(base.timestamp),
+        )?;
+
+        let attributes = OpPayloadBuilderAttributes {
+            payload_attributes: eth_attrs,
+            no_tx_pool: true,
+            transactions: transactions.clone(),
+            gas_limit: None,
+            eip_1559_params: Some(eip1559[1..=8].try_into()?),
+            min_base_fee: None,
+        };
+
+        let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
+        let cancel = CancelOnDrop::default();
+
+        let builder_ctx = OpPayloadBuilderCtxBuilder.build(
+            provider.clone(),
+            evm_config.clone(),
+            Default::default(),
+            config,
+            &cancel,
+            latest_payload.as_ref().map(|p| p.0.clone()),
+        );
+
+        let best = |_| BestPayloadTransactions::new(vec![].into_iter());
+        let db = StateProviderDatabase::new(&state_provider);
+
+        let outcome = build(
+            best,
+            Option::<NoopTransactionPool<EthPooledTransaction>>::None,
+            db,
             state_provider.clone(),
-            &sealed_header,
-            *flashblock.payload_id(),
-        )?
+            &builder_ctx,
+            latest_payload.as_ref().map(|p| &p.0),
+            false,
+        )?;
+
+        match outcome.0 {
+            reth_basic_payload_builder::BuildOutcomeKind::Better { payload } => payload,
+            reth_basic_payload_builder::BuildOutcomeKind::Freeze(payload) => payload,
+            _ => return Err(eyre::eyre::eyre!("unexpected build outcome")),
+        }
     };
+
+    let duration = Instant::now().duration_since(start);
+    metrics::histogram!("flashblocks.validate", "access_list" => flashblock.diff().access_list_data.is_some().to_string())
+        .record(duration.as_nanos() as f64 / 1_000_000_000.0);
 
     // construct the full payload
     *latest_payload = Some((payload.clone(), index));
 
     flashblocks.push(flashblock)?;
 
-    pending_block.send_replace(payload.executed_block());
+    pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
 
     trace!(
         target: "flashblocks::state_executor",

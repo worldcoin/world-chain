@@ -1,11 +1,12 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{B256, Bytes, TxHash};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
-use reth_primitives::TransactionMeta;
+use reth_primitives::{Recovered, TransactionMeta};
 use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
@@ -14,6 +15,7 @@ use reth_rpc_eth_api::{
     },
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
+use reth_transaction_pool::PoolPooledTx;
 
 use std::{future::Future, time::Duration};
 
@@ -32,6 +34,13 @@ where
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
+    }
+
+    fn send_transaction(
+        &self,
+        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
+        self.inner.send_transaction(tx)
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

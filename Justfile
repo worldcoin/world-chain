@@ -12,8 +12,6 @@ deploy-devnet: build
 
 build:
     docker buildx build \
-        --cache-from type=local,src=.docker-cache \
-        --cache-to type=local,dest=.docker-cache,mode=max \
         -t world-chain:latest .
 
 deploy-contracts:

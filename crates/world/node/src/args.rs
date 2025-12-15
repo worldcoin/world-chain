@@ -3,7 +3,7 @@ use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use eyre::eyre;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
 use reth_network_peers::PeerId;
@@ -100,9 +100,14 @@ impl WorldChainArgs {
             }
         }
 
+        let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
+
         Ok(WorldChainNodeConfig {
             args: self,
-            builder_config: Default::default(),
+            builder_config: FlashblocksPayloadBuilderConfig {
+                inner: Default::default(),
+                bal_enabled,
+            },
         })
     }
 }

@@ -7,7 +7,7 @@ use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder,
 };
 use alloy_eips::{Decodable2718, Encodable2718, merge::BEACON_NONCE};
-use alloy_primitives::{U256, keccak256};
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
@@ -58,7 +58,7 @@ impl Flashblock {
                 gas_limit: block.gas_limit(),
                 timestamp: config.attributes.payload_attributes.timestamp,
                 extra_data: block.extra_data().clone(),
-                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(),
+                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
             })
         } else {
             None
@@ -93,7 +93,7 @@ impl Flashblock {
         };
 
         let access_list_data = if let Some(access_list) = access_list {
-            let hash = keccak256(alloy_rlp::encode(&access_list));
+            let hash = crate::access_list::access_list_hash(&access_list);
             Some(FlashblockAccessListData {
                 access_list,
                 access_list_hash: hash,

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use alloy_primitives::{Address, B256};
 use revm::{
     DatabaseRef,
@@ -10,14 +12,14 @@ use revm::{
 #[derive(Clone, Debug)]
 pub struct BundleDb<DB: DatabaseRef> {
     /// Layer 1: Underlying [`BundleState`] from prior flashblocks _or_ the pre-execution changes.
-    pub bundle: BundleState,
+    pub bundle: Arc<BundleState>,
     /// Layer 2: The underlying database
     pub db: DB,
 }
 
 impl<DB: DatabaseRef> BundleDb<DB> {
     /// Creates a new [`BundleDb`] from the given bundle state and underlying database.
-    pub fn new(db: DB, bundle: BundleState) -> Self {
+    pub fn new(db: DB, bundle: Arc<BundleState>) -> Self {
         Self { bundle, db }
     }
 }
@@ -52,10 +54,27 @@ impl<DB: DatabaseRef> DatabaseRef for BundleDb<DB> {
         if let Some(account) = self.bundle.account(&address)
             && let Some(storage) = account.storage_slot(index)
         {
+            tracing::trace!(
+                target: "flashblocks::bundle_db",
+                ?address,
+                ?index,
+                value = ?storage,
+                source = "bundle",
+                "BundleDb storage read from bundle"
+            );
             return Ok(storage);
         }
 
-        self.db.storage_ref(address, index)
+        let val = self.db.storage_ref(address, index)?;
+        tracing::trace!(
+            target: "flashblocks::bundle_db",
+            ?address,
+            ?index,
+            value = ?val,
+            source = "fallback_db",
+            "BundleDb storage read from fallback db"
+        );
+        Ok(val)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {

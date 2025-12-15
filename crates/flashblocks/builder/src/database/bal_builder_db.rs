@@ -1,15 +1,25 @@
 use std::thread::JoinHandle;
 
 use alloy_primitives::{Address, B256};
-use crossbeam_channel::{Receiver, Sender};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use crossbeam_channel::Sender;
+use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
+    database::{BundleState, states::bundle_state::BundleRetention},
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
+use tracing::error;
 
 use crate::access_list::FlashblockAccessListConstruction;
+
+/// Messages sent to the background builder for recording reads/writes.
+enum BalBuilderMsg {
+    StorageRead(Address, StorageKey),
+    Commit(HashMap<Address, revm::state::Account>),
+    SetIndex(u16),
+    MergeAcccessList(FlashblockAccessListConstruction),
+}
 
 /// A wrapper around a database that builds a Flashblock
 /// Access List during execution.
@@ -19,110 +29,76 @@ use crate::access_list::FlashblockAccessListConstruction;
 /// [`BalBuilderDb::set_index`] with the block-local transaction index so changes can be
 /// attributed correctly.
 #[derive(Debug)]
-pub struct BalBuilderDb<DB> {
-    /// The underlying read/write database.
-    db: DB,
-    /// The sender to the builder thread.
-    tx: Sender<BalBuilderMsg>,
-    /// Join hande for the builder thread
-    handle: JoinHandle<eyre::Result<FlashblockAccessListConstruction>>,
-}
-
-#[derive(Clone, Debug)]
-struct BalBuilder<DB: DatabaseRef> {
+pub struct BalBuilderDb<DB>
+where
+    DB: DatabaseCommit + Database,
+{
     /// Underlying cached database.
     db: DB,
     /// The Flashblock Access List under construction.
     access_list: FlashblockAccessListConstruction,
     /// The current index being built
     index: u16,
+    /// The most recent error generated. We store this error in order to be compliant
+    /// with [`DatabaseCommit`], and return it on [`BalBuilderDb::finish`]
+    error: Option<<Self as Database>::Error>,
 }
 
-/// Messages sent to the background builder for recording reads/writes.
-enum BalBuilderMsg {
-    StorageRead(Address, StorageKey),
-    Commit(HashMap<Address, revm::state::Account>),
-    SetIndex(u16),
-}
+impl<DB> BalBuilderDb<DB>
+where
+    DB: DatabaseCommit + Database,
+{
+    /// Creates a new BalBuilderDb around the given database.
+    pub fn new(db: DB) -> Self {
+        Self {
+            db,
+            access_list: Default::default(),
+            index: 0,
+            error: None,
+        }
+    }
 
-impl<DB> BalBuilderDb<DB> {
-    /// Creates a new builder around a writable DB plus a dummy mirror that
-    /// the background thread uses to compare state when deriving changes. The dummy will
-    /// be commited to so the caller should likely wrap in a caching layer.
-    pub fn new<DDB: DatabaseRef<Error: Send + Sync> + DatabaseCommit + Send + Sync + 'static>(
-        db: DB,
-        dummy_db: DDB,
-    ) -> Self {
-        let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
-        let handle = BalBuilder::spawn(dummy_db, rx);
+    /// Returns a reference to the underlying database.
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
 
-        Self { db, tx, handle }
+    /// Returns a mutable reference to the underlying database.
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
     }
 
     /// Updates the current transaction index used to tag future changes.
     pub fn set_index(&mut self, index: u16) {
-        let _ = self.tx.send(BalBuilderMsg::SetIndex(index));
+        self.index = index;
     }
 
-    /// Signals the background thread to finish and returns the constructed
-    /// access list.
-    pub fn finish(self) -> eyre::Result<FlashblockAccessListConstruction> {
-        drop(self.tx);
-        // unwrap should be safe here since builder thread can't panic
-        self.handle.join().unwrap()
-    }
-}
-
-impl<DB> BalBuilder<DB>
-where
-    DB: DatabaseRef + DatabaseCommit + Send + Sync + 'static,
-    DB::Error: Send + Sync + 'static,
-{
-    /// Spawns a background thread that receives read/write events and builds
-    /// the access list. `db` should probably have a chaching layer for performance reasons
-    pub fn spawn(
-        db: DB,
-        rx: Receiver<BalBuilderMsg>,
-    ) -> JoinHandle<eyre::Result<FlashblockAccessListConstruction>> {
-        std::thread::spawn(move || {
-            let mut bal_builder = BalBuilder {
-                db,
-                access_list: Default::default(),
-                index: 0,
-            };
-
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    BalBuilderMsg::StorageRead(address, index) => {
-                        bal_builder.storage_read(address, index);
-                    }
-                    BalBuilderMsg::Commit(changes) => {
-                        bal_builder.commit(changes)?;
-                    }
-                    BalBuilderMsg::SetIndex(index) => {
-                        bal_builder.index = index;
-                    }
-                }
-            }
-
-            Ok(bal_builder.access_list)
-        })
+    /// Merges the access lists
+    pub fn merge_access_list(&mut self, access_list: FlashblockAccessListConstruction) {
+        self.access_list.merge(access_list);
     }
 
     /// Records a storage read for the given address and slot.
-    fn storage_read(&mut self, address: Address, index: StorageKey) {
+    fn handle_storage_read(&mut self, address: Address, index: StorageKey) {
         let mut account = self.access_list.changes.entry(address).or_default();
         account.storage_reads.insert(index);
     }
 
-    /// Applies account/storage changes, comparing against the dummy DB to
+    /// Applies account/storage changes, comparing against the DB to
     /// capture only new values in the access list.
-    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) -> Result<(), DB::Error> {
+    fn try_commit(
+        &mut self,
+        changes: HashMap<Address, revm::state::Account>,
+    ) -> Result<(), <DB as Database>::Error> {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
         changes
             .iter()
-            .par_bridge()
+            // Pre-load all accounts into the cache using the mutable `basic` method.
+            // This is required because `State::commit` expects all accounts to be present
+            // in the cache (it panics with "All accounts should be present inside cache" otherwise).
+            // The `DatabaseRef::basic_ref` method does NOT populate the cache, only `Database::basic` does.
+            // .par_bridge()
             .try_for_each(|(address, account)| {
                 let mut acc_changes = self.access_list.changes.entry(*address).or_default();
 
@@ -130,7 +106,7 @@ where
                 // back. This would result in appending a value to the access list that isn't strctly
                 // required. For this reason we should dedup consecutive identical entries when
                 // finalizing the access list.
-                match self.db.basic_ref(*address)? {
+                match self.db.basic(*address)? {
                     Some(previous) => {
                         if previous.balance != account.info.balance {
                             acc_changes
@@ -145,7 +121,7 @@ where
                         if previous.code_hash != account.info.code_hash {
                             let bytecode = match account.info.code.clone() {
                                 Some(code) => code,
-                                None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                                None => self.db.code_by_hash(account.info.code_hash)?,
                             };
                             acc_changes.code_changes.insert(self.index, bytecode);
                         }
@@ -159,14 +135,28 @@ where
                             .insert(self.index, account.info.nonce);
                         let bytecode = match account.info.code.clone() {
                             Some(code) => code,
-                            None => self.db.code_by_hash_ref(account.info.code_hash)?,
+                            None => self.db.code_by_hash(account.info.code_hash)?,
                         };
                         acc_changes.code_changes.insert(self.index, bytecode);
                     }
                 }
 
-                account.storage.iter().try_for_each(|(key, value)| {
-                    let previous_value = self.db.storage_ref(*address, *key)?;
+                account.storage.iter().for_each(|(key, value)| {
+                    // Use the original_value from the EvmStorageSlot, which is the value
+                    // that was read from the database before any modifications in this transaction.
+                    // This is critical because self.db.storage() would return the cached/mutated
+                    // value, not the pre-transaction value.
+                    let previous_value = value.original_value;
+                    tracing::trace!(
+                        target: "flashblocks::bal_builder_db",
+                        address = ?address,
+                        slot = ?key,
+                        previous_value = ?previous_value,
+                        new_value = ?value.present_value,
+                        index = self.index,
+                        will_record = previous_value != value.present_value,
+                        "try_commit storage comparison"
+                    );
                     if previous_value != value.present_value {
                         acc_changes
                             .storage_changes
@@ -174,8 +164,7 @@ where
                             .or_default()
                             .insert(self.index, value.present_value);
                     }
-                    Result::<(), DB::Error>::Ok(())
-                })?;
+                });
 
                 Ok(())
             })?;
@@ -184,9 +173,160 @@ where
 
         Ok(())
     }
+
+    /// Consumes self and returns the constructed access list.
+    pub fn finish(self) -> Result<FlashblockAccessListConstruction, <Self as Database>::Error> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+
+        Ok(self.access_list)
+    }
 }
 
-impl<DB: Database> Database for BalBuilderDb<DB> {
+impl<DB> Database for BalBuilderDb<DB>
+where
+    DB: DatabaseCommit + Database,
+{
+    type Error = <DB as Database>::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.db.basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.db.code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.handle_storage_read(address, index);
+        self.db.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.db.block_hash(number)
+    }
+}
+
+impl<DB: DatabaseCommit> DatabaseCommit for BalBuilderDb<DB>
+where
+    DB: DatabaseCommit + Database,
+{
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+        if let Err(e) = self.try_commit(changes) {
+            error!("Error committing to BalBuilderDb: {:?}", e);
+            self.error = Some(e);
+        }
+    }
+}
+
+impl<DB> StateDB for BalBuilderDb<DB>
+where
+    DB: StateDB + DatabaseCommit + Database,
+{
+    fn bundle_state(&self) -> &BundleState {
+        self.db.bundle_state()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        self.db.bundle_state_mut()
+    }
+
+    fn merge_transitions(&mut self, retention: BundleRetention) {
+        self.db.merge_transitions(retention);
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
+/// An asynchronous Flashblock Access List builder around a database.
+///  
+/// commiting to this database will both commit to the inner database
+/// and update the access list under construction in a background thread.
+/// Between transactions, call [`AsyncBalBuilderDb::set_index`] with the block-local
+/// transaction index so changes can be attributed correctly.
+#[derive(Debug)]
+pub struct AsyncBalBuilderDb<DB: Database> {
+    /// The underlying read/write database.
+    db: DB,
+    /// The sender to the builder thread.
+    tx: Sender<BalBuilderMsg>,
+    /// Join hande for the builder thread
+    handle: JoinHandle<Result<FlashblockAccessListConstruction, <DB as Database>::Error>>,
+}
+
+impl<DB: Database> AsyncBalBuilderDb<DB> {
+    /// Creates a new builder around a writable DB plus a dummy mirror that
+    /// the background thread uses to compare state when deriving changes. The dummy will
+    /// be commited to so the caller should likely wrap in a caching layer.
+    pub fn new<DDB>(db: DB, dummy_db: DDB) -> Self
+    where
+        DB: Database<Error: From<<DDB as Database>::Error>>,
+        DDB: DatabaseCommit + Database + Send + Sync + 'static,
+    {
+        let (tx, rx) = crossbeam_channel::unbounded::<BalBuilderMsg>();
+        let mut bal_builder = BalBuilderDb::new(dummy_db);
+
+        let handle = std::thread::spawn(move || {
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    BalBuilderMsg::StorageRead(address, index) => {
+                        bal_builder.handle_storage_read(address, index);
+                    }
+                    BalBuilderMsg::Commit(changes) => {
+                        bal_builder.try_commit(changes)?;
+                    }
+                    BalBuilderMsg::SetIndex(index) => {
+                        bal_builder.set_index(index);
+                    }
+                    BalBuilderMsg::MergeAcccessList(access_list) => {
+                        bal_builder.merge_access_list(access_list);
+                    }
+                }
+            }
+
+            Ok(bal_builder.finish()?)
+        });
+
+        Self { db, tx, handle }
+    }
+
+    /// Returns a reference to the underlying database.
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
+
+    /// Returns a mutable reference to the underlying database.
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
+    }
+
+    /// Updates the current transaction index used to tag future changes.
+    pub fn set_index(&mut self, index: u16) {
+        let _ = self.tx.send(BalBuilderMsg::SetIndex(index));
+    }
+
+    /// Merges another access list into the current one.
+    pub fn merge_access_list(&mut self, access_list: FlashblockAccessListConstruction) {
+        let _ = self.tx.send(BalBuilderMsg::MergeAcccessList(access_list));
+    }
+
+    /// Signals the background thread to finish and returns the constructed
+    /// access list.
+    pub fn finish(self) -> Result<FlashblockAccessListConstruction, <DB as Database>::Error> {
+        drop(self.tx);
+        // unwrap should be safe here since builder thread can't panic
+        self.handle.join().unwrap()
+    }
+}
+
+impl<DB: Database> Database for AsyncBalBuilderDb<DB> {
     type Error = DB::Error;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
@@ -215,12 +355,97 @@ impl<DB: Database> Database for BalBuilderDb<DB> {
     }
 }
 
-impl<DB: DatabaseCommit + DatabaseRef> DatabaseCommit for BalBuilderDb<DB> {
+impl<DB: Database + DatabaseCommit> DatabaseCommit for AsyncBalBuilderDb<DB> {
     fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
         // Ignore errors from the builder channel.
         // relevent errors will be propagated through `finish()`.
         self.tx.send(BalBuilderMsg::Commit(changes.clone())).ok();
         self.db.commit(changes)
+    }
+}
+
+impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
+    fn bundle_state(&self) -> &BundleState {
+        self.db.bundle_state()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        self.db.bundle_state_mut()
+    }
+
+    fn merge_transitions(&mut self, retention: BundleRetention) {
+        self.db.merge_transitions(retention);
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
+#[derive(Debug)]
+pub struct NoOpCommitDB<DB: DatabaseRef> {
+    pub db: DB,
+}
+
+impl<DB: DatabaseRef> NoOpCommitDB<DB> {
+    pub fn new(db: DB) -> Self {
+        Self { db }
+    }
+
+    pub fn db_mut(&mut self) -> &mut DB {
+        &mut self.db
+    }
+
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
+}
+
+impl<DB: DatabaseRef> Database for NoOpCommitDB<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.db.basic_ref(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.db.code_by_hash_ref(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.db.storage_ref(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.db.block_hash_ref(number)
+    }
+}
+
+impl<DB: DatabaseRef> DatabaseCommit for NoOpCommitDB<DB> {
+    fn commit(&mut self, _changes: HashMap<Address, revm::state::Account>) {
+        // No-op
+    }
+}
+
+impl<DB: DatabaseRef> StateDB for NoOpCommitDB<DB> {
+    fn bundle_state(&self) -> &BundleState {
+        unimplemented!()
+    }
+
+    fn bundle_state_mut(&mut self) -> &mut BundleState {
+        unimplemented!()
+    }
+
+    fn merge_transitions(&mut self, _retention: BundleRetention) {
+        // No-op
+    }
+
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
+        // No-op
     }
 }
 
@@ -245,9 +470,9 @@ mod tests {
         }
     }
 
-    fn bal_db_with_mirror(db: InMemoryDB) -> BalBuilderDb<InMemoryDB> {
+    fn bal_db_with_mirror(db: InMemoryDB) -> AsyncBalBuilderDb<InMemoryDB> {
         let read_db = db.clone();
-        BalBuilderDb::new(db, read_db)
+        AsyncBalBuilderDb::new(db, read_db)
     }
 
     #[test]
@@ -272,7 +497,7 @@ mod tests {
         changes.insert(
             addr,
             Account {
-                info: create_account(uint!(1_U256), 0, None),
+                info: create_account(U256::from(1), 0, None),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,

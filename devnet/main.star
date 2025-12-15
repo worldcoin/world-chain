@@ -67,7 +67,7 @@ def run(plan, args={}):
     # Get the three op-node services
     op_node_1_srv = plan.get_service("op-cl-2151908-1-op-node-op-geth-op-kurtosis")
     op_node_2_srv = plan.get_service("op-cl-2151908-2-op-node-custom-op-kurtosis")
-    op_node_3_srv = plan.get_service("op-cl-2151908-3-op-node-custom-op-kurtosis")
+    op_node_3_srv = plan.get_service("op-cl-2151908-3-op-node-op-reth-op-kurtosis")
 
     # Extract the p2p enode/ENR from each op-node
     extract_p2p_info_recipe = PostHttpRequestRecipe(
@@ -91,7 +91,7 @@ def run(plan, args={}):
     )
 
     op_node_3_p2p = plan.request(
-        service_name="op-cl-2151908-3-op-node-custom-op-kurtosis",
+        service_name="op-cl-2151908-3-op-node-op-reth-op-kurtosis",
         recipe=extract_p2p_info_recipe,
         description="Extracting P2P info from op-node-3",
     )
@@ -141,7 +141,7 @@ def run(plan, args={}):
     )
 
     plan.request(
-        service_name="op-cl-2151908-3-op-node-custom-op-kurtosis",
+        service_name="op-cl-2151908-3-op-node-op-reth-op-kurtosis",
         recipe=connect_peer_recipe_3_to_1,
         description="Connecting op-node-3 to op-node-1",
     )
@@ -163,7 +163,7 @@ def run(plan, args={}):
         builder_1_srv.ip_address, builder_1_rpc_port
     )
 
-    builder_2_srv = plan.get_service("op-el-2151908-3-custom-op-node-op-kurtosis")
+    builder_2_srv = plan.get_service("op-el-2151908-3-op-reth-op-node-op-kurtosis")
     builder_2_rpc_port = builder_2_srv.ports["rpc"].number
     builder_2_rpc_url = "http://{0}:{1}".format(
         builder_2_srv.ip_address, builder_2_rpc_port
@@ -190,7 +190,7 @@ def run(plan, args={}):
     )
 
     builder_2_enode = plan.request(
-        service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
+        service_name="op-el-2151908-3-op-reth-op-node-op-kurtosis",
         recipe=extract_enode_recipe,
         description="Extracting enode from builder 2",
     )
@@ -247,7 +247,7 @@ def run(plan, args={}):
     )
 
     plan.request(
-        service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
+        service_name="op-el-2151908-3-op-reth-op-node-op-kurtosis",
         recipe=add_trusted_peer_1_recipe,
         description="Adding trusted peers to the builders",
     )

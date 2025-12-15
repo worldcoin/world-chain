@@ -36,7 +36,7 @@ jobs:
         run: just test
 
   cargo-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-32core
     timeout-minutes: 20
     name: lint
     steps:
@@ -59,7 +59,7 @@ jobs:
       - name: fmt + lint
         run: cargo +nightly fmt --all -- --check
   cargo-clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-32core
     timeout-minutes: 20
     name: clippy
     steps:

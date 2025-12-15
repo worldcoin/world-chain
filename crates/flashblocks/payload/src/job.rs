@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use alloy_primitives::{B256, keccak256, ruint::aliases::U256};
+use alloy_primitives::{B256, ruint::aliases::U256};
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
@@ -212,7 +212,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: keccak256(alloy_rlp::encode(&access_list)),
+            access_list_hash: flashblocks_primitives::access_list::access_list_hash(&access_list),
             access_list,
         });
         match state {
@@ -328,6 +328,7 @@ where
                 best_payload,
             };
 
+            info!(target: "flashblocks::payload_builder", id = %args.config.payload_id(), committed = ?committed_payload.payload().is_none(), "starting payload build task");
             let result = builder.try_build_with_precommit(args, committed_payload.payload());
             let _ = tx.send(result);
         }));
@@ -367,6 +368,8 @@ where
             withdrawals_offset,
             access_list,
         );
+
+        trace!(target: "flashblocks::payload_builder", index = %flashblock.flashblock().index, receipts =?payload.block(), "publishing payload with block");
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
@@ -467,11 +470,12 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        if this.recommit_interval.poll_tick(cx).is_ready() && !this.best_payload.0.is_frozen() {
-            if this.pending_block.is_none() {
-                trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
-                this.spawn_build_job();
-            }
+        if this.recommit_interval.poll_tick(cx).is_ready()
+            && !this.best_payload.0.is_frozen()
+            && this.pending_block.is_none()
+        {
+            trace!(target: "flashblocks::payload_builder", "recommit interval reached, spawning new build job");
+            this.spawn_build_job();
         }
 
         let network_handle = this.p2p_handler.clone();
