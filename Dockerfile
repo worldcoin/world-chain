@@ -6,7 +6,7 @@ RUN cargo install sccache --version ^0.9
 RUN cargo install cargo-chef --version ^0.1
 
 RUN apt-get update \
-  && apt-get install -y clang libclang-dev gcc
+  && apt-get install -y clang libclang-dev gcc curl
 
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTC_WRAPPER=sccache
@@ -25,7 +25,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
-RUN cargo install --git https://github.com/foundry-rs/foundry --tag v1.3.6 --profile release --locked cast
+RUN curl -L https://foundry.paradigm.xyz | bash && \
+  /root/.foundry/bin/foundryup
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 COPY --from=planner /app/recipe.json recipe.json
@@ -72,7 +73,7 @@ ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 
 COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
-COPY --from=builder /usr/local/cargo/bin/cast /usr/local/bin/
+COPY --from=builder /root/.foundry/bin/cast /usr/local/bin/
 
 COPY scripts/* /usr/local/bin
 
