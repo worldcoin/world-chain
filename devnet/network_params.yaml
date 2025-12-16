@@ -29,7 +29,7 @@ optimism_package:
         granite_time_offset: 0
         holocene_time_offset: 0
       mev_params:
-        image: "leytont/rollup-boost:p2p"
+        image: "leytont/rollup-boost:latest"
         type: custom
       additional_services:
         - rollup-boost
