@@ -94,7 +94,7 @@ where
         let bundle_database =
             BundleDb::new(state_provider_database.clone(), bundle_state.clone().into());
 
-        let temporal_db_factory = TemporalDbFactory::new(bundle_database, access_list.clone());
+        let temporal_db_factory = TemporalDbFactory::new(bundle_database, &access_list);
         let temporal_db = temporal_db_factory.db(block_access_index as u64);
 
         // The cumulative bundle for state root computation contains all state changes
