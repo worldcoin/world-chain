@@ -477,7 +477,7 @@ where
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
         >,
-    DB: StateDB + DatabaseCommit + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    DB: StateDB + DatabaseCommit + Database<Error: Send + Sync + 'a> + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
