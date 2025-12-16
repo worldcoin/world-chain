@@ -41,7 +41,7 @@ use crate::setup::{
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -72,7 +72,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -117,7 +117,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -132,7 +132,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 

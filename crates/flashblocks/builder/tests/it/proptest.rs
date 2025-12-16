@@ -262,9 +262,9 @@ mod property_tests {
 
                 #[test]
                 fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {
-                    for (diff, committed_state) in payloads.into_iter(){
+                    for (diff, committed_state) in payloads.into_iter() {
                         let committed = unwrap_committed_state(committed_state);
-                       let payload = validate(&diff, committed);
+                        let payload = validate(&diff, committed);
                         if let Err(err) = &payload
                             && let Some(e) = err.downcast_ref::<BalExecutorError>() {
                                 debug_output(e);
