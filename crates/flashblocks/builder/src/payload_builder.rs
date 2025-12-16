@@ -124,7 +124,7 @@ where
         let state_provider = Arc::new(self.client.state_by_block_hash(ctx.parent().hash())?);
         let db = StateProviderDatabase::new(&state_provider);
 
-        let database = cached_reads.as_db_mut(db.clone());
+        let database = cached_reads.as_db_mut(db);
 
         if ctx.attributes().no_tx_pool {
             build(
@@ -141,7 +141,7 @@ where
             build(
                 best,
                 Some(self.pool.clone()),
-                db,
+                database,
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
