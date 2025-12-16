@@ -53,7 +53,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, DatabaseRef, context::ContextTr, inspector::NoOpInspector};
+use revm::{DatabaseCommit, context::ContextTr, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span};
 
@@ -107,7 +107,7 @@ where
     {
         let BuildArguments {
             config,
-            cached_reads,
+            mut cached_reads,
             cancel,
             best_payload,
         } = args;
@@ -124,11 +124,13 @@ where
         let state_provider = Arc::new(self.client.state_by_block_hash(ctx.parent().hash())?);
         let db = StateProviderDatabase::new(&state_provider);
 
+        let database = cached_reads.as_db_mut(db.clone());
+
         if ctx.attributes().no_tx_pool {
             build(
                 best,
                 Some(self.pool.clone()),
-                db,
+                database,
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
@@ -252,9 +254,8 @@ where
 /// Builds the payload on top of the state.
 pub fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
-    // TODO: undo optional
     pool: Option<Pool>,
-    _db: impl Database<Error = ProviderError> + DatabaseRef + Send + Sync,
+    db: impl Database<Error = ProviderError> + Send + Sync,
     state_provider: impl StateProvider + Clone + 'static,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
@@ -330,10 +331,9 @@ where
         .saturating_sub(committed_state.gas_used);
 
     let bundle_state = committed_state.bundle.clone();
-    let state_provider_db = StateProviderDatabase::new(state_provider.clone());
 
     let mut state = State::builder()
-        .with_database(state_provider_db.clone())
+        .with_database(db)
         .with_bundle_prestate(bundle_state.clone())
         .with_bundle_update()
         .build();
@@ -477,7 +477,7 @@ where
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
         >,
-    DB: StateDB + DatabaseCommit + DatabaseRef + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    DB: StateDB + DatabaseCommit + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {

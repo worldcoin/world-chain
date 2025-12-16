@@ -141,9 +141,6 @@
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
 
-/// Block assembler for flashblocks.
-pub mod assembler;
-
 /// Underlying block executor and builder with BAL construction.
 pub mod executor;
 
