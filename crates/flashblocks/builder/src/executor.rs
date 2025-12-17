@@ -782,221 +782,138 @@ mod tests {
             states::reverts::{AccountInfoRevert, Reverts},
             AccountRevert, AccountStatus, RevertToSlot,
         },
-        primitives::HashMap,
         state::AccountInfo,
     };
 
+    #[bon::builder]
+    fn revert(
+        #[builder(start_fn)] status: AccountStatus,
+        account: Option<AccountInfoRevert>,
+        #[builder(into, default)] slots: Vec<(U256, U256)>,
+        #[builder(default)] wipe_storage: bool,
+    ) -> AccountRevert {
+        AccountRevert {
+            account: account.unwrap_or(AccountInfoRevert::DoNothing),
+            storage: slots
+                .iter()
+                .map(|(k, v)| (*k, RevertToSlot::Some(*v)))
+                .collect(),
+            previous_status: status,
+            wipe_storage,
+        }
+    }
+
     #[test]
     fn test_flatten_reverts_different_storage_slots() {
-        let mut first_reverts = vec![];
         let addr = Address::with_last_byte(1);
-        // create first revert
-        let account = AccountInfoRevert::DoNothing;
-        let mut storage = HashMap::default();
-        let revert_to_slot = RevertToSlot::Some(U256::from(1));
-        let storage_slot = U256::ZERO;
-        storage.insert(storage_slot, revert_to_slot);
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        first_reverts.push((addr, acc_revert));
-        // create second revert
-        let mut second_reverts = vec![];
-        // same account info revert
-        let account = AccountInfoRevert::DoNothing;
-        let mut storage = HashMap::default();
-        // change the slot value: this should be ignored in final revert because it
-        // works on a storage slot that is already present in reverts
-        let revert_to_slot = RevertToSlot::Some(U256::from(2));
-        let storage_slot = U256::ZERO;
-        storage.insert(storage_slot, revert_to_slot);
-        // now add a new storage slot: this should be considered and included in final
-        // reverts because it's a completely new storage slot
-        let revert_to_slot = RevertToSlot::Some(U256::from(1));
-        let storage_slot = U256::from(1);
-        storage.insert(storage_slot, revert_to_slot);
-        // new previous status: this should be ignored
-        let previous_status = AccountStatus::InMemoryChange;
-        // keep wipe storage = false
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        second_reverts.push((addr, acc_revert));
-        // create final Reverts
-        let reverts = Reverts::new(vec![first_reverts, second_reverts]);
-        assert_eq!(reverts.len(), 2);
-        // flatten reverts using the helper fn
-        let flatten_reverts = flatten_reverts(&reverts);
-        assert_eq!(flatten_reverts.len(), 1);
-        let actual_reverts = flatten_reverts.first().unwrap();
-        assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
+        let slot_0 = U256::ZERO;
+        let slot_1 = U256::from(1);
+
+        // Frame 1: slot_0 reverts to 1
+        let first = vec![(
+            addr,
+            revert(AccountStatus::Loaded)
+                .slots([(slot_0, U256::from(1))])
+                .call(),
+        )];
+
+        // Frame 2: slot_0 reverts to 2 (should be ignored), slot_1 reverts to 1 (new, kept)
+        let second = vec![(
+            addr,
+            revert(AccountStatus::InMemoryChange)
+                .slots([(slot_0, U256::from(2)), (slot_1, U256::from(1))])
+                .call(),
+        )];
+
+        let reverts = Reverts::new(vec![first, second]);
+        let flattened = flatten_reverts(&reverts);
+
+        assert_eq!(flattened.len(), 1);
+        let (actual_addr, actual_revert) = flattened[0][0].clone();
+
         assert_eq!(actual_addr, addr);
-        let account = AccountInfoRevert::DoNothing;
-        let mut storage = HashMap::default();
-        let revert_to_slot = RevertToSlot::Some(U256::from(1));
-        let storage_slot = U256::ZERO;
-        storage.insert(storage_slot, revert_to_slot);
-        let revert_to_slot = RevertToSlot::Some(U256::from(1));
-        let storage_slot = U256::from(1);
-        storage.insert(storage_slot, revert_to_slot);
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = false;
-        let expected_acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        assert_eq!(expected_acc_revert, actual_account_revert);
+        // slot_0 keeps first frame's value (1), slot_1 added from second frame
+        let expected = revert(AccountStatus::Loaded)
+            .slots([(slot_0, U256::from(1)), (slot_1, U256::from(1))])
+            .call();
+        assert_eq!(actual_revert, expected);
     }
 
     #[test]
     fn test_flatten_reverts_different_account_info() {
-        let mut first_reverts = vec![];
         let addr = Address::with_last_byte(1);
-        // create first revert
-        let account = AccountInfoRevert::DoNothing;
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        first_reverts.push((addr, acc_revert));
-        // create second revert
-        let mut second_reverts = vec![];
-        // change account info
         let prev_acc_info = AccountInfo::default();
-        let account = AccountInfoRevert::RevertTo(prev_acc_info.clone());
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        // keep wipe storage = false
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        second_reverts.push((addr, acc_revert));
-        // create third revert
-        let mut third_reverts = vec![];
-        // change account info: this should be ignored because it's already in
-        // a non-DoNothing state before this revert
-        let account = AccountInfoRevert::DeleteIt;
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        // keep wipe storage = false
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        third_reverts.push((addr, acc_revert));
-        // create final Reverts
-        let reverts = Reverts::new(vec![first_reverts, second_reverts, third_reverts]);
-        assert_eq!(reverts.len(), 3);
-        // flatten reverts using the helper fn
-        let flatten_reverts = flatten_reverts(&reverts);
-        assert_eq!(flatten_reverts.len(), 1);
-        let actual_reverts = flatten_reverts.first().unwrap();
-        assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
+
+        // Frame 1: DoNothing
+        let first = vec![(addr, revert(AccountStatus::Loaded).call())];
+
+        // Frame 2: RevertTo (first non-DoNothing, should be kept)
+        let second = vec![(
+            addr,
+            revert(AccountStatus::Loaded)
+                .account(AccountInfoRevert::RevertTo(prev_acc_info.clone()))
+                .call(),
+        )];
+
+        // Frame 3: DeleteIt (should be ignored, already have non-DoNothing)
+        let third = vec![(
+            addr,
+            revert(AccountStatus::Loaded)
+                .account(AccountInfoRevert::DeleteIt)
+                .call(),
+        )];
+
+        let reverts = Reverts::new(vec![first, second, third]);
+        let flattened = flatten_reverts(&reverts);
+
+        assert_eq!(flattened.len(), 1);
+        let (actual_addr, actual_revert) = flattened[0][0].clone();
+
         assert_eq!(actual_addr, addr);
-        let account = AccountInfoRevert::RevertTo(prev_acc_info);
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = false;
-        let expected_acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        assert_eq!(expected_acc_revert, actual_account_revert);
+        // Should keep RevertTo from frame 2 (first non-DoNothing)
+        let expected = revert(AccountStatus::Loaded)
+            .account(AccountInfoRevert::RevertTo(prev_acc_info))
+            .call();
+        assert_eq!(actual_revert, expected);
     }
 
     #[test]
     fn test_flatten_reverts_wipe_storage() {
-        let mut first_reverts = vec![];
         let addr = Address::with_last_byte(1);
-        // create first revert
-        let account = AccountInfoRevert::DoNothing;
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        first_reverts.push((addr, acc_revert));
-        // create second revert
-        let mut second_reverts = vec![];
         let prev_acc_info = AccountInfo::default();
-        let account = AccountInfoRevert::RevertTo(prev_acc_info.clone());
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        // change wipe storage equal to true
-        let wipe_storage = true;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        second_reverts.push((addr, acc_revert));
-        // create third revert
-        let mut third_reverts = vec![];
-        let account = AccountInfoRevert::DeleteIt;
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        // change again wipe storage = false: this should be ignored because it's
-        // already true before this revert
-        let wipe_storage = false;
-        let acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        third_reverts.push((addr, acc_revert));
-        // create final Reverts
-        let reverts = Reverts::new(vec![first_reverts, second_reverts, third_reverts]);
-        assert_eq!(reverts.len(), 3);
-        // flatten reverts using the helper fn
-        let flatten_reverts = flatten_reverts(&reverts);
-        assert_eq!(flatten_reverts.len(), 1);
-        let actual_reverts = flatten_reverts.first().unwrap();
-        assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
+
+        // Frame 1: wipe_storage = false (default)
+        let first = vec![(addr, revert(AccountStatus::Loaded).call())];
+
+        // Frame 2: wipe_storage = true (should be kept - sticky)
+        let second = vec![(
+            addr,
+            revert(AccountStatus::Loaded)
+                .account(AccountInfoRevert::RevertTo(prev_acc_info.clone()))
+                .wipe_storage(true)
+                .call(),
+        )];
+
+        // Frame 3: wipe_storage = false (should be ignored, already true)
+        let third = vec![(
+            addr,
+            revert(AccountStatus::Loaded)
+                .account(AccountInfoRevert::DeleteIt)
+                .call(),
+        )];
+
+        let reverts = Reverts::new(vec![first, second, third]);
+        let flattened = flatten_reverts(&reverts);
+
+        assert_eq!(flattened.len(), 1);
+        let (actual_addr, actual_revert) = flattened[0][0].clone();
+
         assert_eq!(actual_addr, addr);
-        let account = AccountInfoRevert::RevertTo(prev_acc_info);
-        let storage = HashMap::default();
-        let previous_status = AccountStatus::Loaded;
-        let wipe_storage = true;
-        let expected_acc_revert = AccountRevert {
-            account,
-            storage,
-            previous_status,
-            wipe_storage,
-        };
-        assert_eq!(expected_acc_revert, actual_account_revert);
+        // wipe_storage should remain true (sticky once set)
+        let expected = revert(AccountStatus::Loaded)
+            .account(AccountInfoRevert::RevertTo(prev_acc_info))
+            .wipe_storage(true)
+            .call();
+        assert_eq!(actual_revert, expected);
     }
 }
