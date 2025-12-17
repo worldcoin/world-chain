@@ -60,7 +60,7 @@ use revm::{
     },
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     sync::Arc,
 };
 use tokio::sync::broadcast;
