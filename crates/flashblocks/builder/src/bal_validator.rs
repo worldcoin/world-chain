@@ -47,7 +47,7 @@ use crate::{
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    executor::{BalExecutorError, BalValidationError, CommittedState},
+    bal_executor::{BalExecutorError, BalValidationError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.

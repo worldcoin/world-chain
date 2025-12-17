@@ -5,8 +5,8 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_builder::{
-    executor::CommittedState,
-    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+    bal_executor::CommittedState,
+    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
@@ -68,7 +68,7 @@ fn unwrap_committed_state(
 mod property_tests {
     use std::path::PathBuf;
 
-    use flashblocks_builder::executor::BalExecutorError;
+    use flashblocks_builder::bal_executor::BalExecutorError;
     use proptest::{prelude::Strategy, prop_assert, proptest};
 
     use std::io::Write;

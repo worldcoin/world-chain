@@ -10,7 +10,7 @@ use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
     database::bal_builder_db::BalBuilderDb,
-    executor::{BalBlockBuilder, CommittedState},
+    bal_executor::{BalBlockBuilder, CommittedState},
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},

@@ -142,10 +142,10 @@
 pub mod access_list;
 
 /// Underlying block executor and builder with BAL construction.
-pub mod executor;
+pub mod bal_executor;
 
 /// Flashblock validation with parallel execution support.
-pub mod validator;
+pub mod bal_validator;
 
 /// Flashblocks execution coordinator.
 ///

@@ -31,12 +31,18 @@ use tokio::sync::broadcast;
 use tracing::{error, info, trace};
 
 use crate::{
-    executor::CommittedState,
+    bal_executor::CommittedState,
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
-    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
+
+/// The timout to wait for the parent header to be available in the database when processing a flashblock.
+const PARENT_HEADER_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
+const FETCH_PARENT_HEADER_BACKOFF: Duration = Duration::from_millis(100);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -169,7 +175,7 @@ impl FlashblocksExecutionCoordinator {
         if let Some(payload_events) = payload_events
             && let Err(e) = payload_events.send(event)
         {
-            error!("error broadcasting payload: {e:?}");
+            error!("error broadcasting payload: {e:#?}");
         }
         Ok(())
     }
@@ -190,15 +196,6 @@ where
         + Clone
         + 'static,
 {
-    trace!(
-        target: "flashblocks::state_executor",
-        id = %flashblock.payload_id,
-        index = %flashblock.index,
-        min_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.min_tx_index),
-        max_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.max_tx_index),
-        "processing flashblock"
-    );
-
     let FlashblocksExecutionCoordinatorInner {
         ref mut flashblocks,
         ref mut latest_payload,
@@ -236,22 +233,29 @@ where
         flashblocks.base()
     };
 
-    let timeout = Duration::from_secs(10);
     let now = std::time::Instant::now();
 
-    let sealed_header = loop {
-        match provider.sealed_header_by_hash(base.parent_hash) {
-            Ok(Some(header)) => break header,
-            _ => {
-                if now.elapsed() > timeout {
-                    return Err(eyre::eyre::eyre!(
-                        "timed out waiting for parent header {}",
-                        base.parent_hash
-                    ));
+    let sealed_header_fut = async {
+        loop {
+            match provider.sealed_header_by_hash(base.parent_hash) {
+                Ok(Some(header)) => break Ok(header),
+                _ => {
+                    if now.elapsed() > PARENT_HEADER_TIMEOUT {
+                        break Err(eyre::eyre::eyre!(
+                            "timed out waiting for parent header {}",
+                            base.parent_hash
+                        ));
+                    }
+
+                    tokio::time::sleep(FETCH_PARENT_HEADER_BACKOFF).await;
                 }
             }
         }
     };
+
+    let sealed_header = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(sealed_header_fut)
+    })?;
 
     let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
     let execution_context = OpBlockExecutionCtx {
@@ -259,14 +263,6 @@ where
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
-
-    info!(
-        target: "flashblocks::state_executor",
-        id = %flashblock.flashblock.payload_id,
-        index = %flashblock.flashblock.index,
-        execution_context = ?execution_context,
-        "building payload from flashblock"
-    );
 
     let next_block_context = OpNextBlockEnvAttributes {
         timestamp: base.timestamp,
@@ -276,6 +272,16 @@ where
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
+
+    trace!(
+        target: "flashblocks::coordinator",
+        id = %flashblock.flashblock().payload_id,
+        index = %flashblock.flashblock().index,
+        min_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.min_tx_index.to_string()),
+        max_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.max_tx_index.to_string()),
+        execution_context = ?execution_context,
+        "processing flashblock"
+    );
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
 
