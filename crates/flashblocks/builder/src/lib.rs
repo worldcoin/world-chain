@@ -138,6 +138,8 @@
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
+use reth_optimism_payload_builder::config::OpBuilderConfig;
+
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
 
@@ -172,6 +174,9 @@ pub mod traits;
 /// Database abstractions for BAL construction and temporal state access.
 pub mod database;
 
+/// Standard Flashblock Block Builder (without BAL support).
+pub mod executor;
+
 /// Configuration for the flashblocks payload builder.
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {
@@ -179,7 +184,7 @@ pub struct FlashblocksPayloadBuilderConfig {
     ///
     /// Contains settings for data availability, compute gas limits, and other
     /// OP-stack specific options.
-    pub inner: reth_optimism_payload_builder::config::OpBuilderConfig,
+    pub inner: OpBuilderConfig,
 
     /// Whether to enable Block Access List (BAL) generation.
     ///

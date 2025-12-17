@@ -260,14 +260,14 @@ either = { version = "1.15.0", default-features = false }
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
-
 lazy_static = "1.4"
+proptest = "1.9.0"
 
 [patch.crates-io]
 # TODO: Remove once new versions is published
 revm = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-bytecode = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 revm-database = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
+revm-bytecode = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 revm-state = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 revm-primitives = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 revm-interpreter = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }

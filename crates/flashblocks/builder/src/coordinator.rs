@@ -28,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{
     bal_executor::CommittedState,

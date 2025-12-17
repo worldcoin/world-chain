@@ -1,7 +1,8 @@
 use crate::{
     FlashblocksPayloadBuilderConfig,
-    database::bal_builder_db::BalBuilderDb,
     bal_executor::{BalBlockBuilder, CommittedState},
+    database::bal_builder_db::BalBuilderDb,
+    executor::FlashblocksBlockBuilder,
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -347,7 +348,7 @@ where
     // 2. Create the block builder
     let (tx, access_list_rx) = crossbeam_channel::bounded(1);
 
-    let mut builder = block_builder(
+    let mut builder = bal_block_builder(
         bal_builder_db,
         execution_conext,
         evm_env,
@@ -458,7 +459,7 @@ where
     }
 }
 
-pub fn block_builder<'a, Ctx, DB, R, N, Tx>(
+pub fn bal_block_builder<'a, Ctx, DB, R, N, Tx>(
     state: BalBuilderDb<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
@@ -503,6 +504,51 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
+    );
+
+    Ok(builder)
+}
+
+pub fn flashblocks_block_builder<'a, Ctx, DB, R, N, Tx>(
+    state: DB,
+    execution_context: OpBlockExecutionCtx,
+    evm_env: EvmEnv<OpSpecId>,
+    committed_state: &CommittedState<R>,
+    ctx: &'a Ctx,
+) -> Result<
+    FlashblocksBlockBuilder<'a, N, OpEvm<DB, NoOpInspector, PrecompilesMap>, R>,
+    PayloadBuilderError,
+>
+where
+    Tx: PoolTransaction + OpPooledTx,
+    N: NodePrimitives<
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+        >,
+    DB: StateDB + DatabaseCommit + DatabaseRef + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+    Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+{
+    let evm = OpEvmFactory::default().create_evm(state, evm_env);
+
+    let mut executor =
+        OpBlockExecutor::<OpEvm<DB, NoOpInspector, PrecompilesMap>, R, Arc<OpChainSpec>>::new(
+            evm,
+            execution_context.clone(),
+            ctx.spec().clone().into(),
+            R::default(),
+        );
+    executor.gas_used = committed_state.gas_used;
+    executor.receipts = committed_state.receipts_iter().cloned().collect();
+
+    let builder = FlashblocksBlockBuilder::new(
+        execution_context,
+        ctx.parent(),
+        executor,
+        committed_state.transactions_iter().cloned().collect(),
+        ctx.spec().clone().into(),
     );
 
     Ok(builder)

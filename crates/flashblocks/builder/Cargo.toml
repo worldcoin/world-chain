@@ -44,6 +44,7 @@ flashblocks-p2p.workspace = true
 
 # revm
 revm.workspace = true
+revm-database.workspace = true
 
 # tokio
 tokio.workspace = true
@@ -64,19 +65,13 @@ serde.workspace = true
 [dev-dependencies]
 serde.workspace = true
 serde_json.workspace = true
+eyre.workspace = true
 lazy_static.workspace = true
-op-alloy-network.workspace = true
-alloy-sol-types.workspace = true
-alloy-genesis.workspace = true
-alloy-signer-local.workspace = true
-alloy-rpc-types-eth.workspace = true
+proptest.workspace = true
 reth-tracing.workspace = true
-proptest = { version = "*" }
+alloy-genesis.workspace = true
+op-alloy-network.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
 alloy-trie.workspace = true
-world-chain-pool.workspace = true
-world-chain-payload.workspace = true
-tracing-subscriber.workspace = true
-
-[[test]]
-name = "proptest"
-path = "tests/it/main.rs"
+bon.workspace = true
