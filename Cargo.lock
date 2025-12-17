@@ -3753,6 +3753,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "bon",
  "color-eyre",
  "flashblocks-p2p",
  "flashblocks-primitives",
