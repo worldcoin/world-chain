@@ -52,11 +52,17 @@ use revm::{
         BlockEnv,
     },
     database::{
-        states::{bundle_state::BundleRetention, reverts::Reverts},
+        states::{
+            bundle_state::BundleRetention,
+            reverts::{AccountInfoRevert, Reverts},
+        },
         BundleState,
     },
 };
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::sync::broadcast;
 use tracing::{error, trace};
 
@@ -376,24 +382,16 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-        // which represent a single atomic state transition. therefore reverts should have length 1
-        // we only retain the first occurance of a revert for any given account.
-        let flattened = db
-            .bundle_state
-            .reverts
-            .iter()
-            .flatten()
-            .scan(HashSet::new(), |visited, (acc, revert)| {
-                if visited.insert(acc) {
-                    Some((*acc, revert.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        db.bundle_state.reverts = Reverts::new(vec![flattened]);
+        // Flatten reverts into a single transition:
+        // - per account: keep earliest `previous_status`
+        // - per account: keep earliest non-`DoNothing` account-info revert
+        // - per account+slot: keep earliest revert-to value
+        // - per account: OR `wipe_storage`
+        //
+        // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
+        // bundle represents a single block worth of changes even if we built multiple payloads.
+        let flattened = flatten_reverts(&db.bundle_state.reverts);
+        db.bundle_state.reverts = flattened;
 
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
@@ -444,6 +442,50 @@ where
     fn into_executor(self) -> Self::Executor {
         self.inner.into_executor()
     }
+}
+
+/// Flattens a multi-transition [`Reverts`] into a single transition, merging per-account data.
+///
+/// Merge rules (iterate earliest -> latest):
+/// - For each account, keep the **earliest** `previous_status`.
+/// - For each account, keep the **earliest non-`DoNothing`** account-info revert.
+/// - For each account+slot, keep the **earliest** `RevertToSlot`.
+/// - For each account, OR `wipe_storage`.
+fn flatten_reverts(reverts: &Reverts) -> Reverts {
+    let mut per_account = HashMap::new();
+
+    for (addr, acc_revert) in reverts.iter().flatten() {
+        match per_account.entry(*addr) {
+            Entry::Vacant(v) => {
+                v.insert(acc_revert.clone());
+            }
+            Entry::Occupied(mut o) => {
+                let entry = o.get_mut();
+
+                // Always OR wipe_storage (if any transition wiped storage, the block-level revert
+                // must reflect it).
+                entry.wipe_storage |= acc_revert.wipe_storage;
+
+                // Merge storage: keep earliest revert-to value per slot.
+                for (slot, revert_to) in &acc_revert.storage {
+                    entry.storage.entry(*slot).or_insert(*revert_to);
+                }
+
+                // Merge account-info revert: keep earliest non-DoNothing.
+                if matches!(entry.account, AccountInfoRevert::DoNothing)
+                    && !matches!(acc_revert.account, AccountInfoRevert::DoNothing)
+                {
+                    entry.account = acc_revert.account.clone();
+                }
+
+                // Keep earliest previous_status: do not overwrite.
+            }
+        }
+    }
+
+    // Transform the map into a vec
+    let flattened = per_account.into_iter().collect();
+    Reverts::new(vec![flattened])
 }
 
 /// The current state of all known pre confirmations received over the P2P layer
