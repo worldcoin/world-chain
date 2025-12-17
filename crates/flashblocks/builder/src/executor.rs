@@ -839,7 +839,7 @@ mod tests {
         assert_eq!(flatten_reverts.len(), 1);
         let actual_reverts = flatten_reverts.first().unwrap();
         assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.get(0).unwrap().clone();
+        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
         assert_eq!(actual_addr, addr);
         let account = AccountInfoRevert::DoNothing;
         let mut storage = HashMap::default();
@@ -916,7 +916,7 @@ mod tests {
         assert_eq!(flatten_reverts.len(), 1);
         let actual_reverts = flatten_reverts.first().unwrap();
         assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.get(0).unwrap().clone();
+        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
         assert_eq!(actual_addr, addr);
         let account = AccountInfoRevert::RevertTo(prev_acc_info);
         let storage = HashMap::default();
@@ -985,7 +985,7 @@ mod tests {
         assert_eq!(flatten_reverts.len(), 1);
         let actual_reverts = flatten_reverts.first().unwrap();
         assert_eq!(actual_reverts.len(), 1);
-        let (actual_addr, actual_account_revert) = actual_reverts.get(0).unwrap().clone();
+        let (actual_addr, actual_account_revert) = actual_reverts.first().unwrap().clone();
         assert_eq!(actual_addr, addr);
         let account = AccountInfoRevert::RevertTo(prev_acc_info);
         let storage = HashMap::default();
