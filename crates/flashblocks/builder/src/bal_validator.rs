@@ -42,12 +42,12 @@ use tracing::{error, info, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
+    bal_executor::{BalExecutorError, BalValidationError, CommittedState},
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    bal_executor::{BalExecutorError, BalValidationError, CommittedState},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -427,6 +427,7 @@ where
         ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
+
         let access_list = db
             .finish()
             .map_err(InternalBlockExecutionError::other)?

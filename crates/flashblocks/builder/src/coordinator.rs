@@ -32,9 +32,9 @@ use tracing::{error, trace};
 
 use crate::{
     bal_executor::CommittedState,
+    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
-    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 

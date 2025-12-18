@@ -25,8 +25,7 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // The transaction offset is the number of previously committed transactions.
-    // This matches the builder's start_index which is set to transactions.len().
+    // The transaction offset is the number of previously committed transactions offset 1.
     let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
     let executor_transactions =
@@ -41,7 +40,7 @@ pub fn validate(
         executor_transactions,
     };
 
-    let payload_id = PayloadId::new([0u8; 8]);
+    let payload_id = PayloadId::default();
     let payload = validator.validate(
         state_provider as Arc<dyn StateProvider>,
         diff.clone(),

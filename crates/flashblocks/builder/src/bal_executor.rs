@@ -21,7 +21,9 @@ use revm::{
 };
 use tracing::trace;
 
-use crate::{access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb};
+use crate::{
+    BlockBuilderExt, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
+};
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -35,11 +37,8 @@ use reth_evm::{
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
-use revm::{
-    context::result::ExecutionResult,
-    database::states::{bundle_state::BundleRetention, reverts::Reverts},
-};
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
+use std::{borrow::Cow, sync::Arc};
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
@@ -197,32 +196,66 @@ where
 
     fn finish(
         self,
-        state: impl StateProvider,
+        _state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        unimplemented!(
+            "finish is not supported on FlashblocksBlockBuilder; use finish_with_bundle instead"
+        )
+    }
+
+    fn executor_mut(&mut self) -> &mut Self::Executor {
+        self.inner.executor_mut()
+    }
+
+    fn executor(&self) -> &Self::Executor {
+        self.inner.executor()
+    }
+
+    fn into_executor(self) -> Self::Executor {
+        self.inner.into_executor()
+    }
+}
+
+impl<'a, DB, R, N, E> BlockBuilderExt for BalBlockBuilder<'a, R, N, E>
+where
+    DB: StateDB + DatabaseCommit + Database + 'a,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = Block<OpTransactionSigned>,
+            BlockHeader = Header,
+        >,
+    E: Evm<
+            DB = BalBuilderDb<DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
+    R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    OpTransaction<TxEnv>:
+        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+{
+    fn finish_with_bundle(
+        self,
+        state: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // flatten reverts into a single reverts as the bundle is re-used across multiple payloads
-        // which represent a single atomic state transition. therefore reverts should have length 1
-        // we only retain the first occurance of a revert for any given account.
-        let flattened = db
-            .bundle_state()
-            .reverts
-            .iter()
-            .flatten()
-            .scan(HashSet::new(), |visited, (acc, revert)| {
-                if visited.insert(acc) {
-                    Some((*acc, revert.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        db.bundle_state_mut().reverts = Reverts::new(vec![flattened]);
+        // Flatten reverts into a single transition:
+        // - per account: keep earliest `previous_status`
+        // - per account: keep earliest non-`DoNothing` account-info revert
+        // - per account+slot: keep earliest revert-to value
+        // - per account: OR `wipe_storage`
+        //
+        // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
+        // bundle represents a single block worth of changes even if we built multiple payloads.
+        let flattened = crate::utils::flatten_reverts(&db.bundle_state().reverts);
+        db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
         let hashed_state = state.hashed_post_state(db.bundle_state());
@@ -254,6 +287,8 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
+        let bundle = db.take_bundle();
+
         let access_list = db
             .finish()
             .map_err(InternalBlockExecutionError::other)?
@@ -263,24 +298,15 @@ where
             .send(access_list)
             .map_err(BlockExecutionError::other)?;
 
-        Ok(BlockBuilderOutcome {
-            execution_result: result,
-            hashed_state,
-            trie_updates,
-            block,
-        })
-    }
-
-    fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
-    }
-
-    fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
-    }
-
-    fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        Ok((
+            BlockBuilderOutcome {
+                execution_result: result,
+                hashed_state,
+                trie_updates,
+                block,
+            },
+            bundle,
+        ))
     }
 }
 

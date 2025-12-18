@@ -9,8 +9,7 @@ use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
-    database::bal_builder_db::BalBuilderDb,
-    bal_executor::{BalBlockBuilder, CommittedState},
+    BlockBuilderExt, bal_executor::{BalBlockBuilder, CommittedState}, database::bal_builder_db::BalBuilderDb
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
@@ -595,7 +594,7 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let outcome = builder.finish(state_provider)?;
+    let (outcome, _) = builder.finish_with_bundle(state_provider)?;
 
     let access_list = access_list_rx.recv()?;
 
