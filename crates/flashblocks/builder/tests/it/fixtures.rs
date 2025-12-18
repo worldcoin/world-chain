@@ -9,7 +9,9 @@ use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
-    BlockBuilderExt, bal_executor::{BalBlockBuilder, CommittedState}, database::bal_builder_db::BalBuilderDb
+    BlockBuilderExt,
+    bal_executor::{BalBlockBuilder, CommittedState},
+    database::bal_builder_db::BalBuilderDb,
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
