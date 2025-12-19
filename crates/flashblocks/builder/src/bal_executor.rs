@@ -438,35 +438,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::bal_executor::BlockAccessIndexCounter;
 
-    // #[test]
-    // fn test_block_access_index_counter_new() {
-    //     let counter = BlockAccessIndexCounter::new(10);
-    //     let (start, end) = counter.finish();
+    #[test]
+    fn test_block_access_index_counter_finish() {
+        let mut counter = BlockAccessIndexCounter::new(5);
 
-    //     assert_eq!(start, 10);
-    //     assert_eq!(end, 10, "No indices consumed yet");
-    // }
+        counter.inc();
+        assert_eq!(counter.current_index, 6);
+        counter.inc();
+        assert_eq!(counter.current_index, 7);
+        counter.inc();
+        assert_eq!(counter.current_index, 8);
 
-    // #[test]
-    // fn test_block_access_index_counter_next_index() {
-    //     let mut counter = BlockAccessIndexCounter::new(0);
-
-    //     assert_eq!(counter.inc(), 0);
-    //     assert_eq!(counter.next_index(), 1);
-    //     assert_eq!(counter.next_index(), 2);
-    // }
-
-    // #[test]
-    // fn test_block_access_index_counter_finish() {
-    //     let mut counter = BlockAccessIndexCounter::new(5);
-
-    //     counter.next_index(); // 5
-    //     counter.next_index(); // 6
-    //     counter.next_index(); // 7
-
-    //     let (start, end) = counter.finish();
-    //     assert_eq!(start, 5);
-    //     assert_eq!(end, 8);
-    // }
+        let (start, end) = counter.finish();
+        assert_eq!(start, 5);
+        assert_eq!(end, 8);
+    }
 }

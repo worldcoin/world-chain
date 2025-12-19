@@ -161,6 +161,9 @@ where
                 expected = ?access_list_hash,
                 access_list = ?computed_access_list,
                 expected_access_list = ?access_list.clone(),
+                block_number = outcome.block.number(),
+                block_hash = ?outcome.block.hash(),
+                execution_context = ?self.execution_context,
                 "Access list hash mismatch"
             );
 
@@ -356,11 +359,11 @@ where
     }
 }
 
-impl<'a, DBRef, R, E> BlockBuilder for BalBlockValidator<'a, DBRef, R, E>
+impl<'a, DB, R, E> BlockBuilder for BalBlockValidator<'a, DB, R, E>
 where
-    DBRef: DatabaseRef + Clone + Send + Sync + std::fmt::Debug + 'static,
+    DB: DatabaseRef + Clone + Send + Sync + std::fmt::Debug + 'static,
     E: Evm<
-            DB = ValidatorDb<'a, DBRef>,
+            DB = ValidatorDb<'a, DB>,
             Tx = OpTransaction<TxEnv>,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,

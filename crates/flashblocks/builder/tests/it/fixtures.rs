@@ -371,7 +371,7 @@ pub fn arb_sender() -> impl Strategy<Value = PrivateKeySigner> {
 /// Strategy for generating a single chaos operation
 pub fn arb_transaction_op() -> impl Strategy<Value = TxOp> {
     prop_oneof![
-        3 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: Address::random(), value: U256::from(1_000_000_000u64) }),
+        3 => (0usize..1usize).prop_map(|_| TxOp::Transfer { from: ALICE.clone(), to: BOB.address(), value: U256::from(1_000_000_000u64) }),
         2 => (arb_sender(), 2u64..15u64, prop_oneof![Just(ChaosTarget::Direct), Just(ChaosTarget::Proxy),]).prop_map(|(from, n, target)| TxOp::Fib {
             from,
             n,
@@ -435,7 +435,6 @@ pub fn arb_execution_payload_sequence(
         Option<CommittedState<OpRethReceiptBuilder>>,
     )>,
 > {
-    // Generate a vector of chaos sequences (one per flashblock)
     arb_transaction_sequence(transactions).prop_filter_map(
         "execution must succeed",
         move |sequence: Vec<(TxOp, u64)>| build_chained_payloads(sequence, max_flashblocks).ok(),
@@ -596,7 +595,7 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, _) = builder.finish_with_bundle(state_provider)?;
+    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider)?;
 
     let access_list = access_list_rx.recv()?;
 
@@ -607,7 +606,7 @@ pub fn execute_serial(
         access_list_hash: hash,
     };
 
-    Ok((outcome, bal_data, state.take_bundle()))
+    Ok((outcome, bal_data, bundle_state))
 }
 
 // ============================================================================

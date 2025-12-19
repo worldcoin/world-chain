@@ -1,6 +1,6 @@
 use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
-use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
@@ -36,13 +36,11 @@ use crate::{
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
+use backon::BlockingRetryable;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
-/// The timout to wait for the parent header to be available in the database when processing a flashblock.
-const PARENT_HEADER_TIMEOUT: Duration = Duration::from_secs(2);
-
 /// The backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_BACKOFF: Duration = Duration::from_millis(100);
+const FETCH_PARENT_HEADER_BACKOFF: Duration = Duration::from_millis(2000);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -114,7 +112,7 @@ impl FlashblocksExecutionCoordinator {
                         flashblock,
                         pending_block.clone(),
                     ) {
-                        error!("error processing flashblock: {e:?}")
+                        error!("error processing flashblock: {e:#?}")
                     }
                 }
             });
@@ -233,29 +231,22 @@ where
         flashblocks.base()
     };
 
-    let now = std::time::Instant::now();
+    let f = || provider.sealed_header_by_hash(base.parent_hash);
 
-    let sealed_header_fut = async {
-        loop {
-            match provider.sealed_header_by_hash(base.parent_hash) {
-                Ok(Some(header)) => break Ok(header),
-                _ => {
-                    if now.elapsed() > PARENT_HEADER_TIMEOUT {
-                        break Err(eyre::eyre::eyre!(
-                            "timed out waiting for parent header {}",
-                            base.parent_hash
-                        ));
-                    }
-
-                    tokio::time::sleep(FETCH_PARENT_HEADER_BACKOFF).await;
-                }
-            }
-        }
-    };
-
-    let sealed_header = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(sealed_header_fut)
-    })?;
+    let sealed_header = f
+        .retry(
+            backon::ExponentialBuilder::default()
+                .with_max_delay(FETCH_PARENT_HEADER_BACKOFF)
+                .with_max_times(10),
+        )
+        .notify(|e, duration| {
+            error!(
+                "waiting for parent header {}: {e:#?}. waited {:#?} so far",
+                base.parent_hash, duration
+            )
+        })
+        .call()?
+        .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))?;
 
     let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
     let execution_context = OpBlockExecutionCtx {
@@ -280,6 +271,7 @@ where
         min_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.min_tx_index.to_string()),
         max_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.max_tx_index.to_string()),
         execution_context = ?execution_context,
+        next_block_context = ?next_block_context,
         "processing flashblock"
     );
 
@@ -327,7 +319,7 @@ where
             .collect::<eyre::Result<Vec<_>>>()?;
 
         let eth_attrs = EthPayloadBuilderAttributes {
-            id: PayloadId(flashblock.payload_id().to_owned().0),
+            id: flashblock.payload_id().to_owned(),
             parent: base.parent_hash,
             timestamp: base.timestamp,
             suggested_fee_recipient: base.fee_recipient,

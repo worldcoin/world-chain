@@ -67,8 +67,10 @@ fn unwrap_committed_state(
 mod property_tests {
     use std::path::PathBuf;
 
+    use eyre::eyre::eyre;
     use flashblocks_builder::bal_executor::BalExecutorError;
     use proptest::{prelude::Strategy, prop_assert, proptest};
+    use tracing::info;
 
     use std::io::Write;
 
@@ -194,7 +196,9 @@ mod property_tests {
 
     /// Test with fib calls that involve storage operations across multiple flashblocks
     #[test]
-    fn test_multi_flashblock_with_storage() {
+    fn test_multi_flashblock_with_storage() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
         // Create a sequence where we call fib() which modifies storage
         let sequence: Vec<(TxOp, u64)> = vec![
             // Flashblock 1: ALICE calls fib(5) on the proxy, BOB does a transfer
@@ -239,6 +243,14 @@ mod property_tests {
 
         for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
             let committed = unwrap_committed_state(committed_state);
+
+            info!(
+                i,
+                diff = ?diff,
+                committed = ?committed,
+                "Validating flashblock",
+            );
+
             eprintln!(
                 "Validating flashblock {} with {} committed txs",
                 i,
@@ -249,11 +261,13 @@ mod property_tests {
             if let Err(err) = &result {
                 if let Some(e) = err.downcast_ref::<BalExecutorError>() {
                     debug_output(e);
-                }
 
-                panic!("Flashblock {} validation failed: {:?}", i, err);
+                    return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
+                }
             }
         }
+
+        Ok(())
     }
 
     proptest! {

@@ -82,7 +82,7 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.access_list",
         env = "FLASHBLOCKS_ACCESS_LIST",
-        default_value_t = true
+        default_value_t = false
     )]
     pub access_list: bool,
 }
@@ -147,7 +147,7 @@ mod tests {
             builder_sk: None,
             recommit_interval: 200,
             flashblocks_interval: 200,
-            access_list: true,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([

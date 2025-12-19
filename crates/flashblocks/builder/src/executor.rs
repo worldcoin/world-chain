@@ -1,3 +1,4 @@
+use alloy_consensus::{Block, Header};
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
     block::{OpTxEnv, receipt_builder::OpReceiptBuilder},
@@ -122,8 +123,8 @@ where
     N: NodePrimitives<
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
-            Block = alloy_consensus::Block<OpTransactionSigned>,
-            BlockHeader = alloy_consensus::Header,
+            Block = Block<OpTransactionSigned>,
+            BlockHeader = Header,
         >,
     E: Evm<
             DB: StateDB + DatabaseCommit + Database + 'a,

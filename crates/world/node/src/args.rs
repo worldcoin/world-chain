@@ -10,7 +10,7 @@ use reth_network_peers::PeerId;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::str::FromStr;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::WorldChainNodeConfig;
 
@@ -101,6 +101,12 @@ impl WorldChainArgs {
         }
 
         let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
+
+        info!(
+            target: "reth::cli",
+            "Flashblocks BAL validation is {}",
+            if bal_enabled { "enabled" } else { "disabled" }
+        );
 
         Ok(WorldChainNodeConfig {
             args: self,
@@ -202,7 +208,7 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             flashblocks_interval: 200,
             recommit_interval: 200,
-            access_list: true,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([
@@ -229,7 +235,7 @@ mod tests {
             builder_sk: None,
             flashblocks_interval: 200,
             recommit_interval: 200,
-            access_list: true,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([

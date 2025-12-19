@@ -137,7 +137,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                true,
+                self.config.bal_enabled,
             )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
@@ -148,7 +148,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                true,
+                self.config.bal_enabled,
             )
         }
         .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
