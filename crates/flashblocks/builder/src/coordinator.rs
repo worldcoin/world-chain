@@ -279,7 +279,7 @@ where
 
     let committed_state =
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
-            .unwrap();
+            .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
 
     let transactions_offset = committed_state.transactions.len() + 1;
     let start = Instant::now();
