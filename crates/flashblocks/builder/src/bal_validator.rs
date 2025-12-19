@@ -80,7 +80,10 @@ where
         let FlashblockAccessListData {
             access_list,
             access_list_hash,
-        } = diff.access_list_data.unwrap();
+        } = diff
+            .access_list_data
+            .ok_or(BalValidationError::MissingAccessListData.boxed())
+            .map_err(BalExecutorError::from)?;
 
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());

@@ -60,6 +60,8 @@ pub enum BalValidationError {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
     },
+    #[error("Missing access list data")]
+    MissingAccessListData,
 }
 
 impl BalValidationError {
@@ -337,7 +339,6 @@ impl BlockAccessIndexCounter {
 /// [`CommittedState`] holds all relevant information about the intra block state committment
 /// for which we are executing on top of.
 #[derive(Default, Debug, Clone)]
-
 pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
     /// The total gas used in previous committed transactions.
     pub gas_used: u64,

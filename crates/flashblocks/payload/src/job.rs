@@ -172,7 +172,7 @@ impl<P: BuiltPayload> CommittedPayloadState<P> {
         }
     }
 
-    pub fn take_payload(&self) -> Option<P>
+    pub fn clone_payload(&self) -> Option<P>
     where
         P: Clone,
     {
@@ -723,7 +723,7 @@ where
         }
 
         let fut = ResolveBestPayload {
-            best_payload: self.committed_payload.take_payload(),
+            best_payload: self.committed_payload.clone_payload(),
             maybe_better: None,
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };

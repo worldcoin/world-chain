@@ -158,7 +158,7 @@ impl FlashblockAccessList {
                     bundle_account.storage.insert(
                         slot,
                         StorageSlot {
-                            previous_or_original_value: original_value, // Original value tracking can be added if needed
+                            previous_or_original_value: original_value, // TODO: Revisit this logic
                             present_value: change.new_value.into(),
                         },
                     );

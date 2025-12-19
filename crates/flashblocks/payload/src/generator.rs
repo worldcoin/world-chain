@@ -244,7 +244,7 @@ where
 
         let best_payload = if committed_payload.is_frozen() {
             (
-                PayloadState::Frozen(committed_payload.take_payload().unwrap()),
+                PayloadState::Frozen(committed_payload.clone_payload().unwrap()),
                 committed_payload
                     .access_list()
                     .cloned()

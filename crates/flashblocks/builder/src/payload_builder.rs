@@ -129,28 +129,15 @@ where
 
         let database = cached_reads.as_db_mut(db);
 
-        if ctx.attributes().no_tx_pool {
-            build(
-                best,
-                Some(self.pool.clone()),
-                database,
-                state_provider.clone(),
-                &ctx,
-                committed_payload,
-                self.config.bal_enabled,
-            )
-        } else {
-            // sequencer mode we can reuse cachedreads from previous runs
-            build(
-                best,
-                Some(self.pool.clone()),
-                database,
-                state_provider.clone(),
-                &ctx,
-                committed_payload,
-                self.config.bal_enabled,
-            )
-        }
+        build(
+            best,
+            Some(self.pool.clone()),
+            database,
+            state_provider.clone(),
+            &ctx,
+            committed_payload,
+            self.config.bal_enabled,
+        )
         .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
     }
 }
