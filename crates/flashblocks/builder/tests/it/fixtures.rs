@@ -9,8 +9,9 @@ use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use flashblocks_builder::{
+    BlockBuilderExt,
+    bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
-    executor::{BalBlockBuilder, CommittedState},
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
@@ -434,7 +435,6 @@ pub fn arb_execution_payload_sequence(
         Option<CommittedState<OpRethReceiptBuilder>>,
     )>,
 > {
-    // Generate a vector of chaos sequences (one per flashblock)
     arb_transaction_sequence(transactions).prop_filter_map(
         "execution must succeed",
         move |sequence: Vec<(TxOp, u64)>| build_chained_payloads(sequence, max_flashblocks).ok(),
@@ -595,7 +595,7 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let outcome = builder.finish(state_provider)?;
+    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider)?;
 
     let access_list = access_list_rx.recv()?;
 
@@ -606,7 +606,7 @@ pub fn execute_serial(
         access_list_hash: hash,
     };
 
-    Ok((outcome, bal_data, state.take_bundle()))
+    Ok((outcome, bal_data, bundle_state))
 }
 
 // ============================================================================

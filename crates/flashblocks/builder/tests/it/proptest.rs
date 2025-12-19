@@ -5,8 +5,8 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_builder::{
-    executor::CommittedState,
-    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+    bal_executor::CommittedState,
+    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
@@ -25,8 +25,7 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // The transaction offset is the number of previously committed transactions.
-    // This matches the builder's start_index which is set to transactions.len().
+    // The transaction offset is the number of previously committed transactions offset 1.
     let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
     let executor_transactions =
@@ -41,7 +40,7 @@ pub fn validate(
         executor_transactions,
     };
 
-    let payload_id = PayloadId::new([0u8; 8]);
+    let payload_id = PayloadId::default();
     let payload = validator.validate(
         state_provider as Arc<dyn StateProvider>,
         diff.clone(),
@@ -68,8 +67,10 @@ fn unwrap_committed_state(
 mod property_tests {
     use std::path::PathBuf;
 
-    use flashblocks_builder::executor::BalExecutorError;
+    use eyre::eyre::eyre;
+    use flashblocks_builder::bal_executor::BalExecutorError;
     use proptest::{prelude::Strategy, prop_assert, proptest};
+    use tracing::info;
 
     use std::io::Write;
 
@@ -195,7 +196,9 @@ mod property_tests {
 
     /// Test with fib calls that involve storage operations across multiple flashblocks
     #[test]
-    fn test_multi_flashblock_with_storage() {
+    fn test_multi_flashblock_with_storage() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
         // Create a sequence where we call fib() which modifies storage
         let sequence: Vec<(TxOp, u64)> = vec![
             // Flashblock 1: ALICE calls fib(5) on the proxy, BOB does a transfer
@@ -240,6 +243,14 @@ mod property_tests {
 
         for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
             let committed = unwrap_committed_state(committed_state);
+
+            info!(
+                i,
+                diff = ?diff,
+                committed = ?committed,
+                "Validating flashblock",
+            );
+
             eprintln!(
                 "Validating flashblock {} with {} committed txs",
                 i,
@@ -247,14 +258,16 @@ mod property_tests {
             );
 
             let result = validate(&diff, committed);
-            if let Err(err) = &result {
-                if let Some(e) = err.downcast_ref::<BalExecutorError>() {
-                    debug_output(e);
-                }
+            if let Err(err) = &result
+                && let Some(e) = err.downcast_ref::<BalExecutorError>()
+            {
+                debug_output(e);
 
-                panic!("Flashblock {} validation failed: {:?}", i, err);
+                return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
             }
         }
+
+        Ok(())
     }
 
     proptest! {

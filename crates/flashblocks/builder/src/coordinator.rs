@@ -1,6 +1,6 @@
 use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
-use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
@@ -28,15 +28,19 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{
-    executor::CommittedState,
+    bal_executor::CommittedState,
+    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
-    validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
 };
+use backon::BlockingRetryable;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
+
+/// The backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
+const FETCH_PARENT_HEADER_BACKOFF: Duration = Duration::from_millis(2000);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -108,7 +112,7 @@ impl FlashblocksExecutionCoordinator {
                         flashblock,
                         pending_block.clone(),
                     ) {
-                        error!("error processing flashblock: {e:?}")
+                        error!("error processing flashblock: {e:#?}")
                     }
                 }
             });
@@ -169,7 +173,7 @@ impl FlashblocksExecutionCoordinator {
         if let Some(payload_events) = payload_events
             && let Err(e) = payload_events.send(event)
         {
-            error!("error broadcasting payload: {e:?}");
+            error!("error broadcasting payload: {e:#?}");
         }
         Ok(())
     }
@@ -190,15 +194,6 @@ where
         + Clone
         + 'static,
 {
-    trace!(
-        target: "flashblocks::state_executor",
-        id = %flashblock.payload_id,
-        index = %flashblock.index,
-        min_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.min_tx_index),
-        max_tx_index = %flashblock.diff.access_list_data.as_ref().map_or(0, |d| d.access_list.max_tx_index),
-        "processing flashblock"
-    );
-
     let FlashblocksExecutionCoordinatorInner {
         ref mut flashblocks,
         ref mut latest_payload,
@@ -236,22 +231,22 @@ where
         flashblocks.base()
     };
 
-    let timeout = Duration::from_secs(10);
-    let now = std::time::Instant::now();
+    let f = || provider.sealed_header_by_hash(base.parent_hash);
 
-    let sealed_header = loop {
-        match provider.sealed_header_by_hash(base.parent_hash) {
-            Ok(Some(header)) => break header,
-            _ => {
-                if now.elapsed() > timeout {
-                    return Err(eyre::eyre::eyre!(
-                        "timed out waiting for parent header {}",
-                        base.parent_hash
-                    ));
-                }
-            }
-        }
-    };
+    let sealed_header = f
+        .retry(
+            backon::ExponentialBuilder::default()
+                .with_max_delay(FETCH_PARENT_HEADER_BACKOFF)
+                .with_max_times(10),
+        )
+        .notify(|e, duration| {
+            error!(
+                "waiting for parent header {}: {e:#?}. waited {:#?} so far",
+                base.parent_hash, duration
+            )
+        })
+        .call()?
+        .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))?;
 
     let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
     let execution_context = OpBlockExecutionCtx {
@@ -259,14 +254,6 @@ where
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
-
-    info!(
-        target: "flashblocks::state_executor",
-        id = %flashblock.flashblock.payload_id,
-        index = %flashblock.flashblock.index,
-        execution_context = ?execution_context,
-        "building payload from flashblock"
-    );
 
     let next_block_context = OpNextBlockEnvAttributes {
         timestamp: base.timestamp,
@@ -276,6 +263,17 @@ where
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
     };
+
+    trace!(
+        target: "flashblocks::coordinator",
+        id = %flashblock.flashblock().payload_id,
+        index = %flashblock.flashblock().index,
+        min_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.min_tx_index.to_string()),
+        max_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.max_tx_index.to_string()),
+        execution_context = ?execution_context,
+        next_block_context = ?next_block_context,
+        "processing flashblock"
+    );
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
 
@@ -321,7 +319,7 @@ where
             .collect::<eyre::Result<Vec<_>>>()?;
 
         let eth_attrs = EthPayloadBuilderAttributes {
-            id: PayloadId(flashblock.payload_id().to_owned().0),
+            id: flashblock.payload_id().to_owned(),
             parent: base.parent_hash,
             timestamp: base.timestamp,
             suggested_fee_recipient: base.fee_recipient,

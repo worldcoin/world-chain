@@ -138,14 +138,22 @@
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
+use reth_evm::{
+    block::BlockExecutionError,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+};
+use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_provider::StateProvider;
+use revm_database::BundleState;
+
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
 
 /// Underlying block executor and builder with BAL construction.
-pub mod executor;
+pub mod bal_executor;
 
 /// Flashblock validation with parallel execution support.
-pub mod validator;
+pub mod bal_validator;
 
 /// Flashblocks execution coordinator.
 ///
@@ -172,6 +180,12 @@ pub mod traits;
 /// Database abstractions for BAL construction and temporal state access.
 pub mod database;
 
+/// Standard Flashblock Block Builder (without BAL support).
+pub mod executor;
+
+/// Block building utilities
+pub mod utils;
+
 /// Configuration for the flashblocks payload builder.
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {
@@ -179,7 +193,7 @@ pub struct FlashblocksPayloadBuilderConfig {
     ///
     /// Contains settings for data availability, compute gas limits, and other
     /// OP-stack specific options.
-    pub inner: reth_optimism_payload_builder::config::OpBuilderConfig,
+    pub inner: OpBuilderConfig,
 
     /// Whether to enable Block Access List (BAL) generation.
     ///
@@ -189,4 +203,12 @@ pub struct FlashblocksPayloadBuilderConfig {
     ///
     /// Defaults to `false`.
     pub bal_enabled: bool,
+}
+
+pub trait BlockBuilderExt: BlockBuilder {
+    /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].
+    fn finish_with_bundle(
+        self,
+        state_provider: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }

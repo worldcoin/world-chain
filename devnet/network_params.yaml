@@ -27,6 +27,7 @@ optimism_package:
         fjord_time_offset: 0
         granite_time_offset: 0
         holocene_time_offset: 0
+        isthmus_time_offset: 0
       mev_params:
         image: "leytont/rollup-boost:latest"
         type: custom

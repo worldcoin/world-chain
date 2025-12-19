@@ -1,19 +1,24 @@
 use crate::{
-    FlashblocksPayloadBuilderConfig,
+    BlockBuilderExt, FlashblocksPayloadBuilderConfig,
+    bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
-    executor::{BalBlockBuilder, CommittedState},
+    executor::FlashblocksBlockBuilder,
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
         payload_builder::FlashblockPayloadBuilder,
     },
 };
-use reth_evm::{EvmFactory, block::StateDB};
+use alloy_primitives::TxHash;
+use reth_evm::{
+    Evm, EvmFactory,
+    block::{BlockExecutor, BlockExecutorFactory, StateDB},
+};
 
 use alloy_consensus::{BlockHeader, Header};
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvm, OpEvmFactory,
     block::receipt_builder::OpReceiptBuilder,
 };
 use flashblocks_primitives::access_list::FlashblockAccessList;
@@ -28,9 +33,7 @@ use reth_basic_payload_builder::{
     PayloadConfig,
 };
 use reth_evm::{
-    ConfigureEvm, Database, EvmEnv,
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    op_revm::OpSpecId,
+    ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, op_revm::OpSpecId,
     precompiles::PrecompilesMap,
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
@@ -53,7 +56,7 @@ use reth_provider::{
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, context::ContextTr, inspector::NoOpInspector};
+use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
 use tracing::{debug, span};
 
@@ -134,7 +137,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                true,
+                self.config.bal_enabled,
             )
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
@@ -145,7 +148,7 @@ where
                 state_provider.clone(),
                 &ctx,
                 committed_payload,
-                true,
+                self.config.bal_enabled,
             )
         }
         .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
@@ -332,30 +335,109 @@ where
 
     let bundle_state = committed_state.bundle.clone();
 
-    let mut state = State::builder()
-        .with_database(db)
-        .with_bundle_prestate(bundle_state.clone())
-        .with_bundle_update()
-        .build();
-
-    let bal_builder_db = BalBuilderDb::new(&mut state);
-
     let visited_transactions = committed_state
         .transaction_hashes_iter()
         .collect::<Vec<_>>();
 
-    // 2. Create the block builder
-    let (tx, access_list_rx) = crossbeam_channel::bounded(1);
+    if bal_enabled {
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_prestate(bundle_state)
+            .with_bundle_update()
+            .build();
 
-    let mut builder = block_builder(
-        bal_builder_db,
-        execution_conext,
-        evm_env,
-        &committed_state,
-        ctx,
-        tx.clone(),
-    )?;
+        let bal_builder_db = BalBuilderDb::new(&mut state);
 
+        // 2. Create the block builder
+        let (tx, access_list_rx) = crossbeam_channel::bounded(1);
+
+        let builder = bal_block_builder(
+            bal_builder_db,
+            execution_conext,
+            evm_env,
+            &committed_state,
+            ctx,
+            tx.clone(),
+        )?;
+
+        build_inner(
+            committed_payload,
+            visited_transactions,
+            gas_limit,
+            best,
+            pool,
+            state_provider,
+            ctx,
+            builder,
+            &committed_state,
+            Some(access_list_rx),
+        )
+    } else {
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_prestate(bundle_state)
+            .with_bundle_update()
+            .build();
+
+        let builder = flashblocks_block_builder(
+            &mut state,
+            execution_conext,
+            evm_env,
+            &committed_state,
+            ctx,
+        )?;
+
+        build_inner(
+            committed_payload,
+            visited_transactions,
+            gas_limit,
+            best,
+            pool,
+            state_provider,
+            ctx,
+            builder,
+            &committed_state,
+            None,
+        )
+    }
+}
+
+fn build_inner<'a, Txs, Ctx, Pool, R>(
+    committed_payload: Option<&OpBuiltPayload>,
+    visited_transactions: Vec<TxHash>,
+    gas_limit: u64,
+    best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+    pool: Option<Pool>,
+    state_provider: impl StateProvider + Clone + 'static,
+    ctx: &Ctx,
+    mut builder: impl BlockBuilderExt<
+        Primitives = OpPrimitives,
+        Executor: BlockExecutor<
+            Evm: Evm<DB: StateDB + DatabaseCommit + Database + 'a, BlockEnv = BlockEnv>,
+            Receipt = R::Receipt,
+            Transaction = R::Transaction,
+        >,
+    >,
+    committed_state: &CommittedState<R>,
+    access_list_rx: Option<crossbeam_channel::Receiver<FlashblockAccessList>>,
+) -> Result<
+    (
+        BuildOutcomeKind<OpBuiltPayload>,
+        Option<FlashblockAccessList>,
+    ),
+    PayloadBuilderError,
+>
+where
+    R: OpReceiptBuilder + Default,
+    Pool: TransactionPool,
+    Txs: PayloadTransactions,
+    Txs::Transaction: OpPooledTx,
+    Ctx: PayloadBuilderCtx<
+            Evm = OpEvmConfig,
+            Transaction = Txs::Transaction,
+            ChainSpec = OpChainSpec,
+        >,
+{
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
     // will already be in the [`BundleState`] at this point if the `best_payload` is set.
     let mut info = if committed_payload.is_none() {
@@ -407,7 +489,7 @@ where
     }
 
     // 6. Build the block
-    let build_outcome = builder.finish(&state_provider)?;
+    let (build_outcome, bundle) = builder.finish_with_bundle(&state_provider)?;
 
     // 7. Seal the block
     let BlockBuilderOutcome {
@@ -420,7 +502,7 @@ where
     let sealed_block = Arc::new(block.sealed_block().clone());
 
     let execution_outcome = ExecutionOutcome::new(
-        state.take_bundle(),
+        bundle,
         vec![execution_result.receipts.clone()],
         block.number(),
         Vec::new(),
@@ -441,7 +523,7 @@ where
         Some(executed_block),
     );
 
-    let access_list = if bal_enabled {
+    let access_list = if let Some(access_list_rx) = access_list_rx {
         Some(access_list_rx.recv().map_err(PayloadBuilderError::other)?)
     } else {
         None
@@ -458,15 +540,15 @@ where
     }
 }
 
-pub fn block_builder<'a, Ctx, DB, R, N, Tx>(
-    state: BalBuilderDb<DB>,
+pub fn bal_block_builder<'a, Ctx, DB, R, N, Tx>(
+    state: BalBuilderDb<&'a mut DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>>,
+    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<&'a mut DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where
@@ -484,7 +566,7 @@ where
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
 
     let mut executor = OpBlockExecutor::<
-        OpEvm<BalBuilderDb<DB>, NoOpInspector, PrecompilesMap>,
+        OpEvm<BalBuilderDb<&'a mut DB>, NoOpInspector, PrecompilesMap>,
         R,
         Arc<OpChainSpec>,
     >::new(
@@ -503,6 +585,53 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
+    );
+
+    Ok(builder)
+}
+
+pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
+    state: &'a mut DB,
+    execution_context: OpBlockExecutionCtx,
+    evm_env: EvmEnv<OpSpecId>,
+    committed_state: &CommittedState<OpRethReceiptBuilder>,
+    ctx: &'a Ctx,
+) -> Result<
+    impl BlockBuilderExt<
+        Primitives = OpPrimitives,
+        Executor = OpBlockExecutor<
+            OpEvm<&'a mut DB, NoOpInspector, PrecompilesMap>,
+            OpRethReceiptBuilder,
+            OpChainSpec,
+        >,
+    > + 'a,
+    PayloadBuilderError,
+>
+where
+    OpBlockExecutorFactory<OpRethReceiptBuilder>:
+        BlockExecutorFactory<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    Tx: PoolTransaction + OpPooledTx,
+    DB: StateDB + DatabaseCommit + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+{
+    let evm = OpEvmFactory::default().create_evm(state, evm_env);
+
+    let mut executor = OpBlockExecutor::new(
+        evm,
+        execution_context.clone(),
+        ctx.spec().clone(),
+        OpRethReceiptBuilder::default(),
+    );
+
+    executor.gas_used = committed_state.gas_used;
+    executor.receipts = committed_state.receipts_iter().cloned().collect();
+
+    let builder = FlashblocksBlockBuilder::new(
+        execution_context,
+        ctx.parent(),
+        executor,
+        committed_state.transactions_iter().cloned().collect(),
+        ctx.spec().clone().into(),
     );
 
     Ok(builder)
