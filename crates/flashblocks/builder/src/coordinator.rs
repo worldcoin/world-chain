@@ -39,9 +39,11 @@ use crate::{
 use backon::BlockingRetryable;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
-/// The backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_BACKOFF: Duration = Duration::from_millis(2000);
+/// The maximum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
+const FETCH_PARENT_HEADER_MAX_DELAY: Duration = Duration::from_millis(2000);
 
+/// The minimum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
+const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(100);
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -231,12 +233,17 @@ where
         flashblocks.base()
     };
 
-    let f = || provider.sealed_header_by_hash(base.parent_hash);
+    let f = || {
+        provider
+            .sealed_header_by_hash(base.parent_hash)?
+            .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))
+    };
 
     let sealed_header = f
         .retry(
             backon::ExponentialBuilder::default()
-                .with_max_delay(FETCH_PARENT_HEADER_BACKOFF)
+                .with_min_delay(FETCH_PARENT_HEADER_MIN_DELAY)
+                .with_max_delay(FETCH_PARENT_HEADER_MAX_DELAY)
                 .with_max_times(10),
         )
         .notify(|e, duration| {
@@ -245,8 +252,7 @@ where
                 base.parent_hash, duration
             )
         })
-        .call()?
-        .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))?;
+        .call()?;
 
     let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
     let execution_context = OpBlockExecutionCtx {
