@@ -41,9 +41,7 @@ use std::{
 };
 use tracing::{info, span};
 use world_chain_node::{
-    FlashblocksOpApi, OpApiExtServer,
-    context::FlashblocksComponentsContext,
-    node::WorldChainNode,
+    FlashblocksOpApi, OpApiExtServer, context::FlashblocksComponentsContext, node::WorldChainNode,
 };
 use world_chain_test::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT,
@@ -176,8 +174,7 @@ pub async fn setup_with_tx_peers(
     let mut environment = Environment::default();
     environment.block_timestamp_increment = 12;
 
-    let mut node_contexts =
-        Vec::<WorldChainTestingNodeContext>::with_capacity(num_nodes as usize);
+    let mut node_contexts = Vec::<WorldChainTestingNodeContext>::with_capacity(num_nodes as usize);
 
     let mut spammer = TxSpammer {
         rpc: Vec::new(),

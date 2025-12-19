@@ -142,8 +142,8 @@ pub trait WorldChainNodeTypes<N: FullNodeTypes<Types = WorldChainNode>> {
     type ComponentsBuilder: NodeComponentsBuilder<N>;
     /// The add-ons type.
     type AddOns: reth_node_api::NodeAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-    >;
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        >;
 
     /// Returns the components builder.
     fn components(&self) -> Self::ComponentsBuilder;
@@ -317,7 +317,6 @@ where
             1_000_000,
         )
     }
-
 }
 
 impl FlashblocksContext {

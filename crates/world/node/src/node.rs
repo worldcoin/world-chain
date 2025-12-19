@@ -18,8 +18,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes, OpPayloadBuilderAttributes,
-    OpStorage,
-    txpool::OpTransactionValidator,
+    OpStorage, txpool::OpTransactionValidator,
 };
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -37,11 +36,8 @@ use crate::config::WorldChainNodeConfig;
 use tracing::{debug, info};
 use world_chain_payload::builder::WorldChainPayloadBuilder;
 use world_chain_pool::{
-    WorldChainTransactionPool,
-    ordering::WorldChainOrdering,
-    root::WorldChainRootValidator,
-    tx::WorldChainPooledTransaction,
-    validator::WorldChainTransactionValidator,
+    WorldChainTransactionPool, ordering::WorldChainOrdering, root::WorldChainRootValidator,
+    tx::WorldChainPooledTransaction, validator::WorldChainTransactionValidator,
 };
 
 use crate::context::{FlashblocksComponentsContext, FlashblocksContext, WorldChainNodeTypes};
