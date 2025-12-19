@@ -9,33 +9,33 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "3"
 members = [
-  "crates/tests/*",
-  "crates/toolkit",
-  "crates/world/*",
-  "crates/flashblocks/p2p",
-  "crates/flashblocks/primitives",
-  "crates/flashblocks/rpc",
-  "crates/flashblocks/builder",
-  "crates/flashblocks/payload",
-  "crates/flashblocks/node",
-  "crates/flashblocks/cli",
+    "crates/tests/*",
+    "crates/toolkit",
+    "crates/world/*",
+    "crates/flashblocks/p2p",
+    "crates/flashblocks/primitives",
+    "crates/flashblocks/rpc",
+    "crates/flashblocks/builder",
+    "crates/flashblocks/payload",
+    "crates/flashblocks/node",
+    "crates/flashblocks/cli",
 ]
 default-members = [
-  "crates/flashblocks/p2p",
-  "crates/flashblocks/primitives",
-  "crates/flashblocks/rpc",
-  "crates/flashblocks/builder",
-  "crates/flashblocks/payload",
-  "crates/flashblocks/node",
-  "crates/flashblocks/cli",
-  "crates/world/bin",
-  "crates/world/node",
-  "crates/world/payload",
-  "crates/world/rpc",
-  "crates/world/pbh",
-  "crates/world/pool",
-  "crates/tests/sepolia",
-  "crates/tests/devnet",
+    "crates/flashblocks/p2p",
+    "crates/flashblocks/primitives",
+    "crates/flashblocks/rpc",
+    "crates/flashblocks/builder",
+    "crates/flashblocks/payload",
+    "crates/flashblocks/node",
+    "crates/flashblocks/cli",
+    "crates/world/bin",
+    "crates/world/node",
+    "crates/world/payload",
+    "crates/world/rpc",
+    "crates/world/pbh",
+    "crates/world/pool",
+    "crates/tests/sepolia",
+    "crates/tests/devnet",
 ]
 
 [profile.maxperf]
@@ -65,16 +65,16 @@ world-chain-test = { path = "crates/world/test" }
 
 # reth
 reth = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-cli-util = {  git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+reth-cli-util = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-cli = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-engine-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-evm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
-  "op",
+    "op",
 ] }
 reth-db = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-db-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-provider = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
-  "test-utils",
+    "test-utils",
 ] }
 reth-basic-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-transaction-pool = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
@@ -86,7 +86,7 @@ reth-prune-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3
 reth-trie = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-chain-state = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-ethereum = { git = "https://github.com/worldcoin/reth", features = [
-  "network",
+    "network",
 ], rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-eth-wire = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-eth-wire-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
@@ -94,10 +94,10 @@ reth-stages-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd
 reth-trie-db = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-primitives-traits = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-node-builder = { git = "https://github.com/worldcoin/reth", features = [
-  "test-utils",
+    "test-utils",
 ], rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-engine-local = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
-  "op",
+    "op",
 ] }
 reth-node-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
@@ -105,7 +105,7 @@ reth-payload-primitives = { git = "https://github.com/worldcoin/reth", rev = "1c
 reth-payload-util = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-payload-validator = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-revm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", default-features = false, features = [
-  "std",
+    "std",
 ] }
 reth-tasks = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
 reth-trie-common = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
@@ -156,13 +156,13 @@ alloy-transport = { version = "1.1.2", default-features = false }
 alloy-consensus = { version = "1.1.2", default-features = false }
 alloy-network = { version = "1.1.2", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = [
-  "rand",
-  "arbitrary",
+    "rand",
+    "arbitrary",
 ] }
 alloy-contract = { version = "1.1.2", default-features = false }
 alloy-rpc-types-eth = { version = "1.1.2", default-features = false }
 alloy-rpc-types = { version = "1.1.2", features = [
-  "eth",
+    "eth",
 ], default-features = false }
 alloy-rpc-types-engine = { version = "1.1.2" }
 alloy-rlp = { version = "0.3.10", default-features = false, features = [
@@ -170,19 +170,21 @@ alloy-rlp = { version = "0.3.10", default-features = false, features = [
 ] }
 alloy-eips = { version = "1.1.2", default-features = false }
 alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "307eae2", default-features = false, features = [
-  "serde",
-  "rlp",
+    "serde",
+    "rlp",
 ] }
 alloy-genesis = { version = "1.1.2", default-features = false }
 alloy-rpc-types-debug = "1.1.2"
 alloy-signer = { version = "1.1.2", default-features = false }
 alloy-signer-local = { version = "1.1.2", default-features = false, features = [
-  "mnemonic",
+    "mnemonic",
 ] }
 alloy-sol-types = "1.4.1"
 alloy-serde = { version = "1.1.2", default-features = false }
 alloy-hardforks = { version = "0.4.4", default-features = false }
-alloy-trie = { version = "0.9.1", default-features = false, features = ["ethereum"] }
+alloy-trie = { version = "0.9.1", default-features = false, features = [
+    "ethereum",
+] }
 # revm
 revm = { version = "33.1.0", default-features = false }
 revm-bytecode = { version = "7.1.1", default-features = false }

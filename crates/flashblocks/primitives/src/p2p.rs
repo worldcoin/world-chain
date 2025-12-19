@@ -748,31 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn authorized_rlp_roundtrip_and_verify_v1() {
-        let (builder_sk, _builder_vk) = key_pair(2);
-        let (authorization, authorizer_vk) = sample_authorization();
-
-        let payload = sample_flashblocks_payload();
-        let msg = AuthorizedMsg::FlashblocksPayloadV1(payload);
-
-        let authorized = Authorized::new(&builder_sk, authorization, msg);
-
-        // Encode → decode
-        let encoded = encode(&authorized);
-        assert_eq!(encoded.len(), authorized.length());
-
-        let mut slice = encoded.as_ref();
-        let decoded = Authorized::decode(&mut slice).expect("decoding succeeds");
-        assert!(slice.is_empty());
-        assert_eq!(decoded, authorized);
-
-        decoded
-            .verify(authorizer_vk)
-            .expect("composite verification succeeds");
-    }
-
-    #[test]
-    fn authorized_rlp_roundtrip_and_verify_v2() {
+    fn authorized_rlp_roundtrip_and_verify() {
         let (builder_sk, _builder_vk) = key_pair(2);
         let (authorization, authorizer_vk) = sample_authorization();
 
