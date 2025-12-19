@@ -27,7 +27,6 @@ use std::{
     time::Duration,
 };
 use tracing::info;
-use world_chain_node::context::FlashblocksContext;
 use world_chain_test::{
     node::{raw_pbh_bundle_bytes, tx},
     utils::{account, signer},
@@ -41,7 +40,7 @@ use crate::setup::{
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -72,7 +71,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -117,7 +116,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -132,7 +131,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 
@@ -164,10 +163,10 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     // Builder and Follower
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+        setup(2, optimism_payload_attributes, true).await?;
 
     // Verifier
-    let (_, basic_nodes, _tasks, mut basic_env, _) = setup_with_tx_peers::<FlashblocksContext>(
+    let (_, basic_nodes, _tasks, mut basic_env, _) = setup_with_tx_peers(
         1,
         optimism_payload_attributes,
         false,
@@ -282,7 +281,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_, nodes, _tasks, mut env, _spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -362,7 +361,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -436,7 +435,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, _nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup(1, optimism_payload_attributes, true).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
@@ -456,7 +455,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+        setup(2, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -536,7 +535,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 
     // Spin up 3 nodes WITHOUT tx_peers configuration
     let (_, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup(3, optimism_payload_attributes, true).await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -610,7 +609,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // We disconnect Node 0 from Node 2 to prevent multi-hop forwarding in Part 1
-    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers::<FlashblocksContext>(
+    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers(
         3,
         optimism_payload_attributes,
         true,
@@ -755,7 +754,7 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_, mut nodes, _tasks, _, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true, true)
+        setup_with_tx_peers(3, optimism_payload_attributes, true, true, true)
             .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
@@ -819,11 +818,11 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
     const TXS_PER_FLASHBLOCK: u64 = 20;
 
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup(3, optimism_payload_attributes, true).await?;
 
     // Setup: 1 basic verifier node for flashblock validation
     let (_, mut basic_validators, _tasks, _basic_env, _) =
-        setup_with_tx_peers::<FlashblocksContext>(
+        setup_with_tx_peers(
             1,
             optimism_payload_attributes,
             false,

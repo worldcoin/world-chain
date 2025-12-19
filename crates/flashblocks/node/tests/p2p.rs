@@ -19,12 +19,10 @@ use flashblocks_primitives::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-use reth_e2e_test_utils::TmpDB;
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_ethereum::network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
-use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -52,7 +50,6 @@ use url::Host;
 use world_chain_node::{
     args::{BuilderArgs, PbhArgs, WorldChainArgs},
     config::WorldChainNodeConfig,
-    context::FlashblocksContext,
     node::WorldChainNode,
 };
 use world_chain_test::{
@@ -199,18 +196,14 @@ async fn setup_node_extended_cfg(
         builder_config: Default::default(),
     };
 
-    let node = WorldChainNode::<FlashblocksContext>::new(
+    let node = WorldChainNode::new(
         world_chain_node_config
             .args
             .clone()
             .into_config(&chain_spec)?,
     );
 
-    let ext_context = node.ext_context::<FullNodeTypesAdapter<
-        WorldChainNode<FlashblocksContext>,
-        TmpDB,
-        BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<FlashblocksContext>, TmpDB>>,
-    >>();
+    let ext_context = node.ext_context();
     // Safe unwrap because node has flashblocks enabled
     let p2p_handle = ext_context.unwrap().flashblocks_handle.clone();
 
@@ -219,7 +212,7 @@ async fn setup_node_extended_cfg(
         node_exit_future,
     } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
-        .with_types_and_provider::<WorldChainNode<FlashblocksContext>, BlockchainProvider<_>>()
+        .with_types_and_provider::<WorldChainNode, BlockchainProvider<_>>()
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons())
         .launch()
