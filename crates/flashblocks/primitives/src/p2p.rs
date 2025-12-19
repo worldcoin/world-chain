@@ -476,7 +476,7 @@ impl AsRef<FlashblocksPayloadV1> for AuthorizedMsg {
     fn as_ref(&self) -> &FlashblocksPayloadV1 {
         match self {
             Self::FlashblocksPayloadV1(p) => p,
-            _ => panic!("not a FlashblocksPayloadV1V1 message"),
+            _ => panic!("not a FlashblocksPayloadV1 message"),
         }
     }
 }
