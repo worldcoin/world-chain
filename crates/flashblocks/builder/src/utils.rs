@@ -1,5 +1,4 @@
 use std::collections::{HashMap, hash_map::Entry};
-
 use revm_database::states::reverts::{AccountInfoRevert, Reverts};
 
 /// Flattens a multi-transition [`Reverts`] into a single transition, merging per-account data.
