@@ -258,12 +258,12 @@ mod property_tests {
             );
 
             let result = validate(&diff, committed);
-            if let Err(err) = &result {
-                if let Some(e) = err.downcast_ref::<BalExecutorError>() {
-                    debug_output(e);
+            if let Err(err) = &result
+                && let Some(e) = err.downcast_ref::<BalExecutorError>()
+            {
+                debug_output(e);
 
-                    return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
-                }
+                return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
             }
         }
 
