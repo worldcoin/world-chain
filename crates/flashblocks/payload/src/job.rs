@@ -101,6 +101,7 @@ impl<P> Future for FlashblocksPendingPayload<P> {
     }
 }
 
+#[derive(Clone)]
 pub enum CommittedPayloadState<P> {
     Frozen {
         payload: P,
@@ -180,28 +181,6 @@ impl<P: BuiltPayload> CommittedPayloadState<P> {
             CommittedPayloadState::Frozen { payload, .. }
             | CommittedPayloadState::Best { payload, .. } => Some(payload.clone()),
             CommittedPayloadState::Empty => None,
-        }
-    }
-}
-
-impl<P: Clone> Clone for CommittedPayloadState<P> {
-    fn clone(&self) -> Self {
-        match self {
-            CommittedPayloadState::Frozen {
-                payload,
-                access_list,
-            } => CommittedPayloadState::Frozen {
-                payload: payload.clone(),
-                access_list: access_list.clone(),
-            },
-            CommittedPayloadState::Best {
-                payload,
-                access_list,
-            } => CommittedPayloadState::Best {
-                payload: payload.clone(),
-                access_list: access_list.clone(),
-            },
-            CommittedPayloadState::Empty => CommittedPayloadState::Empty,
         }
     }
 }
@@ -370,8 +349,6 @@ where
             withdrawals_offset,
             access_list,
         );
-
-        trace!(target: "flashblocks::payload_builder", index = %flashblock.flashblock().index, receipts =?payload.block(), "publishing payload with block");
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
