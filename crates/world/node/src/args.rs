@@ -3,14 +3,14 @@ use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use eyre::eyre;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
 use reth_network_peers::PeerId;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::str::FromStr;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::WorldChainNodeConfig;
 
@@ -100,9 +100,20 @@ impl WorldChainArgs {
             }
         }
 
+        let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
+
+        info!(
+            target: "reth::cli",
+            "Flashblocks BAL validation is {}",
+            if bal_enabled { "enabled" } else { "disabled" }
+        );
+
         Ok(WorldChainNodeConfig {
             args: self,
-            builder_config: Default::default(),
+            builder_config: FlashblocksPayloadBuilderConfig {
+                inner: Default::default(),
+                bal_enabled,
+            },
         })
     }
 }
@@ -197,6 +208,7 @@ mod tests {
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([
@@ -223,6 +235,7 @@ mod tests {
             builder_sk: None,
             flashblocks_interval: 200,
             recommit_interval: 200,
+            access_list: false,
         };
 
         let args = CommandParser::parse_from([

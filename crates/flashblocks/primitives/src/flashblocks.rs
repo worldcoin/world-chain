@@ -1,12 +1,14 @@
-use crate::primitives::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+use crate::{
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
+    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use alloy_consensus::{
-    proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
-    EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
+    proofs::ordered_trie_root_with_encoder,
 };
-use alloy_eips::{merge::BEACON_NONCE, Decodable2718, Encodable2718};
-use alloy_primitives::{FixedBytes, U256};
+use alloy_eips::{Decodable2718, Encodable2718, merge::BEACON_NONCE};
+use alloy_primitives::U256;
+use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
@@ -29,10 +31,11 @@ pub struct Flashblock {
 impl Flashblock {
     pub fn new(
         payload: &OpBuiltPayload,
-        config: PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
         index: u64,
         transactions_offset: usize,
         withdrawal_offset: usize,
+        access_list: Option<FlashblockAccessList>,
     ) -> Self {
         let block = payload.block();
         let fees = payload.fees();
@@ -55,7 +58,7 @@ impl Flashblock {
                 gas_limit: block.gas_limit(),
                 timestamp: config.attributes.payload_attributes.timestamp,
                 extra_data: block.extra_data().clone(),
-                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(),
+                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
             })
         } else {
             None
@@ -89,6 +92,16 @@ impl Flashblock {
             ),
         };
 
+        let access_list_data = if let Some(access_list) = access_list {
+            let hash = crate::access_list::access_list_hash(&access_list);
+            Some(FlashblockAccessListData {
+                access_list,
+                access_list_hash: hash,
+            })
+        } else {
+            None
+        };
+
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
                 payload_id: config.attributes.payload_id(),
@@ -103,6 +116,7 @@ impl Flashblock {
                     transactions,
                     withdrawals,
                     withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    access_list_data,
                 },
                 metadata,
             },
@@ -110,7 +124,7 @@ impl Flashblock {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq, Hash)]
 pub struct FlashblockMetadata {
     /// Total fees collected by the proposer for this block.
     pub fees: U256,
@@ -128,8 +142,8 @@ impl Flashblock {
         self.flashblock
     }
 
-    pub fn payload_id(&self) -> &FixedBytes<8> {
-        &self.flashblock.payload_id.0
+    pub fn payload_id(&self) -> &PayloadId {
+        &self.flashblock.payload_id
     }
 
     pub fn base(&self) -> Option<&ExecutionPayloadBaseV1> {
@@ -142,9 +156,9 @@ impl Flashblock {
 }
 
 impl Flashblock {
-    pub fn reduce(flashblocks: Flashblocks) -> Option<Flashblock> {
+    pub fn reduce(flashblocks: Flashblocks) -> eyre::Result<Flashblock> {
         let mut iter = flashblocks.0.into_iter();
-        let mut acc = iter.next()?.flashblock;
+        let mut acc = iter.next().ok_or(eyre!("flashblocks is empty"))?.flashblock;
 
         for next in iter {
             debug_assert_eq!(
@@ -177,7 +191,7 @@ impl Flashblock {
             acc.diff.block_hash = next.flashblock.diff.block_hash;
         }
 
-        Some(Flashblock { flashblock: acc })
+        Ok(Flashblock { flashblock: acc })
     }
 }
 
@@ -242,7 +256,7 @@ impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
 /// - All flashblocks have the same payload ID
 /// - Flashblocks have contiguous indices starting from 0
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Flashblocks(Vec<Flashblock>);
+pub struct Flashblocks(pub Vec<Flashblock>);
 
 impl Default for Flashblocks {
     fn default() -> Self {
@@ -313,7 +327,9 @@ impl Flashblocks {
                 bail!("New flashblock has different payload_id and must contain the base payload");
             };
             if base.timestamp <= self.base().timestamp {
-                bail!("New flashblock has different payload_id and must have a later timestamp than the current base");
+                bail!(
+                    "New flashblock has different payload_id and must have a later timestamp than the current base"
+                );
             }
 
             return Ok(true);
@@ -339,7 +355,7 @@ impl Flashblocks {
         &self.0
     }
 
-    pub fn payload_id(&self) -> &FixedBytes<8> {
+    pub fn payload_id(&self) -> &PayloadId {
         self.0.first().unwrap().payload_id()
     }
 
@@ -353,7 +369,7 @@ impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
 
     /// Converts a collection of flashblocks into a single `RecoveredBlock`.
     fn try_from(value: Flashblocks) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
-        let reduced = Flashblock::reduce(value).ok_or(eyre!("No flashblocks to reduce"))?;
+        let reduced = Flashblock::reduce(value)?;
         reduced.try_into()
     }
 }

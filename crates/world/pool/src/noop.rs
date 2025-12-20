@@ -2,14 +2,14 @@ use std::{collections::HashSet, sync::Arc};
 
 use super::tx::WorldChainPooledTransaction;
 use alloy_eips::eip4844::BlobAndProofV1;
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{Address, B256, TxHash};
 use reth::transaction_pool::{
-    error::PoolError, noop::NoopTransactionPool, pool::AddedTransactionState,
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
     NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
     PropagatedTransactions, TransactionEvents, TransactionListenerKind, TransactionOrigin,
-    TransactionPool, ValidPoolTransaction,
+    TransactionPool, ValidPoolTransaction, error::PoolError, noop::NoopTransactionPool,
+    pool::AddedTransactionState,
 };
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::Recovered;
@@ -23,12 +23,6 @@ pub struct NoopWorldChainTransactionPool {
 
 impl TransactionPool for NoopWorldChainTransactionPool {
     type Transaction = WorldChainPooledTransaction;
-    async fn add_transactions_with_origins(
-        &self,
-        _transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<PoolResult<reth::transaction_pool::AddedTransactionOutcome>> {
-        vec![]
-    }
 
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]

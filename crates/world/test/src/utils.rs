@@ -2,11 +2,11 @@ use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{
-    address, aliases::U48, bytes, fixed_bytes, keccak256, Address, Bytes, ChainId, FixedBytes,
-    TxKind, B256, U128, U256, U64, U8,
+    Address, B256, Bytes, ChainId, FixedBytes, TxKind, U8, U64, U128, U256, address, aliases::U48,
+    bytes, fixed_bytes, keccak256,
 };
 use alloy_signer::SignerSync;
-use alloy_signer_local::{coins_bip39::English, PrivateKeySigner};
+use alloy_signer_local::{PrivateKeySigner, coins_bip39::English};
 use alloy_sol_types::SolValue;
 use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
@@ -14,7 +14,7 @@ use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::transaction::SignedTransaction;
 use reth_primitives_traits::size::InMemorySize;
-use semaphore_rs::{hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree, Field};
+use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
 
@@ -24,14 +24,14 @@ use world_chain_pbh::{
 };
 
 use crate::{
+    DEV_CHAIN_ID, DEVNET_ENTRYPOINT, MNEMONIC, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES, WC_SEPOLIA_CHAIN_ID,
     bindings::{
         EncodedSafeOpStruct,
         IEntryPoint::{self, PackedUserOperation, UserOpsPerAggregator},
         IMulticall3,
         IPBHEntryPoint::{self, PBHPayload},
     },
-    DEVNET_ENTRYPOINT, DEV_CHAIN_ID, MNEMONIC, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-    PBH_NONCE_KEY, TEST_MODULES, TEST_SAFES, WC_SEPOLIA_CHAIN_ID,
 };
 
 pub static TREE: LazyLock<LazyPoseidonTree> = LazyLock::new(|| {
@@ -145,11 +145,11 @@ pub async fn eth_tx(acc: u32, mut tx: TxEip1559) -> OpPooledTransaction {
         .expect("Failed to sign transaction");
     let op_tx: OpTypedTransaction = tx.clone().into();
     let tx_signed = OpTransactionSigned::from(op_tx.into_signed(signature));
-    let pooled = OpPooledTransaction::new(
+
+    OpPooledTransaction::new(
         tx_signed.clone().try_into_recovered().unwrap(),
         tx_signed.as_eip1559().unwrap().size(),
-    );
-    pooled
+    )
 }
 
 pub async fn raw_tx(acc: u32, mut tx: TxEip1559) -> Bytes {
@@ -391,14 +391,14 @@ pub fn pbh_multicall(
     let nullifier_hash = nullifier_hash(acc, encoded_external_nullifier.0);
 
     let proof = [
-        proof.0 .0,
-        proof.0 .1,
-        proof.1 .0[0],
-        proof.1 .0[1],
-        proof.1 .1[0],
-        proof.1 .1[1],
-        proof.2 .0,
-        proof.2 .1,
+        proof.0.0,
+        proof.0.1,
+        proof.1.0[0],
+        proof.1.0[1],
+        proof.1.1[0],
+        proof.1.1[1],
+        proof.2.0,
+        proof.2.1,
     ];
 
     let payload = IPBHEntryPoint::PBHPayload {
@@ -468,14 +468,14 @@ impl From<PackedUserOperation> for EncodedSafeOpStruct {
 
 impl From<PbhPayload> for PBHPayload {
     fn from(val: PbhPayload) -> Self {
-        let p0 = val.proof.0 .0 .0;
-        let p1 = val.proof.0 .0 .1;
-        let p2 = val.proof.0 .1 .0[0];
-        let p3 = val.proof.0 .1 .0[1];
-        let p4 = val.proof.0 .1 .1[0];
-        let p5 = val.proof.0 .1 .1[1];
-        let p6 = val.proof.0 .2 .0;
-        let p7 = val.proof.0 .2 .1;
+        let p0 = val.proof.0.0.0;
+        let p1 = val.proof.0.0.1;
+        let p2 = val.proof.0.1.0[0];
+        let p3 = val.proof.0.1.0[1];
+        let p4 = val.proof.0.1.1[0];
+        let p5 = val.proof.0.1.1[1];
+        let p6 = val.proof.0.2.0;
+        let p7 = val.proof.0.2.1;
 
         Self {
             root: val.root,

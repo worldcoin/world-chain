@@ -29,17 +29,19 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
   /root/.foundry/bin/foundryup
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
+ARG PROFILE="maxperf"
+ARG FEATURES="jemalloc"
+
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-  cargo chef cook --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN} --recipe-path recipe.json
-
+    cargo chef cook --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/usr/local/cargo/git \
-  --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-  cargo build --profile maxperf --features jemalloc --bin ${WORLD_CHAIN_BUILDER_BIN}
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo build --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
@@ -70,8 +72,8 @@ RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.1.4/s3fcp-lin
   chmod +x /usr/local/bin/s3fcp
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
-
-COPY --from=builder /app/target/maxperf/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
+ARG PROFILE="maxperf"
+COPY --from=builder /app/target/${PROFILE}/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
 
 COPY --from=builder /root/.foundry/bin/cast /usr/local/bin/
 

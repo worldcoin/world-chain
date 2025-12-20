@@ -20,17 +20,11 @@ reth-payload-primitives.workspace = true
 reth-payload-util.workspace = true
 reth-evm.workspace = true
 reth-node-api.workspace = true
-reth-rpc-eth-api.workspace = true
-reth-rpc-eth-types.workspace = true
-reth-storage-api.workspace = true
 reth-node-builder.workspace = true
-reth-tasks.workspace = true
-revm.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
-reth-optimism-rpc.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
@@ -38,35 +32,47 @@ reth-optimism-evm.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
-alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 op-alloy-consensus.workspace = true
-op-alloy-network.workspace = true
-op-alloy-rpc-types-engine.workspace = true
-op-alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
 
 flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
 
+# revm
+revm.workspace = true
+revm-database.workspace = true
+
 # tokio
 tokio.workspace = true
 
-# metrics
-metrics.workspace = true
-metrics-derive.workspace = true
-
 # misc
+crossbeam-channel.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
-jsonrpsee-core.workspace = true
-jsonrpsee.workspace = true
 futures.workspace = true
+eyre.workspace = true
+rayon.workspace = true
+dashmap.workspace = true
+thiserror.workspace = true
+either.workspace = true
+metrics.workspace = true
+serde.workspace = true
+backon.workspace = true
+
+[dev-dependencies]
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
-
-[dev-dependencies]
+lazy_static.workspace = true
+proptest.workspace = true
+reth-tracing.workspace = true
+alloy-genesis.workspace = true
+op-alloy-network.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
+alloy-trie.workspace = true
 bon.workspace = true

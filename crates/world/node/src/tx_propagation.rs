@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use reth_eth_wire_types::primitives::NetworkPrimitives;
-use reth_network::transactions::{config::TransactionPropagationPolicy, PeerMetadata};
+use reth_network::transactions::{PeerMetadata, config::TransactionPropagationPolicy};
 use reth_network_peers::PeerId;
 
 /// Transaction propagation policy for World Chain that restricts propagation to a specific peer list.
@@ -26,8 +26,10 @@ impl WorldChainTransactionPropagationPolicy {
     }
 }
 
-impl TransactionPropagationPolicy for WorldChainTransactionPropagationPolicy {
-    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+impl<N: NetworkPrimitives> TransactionPropagationPolicy<N>
+    for WorldChainTransactionPropagationPolicy
+{
+    fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool {
         // Access peer_id via request_tx().peer_id
         let peer_id = &peer.request_tx().peer_id;
         let allowed = self.allowed_peers.contains(peer_id);
@@ -44,11 +46,11 @@ impl TransactionPropagationPolicy for WorldChainTransactionPropagationPolicy {
         allowed
     }
 
-    fn on_session_established<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {
+    fn on_session_established(&mut self, _peer: &mut PeerMetadata<N>) {
         // No dynamic updates needed
     }
 
-    fn on_session_closed<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {
+    fn on_session_closed(&mut self, _peer: &mut PeerMetadata<N>) {
         // No cleanup needed
     }
 }

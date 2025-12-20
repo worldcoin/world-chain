@@ -15,3 +15,5 @@ CODEOWNERS
 .git
 .gitignore
 .docker-cache/
+.DS_Store
+**/.DS_Store

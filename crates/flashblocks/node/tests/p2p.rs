@@ -1,5 +1,5 @@
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
@@ -21,7 +21,7 @@ use flashblocks_primitives::{
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_e2e_test_utils::TmpDB;
 use reth_eth_wire::BasicNetworkPrimitives;
-use reth_ethereum::network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_ethereum::network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
@@ -31,7 +31,6 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
-use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::{TaskExecutor, TaskManager};
@@ -47,8 +46,8 @@ use std::{
     sync::Arc,
 };
 use tempfile::NamedTempFile;
-use tokio::time::{sleep, Duration, Instant};
-use tracing::{info, Dispatch};
+use tokio::time::{Duration, Instant, sleep};
+use tracing::{Dispatch, info};
 use url::Host;
 use world_chain_node::{
     args::{BuilderArgs, PbhArgs, WorldChainArgs},
@@ -57,7 +56,7 @@ use world_chain_node::{
     node::WorldChainNode,
 };
 use world_chain_test::{
-    utils::signer, DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR, utils::signer,
 };
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -193,10 +192,11 @@ async fn setup_node_extended_cfg(
                 spoof_authorizer: false,
                 flashblocks_interval: 200,
                 recommit_interval: 200,
+                access_list: true,
             }),
             tx_peers: None,
         },
-        builder_config: OpBuilderConfig::default(),
+        builder_config: Default::default(),
     };
 
     let node = WorldChainNode::<FlashblocksContext>::new(
@@ -273,8 +273,8 @@ fn base_payload(
             extra_data: Bytes::new(),
             base_fee_per_gas: U256::ZERO,
         }),
-        diff: ExecutionPayloadFlashblockDeltaV1::default(),
         metadata: FlashblockMetadata::default(),
+        diff: ExecutionPayloadFlashblockDeltaV1::default(),
     }
 }
 
@@ -296,6 +296,7 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
             withdrawals: Vec::new(),
             logs_bloom: Default::default(),
             withdrawals_root: Default::default(),
+            access_list_data: Default::default(),
         },
         metadata: FlashblockMetadata::default(),
     }

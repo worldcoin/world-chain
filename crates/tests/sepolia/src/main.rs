@@ -1,11 +1,11 @@
 #![warn(unused_crate_dependencies)]
 
-use alloy_primitives::{address, Address};
+use alloy_primitives::{Address, address};
 use clap::Parser;
 use cli::{
+    Cli,
     identities::generate_identities,
     transactions::{create_bundle, send_aa, send_bundle, send_invalid_pbh, stake_aa},
-    Cli,
 };
 
 use crate::cli::transactions::load_test;

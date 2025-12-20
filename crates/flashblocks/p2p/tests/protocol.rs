@@ -26,7 +26,9 @@ fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayload
             block_number: 0,
             ..Default::default()
         }),
-        diff: ExecutionPayloadFlashblockDeltaV1::default(),
+        diff: ExecutionPayloadFlashblockDeltaV1 {
+            ..ExecutionPayloadFlashblockDeltaV1::default()
+        },
         metadata: FlashblockMetadata::default(),
     }
 }

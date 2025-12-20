@@ -9,29 +9,27 @@ mod pending_block;
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
+use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_optimism_flashblocks::FlashBlockCompleteSequence;
 use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{
-    eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper, OpRpcConvert},
-    OpEthApi, OpEthApiBuilder, OpEthApiError,
-};
+use reth_optimism_rpc::{OpEthApi, OpEthApiBuilder, OpEthApiError, eth::OpRpcConvert};
 use reth_rpc_eth_api::{
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{
-        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
-        LoadState, SpawnBlocking, Trace,
+        EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;
 use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
+    pool::{BlockingTaskGuard, BlockingTaskPool},
 };
 
 /// Flashblocks `Eth` API implementation.
@@ -75,8 +73,8 @@ where
     type NetworkTypes = <OpEthApi<N, Rpc> as EthApiTypes>::NetworkTypes;
     type RpcConvert = <OpEthApi<N, Rpc> as EthApiTypes>::RpcConvert;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        self.inner.tx_resp_builder()
+    fn converter(&self) -> &Self::RpcConvert {
+        self.inner.converter()
     }
 }
 
@@ -281,47 +279,30 @@ impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
 impl<N, NetworkT> EthApiBuilder<N> for FlashblocksEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
-        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>> + Unpin>,
-    >,
-    N: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>,
+            Evm: ConfigureEvm<
+                NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>
+                                     + From<OpFlashblockPayloadBase>
+                                     + Unpin,
+            >,
+            Types: NodeTypes<
+                ChainSpec: Hardforks + EthereumHardforks,
+                Payload: reth_node_api::PayloadTypes<
+                    ExecutionData: for<'a> TryFrom<
+                        &'a FlashBlockCompleteSequence,
+                        Error: std::fmt::Display,
+                    >,
+                >,
+            >,
+        >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT> + Clone,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
-    FlashblocksEthApi<
-        N,
-        RpcConverter<
-            NetworkT,
-            <N as FullNodeComponents>::Evm,
-            OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-            (),
-            OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
-        >,
-    >: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<
-        N,
-        EthApi = OpEthApi<
-            N,
-            RpcConverter<
-                NetworkT,
-                <N as FullNodeComponents>::Evm,
-                OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-                (),
-                OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
-            >,
-        >,
-    >,
+    FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>:
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<N, EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>>,
 {
-    type EthApi = FlashblocksEthApi<
-        N,
-        RpcConverter<
-            NetworkT,
-            <N as FullNodeComponents>::Evm,
-            OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-            (),
-            OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
-        >,
-    >;
+    type EthApi = FlashblocksEthApi<N, OpRpcConvert<N, NetworkT>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let inner = self.inner.build_eth_api(ctx).await?;

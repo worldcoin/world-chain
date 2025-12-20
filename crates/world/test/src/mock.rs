@@ -7,11 +7,11 @@ use std::{
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
+    keccak256, map::HashMap,
 };
 
-use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
+use alloy_consensus::{Header, constants::EMPTY_ROOT_HASH, transaction::TransactionMeta};
 use alloy_eips::BlockId;
 use parking_lot::Mutex;
 use reth::{
@@ -30,19 +30,19 @@ use reth_primitives::{
 };
 use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{
-    providers::ConsistentViewError, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChainSpecProvider, ChangeSetReader, DatabaseProvider, DatabaseProviderFactory, EthStorage,
-    ExecutionOutcome, HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
+    DatabaseProvider, DatabaseProviderFactory, EthStorage, ExecutionOutcome,
+    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider, providers::ConsistentViewError,
 };
 use reth_revm::revm;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 
 /// A mock implementation for Provider interfaces.
@@ -314,18 +314,6 @@ impl TransactionsProvider for MockEthProvider {
                     return Ok(Some((tx.clone(), meta)));
                 }
             }
-        }
-        Ok(None)
-    }
-
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let lock = self.blocks.lock();
-        let mut current_tx_number: TxNumber = 0;
-        for block in lock.values() {
-            if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
-                return Ok(Some(block.header.number));
-            }
-            current_tx_number += block.body.transactions.len() as TxNumber;
         }
         Ok(None)
     }

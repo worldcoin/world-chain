@@ -51,7 +51,7 @@ def run(plan, args={}):
     )
 
     # Stop the builder op-node service
-    plan.stop_service("op-cl-builder-2151908-1-op-node-custom-op-kurtosis")
+    # plan.stop_service("op-cl-builder-2151908-1-op-node-custom-op-kurtosis")
 
     # Extract HTTP RPC url of the builder
     builder_srv = plan.get_service("op-el-builder-2151908-1-custom-op-node-op-kurtosis")
@@ -61,6 +61,96 @@ def run(plan, args={}):
     l2_srv = plan.get_service("op-el-2151908-1-op-geth-op-node-op-kurtosis")
     l2_rpc_port = l2_srv.ports["rpc"].number
     l2_rpc_url = "http://{0}:{1}".format(l2_srv.ip_address, l2_rpc_port)
+
+
+    # Peer op-node clients together using P2P admin API
+    # Get the three op-node services
+    op_node_1_srv = plan.get_service("op-cl-2151908-1-op-node-op-geth-op-kurtosis")
+    op_node_2_srv = plan.get_service("op-cl-2151908-2-op-node-custom-op-kurtosis")
+    op_node_3_srv = plan.get_service("op-cl-2151908-3-op-node-op-reth-op-kurtosis")
+
+    # Extract the p2p enode/ENR from each op-node
+    extract_p2p_info_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}',
+        port_id="http",
+        extract={"peer_id": ".result.addresses[0]"},
+    )
+
+    op_node_1_p2p = plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-1",
+    )
+
+    op_node_2_p2p = plan.request(
+        service_name="op-cl-2151908-2-op-node-custom-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-2",
+    )
+
+    op_node_3_p2p = plan.request(
+        service_name="op-cl-2151908-3-op-node-op-reth-op-kurtosis",
+        recipe=extract_p2p_info_recipe,
+        description="Extracting P2P info from op-node-3",
+    )
+
+    # Connect op-node-2 to op-node-1
+    connect_peer_recipe_2_to_1 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_1_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-1 to op-node-2 (bidirectional for redundancy)
+    connect_peer_recipe_1_to_2 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_2_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-3 to op-node-1
+    connect_peer_recipe_3_to_1 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_1_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    # Connect op-node-1 to op-node-3 (bidirectional for redundancy)
+    connect_peer_recipe_1_to_3 = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"opp2p_connectPeer","params":["' + op_node_3_p2p["extract.peer_id"] + '"],"id":1}',
+        port_id="http",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-2-op-node-custom-op-kurtosis",
+        recipe=connect_peer_recipe_2_to_1,
+        description="Connecting op-node-2 to op-node-1",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=connect_peer_recipe_1_to_2,
+        description="Connecting op-node-1 to op-node-2",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-3-op-node-op-reth-op-kurtosis",
+        recipe=connect_peer_recipe_3_to_1,
+        description="Connecting op-node-3 to op-node-1",
+    )
+
+    plan.request(
+        service_name="op-cl-2151908-1-op-node-op-geth-op-kurtosis",
+        recipe=connect_peer_recipe_1_to_3,
+        description="Connecting op-node-1 to op-node-3",
+    )
 
     # Add the builders as trusted peers with one another
     builder_0_srv = plan.get_service(
@@ -73,7 +163,7 @@ def run(plan, args={}):
         builder_1_srv.ip_address, builder_1_rpc_port
     )
 
-    builder_2_srv = plan.get_service("op-el-2151908-3-custom-op-node-op-kurtosis")
+    builder_2_srv = plan.get_service("op-el-2151908-3-op-reth-op-node-op-kurtosis")
     builder_2_rpc_port = builder_2_srv.ports["rpc"].number
     builder_2_rpc_url = "http://{0}:{1}".format(
         builder_2_srv.ip_address, builder_2_rpc_port
@@ -93,6 +183,18 @@ def run(plan, args={}):
         description="Extracting enode from builder 0",
     )
 
+    builder_1_enode = plan.request(
+        service_name="op-el-2151908-2-custom-op-node-op-kurtosis",
+        recipe=extract_enode_recipe,
+        description="Extracting enode from builder 1",
+    )
+
+    builder_2_enode = plan.request(
+        service_name="op-el-2151908-3-op-reth-op-node-op-kurtosis",
+        recipe=extract_enode_recipe,
+        description="Extracting enode from builder 2",
+    )
+
     add_trusted_peer_0_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -103,7 +205,7 @@ def run(plan, args={}):
         + '],"id":1}',
         port_id="rpc",
     )
-
+    
     add_trusted_peer_1_recipe = PostHttpRequestRecipe(
         endpoint="/",
         content_type="application/json",
@@ -115,6 +217,29 @@ def run(plan, args={}):
         port_id="rpc",
     )
 
+    add_trusted_peer_2_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_1_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
+        port_id="rpc",
+    )
+
+    add_trusted_peer_3_recipe = PostHttpRequestRecipe(
+        endpoint="/",
+        content_type="application/json",
+        body='{"jsonrpc":"2.0","method":"admin_addTrustedPeer","params":['
+        + '"'
+        + "{0}".format(builder_2_enode["extract.enode"])
+        + '"'
+        + '],"id":1}',
+        port_id="rpc",
+    )
+
+
     plan.request(
         service_name="op-el-2151908-2-custom-op-node-op-kurtosis",
         recipe=add_trusted_peer_0_recipe,
@@ -122,8 +247,20 @@ def run(plan, args={}):
     )
 
     plan.request(
-        service_name="op-el-2151908-3-custom-op-node-op-kurtosis",
+        service_name="op-el-2151908-3-op-reth-op-node-op-kurtosis",
         recipe=add_trusted_peer_1_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
+    plan.request(
+        service_name="op-el-builder-2151908-1-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_2_recipe,
+        description="Adding trusted peers to the builders",
+    )
+
+    plan.request(
+        service_name="op-el-builder-2151908-1-custom-op-node-op-kurtosis",
+        recipe=add_trusted_peer_3_recipe,
         description="Adding trusted peers to the builders",
     )
 

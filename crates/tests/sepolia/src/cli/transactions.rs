@@ -1,27 +1,27 @@
 use alloy_eips::Encodable2718;
 use alloy_primitives::{
-    address, bytes, fixed_bytes, Address, Bytes, FixedBytes, TxKind, B256, U128, U256,
+    Address, B256, Bytes, FixedBytes, TxKind, U128, U256, address, bytes, fixed_bytes,
 };
 use alloy_provider::{
-    network::{EthereumWallet, TransactionBuilder},
     Provider, ProviderBuilder,
+    network::{EthereumWallet, TransactionBuilder},
 };
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{sol, SolCall, SolInterface, SolValue};
+use alloy_sol_types::{SolCall, SolInterface, SolValue, sol};
 use alloy_transport_http::Http;
-use eyre::eyre::{bail, Context};
-use futures::{stream, StreamExt, TryStreamExt};
+use eyre::eyre::{Context, bail};
+use futures::{StreamExt, TryStreamExt, stream};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use reqwest::{
-    header::{HeaderMap, AUTHORIZATION},
     Client,
+    header::{AUTHORIZATION, HeaderMap},
 };
 use reth_rpc_layer::secret_to_bearer_header;
-use semaphore_rs::{hash_to_field, identity::Identity, Field};
+use semaphore_rs::{Field, hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
@@ -37,25 +37,25 @@ use world_chain_pbh::{
 };
 
 use world_chain_test::{
+    DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
     bindings::{
         IEntryPoint::{PackedUserOperation, UserOpsPerAggregator},
         IMulticall3, IPBHEntryPoint,
     },
     utils::{
-        get_operation_hash, partial_user_op_sepolia, user_op_sepolia, InclusionProof,
-        RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash, RpcUserOperationV0_7,
+        InclusionProof, RpcGasEstimate, RpcPartialUserOperation, RpcUserOperationByHash,
+        RpcUserOperationV0_7, get_operation_hash, partial_user_op_sepolia, user_op_sepolia,
     },
-    DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
 };
 
 use crate::{
-    cli::{LoadTestArgs, TestTxType},
     PBH_SIGNATURE_AGGREGATOR,
+    cli::{LoadTestArgs, TestTxType},
 };
 
 use super::{
-    identities::SerializableIdentity, BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs,
-    StakeAAArgs, TxType,
+    BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs, TxType,
+    identities::SerializableIdentity,
 };
 use world_chain_test::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
@@ -233,14 +233,14 @@ pub async fn send_user_operations(
                 signal_hash,
             )?;
             let proof = world_chain_pbh::payload::Proof(semaphore_proof);
-            let p0 = proof.0 .0 .0;
-            let p1 = proof.0 .0 .1;
-            let p2 = proof.0 .1 .0[0];
-            let p3 = proof.0 .1 .0[1];
-            let p4 = proof.0 .1 .1[0];
-            let p5 = proof.0 .1 .1[1];
-            let p6 = proof.0 .2 .0;
-            let p7 = proof.0 .2 .1;
+            let p0 = proof.0.0.0;
+            let p1 = proof.0.0.1;
+            let p2 = proof.0.1.0[0];
+            let p3 = proof.0.1.0[1];
+            let p4 = proof.0.1.1[0];
+            let p5 = proof.0.1.1[1];
+            let p6 = proof.0.2.0;
+            let p7 = proof.0.2.1;
             let proof = [p0, p1, p2, p3, p4, p5, p6, p7];
             let input = [root, nullifier_hash, signal_hash, external_nullifier_hash];
 

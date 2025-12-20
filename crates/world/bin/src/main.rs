@@ -1,11 +1,11 @@
 use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_tracing::tracing::info;
 use world_chain_node::{
-    args::WorldChainArgs, config::WorldChainNodeConfig, context::FlashblocksContext,
-    node::WorldChainNode, FlashblocksOpApi, OpApiExtServer,
+    FlashblocksOpApi, OpApiExtServer, args::WorldChainArgs, config::WorldChainNodeConfig,
+    context::FlashblocksContext, node::WorldChainNode,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 

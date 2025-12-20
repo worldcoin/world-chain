@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::executor::FlashblocksStateExecutor;
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -21,14 +21,14 @@ use flashblocks_primitives::p2p::FlashblocksAuthorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
+    NodeAdapter, NodeComponentsBuilder,
     components::{ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
-    NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    args::RollupArgs, OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder,
-    OpNetworkBuilder,
+    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+    args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
@@ -39,7 +39,7 @@ use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
 use reth_network_peers::PeerId;
-use reth_node_builder::{components::NetworkBuilder, BuilderContext};
+use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// Network builder for World Chain that optionally applies custom transaction propagation policy.
@@ -130,10 +130,10 @@ where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >: PayloadServiceBuilder<
-        N,
-        BasicWorldChainPool<N>,
-        OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    >,
+            N,
+            BasicWorldChainPool<N>,
+            OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
+        >,
 {
     type Net = FlashblocksNetworkBuilder<WorldChainNetworkBuilder>;
     type Evm = OpEvmConfig;
@@ -290,8 +290,8 @@ where
 
         OpAddOns::new(
             rpc_add_ons,
-            self.config.builder_config.da_config.clone(),
-            self.config.builder_config.gas_limit_config.clone(),
+            self.config.builder_config.inner.da_config.clone(),
+            self.config.builder_config.inner.gas_limit_config.clone(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
@@ -308,7 +308,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksStateExecutor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -346,11 +346,8 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
-        let flashblocks_state = FlashblocksStateExecutor::new(
-            flashblocks_handle.clone(),
-            value.builder_config.clone(),
-            pending_block,
-        );
+        let flashblocks_state =
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

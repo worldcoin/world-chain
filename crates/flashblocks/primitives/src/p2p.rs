@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use alloy_primitives::{Bytes, B64};
+use alloy_primitives::{B64, Bytes};
 use alloy_rlp::{Decodable, Encodable, Header};
 use alloy_rpc_types_engine::PayloadId;
 use bytes::{Buf as _, BufMut as _, BytesMut};
@@ -600,13 +600,19 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
+        access_list::{FlashblockAccessList, FlashblockAccessListData},
         flashblocks::FlashblockMetadata,
-        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
+        primitives::{
+            ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
+        },
     };
 
     use super::*;
-    use alloy_primitives::{Address, Bloom, B256, U256};
-    use alloy_rlp::{encode, Decodable, Encodable};
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    };
+    use alloy_primitives::{Address, B256, Bloom, FixedBytes, U256};
+    use alloy_rlp::{Decodable, Encodable, encode};
     use alloy_rpc_types_eth::Withdrawal;
     use bytes::{BufMut, BytesMut};
 
@@ -642,6 +648,40 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
+            access_list_data: Some(FlashblockAccessListData {
+                access_list: sample_access_list(),
+                access_list_hash: B256::with_last_byte(0x4),
+            }),
+        }
+    }
+
+    fn sample_access_list() -> FlashblockAccessList {
+        FlashblockAccessList {
+            changes: vec![AccountChanges {
+                address: Address::default(),
+                storage_changes: vec![SlotChanges {
+                    slot: FixedBytes::with_last_byte(0x2),
+                    changes: vec![StorageChange {
+                        block_access_index: 1,
+                        new_value: FixedBytes::with_last_byte(0x3),
+                    }],
+                }],
+                code_changes: vec![CodeChange {
+                    block_access_index: 2,
+                    new_code: Bytes::from_static(b"\xCA\xFE"),
+                }],
+                storage_reads: vec![FixedBytes::with_last_byte(0x4)],
+                balance_changes: vec![BalanceChange {
+                    block_access_index: 3,
+                    post_balance: U256::from(1_000_000u64),
+                }],
+                nonce_changes: vec![NonceChange {
+                    block_access_index: 4,
+                    new_nonce: 42,
+                }],
+            }],
+            max_tx_index: 5,
+            min_tx_index: 0,
         }
     }
 

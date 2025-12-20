@@ -1,14 +1,14 @@
 use crate::{
-    utils::{pbh_bundle, pbh_multicall, signer, user_op},
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    utils::{pbh_bundle, pbh_multicall, signer, user_op},
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
@@ -23,22 +23,22 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChainSpecProvider, ChangeSetReader, HashedPostStateProvider, HeaderProvider,
-    NodePrimitivesProvider, ProviderError, ProviderResult, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
+    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, ProviderError, ProviderResult,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StaticFileProviderFactory, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    providers::StaticFileProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_transaction_pool::{
-    validate::ValidTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use revm_primitives::TxKind;
 use std::{
@@ -100,6 +100,7 @@ pub fn test_config_with_peers_and_gossip(
             builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
             recommit_interval: 50,
             flashblocks_interval: 200,
+            access_list: true,
         })
     } else {
         None
@@ -118,7 +119,10 @@ pub fn test_config_with_peers_and_gossip(
             flashblocks,
             tx_peers,
         },
-        builder_config: OpBuilderConfig::default(),
+        builder_config: FlashblocksPayloadBuilderConfig {
+            inner: OpBuilderConfig::default(),
+            bal_enabled: true,
+        },
     }
 }
 
@@ -398,10 +402,6 @@ impl TransactionsProvider for WorldChainNoopProvider {
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        Ok(None)
-    }
-
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
     }
 
@@ -688,6 +688,15 @@ impl NodePrimitivesProvider for WorldChainNoopProvider {
 impl StaticFileProviderFactory for WorldChainNoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
+    }
+
+    fn get_static_file_writer(
+        &self,
+        _block: BlockNumber,
+        _segment: reth_provider::StaticFileSegment,
+    ) -> ProviderResult<reth_provider::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>>
+    {
+        unimplemented!()
     }
 }
 

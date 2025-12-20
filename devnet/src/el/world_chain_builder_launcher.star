@@ -172,7 +172,7 @@ def launch(
         plan, service_name, RPC_PORT_ID
     )
 
-    metrics_info = observability.new_metrics_info(observability_helper, service)
+    metrics_info = observability.new_metrics_info(observability_helper, service, metrics_path="/metrics")
 
     http_url = "http://{0}:{1}".format(service.ip_address, RPC_PORT_NUM)
 
@@ -211,6 +211,7 @@ def get_config(
     signing_key = sk_for_service(service_name)
     cmd = [
         "node",
+        "--full",
         "--datadir=" + EXECUTION_DATA_DIRPATH_ON_CLIENT_CONTAINER,
         "--chain={0}".format(
             launcher.network
@@ -289,7 +290,7 @@ def get_config(
 
     env_vars[
         "RUST_LOG"
-    ] = "info,payload_builder=trace,engine::persistence=trace,flashblocks::state_executor=trace"
+    ] = "info,payload_builder=trace,engine::persistence=trace,flashblocks=trace"
     env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use flashblocks_builder::{
-    executor::FlashblocksStateExecutor, traits::payload_builder::FlashblockPayloadBuilder,
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::{
@@ -13,8 +13,8 @@ use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
-    components::{PayloadBuilderBuilder, PayloadServiceBuilder},
     BuilderContext,
+    components::{PayloadBuilderBuilder, PayloadServiceBuilder},
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, OpPayloadBuilderAttributes};
@@ -29,7 +29,7 @@ use reth_transaction_pool::TransactionPool;
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: Option<FlashblocksHandle>,
-    flashblocks_state: Option<FlashblocksStateExecutor>,
+    flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
     interval: Duration,
     recommitment_interval: Duration,
@@ -40,7 +40,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     pub const fn new(
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
-        flashblocks_state: Option<FlashblocksStateExecutor>,
+        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
         interval: Duration,
         recommitment_interval: Duration,
@@ -66,12 +66,14 @@ where
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     Node::Types: NodeTypes<
-        ChainSpec = OpChainSpec,
-        Payload: PayloadTypes<
-            BuiltPayload = OpBuiltPayload,
-            PayloadBuilderAttributes = OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
+            ChainSpec = OpChainSpec,
+            Payload: PayloadTypes<
+                BuiltPayload = OpBuiltPayload,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
+                    op_alloy_consensus::OpTxEnvelope,
+                >,
+            >,
         >,
-    >,
     Pool: TransactionPool,
     EvmConfig: Send,
     PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,

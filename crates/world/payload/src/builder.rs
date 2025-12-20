@@ -3,19 +3,18 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
 use reth::{
-    api::PayloadBuilderError,
+    api::{BuiltPayloadExecutedBlock, PayloadBuilderError},
     payload::PayloadBuilderAttributes,
-    revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State},
+    revm::{State, database::StateProviderDatabase, witness::ExecutionWitnessRecord},
     transaction_pool::{BestTransactionsAttributes, TransactionPool},
 };
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Database, Evm,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -23,9 +22,9 @@ use reth_optimism_node::{
     OpBuiltPayload, OpEvmConfig, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::{
+    OpPayloadAttributes,
     builder::{OpPayloadBuilderCtx, OpPayloadTransactions},
     config::OpBuilderConfig,
-    OpPayloadAttributes,
 };
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
@@ -38,7 +37,7 @@ use reth_transaction_pool::BlobStore;
 use revm_primitives::Address;
 use std::sync::Arc;
 use tracing::debug;
-use world_chain_pool::{tx::WorldChainPooledTransaction, WorldChainTransactionPool};
+use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPooledTransaction};
 
 /// World Chain payload builder
 #[derive(Debug, Clone)]
@@ -399,7 +398,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             // TODO: Validate gas limit
             if ctx
                 .execute_best_transactions(pool, &mut info, &mut builder, best_txs, gas_limit)?
-                .is_none()
+                .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
@@ -431,11 +430,12 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         );
 
         // create the executed block data
-        let executed = ExecutedBlock {
+        // create the executed block data
+        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            hashed_state: either::Left(Arc::new(hashed_state)),
+            trie_updates: either::Left(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = op_ctx.attributes().no_tx_pool;
@@ -444,7 +444,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             op_ctx.payload_id(),
             sealed_block,
             info.total_fees,
-            Some(executed),
+            Some(executed_block),
         );
 
         if no_tx_pool {
