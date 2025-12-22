@@ -23,7 +23,6 @@ flashblocks-node.workspace = true
 
 reth.workspace = true
 reth-node-builder.workspace = true
-reth-evm.workspace = true
 reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
