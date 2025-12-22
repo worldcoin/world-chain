@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/rust:1.91.1-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
 
 ARG FEATURES
 
