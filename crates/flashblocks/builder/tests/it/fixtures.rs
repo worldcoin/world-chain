@@ -349,13 +349,6 @@ impl TxOp {
             .unwrap()
     }
 
-    /// Encodes transaction to bytes
-    pub fn to_encoded_bytes(&self, nonce: u64) -> Bytes {
-        let tx = self.to_signed_tx(nonce);
-        let mut buf = Vec::new();
-        tx.inner().encode_2718(&mut buf);
-        Bytes::from(buf)
-    }
 }
 
 /// Strategy for selecting a sender from test signers
@@ -403,14 +396,6 @@ pub fn transaction_op_sequence_to_transactions(
     sequence
         .iter()
         .map(|(op, nonce)| op.to_signed_tx(*nonce))
-        .collect()
-}
-
-/// Converts a chaos sequence to encoded transaction bytes
-pub fn transaction_sequence_to_encoded(sequence: &[(TxOp, u64)]) -> Vec<Bytes> {
-    sequence
-        .iter()
-        .map(|(op, nonce)| op.to_encoded_bytes(*nonce))
         .collect()
 }
 
@@ -483,12 +468,19 @@ pub fn build_chained_payloads(
                 .into());
             }
         }
-        // Encode actual executed transactions for the payload (must match what's in the block)
+        // Encode only the NEW transactions for this flashblock (skip previously committed ones)
+        // The outcome.block contains ALL accumulated transactions, so we skip the ones
+        // that were already in the previous flashblock.
+        let committed_tx_count = prev_outcome
+            .as_ref()
+            .map(|(o, _)| o.block.body().transactions.len())
+            .unwrap_or(0);
         let encoded_txs: Vec<Bytes> = outcome
             .block
             .body()
             .transactions
             .iter()
+            .skip(committed_tx_count)
             .map(|tx| {
                 let mut buf = Vec::new();
                 tx.encode_2718(&mut buf);

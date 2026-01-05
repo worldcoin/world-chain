@@ -25,8 +25,13 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // The transaction offset is the number of previously committed transactions offset 1.
-    let transactions_offset = committed_state.transactions.len() as u16 + 1;
+    // The transaction offset is based on the access_list's min_tx_index + 1, since
+    // transactions execute at indices starting from min_tx_index + 1.
+    let access_list = diff
+        .access_list_data
+        .as_ref()
+        .expect("access_list_data required for validation");
+    let transactions_offset = access_list.access_list.min_tx_index + 1;
 
     let executor_transactions =
         decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
