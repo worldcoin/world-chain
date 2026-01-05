@@ -637,7 +637,7 @@ pub fn execute_serial(
 
     // Finish building the block
     let (evm, execution_result) = builder.executor.finish()?;
-    let (mut db, evm_env) = evm.finish();
+    let (db, evm_env) = evm.finish();
 
     // Merge transitions into bundle state
     db.merge_transitions(revm_database::states::bundle_state::BundleRetention::Reverts);
