@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
 
-use revm::state::Bytecode;
+use revm::state::{Bytecode, bal::Bal};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type BlockAccessIndex = u16;
@@ -30,6 +30,68 @@ impl FlashblockAccessListConstruction {
         Self {
             changes: DashMap::new(),
         }
+    }
+
+    /// Convert from revm's [`Bal`] to [`FlashblockAccessListConstruction`].
+    ///
+    /// This enables using revm's built-in BAL construction with the existing
+    /// flashblocks access list infrastructure.
+    pub fn from_revm_bal(bal: Bal) -> Self {
+        let changes = DashMap::new();
+
+        for (address, account_bal) in bal.accounts {
+            let acc_changes = AccountChangesConstruction {
+                // Convert balance changes: Vec<(u64, U256)> -> HashMap<u16, U256>
+                balance_changes: account_bal
+                    .account_info
+                    .balance
+                    .writes
+                    .into_iter()
+                    .map(|(idx, val)| (idx as u16, val))
+                    .collect(),
+
+                // Convert nonce changes: Vec<(u64, u64)> -> HashMap<u16, u64>
+                nonce_changes: account_bal
+                    .account_info
+                    .nonce
+                    .writes
+                    .into_iter()
+                    .map(|(idx, val)| (idx as u16, val))
+                    .collect(),
+
+                // Convert code changes: Vec<(u64, (B256, Bytecode))> -> HashMap<u16, Bytecode>
+                code_changes: account_bal
+                    .account_info
+                    .code
+                    .writes
+                    .into_iter()
+                    .map(|(idx, (_, bytecode))| (idx as u16, bytecode))
+                    .collect(),
+
+                // Convert storage changes: BTreeMap<StorageKey, BalWrites<StorageValue>>
+                // -> HashMap<U256, HashMap<u16, U256>>
+                storage_changes: account_bal
+                    .storage
+                    .storage
+                    .into_iter()
+                    .filter(|(_, writes)| !writes.is_empty())
+                    .map(|(slot, writes)| {
+                        let slot_changes = writes
+                            .writes
+                            .into_iter()
+                            .map(|(idx, val)| (idx as u16, val))
+                            .collect();
+                        (slot, slot_changes)
+                    })
+                    .collect(),
+
+                // Collect storage reads (slots with empty writes)
+                storage_reads: HashSet::new(),
+            };
+            changes.insert(address, acc_changes);
+        }
+
+        Self { changes }
     }
 
     /// Merges another [`FlashblockAccessListConstruction`] into this one

@@ -97,6 +97,7 @@ mod property_tests {
     /// when the validator processes the second flashblock with committed state from the first.
     #[test]
     fn test_multi_flashblock_same_sender() {
+        reth_tracing::init_test_tracing();
         // Create a sequence where ALICE sends transactions in both flashblocks
         // Flashblock 1: ALICE sends tx with nonce 0, 1, 2, 3
         // Flashblock 2: ALICE sends tx with nonce 4, 5, 6, 7

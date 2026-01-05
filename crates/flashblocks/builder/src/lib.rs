@@ -29,7 +29,7 @@
 //!
 //! - [`coordinator`] - Orchestrates flashblocks execution and P2P message handling
 //! - [`payload_builder`] - Main payload builder implementing [`FlashblocksPayloadBuilder`]
-//! - [`executor`] - Block executor with BAL construction ([`BalBlockExecutor`], [`BalBlockBuilder`])
+//! - [`executor`] - Block executor with unified BAL/non-BAL support ([`FlashblocksBlockBuilder`])
 //! - [`validator`] - Flashblock validation with parallel execution support
 //!
 //! ### Database Layer
@@ -134,8 +134,7 @@
 //! [`FlashblockPayloadBuilder::try_build_with_precommit`]: traits::payload_builder::FlashblockPayloadBuilder::try_build_with_precommit
 //! [`FlashblocksBlockValidator`]: validator::FlashblocksBlockValidator
 //! [`FlashblocksExecutionCoordinator`]: coordinator::FlashblocksExecutionCoordinator
-//! [`BalBlockExecutor`]: executor::BalBlockExecutor
-//! [`BalBlockBuilder`]: executor::BalBlockBuilder
+//! [`FlashblocksBlockBuilder`]: executor::FlashblocksBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
 use reth_evm::{
@@ -144,6 +143,7 @@ use reth_evm::{
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_provider::StateProvider;
+use revm::state::bal::Bal;
 use revm_database::BundleState;
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
@@ -180,7 +180,12 @@ pub mod traits;
 /// Database abstractions for BAL construction and temporal state access.
 pub mod database;
 
-/// Standard Flashblock Block Builder (without BAL support).
+/// Unified Flashblock Block Builder with optional BAL support.
+///
+/// The [`FlashblocksBlockBuilder`] handles both BAL-enabled and non-BAL builds using
+/// revm's built-in BAL construction when enabled.
+///
+/// [`FlashblocksBlockBuilder`]: executor::FlashblocksBlockBuilder
 pub mod executor;
 
 /// Block building utilities
@@ -207,8 +212,8 @@ pub struct FlashblocksPayloadBuilderConfig {
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].
-    fn finish_with_bundle(
+    fn finish_with_bundle_and_bal(
         self,
         state_provider: impl StateProvider,
-    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
+    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState, Option<Bal>), BlockExecutionError>;
 }

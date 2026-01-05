@@ -7,11 +7,9 @@ use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, bytes, he
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
-use crossbeam_channel::bounded;
 use flashblocks_builder::{
-    BlockBuilderExt,
-    bal_executor::{BalBlockBuilder, CommittedState},
-    database::bal_builder_db::BalBuilderDb,
+    access_list::FlashblockAccessListConstruction,
+    bal_executor::CommittedState,
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
@@ -22,15 +20,16 @@ use op_alloy_network::TxSignerSync;
 use proptest::prelude::*;
 use reth::revm::{State, database::StateProviderDatabase};
 use reth_evm::{
-    ConfigureEvm, EvmEnv, EvmFactory,
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm, Evm, EvmEnv, EvmFactory,
+    block::BlockExecutor,
+    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome},
     op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
-use reth_provider::{BytecodeReader, StateProvider};
+use reth_primitives::{Account, Recovered, RecoveredBlock, SealedHeader, transaction::SignedTransaction};
+use reth_provider::{BytecodeReader, StateProvider, StateRootProvider};
 use reth_trie_common::HashedPostState;
 use revm::{
     DatabaseRef,
@@ -484,8 +483,18 @@ pub fn build_chained_payloads(
                 .into());
             }
         }
-        // Encode transactions for the payload
-        let encoded_txs = transaction_sequence_to_encoded(sequence);
+        // Encode actual executed transactions for the payload (must match what's in the block)
+        let encoded_txs: Vec<Bytes> = outcome
+            .block
+            .body()
+            .transactions
+            .iter()
+            .map(|tx| {
+                let mut buf = Vec::new();
+                tx.encode_2718(&mut buf);
+                Bytes::from(buf)
+            })
+            .collect();
 
         // Construct the payload
         let payload = ExecutionPayloadFlashblockDeltaV1 {
@@ -542,6 +551,10 @@ pub fn execute_serial(
     ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
+    use reth_evm::execute::BasicBlockBuilder;
+    use reth_optimism_evm::OpBlockAssembler;
+    use std::borrow::Cow;
+
     let state_provider = create_test_state_provider();
     let db = StateProviderDatabase::new(state_provider.clone());
 
@@ -551,18 +564,32 @@ pub fn execute_serial(
         BundleState::default()
     };
 
+    // Build State with BAL builder for serial execution
     let mut state = State::builder()
         .with_database(db.clone())
         .with_bundle_prestate(bundle.clone())
         .with_bundle_update()
+        .with_bal_builder()
         .build();
 
-    let database = BalBuilderDb::new(&mut state);
-    let prev_transaction = prev_outcome
-        .as_ref()
-        .map(|(o, _)| o.block.clone_transactions_recovered().collect());
+    // Calculate the starting BAL index.
+    // This matches the payload_builder convention where start_index = committed_tx_count
+    // The counter then increments to 1 before the first transaction.
+    let start_index = if let Some((outcome, _)) = &prev_outcome {
+        outcome.block.body().transactions.len() as u64
+    } else {
+        0
+    };
 
-    let evm = OpEvmFactory::default().create_evm(database, EVM_ENV.clone());
+    // Set the initial BAL index
+    state.set_bal_index(start_index);
+
+    let prev_transactions: Vec<Recovered<OpTransactionSigned>> = prev_outcome
+        .as_ref()
+        .map(|(o, _)| o.block.clone_transactions_recovered().collect())
+        .unwrap_or_default();
+
+    let evm = OpEvmFactory::default().create_evm(&mut state, EVM_ENV.clone());
 
     let mut executor = OpBlockExecutor::new(
         evm,
@@ -576,34 +603,119 @@ pub fn execute_serial(
         .as_ref()
         .map_or(Vec::new(), |o| o.0.execution_result.receipts.clone());
 
-    let (access_list_tx, access_list_rx) = bounded(1);
-
-    let mut builder = BalBlockBuilder::<OpRethReceiptBuilder, OpPrimitives, _>::new(
-        BLOCK_EXECUTION_CTX.clone(),
-        &SEALED_HEADER,
+    let mut builder: BasicBlockBuilder<
+        '_,
+        reth_optimism_evm::OpBlockExecutorFactory<OpRethReceiptBuilder>,
+        _,
+        OpBlockAssembler<OpChainSpec>,
+        OpPrimitives,
+    > = BasicBlockBuilder {
         executor,
-        prev_transaction.unwrap_or_default(),
-        CHAIN_SPEC.clone(),
-        access_list_tx,
-    );
+        assembler: OpBlockAssembler::new(CHAIN_SPEC.clone()),
+        ctx: BLOCK_EXECUTION_CTX.clone(),
+        parent: &SEALED_HEADER,
+        transactions: prev_transactions,
+    };
 
+    // Apply pre-execution changes only for the first flashblock
     if prev_outcome.is_none() {
         builder.apply_pre_execution_changes()?;
     }
 
+    // Track current BAL index - increment BEFORE each transaction like FlashblocksBlockBuilder does
+    let mut current_index = start_index;
+
+    // Execute each transaction
     for tx in transactions {
+        // Increment first (like prepare_database in FlashblocksBlockBuilder)
+        current_index += 1;
+
+        // Set the BAL index before each transaction
+        let db = builder.executor.evm_mut().db_mut();
+        db.set_bal_index(current_index);
+
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider)?;
+    // FlashblocksBlockBuilder increments once more after the last transaction
+    // (in the final prepare_database call), so we do the same here
+    if !transactions.is_empty() {
+        current_index += 1;
+    }
 
-    let access_list = access_list_rx.recv()?;
+    // Finish building the block
+    let (evm, execution_result) = builder.executor.finish()?;
+    let (mut db, evm_env) = evm.finish();
+
+    // Merge transitions into bundle state
+    db.merge_transitions(revm_database::states::bundle_state::BundleRetention::Reverts);
+
+    // Get the bundle state for state root computation
+    let bundle_state = db.take_bundle();
+
+    // Compute state root
+    let hashed_state = reth_trie_common::HashedPostState::from_bundle_state::<
+        reth_trie_common::KeccakKeyHasher,
+    >(bundle_state.state());
+
+    let (state_root, trie_updates) = state_provider
+        .state_root_with_updates(hashed_state.clone())
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+    // Build senders list
+    let (block_transactions, senders): (Vec<_>, Vec<_>) = builder
+        .transactions
+        .iter()
+        .chain(transactions.iter())
+        .map(|tx| tx.clone().into_parts())
+        .unzip();
+
+    // Assemble the block
+    let block = builder.assembler.assemble_block(BlockAssemblerInput::<
+        '_,
+        '_,
+        reth_optimism_evm::OpBlockExecutorFactory<OpRethReceiptBuilder>,
+    >::new(
+        evm_env,
+        builder.ctx,
+        builder.parent,
+        block_transactions,
+        &execution_result,
+        Cow::Borrowed(&bundle_state),
+        &*state_provider,
+        state_root,
+    ))?;
+
+    let block = RecoveredBlock::new_unhashed(block, senders);
+
+    // Extract BAL from State
+    let bal = db.take_built_bal();
+
+    // Determine the index range for the access list
+    // min_tx_index = start_index (matches payload_builder convention)
+    // max_tx_index = current_index (the final counter value after all transactions)
+    let min_tx_index = start_index as u16;
+    let max_tx_index = current_index as u16;
+
+    // Convert revm's Bal to FlashblockAccessList
+    let access_list = bal
+        .map(|b| {
+            FlashblockAccessListConstruction::from_revm_bal(b).build((min_tx_index, max_tx_index))
+        })
+        .unwrap_or_default();
 
     let hash = access_list_hash(&access_list);
 
     let bal_data = FlashblockAccessListData {
         access_list,
         access_list_hash: hash,
+    };
+
+    let outcome = BlockBuilderOutcome {
+        execution_result,
+        hashed_state,
+        trie_updates,
+        block,
     };
 
     Ok((outcome, bal_data, bundle_state))

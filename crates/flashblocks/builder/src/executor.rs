@@ -19,15 +19,53 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{
-    DatabaseCommit,
     context::{BlockEnv, result::ExecutionResult},
     database::states::bundle_state::BundleRetention,
+    state::bal::Bal,
 };
-use revm_database::BundleState;
+use revm_database::{BundleState, State};
 use std::{borrow::Cow, sync::Arc};
+use tracing::trace;
 
 use crate::BlockBuilderExt;
+
+/// Simple counter to track block access index bounds for BAL construction.
+///
+/// Used to track the (start_index, current_index) range when building
+/// on top of previously committed transactions.
+#[derive(Debug, Clone)]
+pub struct BlockAccessIndexCounter {
+    /// The current index (incremented before each transaction).
+    pub current_index: u64,
+    /// The starting index for this building session.
+    pub start_index: u64,
+}
+
+impl BlockAccessIndexCounter {
+    /// Create a new counter starting at the given index.
+    pub fn new(start_index: u64) -> Self {
+        Self {
+            current_index: start_index,
+            start_index,
+        }
+    }
+
+    /// Increment and return the new index.
+    pub fn inc(&mut self) -> u64 {
+        self.current_index += 1;
+        self.current_index
+    }
+
+    /// Consume the counter and return (start_index, end_index).
+    pub fn finish(self) -> (u64, u64) {
+        (self.start_index, self.current_index)
+    }
+}
+
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
+///
+/// This builder supports optional BAL (Block Access List) construction
+/// by tracking transaction indices when `counter` is set.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<
         'a,
@@ -36,6 +74,9 @@ pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuild
         OpBlockAssembler<OpChainSpec>,
         N,
     >,
+    /// Optional counter for tracking BAL indices.
+    /// When set, the builder will update the database's bal_index before each transaction.
+    pub counter: Option<BlockAccessIndexCounter>,
 }
 
 impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
@@ -55,11 +96,24 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
                 parent,
                 transactions,
             },
+            counter: None,
         }
+    }
+
+    /// Configure BAL index tracking starting from the given index.
+    ///
+    /// Call this when building on top of committed transactions to ensure
+    /// the BAL indices are preserved correctly.
+    ///
+    /// The `start_index` should be set to `committed_transactions.len() + 1`
+    /// (or 0 if there are no committed transactions).
+    pub fn with_bal_index(mut self, start_index: u64) -> Self {
+        self.counter = Some(BlockAccessIndexCounter::new(start_index));
+        self
     }
 }
 
-impl<'a, N, E, R> BlockBuilder for FlashblocksBlockBuilder<'a, N, E, R>
+impl<'a, DB, N, E, R> FlashblocksBlockBuilder<'a, N, E, R>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + 'static,
     N: NodePrimitives<
@@ -68,8 +122,47 @@ where
             Block = alloy_consensus::Block<OpTransactionSigned>,
             BlockHeader = alloy_consensus::Header,
         >,
+    DB: Database + 'a,
     E: Evm<
-            DB: StateDB + DatabaseCommit + Database + 'a,
+            DB = &'a mut State<DB>,
+            Tx: FromRecoveredTx<OpTransactionSigned>
+                    + FromTxWithEncoded<OpTransactionSigned>
+                    + OpTxEnv,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
+{
+    /// Prepares the database for the next transaction by incrementing the BAL index.
+    ///
+    /// This is called before each transaction execution when BAL tracking is enabled.
+    fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
+        if let Some(counter) = &mut self.counter {
+            let current = counter.inc();
+            let db = self.inner.executor.evm_mut().db_mut();
+            db.set_bal_index(current);
+            trace!(
+                target: "flashblocks::executor",
+                bal_index = %current,
+                "Preparing database for next transaction"
+            );
+        }
+        Ok(())
+    }
+}
+
+impl<'a, DB, N, E, R> BlockBuilder for FlashblocksBlockBuilder<'a, N, E, R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + 'static,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            Block = alloy_consensus::Block<OpTransactionSigned>,
+            BlockHeader = alloy_consensus::Header,
+        >,
+    DB: Database + 'a,
+    E: Evm<
+            DB = &'a mut State<DB>,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -82,7 +175,10 @@ where
     type Executor = OpBlockExecutor<E, R, OpChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        let res = self.inner.apply_pre_execution_changes();
+        // Prepare the BAL index for the first transaction after pre-execution
+        self.prepare_database()?;
+        res
     }
 
     fn execute_transaction_with_commit_condition(
@@ -92,7 +188,10 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+        // Prepare the BAL index for the next transaction
+        self.prepare_database()?;
+        res
     }
 
     fn finish(
@@ -100,7 +199,7 @@ where
         _state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         unimplemented!(
-            "finish is not supported on FlashblocksBlockBuilder; use finish_with_bundle instead"
+            "finish is not supported on FlashblocksBlockBuilder; use finish_with_bundle_and_bal instead"
         )
     }
 
@@ -117,7 +216,7 @@ where
     }
 }
 
-impl<'a, N, E, R> BlockBuilderExt for FlashblocksBlockBuilder<'a, N, E, R>
+impl<'a, DB, N, E, R> BlockBuilderExt for FlashblocksBlockBuilder<'a, N, E, R>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + 'static,
     N: NodePrimitives<
@@ -126,8 +225,9 @@ where
             Block = Block<OpTransactionSigned>,
             BlockHeader = Header,
         >,
+    DB: Database + 'a,
     E: Evm<
-            DB: StateDB + DatabaseCommit + Database + 'a,
+            DB = &'a mut State<DB>,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -136,12 +236,19 @@ where
             BlockEnv = BlockEnv,
         >,
 {
-    fn finish_with_bundle(
+    fn finish_with_bundle_and_bal(
         self,
         state: impl StateProvider,
-    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
+    ) -> Result<
+        (
+            BlockBuilderOutcome<Self::Primitives>,
+            BundleState,
+            Option<Bal>,
+        ),
+        BlockExecutionError,
+    > {
         let (evm, result) = self.inner.executor.finish()?;
-        let (mut db, evm_env) = evm.finish();
+        let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
@@ -195,6 +302,7 @@ where
                 block,
             },
             db.take_bundle(),
+            db.take_built_bal(),
         ))
     }
 }

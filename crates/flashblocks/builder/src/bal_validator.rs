@@ -19,7 +19,7 @@ use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
     Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
+    block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
@@ -38,20 +38,21 @@ use revm::{
     context::{BlockEnv, TxEnv, result::ExecutionResult},
     database::{BundleAccount, BundleState},
 };
+use revm_database::{State, WrapDatabaseRef};
 use tracing::{error, info, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
     database::{
-        bal_builder_db::{BalBuilderDb, NoOpCommitDB},
+        ParallelBalStateFactory,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
 };
 
-/// A type alias for the BAL builder database with a cache layer.
-pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
+/// A type alias for the BAL validator database using State with BAL construction.
+pub type ValidatorDb<'a, DB> = &'a mut State<WrapDatabaseRef<TemporalDb<DB>>>;
 
 pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
     pub chain_spec: Arc<OpChainSpec>,
@@ -106,10 +107,16 @@ where
             .extend_bundle(&mut bundle_state, &state_provider_database)
             .map_err(BalExecutorError::other)?;
 
-        let mut state = NoOpCommitDB::new(temporal_db);
+        // Build State with BAL builder for the main executor
+        let db = WrapDatabaseRef(temporal_db);
+        let mut main_state = State::builder()
+            .with_database(db)
+            .with_bundle_prestate(bundle_state.clone())
+            .with_bundle_update()
+            .with_bal_builder()
+            .build();
 
-        let mut database = BalBuilderDb::new(&mut state);
-        database.set_index(block_access_index);
+        main_state.set_bal_index(block_access_index as u64);
 
         let bundle_clone = bundle_state.clone();
         let state_provider_clone = state_provider.clone();
@@ -120,7 +127,7 @@ where
             let _ = state_root_sender.send(result);
         });
 
-        let evm = OpEvmFactory::default().create_evm(database, self.evm_env.clone());
+        let evm = OpEvmFactory::default().create_evm(&mut main_state, self.evm_env.clone());
 
         let mut executor = OpBlockExecutor::new(
             evm,
@@ -222,11 +229,9 @@ where
                 "Block hash mismatch"
             );
 
-            return Err(BalValidationError::BalHashMismatch {
+            return Err(BalValidationError::BlockHashMismatch {
                 expected: diff.block_hash,
                 got: outcome.block.hash(),
-                expected_bal: access_list,
-                got_bal: computed_access_list,
             }
             .boxed()
             .into());
@@ -285,7 +290,7 @@ pub struct ParalleExecutionResult {
 }
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
-pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuilder, Evm> {
+pub struct BalBlockValidator<'a, DbRef: DatabaseRef + Clone + 'static, R: OpReceiptBuilder, Evm> {
     pub inner: BasicBlockBuilder<
         'a,
         OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
@@ -297,9 +302,11 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'static, R: OpReceiptBuild
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub state_root_receiver:
         crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
-    pub temporal_db_factory: TemporalDbFactory<DbRef>,
+    pub state_factory: ParallelBalStateFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
+    /// The merged access list from parallel execution, stored for finalization.
+    pub merged_access_list: Option<FlashblockAccessListConstruction>,
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -314,7 +321,7 @@ where
         >,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
-    /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
+    /// Creates a new [`BalBlockValidator`] with the given executor factory and assembler.
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
@@ -331,6 +338,9 @@ where
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
+        // Create the ParallelBalStateFactory for parallel execution
+        let state_factory = ParallelBalStateFactory::new(temporal_db_factory, bundle_state.clone());
+
         (
             Self {
                 inner: BasicBlockBuilder {
@@ -343,21 +353,19 @@ where
                 bundle_state,
                 access_list_sender: tx,
                 state_root_receiver,
-                temporal_db_factory,
+                state_factory,
                 evm_env,
                 index_range,
+                merged_access_list: None,
             },
             rx,
         )
     }
 
-    /// Prepares the underlying temporal database for execution.
+    /// Prepares the underlying State database for execution by setting the BAL index.
     pub fn prepare_database(&mut self, index: u16) -> Result<(), BlockExecutionError> {
         let db = self.inner.executor.evm_mut().db_mut();
-        // Set the temporal db index
-        db.db_mut().db_mut().set_index(index as u64);
-        // Set the bal builder db index
-        db.set_index(index);
+        db.set_bal_index(index as u64);
         Ok(())
     }
 }
@@ -398,7 +406,7 @@ where
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
-        let (db, evm_env) = evm.finish();
+        let (_db, evm_env) = evm.finish();
 
         // Wait for the state root result from the async computation
         let StateRootResult {
@@ -434,10 +442,11 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let access_list = db
-            .finish()
-            .map_err(InternalBlockExecutionError::other)?
-            .build(self.index_range);
+        // Build the final access list from the merged results of parallel execution
+        let access_list = self
+            .merged_access_list
+            .map(|al| al.build(self.index_range))
+            .unwrap_or_default();
 
         self.access_list_sender
             .send(access_list)
@@ -500,7 +509,7 @@ where
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
 
-        let db_factory = &self.temporal_db_factory;
+        let state_factory = &self.state_factory;
 
         trace!(
             target: "flashblocks::builder::block_validator",
@@ -528,7 +537,7 @@ where
                     spec.clone(),
                     execution_context.clone(),
                     evm_env.clone(),
-                    db_factory,
+                    state_factory,
                 )
             })
             .collect::<Result<Vec<_>, BalExecutorError>>()?;
@@ -537,10 +546,9 @@ where
         results.sort_unstable_by_key(|r| r.index);
 
         let merged_result = merge_transaction_results(results, gas_used);
-        let database = self.inner.executor_mut().evm_mut().db_mut();
 
-        // merge the aggregated access list into the AsyncBalBuilderDb
-        database.merge_access_list(merged_result.access_list);
+        // Store the merged access list for finalization
+        self.merged_access_list = Some(merged_result.access_list);
 
         // append the accumulated receipts and gas used into the executor
         self.inner
@@ -555,12 +563,6 @@ where
                 .into_iter()
                 .map(|(_, tx)| tx)
                 .collect::<Vec<_>>(),
-        );
-
-        debug_assert_eq!(
-            merged_result.index + 1,
-            self.index_range.1,
-            "Final transaction index should match the expected range"
         );
 
         // finalize the database index
@@ -601,7 +603,7 @@ pub fn execute_transaction<R, DBRef>(
     spec: Arc<OpChainSpec>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
-    db_factory: &TemporalDbFactory<DBRef>,
+    state_factory: &ParallelBalStateFactory<DBRef>,
 ) -> Result<ParalleExecutionResult, BalExecutorError>
 where
     DBRef: DatabaseRef + Clone + Send + Sync + std::fmt::Debug + 'static,
@@ -612,13 +614,11 @@ where
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
-    let temporal_db = db_factory.db(index as u64);
-    let state = NoOpCommitDB::new(temporal_db);
-    let mut database = BalBuilderDb::new(state);
+    // Create State with BAL builder at the transaction index
+    let mut state = state_factory.state_at(index as u64);
+    state.set_bal_index(index as u64);
 
-    database.set_index(index);
-
-    let evm = OpEvmFactory::default().create_evm(database, evm_env);
+    let evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
 
     let mut executor = OpBlockExecutor::new(
         evm,
@@ -651,8 +651,16 @@ where
             .expect("fee is always valid; execution succeeded")
     };
 
-    let (db, _evm_env) = evm.finish();
-    let access_list = db.finish().map_err(BalExecutorError::other)?;
+    let (state, _evm_env) = evm.finish();
+
+    // Merge transitions to finalize state changes - this is needed for BAL to record changes
+    state.merge_transitions(revm_database::states::bundle_state::BundleRetention::Reverts);
+
+    // Extract BAL from State using revm's built-in method
+    let access_list = state
+        .take_built_bal()
+        .map(FlashblockAccessListConstruction::from_revm_bal)
+        .unwrap_or_default();
 
     Ok(ParalleExecutionResult {
         receipts: result.receipts,
