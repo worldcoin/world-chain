@@ -297,6 +297,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let access_list = FlashblockAccessList {
@@ -346,6 +347,7 @@ mod tests {
             nonce: initial_nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let access_list = FlashblockAccessList {
@@ -390,6 +392,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let access_list = FlashblockAccessList {
@@ -438,6 +441,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let access_list = FlashblockAccessList {
@@ -491,6 +495,7 @@ mod tests {
             nonce: 7,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let mut db = CacheDB::new(EmptyDB::new());

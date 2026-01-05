@@ -119,9 +119,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e318e25fb719e747a7e8db1654170fc185024f3ed5b10f86c08d448a912f6e2"
+checksum = "f3dcd2b4e208ce5477de90ccdcbd4bde2c8fb06af49a443974e92bb8f2c5e93f"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -147,9 +147,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus-any"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "364380a845193a317bcb7a5398fc86cdb66c47ebe010771dde05f6869bf9e64a"
+checksum = "ee5655f234985f5ab1e31bef7e02ed11f0a899468cf3300e061e1b96e9e11de0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -162,9 +162,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-contract"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d39c80ffc806f27a76ed42f3351a455f3dc4f81d6ff92c8aad2cf36b7d3a34"
+checksum = "7f01b6d8e5b4f3222aaf7f18613a7292e2fbc9163fe120649cd1b078ca534349"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -266,10 +266,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-eip7928"
+version = "0.2.0"
+source = "git+https://github.com/rakita/alloy-eips.git?rev=734beaf#734beafea409bdd87b3a4e33ac72ac68654bb8dd"
+dependencies = [
+ "alloy-primitives 1.5.0",
+ "alloy-rlp",
+ "borsh",
+ "serde",
+]
+
+[[package]]
 name = "alloy-eips"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4c4d7c5839d9f3a467900c625416b24328450c65702eb3d8caff8813e4d1d33"
+checksum = "6847d641141b92a1557094aa6c236cbe49c06fb24144d4a21fe6acb970c15888"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -294,7 +305,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.24.2"
-source = "git+https://github.com/0xforerunner/evm?rev=9de0fb0#9de0fb0c4440b1dfbffa6abca2aad66483d09c07"
+source = "git+https://github.com/0xOsiris/evm?rev=d57ac5c58bd9bbe930fb1443527a752427ada523#d57ac5c58bd9bbe930fb1443527a752427ada523"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -314,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ba4b1be0988c11f0095a2380aa596e35533276b8fa6c9e06961bbfe0aebcac5"
+checksum = "fe3192fca2eb0b0c4b122b3c2d8254496b88a4e810558dddd3ea2f30ad9469df"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -355,9 +366,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-rpc"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f72cf87cda808e593381fb9f005ffa4d2475552b7a6c5ac33d087bf77d82abd0"
+checksum = "d4ab3330e491053e9608b2a315f147357bb8acb9377a988c1203f2e8e2b296c9"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-sol-types 1.5.0",
@@ -370,9 +381,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12aeb37b6f2e61b93b1c3d34d01ee720207c76fe447e2a2c217e433ac75b17f5"
+checksum = "c1e22ff194b1e34b4defd1e257e3fe4dce0eee37451c7757a1510d6b23e7379a"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -396,9 +407,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abd29ace62872083e30929cd9b282d82723196d196db589f3ceda67edcc05552"
+checksum = "b8a6cbb9f431bdad294eebb5af9b293d6979e633bfe5468d1e87c1421a858265"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -410,7 +421,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.24.2"
-source = "git+https://github.com/0xforerunner/evm?rev=9de0fb0#9de0fb0c4440b1dfbffa6abca2aad66483d09c07"
+source = "git+https://github.com/0xOsiris/evm?rev=d57ac5c58bd9bbe930fb1443527a752427ada523#d57ac5c58bd9bbe930fb1443527a752427ada523"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -485,9 +496,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-provider"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b710636d7126e08003b8217e24c09f0cca0b46d62f650a841736891b1ed1fc1"
+checksum = "3f5dde1abc3d582e53d139904fcdd8b2103f0bd03e8f2acb4292edbbaeaa7e6e"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -529,9 +540,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-pubsub"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdd4c64eb250a18101d22ae622357c6b505e158e9165d4c7974d59082a600c5e"
+checksum = "acbfe0a3c553a027f722185fb574124d205147fffb309cae52d0a2094f076887"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives 1.5.0",
@@ -573,9 +584,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-client"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0882e72d2c1c0c79dcf4ab60a67472d3f009a949f774d4c17d0bdb669cfde05"
+checksum = "5a94bdef2710322c6770be08689fee0878c2ad75615b8fc40e05d7f3c9618c0b"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives 1.5.0",
@@ -599,9 +610,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39cf1398cb33aacb139a960fa3d8cf8b1202079f320e77e952a0b95967bf7a9f"
+checksum = "811a573c8080e1b492d488e6a240ec5dd7677d7167e91ce9cb4d0ec1fcac8027"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rpc-types-engine",
@@ -612,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-admin"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65a583d2029b171301f5dcf122aa2ef443a65a373778ec76540d999691ae867d"
+checksum = "3d2d901eeaf99067f54c97a98c8afddcb9f63e35af1efe0ce8d45d04f9223e50"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives 1.5.0",
@@ -624,9 +635,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-anvil"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3ce4c24e416bd0f17fceeb2f26cd8668df08fe19e1dc02f9d41c3b8ed1e93e0"
+checksum = "838ca94be532a929f27961851000ec8bbbaeb06e2a2bcca44fac7855a2fe0f6f"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rpc-types-eth",
@@ -636,9 +647,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a63fb40ed24e4c92505f488f9dd256e2afaed17faa1b7a221086ebba74f4122"
+checksum = "12df0b34551ca2eab8ec83b56cb709ee5da991737282180d354a659b907f00dc"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -647,9 +658,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-beacon"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16633087e23d8d75161c3a59aa183203637b817a5a8d2f662f612ccb6d129af0"
+checksum = "32598a2443750a2e884c1b48efccaeeaae75e7eb4e0f13df9146b78107b4c301"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -667,9 +678,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-debug"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4936f579d9d10eae01772b2ab3497f9d568684f05f26f8175e12f9a1a2babc33"
+checksum = "6c49a3a168a5bf18f1cf7ed5723a650aebe714edf7665b53dacf5707716733d0"
 dependencies = [
  "alloy-primitives 1.5.0",
  "derive_more 2.1.0",
@@ -679,9 +690,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-engine"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c60bdce3be295924122732b7ecd0b2495ce4790bedc5370ca7019c08ad3f26e"
+checksum = "ffe16cd1dea6089902ec609e04261a9ae6d11ec66005ba24c1f97f0eefbc0fa9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -699,9 +710,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-eth"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eae0c7c40da20684548cbc8577b6b7447f7bf4ddbac363df95e3da220e41e72"
+checksum = "b7f9f130511b8632686dfe6f9909b38d7ae4c68de3ce17d28991400646a39b25"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -721,9 +732,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-mev"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81c0dd81c24944cfbf45b5df7cd149d9cd3e354db81ccf08aa47e0e05be8ab97"
+checksum = "fdeb95f21ba043cbbbc074f7af9c7bb22e2727de02dc3fe95d5ae963a96767a6"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -736,9 +747,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-trace"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef206a4b8d436fbb7cf2e6a61c692d11df78f9382becc3c9a283bd58e64f0583"
+checksum = "cafe859944638c5d57d1a3a0034cdb5d07c98c37de8adce5508f28834acf958f"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rpc-types-eth",
@@ -750,9 +761,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-txpool"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecb5a795264a02222f9534435b8f40dcbd88de8e9d586647884aae24f389ebf2"
+checksum = "afaa06544e36f223b99b1415a12911230fd527994f020736c3c7950d5080208e"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rpc-types-eth",
@@ -762,9 +773,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-serde"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0df1987ed0ff2d0159d76b52e7ddfc4e4fbddacc54d2fbee765e0d14d7c01b5"
+checksum = "067b718d2e6ac1bb889341fcc7a250cfa49bcd3ba4f23923f1c1eb1f2b10cb7c"
 dependencies = [
  "alloy-primitives 1.5.0",
  "arbitrary",
@@ -774,9 +785,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff69deedee7232d7ce5330259025b868c5e6a52fa8dffda2c861fb3a5889b24"
+checksum = "acff6b251740ef473932386d3b71657d3825daebf2217fb41a7ef676229225d4"
 dependencies = [
  "alloy-primitives 1.5.0",
  "async-trait",
@@ -789,9 +800,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer-local"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72cfe0be3ec5a8c1a46b2e5a7047ed41121d360d97f4405bb7c1c784880c86cb"
+checksum = "c9129ef31975d987114c27c9930ee817cf3952355834d47f2fdf4596404507e8"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -937,9 +948,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be98b07210d24acf5b793c99b759e9a696e4a2e67593aec0487ae3b3e1a2478c"
+checksum = "bec1fb08ee484e615f24867c0b154fff5722bb00176102a16868c6532b7c3623"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -960,9 +971,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-http"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4198a1ee82e562cab85e7f3d5921aab725d9bd154b6ad5017f82df1695877c97"
+checksum = "64b722073c76f2de7e118d546ee1921c50710f97feb32aed50db94cfa5b663e1"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -975,9 +986,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ipc"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8db249779ebc20dc265920c7e706ed0d31dbde8627818d1cbde60919b875bb0"
+checksum = "bdedcf401aab4b96d8b5e6638b79d04a6afb96c0bfcb50a2324fbadfe65c47b3"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -995,15 +1006,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ws"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad2344a12398d7105e3722c9b7a7044ea837128e11d453604dec6e3731a86e2"
+checksum = "942210908f0c56941097f5653a5f334546940e6fd9073495b257e52216469feb"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
  "futures",
  "http 1.4.0",
- "rustls",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.26.2",
@@ -1033,9 +1043,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-tx-macros"
-version = "1.1.3"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "333544408503f42d7d3792bfc0f7218b643d968a03d2c0ed383ae558fb4a76d0"
+checksum = "04950a13cc4209d8e9b78f306e87782466bad8538c94324702d061ff03e211c9"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -1662,12 +1672,6 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
-
-[[package]]
-name = "az"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
 
 [[package]]
 name = "backon"
@@ -3786,7 +3790,7 @@ name = "flashblocks-builder"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
+ "alloy-eip7928 0.1.0",
  "alloy-eips",
  "alloy-genesis",
  "alloy-op-evm",
@@ -3982,7 +3986,7 @@ name = "flashblocks-primitives"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
+ "alloy-eip7928 0.1.0",
  "alloy-eips",
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -4409,16 +4413,6 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "gmp-mpfr-sys"
-version = "1.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60f8970a75c006bb2f8ae79c6768a116dd215fa8346a87aed99bf9d82ca43394"
-dependencies = [
- "libc",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6458,7 +6452,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "14.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "auto_impl",
  "revm",
@@ -7605,7 +7599,7 @@ checksum = "1e061d1b48cb8d38042de4ae0a7a6401009d6143dc80d2e2d6f31f0bdd6470c7"
 [[package]]
 name = "reth"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-rpc-types",
  "aquamarine",
@@ -7651,7 +7645,7 @@ dependencies = [
 [[package]]
 name = "reth-basic-payload-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7675,7 +7669,7 @@ dependencies = [
 [[package]]
 name = "reth-chain-state"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7706,7 +7700,7 @@ dependencies = [
 [[package]]
 name = "reth-chainspec"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -7726,7 +7720,7 @@ dependencies = [
 [[package]]
 name = "reth-cli"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-genesis",
  "clap",
@@ -7740,7 +7734,7 @@ dependencies = [
 [[package]]
 name = "reth-cli-commands"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -7815,7 +7809,7 @@ dependencies = [
 [[package]]
 name = "reth-cli-runner"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "reth-tasks",
  "tokio",
@@ -7825,7 +7819,7 @@ dependencies = [
 [[package]]
 name = "reth-cli-util"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -7843,7 +7837,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7863,7 +7857,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7873,7 +7867,7 @@ dependencies = [
 [[package]]
 name = "reth-config"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "eyre",
  "humantime-serde",
@@ -7889,7 +7883,7 @@ dependencies = [
 [[package]]
 name = "reth-consensus"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -7902,7 +7896,7 @@ dependencies = [
 [[package]]
 name = "reth-consensus-common"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7914,7 +7908,7 @@ dependencies = [
 [[package]]
 name = "reth-consensus-debug-client"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7940,7 +7934,7 @@ dependencies = [
 [[package]]
 name = "reth-db"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "derive_more 2.1.0",
@@ -7966,7 +7960,7 @@ dependencies = [
 [[package]]
 name = "reth-db-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -7994,7 +7988,7 @@ dependencies = [
 [[package]]
 name = "reth-db-common"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -8024,7 +8018,7 @@ dependencies = [
 [[package]]
 name = "reth-db-models"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -8039,7 +8033,7 @@ dependencies = [
 [[package]]
 name = "reth-discv4"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -8064,7 +8058,7 @@ dependencies = [
 [[package]]
 name = "reth-discv5"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -8088,7 +8082,7 @@ dependencies = [
 [[package]]
 name = "reth-dns-discovery"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "data-encoding",
@@ -8112,7 +8106,7 @@ dependencies = [
 [[package]]
 name = "reth-downloaders"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8147,7 +8141,7 @@ dependencies = [
 [[package]]
 name = "reth-e2e-test-utils"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8205,7 +8199,7 @@ dependencies = [
 [[package]]
 name = "reth-ecies"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "aes",
  "alloy-primitives 1.5.0",
@@ -8234,7 +8228,7 @@ dependencies = [
 [[package]]
 name = "reth-engine-local"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -8259,7 +8253,7 @@ dependencies = [
 [[package]]
 name = "reth-engine-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8284,7 +8278,7 @@ dependencies = [
 [[package]]
 name = "reth-engine-service"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "futures",
  "pin-project",
@@ -8306,7 +8300,7 @@ dependencies = [
 [[package]]
 name = "reth-engine-tree"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8361,7 +8355,7 @@ dependencies = [
 [[package]]
 name = "reth-engine-util"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-rpc-types-engine",
@@ -8389,7 +8383,7 @@ dependencies = [
 [[package]]
 name = "reth-era"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8404,7 +8398,7 @@ dependencies = [
 [[package]]
 name = "reth-era-downloader"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "bytes",
@@ -8420,7 +8414,7 @@ dependencies = [
 [[package]]
 name = "reth-era-utils"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -8442,7 +8436,7 @@ dependencies = [
 [[package]]
 name = "reth-errors"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "reth-consensus",
  "reth-execution-errors",
@@ -8453,7 +8447,7 @@ dependencies = [
 [[package]]
 name = "reth-eth-wire"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.0",
@@ -8481,7 +8475,7 @@ dependencies = [
 [[package]]
 name = "reth-eth-wire-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -8502,7 +8496,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -8525,7 +8519,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-cli"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "clap",
  "eyre",
@@ -8547,7 +8541,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-consensus"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8563,7 +8557,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-engine-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -8581,7 +8575,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-forks"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eip2124",
  "alloy-hardforks",
@@ -8594,7 +8588,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-payload-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8623,7 +8617,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8643,7 +8637,7 @@ dependencies = [
 [[package]]
 name = "reth-etl"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "rayon",
  "reth-db-api",
@@ -8653,7 +8647,7 @@ dependencies = [
 [[package]]
 name = "reth-evm"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8676,7 +8670,7 @@ dependencies = [
 [[package]]
 name = "reth-evm-ethereum"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8697,7 +8691,7 @@ dependencies = [
 [[package]]
 name = "reth-execution-errors"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-evm",
  "alloy-primitives 1.5.0",
@@ -8710,7 +8704,7 @@ dependencies = [
 [[package]]
 name = "reth-execution-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8728,7 +8722,7 @@ dependencies = [
 [[package]]
 name = "reth-exex"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8766,7 +8760,7 @@ dependencies = [
 [[package]]
 name = "reth-exex-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -8780,7 +8774,7 @@ dependencies = [
 [[package]]
 name = "reth-fs-util"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "serde",
  "serde_json",
@@ -8790,7 +8784,7 @@ dependencies = [
 [[package]]
 name = "reth-invalid-block-hooks"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -8818,7 +8812,7 @@ dependencies = [
 [[package]]
 name = "reth-ipc"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "bytes",
  "futures",
@@ -8838,7 +8832,7 @@ dependencies = [
 [[package]]
 name = "reth-libmdbx"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "bitflags 2.10.0",
  "byteorder",
@@ -8854,7 +8848,7 @@ dependencies = [
 [[package]]
 name = "reth-mdbx-sys"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "bindgen 0.71.1",
  "cc",
@@ -8863,7 +8857,7 @@ dependencies = [
 [[package]]
 name = "reth-metrics"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "futures",
  "metrics",
@@ -8875,7 +8869,7 @@ dependencies = [
 [[package]]
 name = "reth-net-banlist"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "ipnet",
@@ -8884,7 +8878,7 @@ dependencies = [
 [[package]]
 name = "reth-net-nat"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "futures-util",
  "if-addrs",
@@ -8898,7 +8892,7 @@ dependencies = [
 [[package]]
 name = "reth-network"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8953,7 +8947,7 @@ dependencies = [
 [[package]]
 name = "reth-network-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -8978,7 +8972,7 @@ dependencies = [
 [[package]]
 name = "reth-network-p2p"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9001,7 +8995,7 @@ dependencies = [
 [[package]]
 name = "reth-network-peers"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -9016,7 +9010,7 @@ dependencies = [
 [[package]]
 name = "reth-network-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eip2124",
  "humantime-serde",
@@ -9030,7 +9024,7 @@ dependencies = [
 [[package]]
 name = "reth-nippy-jar"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "anyhow",
  "bincode",
@@ -9047,7 +9041,7 @@ dependencies = [
 [[package]]
 name = "reth-node-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
@@ -9071,7 +9065,7 @@ dependencies = [
 [[package]]
 name = "reth-node-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9138,7 +9132,7 @@ dependencies = [
 [[package]]
 name = "reth-node-core"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9194,7 +9188,7 @@ dependencies = [
 [[package]]
 name = "reth-node-ethereum"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-network",
@@ -9232,7 +9226,7 @@ dependencies = [
 [[package]]
 name = "reth-node-ethstats"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -9256,7 +9250,7 @@ dependencies = [
 [[package]]
 name = "reth-node-events"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9280,7 +9274,7 @@ dependencies = [
 [[package]]
 name = "reth-node-metrics"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "eyre",
  "http 1.4.0",
@@ -9302,7 +9296,7 @@ dependencies = [
 [[package]]
 name = "reth-node-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "reth-chainspec",
  "reth-db-api",
@@ -9314,7 +9308,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-chainspec"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -9342,7 +9336,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-cli"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9390,7 +9384,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-consensus"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9415,7 +9409,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-evm"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9443,7 +9437,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-flashblocks"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9480,7 +9474,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-forks"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-op-hardforks",
  "alloy-primitives 1.5.0",
@@ -9491,7 +9485,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-node"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -9541,7 +9535,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-payload-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9581,7 +9575,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9596,7 +9590,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-rpc"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9636,6 +9630,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-optimism-txpool",
  "reth-primitives-traits",
+ "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",
@@ -9657,7 +9652,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-storage"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "reth-optimism-primitives",
@@ -9667,7 +9662,7 @@ dependencies = [
 [[package]]
 name = "reth-optimism-txpool"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9703,7 +9698,7 @@ dependencies = [
 [[package]]
 name = "reth-payload-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -9724,7 +9719,7 @@ dependencies = [
 [[package]]
 name = "reth-payload-builder-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "pin-project",
  "reth-payload-primitives",
@@ -9736,7 +9731,7 @@ dependencies = [
 [[package]]
 name = "reth-payload-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9759,7 +9754,7 @@ dependencies = [
 [[package]]
 name = "reth-payload-util"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -9769,7 +9764,7 @@ dependencies = [
 [[package]]
 name = "reth-payload-validator"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-rpc-types-engine",
@@ -9779,7 +9774,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "c-kzg",
@@ -9793,7 +9788,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9826,7 +9821,7 @@ dependencies = [
 [[package]]
 name = "reth-provider"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9870,7 +9865,7 @@ dependencies = [
 [[package]]
 name = "reth-prune"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9898,7 +9893,7 @@ dependencies = [
 [[package]]
 name = "reth-prune-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "arbitrary",
@@ -9913,7 +9908,7 @@ dependencies = [
 [[package]]
 name = "reth-ress-protocol"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -9932,7 +9927,7 @@ dependencies = [
 [[package]]
 name = "reth-ress-provider"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -9959,7 +9954,7 @@ dependencies = [
 [[package]]
 name = "reth-revm"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "reth-primitives-traits",
@@ -9972,7 +9967,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -10051,7 +10046,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-genesis",
@@ -10079,7 +10074,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-builder"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-network",
  "alloy-provider",
@@ -10118,7 +10113,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-convert"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-evm",
@@ -10144,7 +10139,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-engine-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -10173,7 +10168,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-eth-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -10217,7 +10212,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-eth-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10264,7 +10259,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-layer"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-rpc-types-engine",
  "http 1.4.0",
@@ -10278,7 +10273,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-server-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -10294,7 +10289,7 @@ dependencies = [
 [[package]]
 name = "reth-stages"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10342,7 +10337,7 @@ dependencies = [
 [[package]]
 name = "reth-stages-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -10369,7 +10364,7 @@ dependencies = [
 [[package]]
 name = "reth-stages-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "arbitrary",
@@ -10383,7 +10378,7 @@ dependencies = [
 [[package]]
 name = "reth-static-file"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "parking_lot",
@@ -10403,7 +10398,7 @@ dependencies = [
 [[package]]
 name = "reth-static-file-types"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "clap",
@@ -10415,7 +10410,7 @@ dependencies = [
 [[package]]
 name = "reth-storage-api"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10439,7 +10434,7 @@ dependencies = [
 [[package]]
 name = "reth-storage-errors"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 1.5.0",
@@ -10455,7 +10450,7 @@ dependencies = [
 [[package]]
 name = "reth-tasks"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "auto_impl",
  "dyn-clone",
@@ -10473,7 +10468,7 @@ dependencies = [
 [[package]]
 name = "reth-testing-utils"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10489,7 +10484,7 @@ dependencies = [
 [[package]]
 name = "reth-tokio-util"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -10499,7 +10494,7 @@ dependencies = [
 [[package]]
 name = "reth-tracing"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "clap",
  "eyre",
@@ -10515,7 +10510,7 @@ dependencies = [
 [[package]]
 name = "reth-tracing-otlp"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "clap",
  "eyre",
@@ -10532,7 +10527,7 @@ dependencies = [
 [[package]]
 name = "reth-transaction-pool"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10573,7 +10568,7 @@ dependencies = [
 [[package]]
 name = "reth-trie"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10599,7 +10594,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-common"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.5.0",
@@ -10626,7 +10621,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-db"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "reth-db-api",
@@ -10639,7 +10634,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-parallel"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -10664,7 +10659,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-sparse"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -10683,7 +10678,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-sparse-parallel"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
@@ -10701,7 +10696,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "1.9.3"
-source = "git+https://github.com/worldcoin/reth?rev=1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d#1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d"
+source = "git+https://github.com/worldcoin/reth?rev=725d7ad1f9dc1ef9f08cbf3411179a298afdfa52#725d7ad1f9dc1ef9f08cbf3411179a298afdfa52"
 dependencies = [
  "zstd",
 ]
@@ -10709,7 +10704,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "33.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10727,7 +10722,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "7.1.1"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "bitvec",
  "phf",
@@ -10738,7 +10733,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "12.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10754,7 +10749,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "13.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10769,7 +10764,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "9.0.6"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10782,7 +10777,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.5"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "auto_impl",
  "either",
@@ -10795,7 +10790,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "14.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10813,7 +10808,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "14.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "auto_impl",
  "either",
@@ -10830,8 +10825,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.33.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01def7351cd9af844150b8e88980bcd11304f33ce23c3d7c25f2a8dab87c1345"
+source = "git+https://github.com/0xOsiris/revm-inspectors?rev=79dd11ab869910e2bda0517ecbc21c2de3f32351#79dd11ab869910e2bda0517ecbc21c2de3f32351"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rpc-types-eth",
@@ -10850,7 +10844,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "31.1.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10862,7 +10856,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "31.0.0"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254 0.5.0",
@@ -10878,7 +10872,6 @@ dependencies = [
  "p256",
  "revm-primitives",
  "ripemd",
- "rug",
  "secp256k1 0.31.1",
  "sha2",
 ]
@@ -10886,7 +10879,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.2"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
  "alloy-primitives 1.5.0",
  "num_enum",
@@ -10897,8 +10890,9 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.1.1"
-source = "git+https://github.com/0xforerunner/revm?rev=195c8e9#195c8e90138c17488dc56aae023903684ec87c73"
+source = "git+https://github.com/0xOsiris/revm?rev=431b972b35c8c285b4234ffe92fef644b24a44e7#431b972b35c8c285b4234ffe92fef644b24a44e7"
 dependencies = [
+ "alloy-eip7928 0.2.0",
  "bitflags 2.10.0",
  "revm-bytecode",
  "revm-primitives",
@@ -11021,18 +11015,6 @@ name = "route-recognizer"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
-
-[[package]]
-name = "rug"
-version = "1.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58ad2e973fe3c3214251a840a621812a4f40468da814b1a3d6947d433c2af11f"
-dependencies = [
- "az",
- "gmp-mpfr-sys",
- "libc",
- "libm",
-]
 
 [[package]]
 name = "ruint"

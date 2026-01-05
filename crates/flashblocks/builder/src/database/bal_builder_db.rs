@@ -467,6 +467,7 @@ mod tests {
             nonce,
             code_hash: code.as_ref().map(|c| c.hash_slow()).unwrap_or(KECCAK_EMPTY),
             code,
+            account_id: None,
         }
     }
 
@@ -501,6 +502,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
+                original_info: create_account(U256::from(1), 0, None).into(),
             },
         );
         bal_db.commit(changes);
@@ -514,6 +516,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 1,
+                original_info: create_account(uint!(2_U256), 0, None).into(),
             },
         );
         bal_db.commit(changes);
@@ -609,6 +612,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
+            original_info: create_account(uint!(2000_U256), 5, None).into(),
         };
         changes.insert(addr, new_account);
 
@@ -639,6 +643,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
+            original_info: create_account(uint!(1000_U256), 6, None).into(),
         };
         changes.insert(addr, new_account);
 
@@ -669,6 +674,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
+            original_info: create_account(uint!(1000_U256), 5, Some(new_bytecode.clone())).into(),
         };
         changes.insert(addr, new_account);
 
@@ -712,6 +718,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage,
             transaction_id: 0,
+            original_info: create_account(uint!(1000_U256), 5, None).into(),
         };
         changes.insert(addr, new_account);
 
@@ -743,6 +750,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
+            original_info: initial_account.into(),
         };
         changes.insert(addr, new_account);
 
@@ -773,6 +781,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
+                original_info: create_account(uint!(1500_U256), 0, None).into(),
             },
         );
         bal_db.commit(changes);
@@ -787,6 +796,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 1,
+                original_info: create_account(uint!(1500_U256), 0, None).into(),
             },
         );
         bal_db.commit(repeat_changes);
@@ -815,6 +825,7 @@ mod tests {
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
+            original_info: create_account(uint!(1000_U256), 1, Some(bytecode.clone())).into(),
         };
         changes.insert(addr, new_account);
 
@@ -851,6 +862,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
+                original_info: create_account(uint!(900_U256), 6, None).into(),
             },
         );
         bal_db.commit(changes);
@@ -865,6 +877,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
+                original_info: create_account(uint!(800_U256), 7, None).into(),
             },
         );
         bal_db.commit(changes);
@@ -893,6 +906,7 @@ mod tests {
                 nonce: 0,
                 code_hash,
                 code: Some(bytecode.clone()),
+                account_id: None,
             },
         );
 

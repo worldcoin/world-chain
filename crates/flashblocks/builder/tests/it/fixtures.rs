@@ -626,6 +626,7 @@ fn create_test_db() -> InMemoryDB {
                     .map(alloy_primitives::keccak256)
                     .unwrap_or(KECCAK_EMPTY),
                 code: account.code.map(revm::state::Bytecode::new_legacy),
+                account_id: None,
             },
         );
     }
