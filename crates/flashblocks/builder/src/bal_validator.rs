@@ -111,14 +111,14 @@ where
         // Build State with BAL builder for the main executor
         let db = WrapDatabaseRef(temporal_db);
 
-        let mut main_state = State::builder()
+        let mut state = State::builder()
             .with_database(db)
             .with_bundle_prestate(pre_state)
             .with_bundle_update()
             .with_bal_builder()
             .build();
 
-        main_state.set_bal_index(block_access_index as u64);
+        state.set_bal_index(block_access_index as u64);
 
         let bundle_clone = bundle_state.clone();
         let state_provider_clone = state_provider.clone();
@@ -129,7 +129,7 @@ where
             let _ = state_root_sender.send(result);
         });
 
-        let evm = OpEvmFactory::default().create_evm(&mut main_state, self.evm_env.clone());
+        let evm = OpEvmFactory::default().create_evm(&mut state, self.evm_env.clone());
 
         let mut executor = OpBlockExecutor::new(
             evm,
@@ -417,17 +417,19 @@ where
         // fetch the access list from the database
         let bal = db.take_built_bal();
 
-        let merged = self.merged_access_list.take();
+        // take the merged access list
+        let merged_access_list = self.merged_access_list.take();
 
         // merge with the built access list from parallel execution
-        let merged = bal
-            .map(FlashblockAccessListConstruction::from_revm_bal)
-            .map_or(merged.clone(), |mut bal| {
-                if let Some(other) = merged {
+        let merged = match bal.map(FlashblockAccessListConstruction::from_revm_bal) {
+            Some(mut bal) => {
+                if let Some(other) = merged_access_list {
                     bal.merge(other);
                 }
                 Some(bal)
-            });
+            }
+            None => merged_access_list,
+        };
 
         // Wait for the state root result from the async computation
         let StateRootResult {
