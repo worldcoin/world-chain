@@ -215,5 +215,12 @@ pub trait BlockBuilderExt: BlockBuilder {
     fn finish_with_bundle_and_bal(
         self,
         state_provider: impl StateProvider,
-    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState, Option<Bal>), BlockExecutionError>;
+    ) -> Result<
+        (
+            BlockBuilderOutcome<Self::Primitives>,
+            BundleState,
+            Option<Bal>,
+        ),
+        BlockExecutionError,
+    >;
 }

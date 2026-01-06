@@ -8,8 +8,7 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use flashblocks_builder::{
-    access_list::FlashblockAccessListConstruction,
-    bal_executor::CommittedState,
+    access_list::FlashblockAccessListConstruction, bal_executor::CommittedState,
 };
 use flashblocks_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
@@ -28,7 +27,9 @@ use reth_evm::{
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives::{Account, Recovered, RecoveredBlock, SealedHeader, transaction::SignedTransaction};
+use reth_primitives::{
+    Account, Recovered, RecoveredBlock, SealedHeader, transaction::SignedTransaction,
+};
 use reth_provider::{BytecodeReader, StateProvider, StateRootProvider};
 use reth_trie_common::HashedPostState;
 use revm::{
@@ -348,7 +349,6 @@ impl TxOp {
             .try_clone_into_recovered()
             .unwrap()
     }
-
 }
 
 /// Strategy for selecting a sender from test signers
@@ -440,7 +440,7 @@ pub fn build_chained_payloads(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let mut payloads = Vec::with_capacity(max_flashblocks);
-    let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)> = None;
+    let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState, u64)> = None;
 
     // Split the sequence into determistic chunks - each chunk represents a flashblock
     let chunk_size = (sequence.len() / max_flashblocks).max(1);
@@ -451,7 +451,7 @@ pub fn build_chained_payloads(
         let transactions = transaction_op_sequence_to_transactions(sequence);
 
         // Execute over the previous outcome, if any
-        let (outcome, bal_data, bundle_state) =
+        let (outcome, bal_data, bundle_state, current_index) =
             execute_serial(prev_outcome.clone(), &transactions)?;
 
         for receipt in outcome.execution_result.receipts.iter() {
@@ -473,8 +473,9 @@ pub fn build_chained_payloads(
         // that were already in the previous flashblock.
         let committed_tx_count = prev_outcome
             .as_ref()
-            .map(|(o, _)| o.block.body().transactions.len())
+            .map(|(o, _, _)| o.block.body().transactions.len())
             .unwrap_or(0);
+
         let encoded_txs: Vec<Bytes> = outcome
             .block
             .body()
@@ -503,7 +504,7 @@ pub fn build_chained_payloads(
 
         payloads.push((
             payload,
-            prev_outcome.as_ref().map(|(o, state)| CommittedState {
+            prev_outcome.as_ref().map(|(o, state, _)| CommittedState {
                 gas_used: o.block.gas_used(),
                 fees: U256::ZERO,
                 bundle: state.clone(),
@@ -525,7 +526,7 @@ pub fn build_chained_payloads(
         ));
 
         // Store outcome for next iteration
-        prev_outcome = Some((outcome, bundle_state));
+        prev_outcome = Some((outcome, bundle_state, current_index));
     }
 
     Ok(payloads)
@@ -533,13 +534,14 @@ pub fn build_chained_payloads(
 
 /// Executes a series of transactions serially, building on the previous outcome.
 pub fn execute_serial(
-    prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
+    prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState, u64)>,
     transactions: &[Recovered<OpTransactionSigned>],
 ) -> Result<
     (
         BlockBuilderOutcome<OpPrimitives>,
         FlashblockAccessListData,
         BundleState,
+        u64
     ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
@@ -550,7 +552,7 @@ pub fn execute_serial(
     let state_provider = create_test_state_provider();
     let db = StateProviderDatabase::new(state_provider.clone());
 
-    let bundle = if let Some((_, bundle_state)) = &prev_outcome {
+    let bundle = if let Some((_, bundle_state, _)) = &prev_outcome {
         bundle_state.clone()
     } else {
         BundleState::default()
@@ -564,11 +566,8 @@ pub fn execute_serial(
         .with_bal_builder()
         .build();
 
-    // Calculate the starting BAL index.
-    // This matches the payload_builder convention where start_index = committed_tx_count
-    // The counter then increments to 1 before the first transaction.
-    let start_index = if let Some((outcome, _)) = &prev_outcome {
-        outcome.block.body().transactions.len() as u64
+    let start_index = if let Some((_, _, last_idx)) = &prev_outcome {
+        *last_idx + 1
     } else {
         0
     };
@@ -578,7 +577,7 @@ pub fn execute_serial(
 
     let prev_transactions: Vec<Recovered<OpTransactionSigned>> = prev_outcome
         .as_ref()
-        .map(|(o, _)| o.block.clone_transactions_recovered().collect())
+        .map(|(o, _, _)| o.block.clone_transactions_recovered().collect())
         .unwrap_or_default();
 
     let evm = OpEvmFactory::default().create_evm(&mut state, EVM_ENV.clone());
@@ -609,29 +608,22 @@ pub fn execute_serial(
         transactions: prev_transactions,
     };
 
-    // Apply pre-execution changes only for the first flashblock
-    if prev_outcome.is_none() {
-        builder.apply_pre_execution_changes()?;
-    }
-
     // Track current BAL index - increment BEFORE each transaction like FlashblocksBlockBuilder does
     let mut current_index = start_index;
 
+    // Apply pre-execution changes only for the first flashblock
+    if prev_outcome.is_none() {
+        builder.apply_pre_execution_changes()?;
+        current_index += 1;
+    }
+
     // Execute each transaction
     for tx in transactions {
-        // Increment first (like prepare_database in FlashblocksBlockBuilder)
-        current_index += 1;
-
         // Set the BAL index before each transaction
         let db = builder.executor.evm_mut().db_mut();
         db.set_bal_index(current_index);
 
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
-    }
-
-    // FlashblocksBlockBuilder increments once more after the last transaction
-    // (in the final prepare_database call), so we do the same here
-    if !transactions.is_empty() {
         current_index += 1;
     }
 
@@ -710,7 +702,7 @@ pub fn execute_serial(
         block,
     };
 
-    Ok((outcome, bal_data, bundle_state))
+    Ok((outcome, bal_data, bundle_state, current_index))
 }
 
 // ============================================================================

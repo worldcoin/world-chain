@@ -33,15 +33,11 @@ impl FlashblockAccessListConstruction {
     }
 
     /// Convert from revm's [`Bal`] to [`FlashblockAccessListConstruction`].
-    ///
-    /// This enables using revm's built-in BAL construction with the existing
-    /// flashblocks access list infrastructure.
     pub fn from_revm_bal(bal: Bal) -> Self {
         let changes = DashMap::new();
 
         for (address, account_bal) in bal.accounts {
             let acc_changes = AccountChangesConstruction {
-                // Convert balance changes: Vec<(u64, U256)> -> HashMap<u16, U256>
                 balance_changes: account_bal
                     .account_info
                     .balance
@@ -50,7 +46,6 @@ impl FlashblockAccessListConstruction {
                     .map(|(idx, val)| (idx as u16, val))
                     .collect(),
 
-                // Convert nonce changes: Vec<(u64, u64)> -> HashMap<u16, u64>
                 nonce_changes: account_bal
                     .account_info
                     .nonce
@@ -59,7 +54,6 @@ impl FlashblockAccessListConstruction {
                     .map(|(idx, val)| (idx as u16, val))
                     .collect(),
 
-                // Convert code changes: Vec<(u64, (B256, Bytecode))> -> HashMap<u16, Bytecode>
                 code_changes: account_bal
                     .account_info
                     .code
@@ -68,8 +62,6 @@ impl FlashblockAccessListConstruction {
                     .map(|(idx, (_, bytecode))| (idx as u16, bytecode))
                     .collect(),
 
-                // Convert storage changes: BTreeMap<StorageKey, BalWrites<StorageValue>>
-                // -> HashMap<U256, HashMap<u16, U256>>
                 storage_changes: account_bal
                     .storage
                     .storage
@@ -85,9 +77,9 @@ impl FlashblockAccessListConstruction {
                     })
                     .collect(),
 
-                // Collect storage reads (slots with empty writes)
                 storage_reads: HashSet::new(),
             };
+
             changes.insert(address, acc_changes);
         }
 

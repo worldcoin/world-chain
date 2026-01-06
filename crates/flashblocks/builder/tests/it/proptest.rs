@@ -31,7 +31,12 @@ pub fn validate(
         .access_list_data
         .as_ref()
         .expect("access_list_data required for validation");
-    let transactions_offset = access_list.access_list.min_tx_index + 1;
+
+    let transactions_offset = if committed_state.transactions.is_empty() {
+        access_list.access_list.min_tx_index + 1
+    } else {
+        access_list.access_list.min_tx_index
+    };
 
     let executor_transactions =
         decode_transactions_with_indices(&diff.transactions, transactions_offset)?;

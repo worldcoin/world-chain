@@ -39,7 +39,7 @@ use revm::{
     database::{BundleAccount, BundleState},
 };
 use revm_database::{State, WrapDatabaseRef};
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
@@ -51,7 +51,7 @@ use crate::{
     },
 };
 
-/// A type alias for the BAL validator database using State with BAL construction.
+/// A type alias for the revm State used in the validator.
 pub type ValidatorDb<'a, DB> = &'a mut State<WrapDatabaseRef<TemporalDb<DB>>>;
 
 pub struct FlashblocksBlockValidator<R: OpReceiptBuilder + Default> {
@@ -94,6 +94,7 @@ where
         let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
 
         let mut bundle_state = self.committed_state.bundle.clone();
+        let pre_state = bundle_state.clone();
 
         let bundle_database =
             BundleDb::new(state_provider_database.clone(), bundle_state.clone().into());
@@ -109,9 +110,10 @@ where
 
         // Build State with BAL builder for the main executor
         let db = WrapDatabaseRef(temporal_db);
+
         let mut main_state = State::builder()
             .with_database(db)
-            .with_bundle_prestate(bundle_state.clone())
+            .with_bundle_prestate(pre_state)
             .with_bundle_update()
             .with_bal_builder()
             .build();
@@ -362,6 +364,10 @@ where
         )
     }
 
+    pub fn take_access_list(mut self) -> Option<FlashblockAccessListConstruction> {
+        self.merged_access_list.take()
+    }
+
     /// Prepares the underlying State database for execution by setting the BAL index.
     pub fn prepare_database(&mut self, index: u16) -> Result<(), BlockExecutionError> {
         let db = self.inner.executor.evm_mut().db_mut();
@@ -402,11 +408,26 @@ where
     }
 
     fn finish(
-        self,
+        mut self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
-        let (_db, evm_env) = evm.finish();
+        let (db, evm_env) = evm.finish();
+
+        // fetch the access list from the database
+        let bal = db.take_built_bal();
+
+        let merged = self.merged_access_list.take();
+
+        // merge with the built access list from parallel execution
+        let merged = bal
+            .map(FlashblockAccessListConstruction::from_revm_bal)
+            .map_or(merged.clone(), |mut bal| {
+                if let Some(other) = merged {
+                    bal.merge(other);
+                }
+                Some(bal)
+            });
 
         // Wait for the state root result from the async computation
         let StateRootResult {
@@ -443,8 +464,7 @@ where
         let block = RecoveredBlock::new_unhashed(block, senders);
 
         // Build the final access list from the merged results of parallel execution
-        let access_list = self
-            .merged_access_list
+        let access_list = merged
             .map(|al| al.build(self.index_range))
             .unwrap_or_default();
 
@@ -513,7 +533,6 @@ where
 
         trace!(
             target: "flashblocks::builder::block_validator",
-            tx_count = transactions.clone().into_iter().count(),
             "Starting parallel block execution"
         );
 
@@ -525,12 +544,8 @@ where
             .clone()
             .into_par_iter()
             .map(|(index, tx)| {
-                let tx = tx.clone();
-                info!(
-                    "Executing tx at index {} hash {}",
-                    index,
-                    tx.clone().into_encoded().encoded_bytes().clone()
-                );
+                trace!(target: "flashblocks::builder::block_validator", %index, tx = %tx.hash(), "executing transaction");
+
                 execute_transaction(
                     (index, tx),
                     receipt_builder.clone(),
@@ -555,6 +570,7 @@ where
             .executor
             .receipts
             .extend_from_slice(&merged_result.receipts);
+
         self.inner.executor.gas_used = merged_result.gas_used;
 
         // append the _executed_ transactions into the executor

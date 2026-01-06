@@ -462,7 +462,10 @@ where
     }
 
     // Get the index range from the counter before consuming the builder
-    let index_range = builder.counter.as_ref().map(|c| (c.start_index, c.current_index));
+    let index_range = builder
+        .counter
+        .as_ref()
+        .map(|c| (c.start_index, c.current_index));
 
     // 6. Build the block and get Bal if enabled
     let (build_outcome, bundle, bal) = builder.finish_with_bundle_and_bal(&state_provider)?;

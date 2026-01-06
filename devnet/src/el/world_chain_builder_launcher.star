@@ -249,6 +249,7 @@ def get_config(
         "--flashblocks.builder_sk={0}".format(signing_key),
         "--flashblocks.interval={0}".format("200"),
         "--flashblocks.recommit_interval={0}".format("20"),
+        "--flashblocks.access_list",
         "--builder.max-tasks={0}".format("10"),
     ]
 
