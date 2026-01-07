@@ -281,6 +281,152 @@ mod property_tests {
         Ok(())
     }
 
+    /// Test that validates cross-flashblock storage reads work correctly.
+    /// This specifically tests that fb1 can read storage slots written by fb0 through the bundle.
+    ///
+    /// Scenario:
+    /// - fb0: ALICE calls setSlot(5, 12345) - writes value 12345 to storage slot 5
+    /// - fb1: BOB calls getAndIncrement(5) - reads slot 5, should see 12345, increments to 12346
+    ///
+    /// This is similar to the L1 attributes deposit scenario where:
+    /// - fb0 has the L1 deposit that writes baseFee to L1Block storage
+    /// - fb1 has a transaction that reads baseFee for gas calculation
+    #[test]
+    fn test_cross_flashblock_storage_reads() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Note: The u64 in the tuple is the nonce for that sender
+        let sequence: Vec<(TxOp, u64)> = vec![
+            // Flashblock 0: ALICE writes value 12345 to storage slot 5 (ALICE nonce 0)
+            (
+                TxOp::SetSlot {
+                    from: ALICE.clone(),
+                    slot: alloy_primitives::U256::from(5),
+                    value: alloy_primitives::U256::from(12345),
+                },
+                0,
+            ),
+            // Flashblock 1: BOB reads slot 5 (should see 12345 from fb0) and increments it (BOB nonce 0)
+            (
+                TxOp::GetAndIncrement {
+                    from: BOB.clone(),
+                    slot: alloy_primitives::U256::from(5),
+                },
+                0,
+            ),
+        ];
+
+        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+
+        assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
+
+        for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
+            let committed = unwrap_committed_state(committed_state);
+
+            info!(
+                i,
+                diff = ?diff,
+                committed_txs = committed.transactions.len(),
+                "Validating flashblock",
+            );
+
+            let result = validate(&diff, committed);
+            if let Err(err) = &result
+                && let Some(e) = err.downcast_ref::<BalExecutorError>()
+            {
+                debug_output(e);
+
+                return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Test with multiple storage operations across flashblocks to stress test bundle propagation.
+    /// This tests that multiple storage slots written in fb0 are all readable in fb1.
+    #[test]
+    fn test_cross_flashblock_multiple_storage_slots() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Note: The u64 in the tuple is the nonce for that sender
+        let sequence: Vec<(TxOp, u64)> = vec![
+            // Flashblock 0: ALICE writes to multiple slots (ALICE nonces 0, 1, 2)
+            (
+                TxOp::SetSlot {
+                    from: ALICE.clone(),
+                    slot: alloy_primitives::U256::from(1),
+                    value: alloy_primitives::U256::from(100),
+                },
+                0,
+            ),
+            (
+                TxOp::SetSlot {
+                    from: ALICE.clone(),
+                    slot: alloy_primitives::U256::from(2),
+                    value: alloy_primitives::U256::from(200),
+                },
+                1,
+            ),
+            (
+                TxOp::SetSlot {
+                    from: ALICE.clone(),
+                    slot: alloy_primitives::U256::from(3),
+                    value: alloy_primitives::U256::from(300),
+                },
+                2,
+            ),
+            // Flashblock 1: BOB reads all slots written by fb0 (BOB nonces 0, 1, 2)
+            (
+                TxOp::GetAndIncrement {
+                    from: BOB.clone(),
+                    slot: alloy_primitives::U256::from(1),
+                },
+                0,
+            ),
+            (
+                TxOp::GetAndIncrement {
+                    from: BOB.clone(),
+                    slot: alloy_primitives::U256::from(2),
+                },
+                1,
+            ),
+            (
+                TxOp::GetAndIncrement {
+                    from: BOB.clone(),
+                    slot: alloy_primitives::U256::from(3),
+                },
+                2,
+            ),
+        ];
+
+        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+
+        assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
+
+        for (i, (diff, committed_state)) in payloads.into_iter().enumerate() {
+            let committed = unwrap_committed_state(committed_state);
+
+            info!(
+                i,
+                diff = ?diff,
+                committed_txs = committed.transactions.len(),
+                "Validating flashblock",
+            );
+
+            let result = validate(&diff, committed);
+            if let Err(err) = &result
+                && let Some(e) = err.downcast_ref::<BalExecutorError>()
+            {
+                debug_output(e);
+
+                return Err(eyre!("Flashblock {} validation failed: {:?}", i, e));
+            }
+        }
+
+        Ok(())
+    }
+
     proptest! {
                 #![proptest_config(crate::proptest::ProptestConfig::with_cases(1))]
 
@@ -302,10 +448,7 @@ mod property_tests {
                     let (diff, committed_state) = payload;
                     let committed = unwrap_committed_state(committed_state);
                     let payload = validate(&diff, committed);
-                    if let Err(err) = &payload
-                        && let Some(e) = err.downcast_ref::<BalExecutorError>() {
-                            debug_output(e);
-                        }
+
                     prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
                 }
     }

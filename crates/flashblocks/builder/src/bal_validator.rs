@@ -45,11 +45,59 @@ use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
     database::{
-        ParallelBalStateFactory,
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
 };
+
+/// Factory for creating [`State`] instances with BAL construction for parallel validation.
+///
+/// This factory creates isolated [`State`] instances that can be used in parallel
+/// to execute transactions independently, each with their own BAL (Block Access List)
+/// builder enabled.
+#[derive(Clone, Debug)]
+pub struct ParallelBalStateFactory<DB: DatabaseRef + Clone> {
+    /// The underlying temporal database factory for creating time-indexed views.
+    temporal_factory: TemporalDbFactory<DB>,
+}
+
+impl<DB: DatabaseRef + Clone> ParallelBalStateFactory<DB> {
+    /// Creates a new factory with the given temporal database factory.
+    pub fn new(temporal_factory: TemporalDbFactory<DB>) -> Self {
+        Self { temporal_factory }
+    }
+
+    /// Creates a [`State`] at a specific transaction index with BAL construction enabled.
+    ///
+    /// Each [`State`] instance:
+    /// - Has a time-indexed view of the database via [`TemporalDb`] wrapped in [`WrapDatabaseRef`]
+    /// - Does NOT use bundle prestate (to ensure TemporalDb is used for correct per-index values)
+    /// - Has BAL construction enabled via `with_bal_builder()`
+    ///
+    /// IMPORTANT: We don't use bundle_prestate here because the bundle passed to the validator
+    /// contains FINAL values from extend_bundle, not the per-transaction intermediate values.
+    /// The TemporalDb provides the correct state at each transaction index:
+    /// - TemporalDb's cache has time-indexed values for accounts modified in the current flashblock
+    /// - TemporalDb's underlying BundleDb has values from prior flashblocks (committed_state.bundle)
+    /// - BundleDb's underlying StateProviderDatabase has parent block state
+    ///
+    /// The returned [`State`] is ready for independent parallel execution.
+    pub fn state_at(&self, index: u64) -> State<WrapDatabaseRef<TemporalDb<DB>>> {
+        let temporal_db = self.temporal_factory.db(index);
+        // Wrap TemporalDb (DatabaseRef) in WrapDatabaseRef to provide Database trait
+        let db = WrapDatabaseRef(temporal_db);
+
+        // NOTE: We intentionally don't use with_bundle_prestate here because the bundle
+        // passed to BalBlockValidator contains FINAL values from extend_bundle, not the
+        // per-transaction intermediate values. The TemporalDb provides the correct
+        // time-indexed state for parallel execution.
+        State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .with_bal_builder()
+            .build()
+    }
+}
 
 /// A type alias for the revm State used in the validator.
 pub type ValidatorDb<'a, DB> = &'a mut State<WrapDatabaseRef<TemporalDb<DB>>>;
@@ -85,6 +133,29 @@ where
             .access_list_data
             .ok_or(BalValidationError::MissingAccessListData.boxed())
             .map_err(BalExecutorError::from)?;
+
+        // Debug: Log incoming access list to diagnose missing L1Block storage
+        trace!(
+            target: "flashblocks::bal_validator",
+            ?payload_id,
+            min_tx_index = access_list.min_tx_index,
+            max_tx_index = access_list.max_tx_index,
+            num_account_changes = access_list.changes.len(),
+            "Received access list for validation"
+        );
+        for change in &access_list.changes {
+            let storage_slots: Vec<_> = change.storage_changes.iter()
+                .flat_map(|sc| sc.changes.iter().map(|c| (sc.slot, c.block_access_index, c.new_value)))
+                .collect();
+            trace!(
+                target: "flashblocks::bal_validator",
+                address = %change.address,
+                num_storage_changes = storage_slots.len(),
+                ?storage_slots,
+                num_balance_changes = change.balance_changes.len(),
+                "Access list account changes"
+            );
+        }
 
         // 1. Setup database layers for the base evm/executor
         let state_provider_database = StateProviderDatabase::new(state_provider.clone());
@@ -306,7 +377,7 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + Clone + 'static, R: OpRece
         crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
     pub state_factory: ParallelBalStateFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
-    pub index_range: (u16, u16),
+    pub index_range: (BlockAccessIndex, BlockAccessIndex),
     /// The merged access list from parallel execution, stored for finalization.
     pub merged_access_list: Option<FlashblockAccessListConstruction>,
 }
@@ -328,7 +399,7 @@ where
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
         executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
-        bundle_state: Arc<BundleState>,
+        bundle_state: BundleState,
         transactions: Vec<Recovered<OpTransactionSigned>>,
         chain_spec: Arc<OpChainSpec>,
         temporal_db_factory: TemporalDbFactory<DBRef>,
@@ -336,12 +407,17 @@ where
             Result<StateRootResult, BlockExecutionError>,
         >,
         evm_env: EvmEnv<OpSpecId>,
-        index_range: (u16, u16),
+        index_range: (BlockAccessIndex, BlockAccessIndex),
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         // Create the ParallelBalStateFactory for parallel execution
-        let state_factory = ParallelBalStateFactory::new(temporal_db_factory, bundle_state.clone());
+        // NOTE: We only pass the temporal_db_factory, NOT the bundle_state, because
+        // the bundle_state passed here contains FINAL values from extend_bundle.
+        // The TemporalDbFactory already has the correct layered database:
+        // - BundleDb with the ORIGINAL committed_state.bundle (prior flashblock changes)
+        // - TemporalDb cache with time-indexed values from the current flashblock's access_list
+        let state_factory = ParallelBalStateFactory::new(temporal_db_factory);
 
         (
             Self {
@@ -352,7 +428,7 @@ where
                     parent,
                     transactions,
                 },
-                bundle_state,
+                bundle_state: bundle_state.into(),
                 access_list_sender: tx,
                 state_root_receiver,
                 state_factory,
@@ -369,9 +445,9 @@ where
     }
 
     /// Prepares the underlying State database for execution by setting the BAL index.
-    pub fn prepare_database(&mut self, index: u16) -> Result<(), BlockExecutionError> {
+    pub fn prepare_database(&mut self, index: BlockAccessIndex) -> Result<(), BlockExecutionError> {
         let db = self.inner.executor.evm_mut().db_mut();
-        db.set_bal_index(index as u64);
+        db.set_bal_index(index);
         Ok(())
     }
 }
@@ -421,7 +497,7 @@ where
         let merged_access_list = self.merged_access_list.take();
 
         // merge with the built access list from parallel execution
-        let merged = match bal.map(FlashblockAccessListConstruction::from_revm_bal) {
+        let merged = match bal.map(FlashblockAccessListConstruction::from) {
             Some(mut bal) => {
                 if let Some(other) = merged_access_list {
                     bal.merge(other);
@@ -645,18 +721,9 @@ where
         receipt_builder.clone(),
     );
 
-    let res = executor
+    executor
         .execute_transaction_with_commit_condition(tx.as_executable(), |_| CommitChanges::Yes)
-        .map_err(BalExecutorError::BlockExecutionError);
-
-    trace!(
-        target: "flashblocks::builder::block_validator",
-        ?res,
-        tx_index = index,
-        tx_hash = ?tx.hash(),
-        transaction = ?tx,
-        "Finished executing tx in parallel"
-    );
+        .map_err(BalExecutorError::BlockExecutionError)?;
 
     let (evm, result) = executor
         .finish()
@@ -677,7 +744,7 @@ where
     // Extract BAL from State using revm's built-in method
     let access_list = state
         .take_built_bal()
-        .map(FlashblockAccessListConstruction::from_revm_bal)
+        .map(FlashblockAccessListConstruction::from)
         .unwrap_or_default();
 
     Ok(ParalleExecutionResult {

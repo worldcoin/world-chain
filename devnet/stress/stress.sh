@@ -6,7 +6,7 @@ PRIVATE_KEY=0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba
 
 stress() {
     contender setup -p $PRIVATE_KEY "./stress/scenarios/stress.toml" -r $BUILDER --optimism
-    contender spam --builder-url "$BUILDER" --txs-per-second ${TPS:-50} --duration ${DURATION:-10} --seed $(echo "0x$(echo $(openssl rand -hex 32))") -p $PRIVATE_KEY "./stress/scenarios/stress.toml" -r "$BUILDER" --optimism --min-balance 0.7
+    contender spam --builder-url "$BUILDER" --txs-per-second ${TPS:-5} --duration ${DURATION:-10} --seed $(echo "0x$(echo $(openssl rand -hex 32))") -p $PRIVATE_KEY "./stress/scenarios/stress.toml" -r "$BUILDER" --optimism --min-balance 0.7
 }
 
 stress_precompile() {

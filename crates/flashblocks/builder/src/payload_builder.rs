@@ -359,7 +359,6 @@ where
         &committed_state,
         ctx,
         bal_enabled,
-        start_index,
     )?;
 
     build_inner(
@@ -504,11 +503,9 @@ where
 
     // Convert revm's Bal to FlashblockAccessList if BAL was enabled
     let access_list = if bal_enabled {
-        bal.map(|b| {
-            let (min_tx_index, max_tx_index) = index_range.unwrap_or((0, 0));
-            FlashblockAccessListConstruction::from_revm_bal(b)
-                .build((min_tx_index as u16, max_tx_index as u16))
-        })
+        let (min_tx_index, max_tx_index) = index_range.unwrap_or((0, 0));
+        bal.map(FlashblockAccessListConstruction::from)
+            .map(|bal| bal.build((min_tx_index, max_tx_index)))
     } else {
         None
     };
@@ -535,7 +532,6 @@ pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
     committed_state: &CommittedState<OpRethReceiptBuilder>,
     ctx: &'a Ctx,
     bal_enabled: bool,
-    start_index: u64,
 ) -> Result<
     FlashblocksBlockBuilder<
         'a,
@@ -570,9 +566,15 @@ where
         ctx.spec().clone().into(),
     );
 
+    let min_bal_index = if committed_state.transactions.is_empty() {
+        0u64
+    } else {
+        committed_state.transactions.len() as u64 + 1
+    };
+
     // Configure BAL index tracking if enabled
     if bal_enabled {
-        builder = builder.with_bal_index(start_index);
+        builder = builder.with_bal_index(min_bal_index);
     }
 
     Ok(builder)

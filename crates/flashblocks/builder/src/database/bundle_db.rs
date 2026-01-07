@@ -29,13 +29,47 @@ impl<DB: DatabaseRef> DatabaseRef for BundleDb<DB> {
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         if let Some(account) = self.bundle.account(&address) {
-            let present_info = account.account_info();
-            if let Some(info) = present_info {
+            // First try to get the account info directly from the bundle
+            if let Some(info) = account.account_info() {
+                tracing::trace!(
+                    target: "flashblocks::bundle_db",
+                    ?address,
+                    balance = %info.balance,
+                    nonce = %info.nonce,
+                    "BundleDb account read from bundle info"
+                );
                 return Ok(Some(info));
             }
-        };
 
-        self.db.basic_ref(address)
+            // Account exists in bundle but info is None.
+            // This can happen when only balance/storage was modified without full account load.
+            // In this case, we need to reconstruct the account info from the underlying database
+            // and apply changes from the bundle.
+            //
+            // Check if we have any actual changes in this account (balance changes are in original_info
+            // or we can infer from the account's status)
+            if let Some(original_info) = account.original_info.clone() {
+                // The account had an original state, use that
+                tracing::trace!(
+                    target: "flashblocks::bundle_db",
+                    ?address,
+                    balance = %original_info.balance,
+                    nonce = %original_info.nonce,
+                    "BundleDb account read from bundle original_info (info was None)"
+                );
+                return Ok(Some(original_info));
+            }
+        }
+
+        let result = self.db.basic_ref(address)?;
+        tracing::trace!(
+            target: "flashblocks::bundle_db",
+            ?address,
+            has_result = result.is_some(),
+            balance = result.as_ref().map(|a| a.balance.to_string()).unwrap_or_default(),
+            "BundleDb account read from fallback db"
+        );
+        Ok(result)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {

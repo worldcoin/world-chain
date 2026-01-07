@@ -1,0 +1,321 @@
+2026-01-06T23:58:02.323959Z TRACE flashblocks::coordinator: processing flashblock id=0x03684deb45f857ce index=0 min_tx_index=0 max_tx_index=2 execution_context=OpBlockExecutionCtx { parent_hash: 0x44b257c8280e0595bcd5b9a9e57a6ff548a5be61c7eafc132c4a2279f060af4f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 } next_block_context=OpNextBlockEnvAttributes { timestamp: 1767743884, suggested_fee_recipient: 0x4200000000000000000000000000000000000011, prev_randao: 0x8638b1c945e06882aed9276d1120cd683310b30dc855eb6c59d0a1f6b618b0d1, gas_limit: 60000000, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:02.324036Z TRACE flashblocks::bal_validator: Received access list for validation payload_id=PayloadId(0x03684deb45f857ce) min_tx_index=0 max_tx_index=2 num_account_changes=4
+2026-01-06T23:58:02.324045Z TRACE flashblocks::bal_validator: Access list account changes address=0x0000F90827F1C53a10cb7A02335B175320002935 num_storage_changes=1 storage_slots=[(0x000000000000000000000000000000000000000000000000000000000000003b, 0, 0x44b257c8280e0595bcd5b9a9e57a6ff548a5be61c7eafc132c4a2279f060af4f)] num_balance_changes=0
+2026-01-06T23:58:02.324051Z TRACE flashblocks::bal_validator: Access list account changes address=0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02 num_storage_changes=2 storage_slots=[(0x0000000000000000000000000000000000000000000000000000000000000c93, 0, 0x00000000000000000000000000000000000000000000000000000000695da18c), (0x0000000000000000000000000000000000000000000000000000000000002c92, 0, 0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8)] num_balance_changes=0
+2026-01-06T23:58:02.324054Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000015 num_storage_changes=1 storage_slots=[(0x0000000000000000000000000000000000000000000000000000000000000003, 1, 0x0000000000000000000000000000000000000558000c5fc50000000000000002)] num_balance_changes=0
+2026-01-06T23:58:02.324066Z TRACE flashblocks::bal_validator: Access list account changes address=0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001 num_storage_changes=0 storage_slots=[] num_balance_changes=0
+2026-01-06T23:58:02.324120Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001 has_result=true balance="0"
+2026-01-06T23:58:02.324214Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x0000f90827f1c53a10cb7a02335b175320002935 has_result=true balance="0"
+2026-01-06T23:58:02.324303Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x0000f90827f1c53a10cb7a02335b175320002935 index=59 value=0 source="fallback_db"
+2026-01-06T23:58:02.324362Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 has_result=true balance="0"
+2026-01-06T23:58:02.324392Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 index=3219 value=0 source="fallback_db"
+2026-01-06T23:58:02.324527Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 index=11410 value=0 source="fallback_db"
+2026-01-06T23:58:02.324758Z TRACE flashblocks::builder::block_validator: Starting parallel block execution
+2026-01-06T23:58:02.324811Z TRACE flashblocks::builder::block_validator: executing transaction index=1 tx=0x87ecc7d67cae943904230978ff7ee970ddf334e08d312ed17ae304baa2d3cc5a
+2026-01-06T23:58:02.324856Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001 has_result=true balance="0"
+2026-01-06T23:58:02.324949Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000015 has_result=true balance="0"
+2026-01-06T23:58:02.325022Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=24440054405305269366569402256811496959409073762505157381672968839269610695612 value=1100848482849856729248317607345294555569936597013 source="fallback_db"
+2026-01-06T23:58:02.325080Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xc0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d30015 has_result=true balance="0"
+2026-01-06T23:58:02.325250Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503233 source="fallback_db"
+2026-01-06T23:58:02.325273Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=0 value=32609118573291447292537077790 source="fallback_db"
+2026-01-06T23:58:02.325312Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:02.325395Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:02.325414Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=2 value=31989568807759569949327350792897421502496245064096066016259628942998465986288 source="fallback_db"
+2026-01-06T23:58:02.325420Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=4 value=1210011053889338503540166963274920152971028360245 source="fallback_db"
+2026-01-06T23:58:02.325427Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:02.329743Z TRACE flashblocks::state_executor: built payload from flashblock id=0x03684deb45f857ce index=0 block_hash=0x3407bee309a2f7dcd53c7494b41e9abdf612cc10e722436cea7ab550d130d68d
+2026-01-06T23:58:02.329995Z  INFO reth_node_events::node: Block added to canonical chain number=60 hash=0x3407bee309a2f7dcd53c7494b41e9abdf612cc10e722436cea7ab550d130d68d peers=2 txs=1 gas_used=46.12Kgas gas_throughput=2.73Ggas/second gas_limit=60.00Mgas full=0.1% base_fee=0.79Gwei blobs=0 excess_blobs=0 elapsed=16.917µs
+2026-01-06T23:58:03.021548Z TRACE flashblocks::p2p: queueing flashblock payload_id=0x03684deb45f857ce flashblock_index=1
+2026-01-06T23:58:03.021638Z DEBUG flashblocks::p2p: publishing flashblock payload_id=0x03684deb45f857ce flashblock_index=1
+2026-01-06T23:58:03.022240Z TRACE flashblocks::coordinator: processing flashblock id=0x03684deb45f857ce index=1 min_tx_index=2 max_tx_index=3 execution_context=OpBlockExecutionCtx { parent_hash: 0x44b257c8280e0595bcd5b9a9e57a6ff548a5be61c7eafc132c4a2279f060af4f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 } next_block_context=OpNextBlockEnvAttributes { timestamp: 1767743884, suggested_fee_recipient: 0x4200000000000000000000000000000000000011, prev_randao: 0x8638b1c945e06882aed9276d1120cd683310b30dc855eb6c59d0a1f6b618b0d1, gas_limit: 60000000, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:03.022496Z TRACE flashblocks::bal_validator: Received access list for validation payload_id=PayloadId(0x03684deb45f857ce) min_tx_index=2 max_tx_index=3 num_account_changes=5
+2026-01-06T23:58:03.022506Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000011 num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.022513Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000019 num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.022518Z TRACE flashblocks::bal_validator: Access list account changes address=0x420000000000000000000000000000000000001A num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.022522Z TRACE flashblocks::bal_validator: Access list account changes address=0x984eAeB9B45A548589A2B7B4802A56830441E79f num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.022526Z TRACE flashblocks::bal_validator: Access list account changes address=0xe95a6f9CD739b79b7421c94E4Bab9A38d059d98D num_storage_changes=1 storage_slots=[(0x0000000000000000000000000000000000000000000000000000000000000000, 2, 0x48656c6c6f2c20576f726c64210000000000000000000000000000000000001a)] num_balance_changes=0
+2026-01-06T23:58:03.022612Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000011 has_result=true balance="1670015384510"
+2026-01-06T23:58:03.022622Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000019 has_result=true balance="2124264830965280"
+2026-01-06T23:58:03.022626Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001a has_result=true balance="9767302691"
+2026-01-06T23:58:03.022633Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x984eaeb9b45a548589a2b7b4802a56830441e79f has_result=true balance="10000000000000000"
+2026-01-06T23:58:03.022650Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xe95a6f9cd739b79b7421c94e4bab9a38d059d98d has_result=false balance=""
+2026-01-06T23:58:03.022761Z TRACE flashblocks::builder::block_validator: Starting parallel block execution
+2026-01-06T23:58:03.022784Z TRACE flashblocks::builder::block_validator: executing transaction index=2 tx=0x96aa5bc1480a7b8a4165a29261cac709e2f54156eb117d95cdcf22ad77e1092f
+2026-01-06T23:58:03.022836Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:03.022853Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:03.022859Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:03.022863Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="bundle"
+2026-01-06T23:58:03.022868Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:03.022875Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x984eaeb9b45a548589a2b7b4802a56830441e79f has_result=true balance="10000000000000000"
+2026-01-06T23:58:03.022913Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xe95a6f9cd739b79b7421c94e4bab9a38d059d98d has_result=false balance=""
+2026-01-06T23:58:03.022965Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000011 has_result=true balance="1670015384510"
+2026-01-06T23:58:03.022971Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001a has_result=true balance="9767302691"
+2026-01-06T23:58:03.022977Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000019 has_result=true balance="2124264830965280"
+2026-01-06T23:58:03.022983Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:03.025289Z TRACE flashblocks::state_executor: built payload from flashblock id=0x03684deb45f857ce index=1 block_hash=0xbf3356e1169ce88478d1f52630d537bfeb86a4686fe7c1ab23f4c085b79c0909
+2026-01-06T23:58:03.026072Z  INFO reth_node_events::node: Block added to canonical chain number=60 hash=0xbf3356e1169ce88478d1f52630d537bfeb86a4686fe7c1ab23f4c085b79c0909 peers=2 txs=2 gas_used=705.36Kgas gas_throughput=24.36Ggas/second gas_limit=60.00Mgas full=1.2% base_fee=0.79Gwei blobs=0 excess_blobs=0 elapsed=28.958µs
+2026-01-06T23:58:03.425035Z TRACE flashblocks::p2p: queueing flashblock payload_id=0x03684deb45f857ce flashblock_index=2
+2026-01-06T23:58:03.425129Z DEBUG flashblocks::p2p: publishing flashblock payload_id=0x03684deb45f857ce flashblock_index=2
+2026-01-06T23:58:03.425347Z TRACE flashblocks::coordinator: processing flashblock id=0x03684deb45f857ce index=2 min_tx_index=3 max_tx_index=7 execution_context=OpBlockExecutionCtx { parent_hash: 0x44b257c8280e0595bcd5b9a9e57a6ff548a5be61c7eafc132c4a2279f060af4f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 } next_block_context=OpNextBlockEnvAttributes { timestamp: 1767743884, suggested_fee_recipient: 0x4200000000000000000000000000000000000011, prev_randao: 0x8638b1c945e06882aed9276d1120cd683310b30dc855eb6c59d0a1f6b618b0d1, gas_limit: 60000000, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:03.425759Z TRACE flashblocks::bal_validator: Received access list for validation payload_id=PayloadId(0x03684deb45f857ce) min_tx_index=3 max_tx_index=7 num_account_changes=8
+2026-01-06T23:58:03.425828Z TRACE flashblocks::bal_validator: Access list account changes address=0x134Cd6D823aA5e8B51CA5DB8c7739243064871DF num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.425838Z TRACE flashblocks::bal_validator: Access list account changes address=0x204dDd7602d523F347D1c9F868019b98dFb66238 num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.425881Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000011 num_storage_changes=0 storage_slots=[] num_balance_changes=4
+2026-01-06T23:58:03.425897Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000019 num_storage_changes=0 storage_slots=[] num_balance_changes=4
+2026-01-06T23:58:03.425903Z TRACE flashblocks::bal_validator: Access list account changes address=0x420000000000000000000000000000000000001A num_storage_changes=0 storage_slots=[] num_balance_changes=4
+2026-01-06T23:58:03.425907Z TRACE flashblocks::bal_validator: Access list account changes address=0x5Be9cdD980abD8e9d76BC19B9eaBAf55d8db97FB num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.425916Z TRACE flashblocks::bal_validator: Access list account changes address=0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc num_storage_changes=0 storage_slots=[] num_balance_changes=4
+2026-01-06T23:58:03.425923Z TRACE flashblocks::bal_validator: Access list account changes address=0x9e656B3570FEBC3BEdA4BE4C9F1285Dea9DDF59f num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:03.425974Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x134cd6d823aa5e8b51ca5db8c7739243064871df has_result=false balance=""
+2026-01-06T23:58:03.425991Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x204ddd7602d523f347d1c9f868019b98dfb66238 has_result=false balance=""
+2026-01-06T23:58:03.426003Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000011 balance=53887185443522 nonce=0
+2026-01-06T23:58:03.426013Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000019 balance=2643705247212266 nonce=0
+2026-01-06T23:58:03.426018Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x420000000000000000000000000000000000001a balance=10856769012 nonce=0
+2026-01-06T23:58:03.426025Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x5be9cdd980abd8e9d76bc19b9eabaf55d8db97fb has_result=false balance=""
+2026-01-06T23:58:03.426034Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc has_result=true balance="9999989981717168613033"
+2026-01-06T23:58:03.426041Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x9e656b3570febc3beda4be4c9f1285dea9ddf59f has_result=false balance=""
+2026-01-06T23:58:03.426109Z TRACE flashblocks::builder::block_validator: Starting parallel block execution
+2026-01-06T23:58:03.428098Z TRACE flashblocks::builder::block_validator: executing transaction index=4 tx=0xc3e2811718b21741d7d7f5be42c4129945af61dca943c1716a1b429c0175cd3b
+2026-01-06T23:58:03.428133Z TRACE flashblocks::builder::block_validator: executing transaction index=5 tx=0xf3d6b4874419f3fbaa6f3ea8b1203ac8faf4b1396cb2deff33f4e9ba8321e92e
+2026-01-06T23:58:03.428253Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:03.428265Z TRACE flashblocks::builder::block_validator: executing transaction index=6 tx=0x217e9c3d22ad66cdfe74f86eabd05ebd05c1b290c4bc203b6b059279f43de394
+2026-01-06T23:58:03.428222Z TRACE flashblocks::builder::block_validator: executing transaction index=3 tx=0x4c7319f0da9a449d55a8e070927314170ce48da2d4d9ba9d37de4310f6a8d43e
+2026-01-06T23:58:03.428291Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:03.428337Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:03.428359Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:03.428413Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:03.428425Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="bundle"
+2026-01-06T23:58:03.428432Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:03.428429Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:03.428456Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:03.428463Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:03.428471Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="bundle"
+2026-01-06T23:58:03.428509Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:03.428677Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:03.428757Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x9e656b3570febc3beda4be4c9f1285dea9ddf59f has_result=false balance=""
+2026-01-06T23:58:03.428697Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:03.429088Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:03.428715Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:03.429112Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="bundle"
+2026-01-06T23:58:03.429127Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:03.428970Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:03.429225Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x134cd6d823aa5e8b51ca5db8c7739243064871df has_result=false balance=""
+2026-01-06T23:58:03.429234Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x5be9cdd980abd8e9d76bc19b9eabaf55d8db97fb has_result=false balance=""
+2026-01-06T23:58:03.429024Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="bundle"
+2026-01-06T23:58:03.429278Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:03.429288Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:03.429287Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:03.429362Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc has_result=true balance="9999989981717168613033"
+2026-01-06T23:58:03.429435Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x204ddd7602d523f347d1c9f868019b98dfb66238 has_result=false balance=""
+2026-01-06T23:58:03.429558Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000011 balance=53887185443522 nonce=0
+2026-01-06T23:58:03.429752Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x420000000000000000000000000000000000001a balance=10856769012 nonce=0
+2026-01-06T23:58:03.429760Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000019 balance=2643705247212266 nonce=0
+2026-01-06T23:58:03.429768Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:03.433036Z TRACE flashblocks::state_executor: built payload from flashblock id=0x03684deb45f857ce index=2 block_hash=0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f
+2026-01-06T23:58:03.433244Z  INFO reth_node_events::node: Block added to canonical chain number=60 hash=0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f peers=2 txs=6 gas_used=789.36Kgas gas_throughput=79.93Ggas/second gas_limit=60.00Mgas full=1.3% base_fee=0.79Gwei blobs=0 excess_blobs=0 elapsed=9.875µs
+2026-01-06T23:58:04.217119Z TRACE flashblocks::p2p: queueing flashblock payload_id=0x03cb09825951002a flashblock_index=0
+2026-01-06T23:58:04.217193Z DEBUG flashblocks::p2p: publishing flashblock payload_id=0x03cb09825951002a flashblock_index=0
+2026-01-06T23:58:04.217432Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.222990Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.229137Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.234985Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.241118Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.247108Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.253697Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.259156Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.265063Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.272171Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.278588Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.285148Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.292188Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.299178Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.305049Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.311962Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.318571Z  WARN flashblocks_builder::coordinator: waiting for parent header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f: "failed to fetch sealed header 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f". waited 5ms so far
+2026-01-06T23:58:04.320508Z  INFO reth_node_events::node: Received block from consensus engine number=60 hash=0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f
+2026-01-06T23:58:04.321494Z  INFO reth_node_events::node: Canonical chain committed number=60 hash=0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f elapsed=35.625µs
+2026-01-06T23:58:04.323941Z TRACE flashblocks::coordinator: processing flashblock id=0x03cb09825951002a index=0 min_tx_index=0 max_tx_index=2 execution_context=OpBlockExecutionCtx { parent_hash: 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 } next_block_context=OpNextBlockEnvAttributes { timestamp: 1767743886, suggested_fee_recipient: 0x4200000000000000000000000000000000000011, prev_randao: 0x8638b1c945e06882aed9276d1120cd683310b30dc855eb6c59d0a1f6b618b0d1, gas_limit: 60000000, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:04.324022Z TRACE flashblocks::bal_validator: Received access list for validation payload_id=PayloadId(0x03cb09825951002a) min_tx_index=0 max_tx_index=2 num_account_changes=4
+2026-01-06T23:58:04.324066Z TRACE flashblocks::bal_validator: Access list account changes address=0x0000F90827F1C53a10cb7A02335B175320002935 num_storage_changes=1 storage_slots=[(0x000000000000000000000000000000000000000000000000000000000000003c, 0, 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f)] num_balance_changes=0
+2026-01-06T23:58:04.324081Z TRACE flashblocks::bal_validator: Access list account changes address=0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02 num_storage_changes=2 storage_slots=[(0x0000000000000000000000000000000000000000000000000000000000000c95, 0, 0x00000000000000000000000000000000000000000000000000000000695da18e), (0x0000000000000000000000000000000000000000000000000000000000002c94, 0, 0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8)] num_balance_changes=0
+2026-01-06T23:58:04.324084Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000015 num_storage_changes=1 storage_slots=[(0x0000000000000000000000000000000000000000000000000000000000000003, 1, 0x0000000000000000000000000000000000000558000c5fc50000000000000003)] num_balance_changes=0
+2026-01-06T23:58:04.324086Z TRACE flashblocks::bal_validator: Access list account changes address=0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001 num_storage_changes=0 storage_slots=[] num_balance_changes=0
+2026-01-06T23:58:04.324103Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001 has_result=true balance="0"
+2026-01-06T23:58:04.324236Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x0000f90827f1c53a10cb7a02335b175320002935 has_result=true balance="0"
+2026-01-06T23:58:04.324288Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x0000f90827f1c53a10cb7a02335b175320002935 index=60 value=0 source="fallback_db"
+2026-01-06T23:58:04.324315Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 has_result=true balance="0"
+2026-01-06T23:58:04.324330Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 index=3221 value=0 source="fallback_db"
+2026-01-06T23:58:04.324340Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x000f3df6d732807ef1319fb7b8bb8522d0beac02 index=11412 value=0 source="fallback_db"
+2026-01-06T23:58:04.324346Z TRACE flashblocks::builder::block_validator: Starting parallel block execution
+2026-01-06T23:58:04.324358Z TRACE flashblocks::builder::block_validator: executing transaction index=1 tx=0xd941264669060fb0631ec116a57b31d1940a4af7a17c0a8693cafffa967a57f8
+2026-01-06T23:58:04.324386Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001 has_result=true balance="0"
+2026-01-06T23:58:04.324393Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000015 has_result=true balance="0"
+2026-01-06T23:58:04.324419Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=24440054405305269366569402256811496959409073762505157381672968839269610695612 value=1100848482849856729248317607345294555569936597013 source="fallback_db"
+2026-01-06T23:58:04.324437Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xc0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d30015 has_result=true balance="0"
+2026-01-06T23:58:04.324443Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503234 source="fallback_db"
+2026-01-06T23:58:04.324454Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=0 value=32609118573291447292537077790 source="fallback_db"
+2026-01-06T23:58:04.324457Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:04.324460Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:04.324462Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=2 value=31989568807759569949327350792897421502496245064096066016259628942998465986288 source="fallback_db"
+2026-01-06T23:58:04.324465Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=4 value=1210011053889338503540166963274920152971028360245 source="fallback_db"
+2026-01-06T23:58:04.324469Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:04.326907Z TRACE flashblocks::state_executor: built payload from flashblock id=0x03cb09825951002a index=0 block_hash=0x1d20202b58acba49c6a41c34946d4761a713429ae7e8051173b57d0f9db5e8af
+2026-01-06T23:58:04.327141Z  INFO reth_node_events::node: Block added to canonical chain number=61 hash=0x1d20202b58acba49c6a41c34946d4761a713429ae7e8051173b57d0f9db5e8af peers=2 txs=1 gas_used=46.12Kgas gas_throughput=4.88Ggas/second gas_limit=60.00Mgas full=0.1% base_fee=0.79Gwei blobs=0 excess_blobs=0 elapsed=9.459µs
+2026-01-06T23:58:05.639164Z TRACE flashblocks::p2p: queueing flashblock payload_id=0x03cb09825951002a flashblock_index=1
+2026-01-06T23:58:05.639227Z DEBUG flashblocks::p2p: publishing flashblock payload_id=0x03cb09825951002a flashblock_index=1
+2026-01-06T23:58:05.639418Z TRACE flashblocks::coordinator: processing flashblock id=0x03cb09825951002a index=1 min_tx_index=2 max_tx_index=3 execution_context=OpBlockExecutionCtx { parent_hash: 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 } next_block_context=OpNextBlockEnvAttributes { timestamp: 1767743886, suggested_fee_recipient: 0x4200000000000000000000000000000000000011, prev_randao: 0x8638b1c945e06882aed9276d1120cd683310b30dc855eb6c59d0a1f6b618b0d1, gas_limit: 60000000, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:05.639533Z TRACE flashblocks::bal_validator: Received access list for validation payload_id=PayloadId(0x03cb09825951002a) min_tx_index=2 max_tx_index=3 num_account_changes=4
+2026-01-06T23:58:05.639570Z TRACE flashblocks::bal_validator: Access list account changes address=0x134Cd6D823aA5e8B51CA5DB8c7739243064871DF num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:05.639579Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000011 num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:05.639584Z TRACE flashblocks::bal_validator: Access list account changes address=0x4200000000000000000000000000000000000019 num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:05.639596Z TRACE flashblocks::bal_validator: Access list account changes address=0x420000000000000000000000000000000000001A num_storage_changes=0 storage_slots=[] num_balance_changes=1
+2026-01-06T23:58:05.639613Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x134cd6d823aa5e8b51ca5db8c7739243064871df has_result=true balance="700000000000000000"
+2026-01-06T23:58:05.639628Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000011 has_result=true balance="60540688859522"
+2026-01-06T23:58:05.639641Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000019 has_result=true balance="2709892261560266"
+2026-01-06T23:58:05.639644Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001a has_result=true balance="11095952880"
+2026-01-06T23:58:05.639698Z TRACE flashblocks::builder::block_validator: Starting parallel block execution
+2026-01-06T23:58:05.639756Z TRACE flashblocks::builder::block_validator: executing transaction index=2 tx=0x173ae9fddd7d2a9e128452c2a23364b08e3f2a171cd4e3c9d0af57aa28f78cd3
+2026-01-06T23:58:05.640074Z TRACE flashblocks::bundle_db: BundleDb account read from bundle info address=0x4200000000000000000000000000000000000015 balance=0 nonce=0
+2026-01-06T23:58:05.640233Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=1 value=27319027 source="fallback_db"
+2026-01-06T23:58:05.640272Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=7 value=1 source="fallback_db"
+2026-01-06T23:58:05.640276Z TRACE flashblocks::bundle_db: BundleDb storage read from bundle address=0x4200000000000000000000000000000000000015 index=3 value=108384141278882273658655297503235 source="bundle"
+2026-01-06T23:58:05.640281Z TRACE flashblocks::bundle_db: BundleDb storage read from fallback db address=0x4200000000000000000000000000000000000015 index=8 value=0 source="fallback_db"
+2026-01-06T23:58:05.640294Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x134cd6d823aa5e8b51ca5db8c7739243064871df has_result=true balance="700000000000000000"
+2026-01-06T23:58:05.640309Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0xe95a6f9cd739b79b7421c94e4bab9a38d059d98d has_result=true balance="0"
+2026-01-06T23:58:05.640333Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000011 has_result=true balance="60540688859522"
+2026-01-06T23:58:05.640339Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001a has_result=true balance="11095952880"
+2026-01-06T23:58:05.640345Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x4200000000000000000000000000000000000019 has_result=true balance="2709892261560266"
+2026-01-06T23:58:05.640359Z TRACE flashblocks::bundle_db: BundleDb account read from fallback db address=0x420000000000000000000000000000000000001b has_result=true balance="0"
+2026-01-06T23:58:05.643133Z ERROR flashblocks::state_executor: Access list hash mismatch access_list_hash=0x9700c1c6a1f2ec9160af650c17a9261bf515ebdd0b3c2222d4a273d44e4fcde3 expected=0x9700c1c6a1f2ec9160af650c17a9261bf515ebdd0b3c2222d4a273d44e4fcde3 access_list=FlashblockAccessList { changes: [AccountChanges { address: 0x134cd6d823aa5e8b51ca5db8c7739243064871df, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 699980354132527393 }], nonce_changes: [NonceChange { block_access_index: 2, new_nonce: 1 }], code_changes: [] }, AccountChanges { address: 0x4200000000000000000000000000000000000011, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 62334739874882 }], nonce_changes: [], code_changes: [] }, AccountChanges { address: 0x4200000000000000000000000000000000000019, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 2727744018221546 }], nonce_changes: [], code_changes: [] }, AccountChanges { address: 0x420000000000000000000000000000000000001a, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 11155748847 }], nonce_changes: [], code_changes: [] }], min_tx_index: 2, max_tx_index: 3 } expected_access_list=FlashblockAccessList { changes: [AccountChanges { address: 0x134cd6d823aa5e8b51ca5db8c7739243064871df, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 698867217831551249 }], nonce_changes: [NonceChange { block_access_index: 2, new_nonce: 1 }], code_changes: [] }, AccountChanges { address: 0x4200000000000000000000000000000000000011, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 163986112211938 }], nonce_changes: [], code_changes: [] }, AccountChanges { address: 0x4200000000000000000000000000000000000019, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 3739228946860634 }], nonce_changes: [], code_changes: [] }, AccountChanges { address: 0x420000000000000000000000000000000000001a, storage_changes: [], storage_reads: [], balance_changes: [BalanceChange { block_access_index: 2, post_balance: 11155748847 }], nonce_changes: [], code_changes: [] }], min_tx_index: 2, max_tx_index: 3 } block_number=61 block_hash=0x7673941781e292ab8eecd34491570758aaf76457d931aba51956fedf51c3a153 execution_context=OpBlockExecutionCtx { parent_hash: 0x5609b7cb38ac04683c88bb3545b9fe8f7993f72809f76cdc572edbcf39d0918f, parent_beacon_block_root: Some(0x9909e1c0fee664762d81b5ecaa8c5189284aa7647a8e458f5399d2dc184aace8), extra_data: 0x00000000fa00000006 }
+2026-01-06T23:58:05.643362Z ERROR flashblocks_builder::coordinator: error processing flashblock: BalValidationError(
+    BalHashMismatch {
+        expected: 0x9700c1c6a1f2ec9160af650c17a9261bf515ebdd0b3c2222d4a273d44e4fcde3,
+        got: 0xd2bba8acbda0a9a2e2eaad724b43b2c7adfae32325cfb510f0702337c36b5387,
+        expected_bal: FlashblockAccessList {
+            changes: [
+                AccountChanges {
+                    address: 0x134cd6d823aa5e8b51ca5db8c7739243064871df,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 698867217831551249,
+                        },
+                    ],
+                    nonce_changes: [
+                        NonceChange {
+                            block_access_index: 2,
+                            new_nonce: 1,
+                        },
+                    ],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x4200000000000000000000000000000000000011,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 163986112211938,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x4200000000000000000000000000000000000019,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 3739228946860634,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x420000000000000000000000000000000000001a,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 11155748847,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+            ],
+            min_tx_index: 2,
+            max_tx_index: 3,
+        },
+        got_bal: FlashblockAccessList {
+            changes: [
+                AccountChanges {
+                    address: 0x134cd6d823aa5e8b51ca5db8c7739243064871df,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 699980354132527393,
+                        },
+                    ],
+                    nonce_changes: [
+                        NonceChange {
+                            block_access_index: 2,
+                            new_nonce: 1,
+                        },
+                    ],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x4200000000000000000000000000000000000011,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 62334739874882,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x4200000000000000000000000000000000000019,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 2727744018221546,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+                AccountChanges {
+                    address: 0x420000000000000000000000000000000000001a,
+                    storage_changes: [],
+                    storage_reads: [],
+                    balance_changes: [
+                        BalanceChange {
+                            block_access_index: 2,
+                            post_balance: 11155748847,
+                        },
+                    ],
+                    nonce_changes: [],
+                    code_changes: [],
+                },
+            ],
+            min_tx_index: 2,
+            max_tx_index: 3,
+        },
+    },
+)

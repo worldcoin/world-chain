@@ -31,6 +31,7 @@ use tokio::sync::broadcast;
 use tracing::{error, trace, warn};
 
 use crate::{
+    access_list::BlockAccessIndex,
     bal_executor::CommittedState,
     bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
     payload_builder::build,
@@ -43,7 +44,7 @@ use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 const FETCH_PARENT_HEADER_MAX_DELAY: Duration = Duration::from_millis(2000);
 
 /// The minimum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(25);
+const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(5);
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -243,8 +244,8 @@ where
         .retry(
             backon::ExponentialBuilder::default()
                 .with_min_delay(FETCH_PARENT_HEADER_MIN_DELAY)
-                .with_max_delay(FETCH_PARENT_HEADER_MAX_DELAY)
-                .with_max_times(10),
+                .with_max_delay(FETCH_PARENT_HEADER_MIN_DELAY)
+                .with_max_times(200),
         )
         .notify(|e, duration| {
             warn!(
@@ -287,16 +288,14 @@ where
         CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
             .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
 
-    let transactions_offset = committed_state.transactions.len() + 1;
+    let transactions_offset = committed_state.transactions.len() as BlockAccessIndex + 1;
     let start = Instant::now();
 
     let payload = if flashblock.diff().access_list_data.is_some() {
         let sealed_header = Arc::new(sealed_header);
 
-        let executor_transactions = decode_transactions_with_indices(
-            &flashblock.diff().transactions,
-            transactions_offset as u16,
-        )?;
+        let executor_transactions =
+            decode_transactions_with_indices(&flashblock.diff().transactions, transactions_offset)?;
 
         let block_validator = FlashblocksBlockValidator {
             chain_spec: chain_spec.clone(),

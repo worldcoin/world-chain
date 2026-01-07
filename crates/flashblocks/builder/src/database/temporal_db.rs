@@ -166,43 +166,15 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
     ) -> Result<StorageValue, Self::Error> {
         match self.cache.account_storage.get(&address) {
             Some(storage) => match storage.get(self.index, &index) {
-                Some(val) => {
-                    tracing::trace!(
-                        target: "flashblocks::temporal_db",
-                        ?address,
-                        ?index,
-                        temporal_index = self.index,
-                        value = ?val,
-                        source = "temporal_cache",
-                        "TemporalDb storage read from cache"
-                    );
-                    Ok(*val)
-                }
+                Some(val) => Ok(*val),
                 None => {
                     let val = self.db.storage_ref(address, index)?;
-                    tracing::trace!(
-                        target: "flashblocks::temporal_db",
-                        ?address,
-                        ?index,
-                        temporal_index = self.index,
-                        value = ?val,
-                        source = "fallback_db_slot_not_in_cache",
-                        "TemporalDb storage read from fallback (slot not in cache)"
-                    );
                     Ok(val)
                 }
             },
             None => {
                 let val = self.db.storage_ref(address, index)?;
-                tracing::trace!(
-                    target: "flashblocks::temporal_db",
-                    ?address,
-                    ?index,
-                    temporal_index = self.index,
-                    value = ?val,
-                    source = "fallback_db_account_not_in_cache",
-                    "TemporalDb storage read from fallback (account not in cache)"
-                );
+
                 Ok(val)
             }
         }

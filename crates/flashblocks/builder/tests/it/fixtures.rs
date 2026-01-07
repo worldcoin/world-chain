@@ -66,6 +66,14 @@ lazy_static::lazy_static! {
         Address::from_slice(&[0xCA, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02]);
 
+    /// StorageTest contract address (deterministic)
+    pub static ref STORAGE_TEST_CONTRACT: Address =
+        Address::from_slice(&[0x57, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+
+    /// StorageTest contract bytecode (must match sol! macro definition below)
+    pub static ref STORAGE_TEST_BYTECODE: Bytes = bytes!("0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063168d7c47146100435780637eba7ba6146100685780638dc44a7214610087575b5f5ffd5b6100566100513660046100e1565b61009a565b60405190815260200160405180910390f35b610056610076366004610101565b5f9081526020819052604090205490565b610056610095366004610101565b6100b2565b5f828152602081905260409020819055805b92915050565b5f818152602081905260408120546100cb816001610118565b5f93845260208490526040909320929092555090565b5f5f604083850312156100f2575f5ffd5b50508035926020909101359150565b5f60208284031215610111575f5ffd5b5035919050565b808201808211156100ac57634e487b7160e01b5f52601160045260245ffd");
+
     /// ChaosTest contract bytecode (from sol! macro compilation)
     pub static ref CHAOS_BYTECODE: Bytes = Bytes::from(
         hex::decode("6080604052348015600e575f5ffd5b5060b680601a5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056")
@@ -124,6 +132,12 @@ lazy_static::lazy_static! {
                     .with_storage(Some(CHAOS_PROXY_STORAGE.clone()))
                     .with_nonce(Some(1))
             ),
+            (
+                *STORAGE_TEST_CONTRACT,
+                GenesisAccount::default()
+                    .with_code(Some(STORAGE_TEST_BYTECODE.clone()))
+                    .with_nonce(Some(1))
+            ),
         ])
         .with_base_fee(Some(1))
         .with_gas_limit(30_000_000);
@@ -161,6 +175,35 @@ lazy_static::lazy_static! {
     pub static ref EVM_ENV: EvmEnv<OpSpecId> = EVM_CONFIG
         .next_evm_env(SEALED_HEADER.header(), &NEXT_BLOCK_ENV_ATTRS)
         .unwrap();
+}
+
+// Simple storage contract for testing cross-flashblock storage reads
+// setSlot(uint256 slot, uint256 value): stores value at slot
+// getSlot(uint256 slot): returns value at slot
+// getAndIncrement(uint256 slot): reads slot, increments, stores back, returns original
+sol! {
+    #[sol(bytecode = "0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c8063168d7c47146100435780637eba7ba6146100685780638dc44a7214610087575b5f5ffd5b6100566100513660046100e1565b61009a565b60405190815260200160405180910390f35b610056610076366004610101565b5f9081526020819052604090205490565b610056610095366004610101565b6100b2565b5f828152602081905260409020819055805b92915050565b5f818152602081905260408120546100cb816001610118565b5f93845260208490526040909320929092555090565b5f5f604083850312156100f2575f5ffd5b50508035926020909101359150565b5f60208284031215610111575f5ffd5b5035919050565b808201808211156100ac57634e487b7160e01b5f52601160045260245ffd")]
+    contract StorageTest {
+        mapping(uint256 => uint256) private slots;
+
+        /// Sets storage at `slot` to `value`
+        function setSlot(uint256 slot, uint256 value) external returns (uint256) {
+            slots[slot] = value;
+            return value;
+        }
+
+        /// Gets storage at `slot`
+        function getSlot(uint256 slot) external view returns (uint256) {
+            return slots[slot];
+        }
+
+        /// Reads slot, increments it, and returns the original value
+        function getAndIncrement(uint256 slot) external returns (uint256) {
+            uint256 current = slots[slot];
+            slots[slot] = current + 1;
+            return current;
+        }
+    }
 }
 
 sol! {
@@ -272,6 +315,18 @@ pub enum TxOp {
     },
     /// Call deployNewImplementation() on ChaosTestProxy - deploys new contract
     DeployNewImplementation { from: PrivateKeySigner },
+    /// Call setSlot(slot, value) on StorageTest - writes to specific storage slot
+    SetSlot {
+        from: PrivateKeySigner,
+        slot: U256,
+        value: U256,
+    },
+    /// Call getAndIncrement(slot) on StorageTest - reads slot, increments, returns original
+    /// This is useful for testing cross-flashblock storage reads
+    GetAndIncrement {
+        from: PrivateKeySigner,
+        slot: U256,
+    },
 }
 
 impl TxOp {
@@ -281,6 +336,8 @@ impl TxOp {
             TxOp::Transfer { from, .. } => from,
             TxOp::Fib { from, .. } => from,
             TxOp::DeployNewImplementation { from } => from,
+            TxOp::SetSlot { from, .. } => from,
+            TxOp::GetAndIncrement { from, .. } => from,
         }
     }
 
@@ -296,6 +353,19 @@ impl TxOp {
                 // deployNewImplementation() selector
                 FibProxy::deployNewImplementationCall {}.abi_encode().into()
             }
+            TxOp::SetSlot { slot, value, .. } => {
+                StorageTest::setSlotCall {
+                    slot: *slot,
+                    value: *value,
+                }
+                .abi_encode()
+                .into()
+            }
+            TxOp::GetAndIncrement { slot, .. } => {
+                StorageTest::getAndIncrementCall { slot: *slot }
+                    .abi_encode()
+                    .into()
+            }
         }
     }
 
@@ -308,6 +378,9 @@ impl TxOp {
                 ChaosTarget::Proxy => TxKind::Call(*CHAOS_PROXY_CONTRACT),
             },
             TxOp::DeployNewImplementation { .. } => TxKind::Call(*CHAOS_PROXY_CONTRACT),
+            TxOp::SetSlot { .. } | TxOp::GetAndIncrement { .. } => {
+                TxKind::Call(*STORAGE_TEST_CONTRACT)
+            }
         }
     }
 
@@ -325,6 +398,8 @@ impl TxOp {
             TxOp::Transfer { .. } => 21_000,
             TxOp::Fib { n, .. } => 100_000 + *n * 20_000,
             TxOp::DeployNewImplementation { .. } => 500_000,
+            TxOp::SetSlot { .. } => 50_000,
+            TxOp::GetAndIncrement { .. } => 50_000,
         }
     }
 
@@ -514,13 +589,13 @@ pub fn build_chained_payloads(
                     .clone()
                     .iter()
                     .enumerate()
-                    .map(|(idx, r)| (idx as u16, r.clone()))
+                    .map(|(idx, r)| (idx as u64, r.clone()))
                     .collect(),
                 transactions: o
                     .block
                     .clone_transactions_recovered()
                     .enumerate()
-                    .map(|(idx, tx)| (idx as u16, tx.clone()))
+                    .map(|(idx, tx)| (idx as u64, tx.clone()))
                     .collect(),
             }),
         ));
@@ -541,7 +616,7 @@ pub fn execute_serial(
         BlockBuilderOutcome<OpPrimitives>,
         FlashblockAccessListData,
         BundleState,
-        u64
+        u64,
     ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
@@ -567,7 +642,7 @@ pub fn execute_serial(
         .build();
 
     let start_index = if let Some((_, _, last_idx)) = &prev_outcome {
-        *last_idx + 1
+        *last_idx
     } else {
         0
     };
@@ -649,8 +724,7 @@ pub fn execute_serial(
     // Build senders list
     let (block_transactions, senders): (Vec<_>, Vec<_>) = builder
         .transactions
-        .iter()
-        .chain(transactions.iter())
+        .into_iter()
         .map(|tx| tx.clone().into_parts())
         .unzip();
 
@@ -678,14 +752,12 @@ pub fn execute_serial(
     // Determine the index range for the access list
     // min_tx_index = start_index (matches payload_builder convention)
     // max_tx_index = current_index (the final counter value after all transactions)
-    let min_tx_index = start_index as u16;
-    let max_tx_index = current_index as u16;
+    let min_tx_index = start_index;
+    let max_tx_index = current_index;
 
     // Convert revm's Bal to FlashblockAccessList
     let access_list = bal
-        .map(|b| {
-            FlashblockAccessListConstruction::from_revm_bal(b).build((min_tx_index, max_tx_index))
-        })
+        .map(|b| FlashblockAccessListConstruction::from(b).build((min_tx_index, max_tx_index)))
         .unwrap_or_default();
 
     let hash = access_list_hash(&access_list);

@@ -6,10 +6,13 @@ use dashmap::DashMap;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
 
-use revm::state::{Bytecode, bal::Bal};
+use revm::state::{
+    Bytecode,
+    bal::{AccountBal, Bal},
+};
 use std::collections::{HashMap, HashSet};
 
-pub(crate) type BlockAccessIndex = u16;
+pub(crate) type BlockAccessIndex = u64;
 
 /// A convenience builder type for [`FlashblockAccessList`]
 #[derive(Debug, Clone)]
@@ -32,60 +35,6 @@ impl FlashblockAccessListConstruction {
         }
     }
 
-    /// Convert from revm's [`Bal`] to [`FlashblockAccessListConstruction`].
-    pub fn from_revm_bal(bal: Bal) -> Self {
-        let changes = DashMap::new();
-
-        for (address, account_bal) in bal.accounts {
-            let acc_changes = AccountChangesConstruction {
-                balance_changes: account_bal
-                    .account_info
-                    .balance
-                    .writes
-                    .into_iter()
-                    .map(|(idx, val)| (idx as u16, val))
-                    .collect(),
-
-                nonce_changes: account_bal
-                    .account_info
-                    .nonce
-                    .writes
-                    .into_iter()
-                    .map(|(idx, val)| (idx as u16, val))
-                    .collect(),
-
-                code_changes: account_bal
-                    .account_info
-                    .code
-                    .writes
-                    .into_iter()
-                    .map(|(idx, (_, bytecode))| (idx as u16, bytecode))
-                    .collect(),
-
-                storage_changes: account_bal
-                    .storage
-                    .storage
-                    .into_iter()
-                    .filter(|(_, writes)| !writes.is_empty())
-                    .map(|(slot, writes)| {
-                        let slot_changes = writes
-                            .writes
-                            .into_iter()
-                            .map(|(idx, val)| (idx as u16, val))
-                            .collect();
-                        (slot, slot_changes)
-                    })
-                    .collect(),
-
-                storage_reads: HashSet::new(),
-            };
-
-            changes.insert(address, acc_changes);
-        }
-
-        Self { changes }
-    }
-
     /// Merges another [`FlashblockAccessListConstruction`] into this one
     pub fn merge(&mut self, other: Self) {
         for entry in other.changes.into_iter() {
@@ -100,7 +49,10 @@ impl FlashblockAccessListConstruction {
     /// Consumes the builder and produces a [`FlashblockAccessList`]
     ///
     /// Note: All Empty, and Adjecent changes are removed (favoring the last occurrence)
-    pub fn build(self, (min_tx_index, max_tx_index): (u16, u16)) -> FlashblockAccessList {
+    pub fn build(
+        self,
+        (min_tx_index, max_tx_index): (BlockAccessIndex, BlockAccessIndex),
+    ) -> FlashblockAccessList {
         // Sort addresses lexicographically
         let mut changes: Vec<_> = self
             .changes
@@ -132,6 +84,22 @@ impl FlashblockAccessListConstruction {
             .or_insert_with(AccountChangesConstruction::default);
 
         f(&mut entry);
+    }
+}
+
+impl From<Bal> for FlashblockAccessListConstruction {
+    fn from(value: Bal) -> Self {
+        let changes: DashMap<Address, AccountChangesConstruction> = value
+            .accounts
+            .into_iter()
+            .par_bridge()
+            .map(|(address, account_bal)| {
+                let acc_changes = AccountChangesConstruction::from(account_bal);
+                (address, acc_changes)
+            })
+            .collect();
+
+        Self { changes }
     }
 }
 
@@ -168,7 +136,12 @@ impl AccountChangesConstruction {
     /// Consumes the builder and produces an [`AccountChanges`] for the given address
     ///
     /// Note: This will sort all changes by transaction index, and storage slots by their value.
+    /// Storage reads are filtered to exclude any slots that also have writes (storage_changes),
+    /// matching the behavior of sequential execution where a slot with writes is not in storage_reads.
     pub fn build(mut self, address: Address) -> AccountChanges {
+        // Collect the set of slots that have writes - these should NOT be in storage_reads
+        let written_slots: HashSet<U256> = self.storage_changes.keys().cloned().collect();
+
         let sorted_storage_changes: Vec<_> = {
             let mut slots = self.storage_changes.keys().cloned().collect::<Vec<_>>();
             slots.sort_unstable();
@@ -190,7 +163,15 @@ impl AccountChangesConstruction {
                 .collect()
         };
 
-        let mut storage_reads_sorted: Vec<_> = self.storage_reads.drain().collect();
+        // Filter out storage_reads that also have writes - in sequential execution,
+        // a slot that was read and then written only appears in storage_changes.
+        // This handles the case where parallel execution merges reads from one worker
+        // with writes from another worker for the same slot.
+        let mut storage_reads_sorted: Vec<_> = self
+            .storage_reads
+            .drain()
+            .filter(|slot| !written_slots.contains(slot))
+            .collect();
         storage_reads_sorted.sort_unstable();
 
         let mut balance_changes_sorted: Vec<_> = self.balance_changes.drain().collect();
@@ -248,5 +229,62 @@ impl AccountChangesConstruction {
             && self.balance_changes.is_empty()
             && self.nonce_changes.is_empty()
             && self.code_changes.is_empty()
+    }
+}
+
+impl From<AccountBal> for AccountChangesConstruction {
+    fn from(value: AccountBal) -> Self {
+        let mut storage_reads: HashSet<U256> = HashSet::default();
+
+        let storage_changes: HashMap<U256, HashMap<BlockAccessIndex, U256>> = value
+            .storage
+            .storage
+            .into_iter()
+            .filter(|(slot, slot_writes)| {
+                if !slot_writes.is_empty() {
+                    true
+                } else {
+                    storage_reads.insert(*slot);
+                    false
+                }
+            })
+            .map(|(slot, slot_writes)| {
+                let slot_changes = slot_writes
+                    .writes
+                    .into_iter()
+                    .map(|(idx, val)| (idx, val))
+                    .collect();
+                (slot, slot_changes)
+            })
+            .collect();
+
+        Self {
+            balance_changes: value
+                .account_info
+                .balance
+                .writes
+                .into_iter()
+                .map(|(idx, val)| (idx, val))
+                .collect(),
+
+            nonce_changes: value
+                .account_info
+                .nonce
+                .writes
+                .into_iter()
+                .map(|(idx, val)| (idx, val))
+                .collect(),
+
+            code_changes: value
+                .account_info
+                .code
+                .writes
+                .into_iter()
+                .map(|(idx, (_, bytecode))| (idx, bytecode))
+                .collect(),
+
+            storage_changes,
+            storage_reads,
+        }
     }
 }
