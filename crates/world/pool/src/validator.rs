@@ -139,6 +139,12 @@ where
                 .to_outcome(tx);
         };
 
+        // Reject empty aggregator arrays - they bypass all validation
+        if calldata._0.is_empty() {
+            return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload)
+                .to_outcome(tx);
+        }
+
         if !calldata
             ._0
             .iter()
@@ -212,7 +218,12 @@ where
             ..
         } = &mut tx_outcome
         {
-            tx.set_pbh_payloads(aggregated_payloads);
+            if !aggregated_payloads.is_empty() {
+                tx.set_pbh_payloads(aggregated_payloads);
+            } else {
+                return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload)
+                    .to_outcome(tx.clone());
+            }
         }
 
         tx_outcome
