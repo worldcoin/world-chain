@@ -1,6 +1,10 @@
-# PBH Contracts
+# World Chain Contracts
 
-[Priority blockspace for humans (PBH)](https://github.com/worldcoin/world-chain?tab=readme-ov-file#world-chain-builder) enables verified World ID users to execute transactions with top of block priority, enabling a more frictionless user experience onchain. This mechanism is designed to ensure that ordinary users aren’t unfairly disadvantaged by automated systems and greatly mitigates the negative impact of MEV.
+This repository contains smart contracts for World Chain, including PBH (Priority Blockspace for Humans) and Fee Vault contracts.
+
+## PBH Contracts
+
+[Priority blockspace for humans (PBH)](https://github.com/worldcoin/world-chain?tab=readme-ov-file#world-chain-builder) enables verified World ID users to execute transactions with top of block priority, enabling a more frictionless user experience onchain. This mechanism is designed to ensure that ordinary users aren't unfairly disadvantaged by automated systems and greatly mitigates the negative impact of MEV.
 
 [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) is designed to enable [account abstraction](https://ethereum.org/en/roadmap/account-abstraction/) via an “entry point” contract and “user operations”. A `UserOperation` is a payload that is defined by a user, specifying actions that a “bundler” can execute on their behalf. The `EntryPoint` contract conducts all of the necessary validation logic, executes the user operation onchain and manages any post execution logic (ex. paymaster logic). Users send their `UserOperation` to “bundlers”, which are services that maintain a mempool of many `UserOperation`s, bundling them together to submit them to the blockchain for inclusion.
 
@@ -31,4 +35,27 @@ Bytes [12 : 65 * signatureThreshold + 12] ECDSA Signatures
 Bytes [65 * signatureThreshold + 12 : 65 * signatureThreshold + 364] ABI Encoded Proof Data
 ```
 
+## Fee Vault Contracts
+
+The Fee Vault contracts manage the distribution and burning of sequencer fees on World Chain.
+
+*FeeRecipient*
+
+The `FeeRecipient` contract acts as the initial receiver of sequencer fees. When ETH is sent to this contract, it automatically splits the incoming funds between:
+- A configurable portion sent to the `FeeEscrow` for WLD burns
+- The remainder held for withdrawal to a fee vault recipient
+
+The distribution ratio is configurable by the owner (default 50%).
+
+*FeeEscrow*
+
+The `FeeEscrow` contract handles the conversion of ETH to WLD for burning. Key features:
+- Holds ETH received from the `FeeRecipient`
+- Uses Chainlink oracles (WLD/USD and ETH/USD) to calculate fair exchange rates
+- Implements a callback mechanism allowing any executor to perform the swap and burn
+- Enforces a minimum interval between burns (default 24 hours)
+- Burns WLD by sending it to a dead address (`0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF`)
+- Includes slippage protection (0.03%) to ensure fair execution
+
+The burn mechanism requires executors to implement the `IBurnCallback` interface, providing flexibility in how the ETH-to-WLD swap is performed (e.g., via Uniswap V3).
 

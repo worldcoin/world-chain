@@ -6,7 +6,7 @@ import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/Pac
 import {ValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {_packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {ISafe} from "@4337/interfaces/Safe.sol";
-import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
+import {SafeModuleSignatures} from "./libraries/SafeModuleSignatures.sol";
 
 /// @title PBH Safe 4337 Module
 /// @author Worldcoin

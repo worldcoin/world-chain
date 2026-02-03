@@ -3,20 +3,20 @@ pragma solidity ^0.8.28;
 
 import {Script} from "@forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
-import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
+import {PBHEntryPointImplV1} from "../../src/pbh/PBHEntryPointImplV1.sol";
+import {PBHSignatureAggregator} from "../../src/pbh/PBHSignatureAggregator.sol";
 import {console} from "forge-std/console.sol";
 import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
-import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
+import {IPBHEntryPoint} from "../../src/pbh/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {SafeProxyFactory} from "@safe-global/safe-contracts/contracts/proxies/SafeProxyFactory.sol";
 import {SafeProxy} from "@safe-global/safe-contracts/contracts/proxies/SafeProxy.sol";
 import {Enum} from "@safe-global/safe-contracts/contracts/common/Enum.sol";
 import {SafeModuleSetup} from "@4337/SafeModuleSetup.sol";
-import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
-import {Mock4337Module} from "../test/mocks/Mock4337Module.sol";
+import {PBHSafe4337Module} from "../../src/pbh/PBH4337Module.sol";
+import {Mock4337Module} from "../../test/mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 
 contract DeployDevnet is Script {

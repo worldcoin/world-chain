@@ -11,7 +11,7 @@ import {SafeProxyFactory} from "@safe-global/safe-contracts/contracts/proxies/Sa
 import {SafeProxy} from "@safe-global/safe-contracts/contracts/proxies/SafeProxy.sol";
 import {Enum} from "@safe-global/safe-contracts/contracts/common/Enum.sol";
 import {SafeModuleSetup} from "@4337/SafeModuleSetup.sol";
-import {PBHSafe4337Module} from "../src/PBH4337Module.sol";
+import {PBHSafe4337Module} from "../src/pbh/PBH4337Module.sol";
 import {Mock4337Module} from "./mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 

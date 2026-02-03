@@ -1,0 +1,50 @@
+{
+  "contracts/lib/BokkyPooBahsDateTimeLibrary": {
+    "rev": "1dc26f977c57a6ba3ed6d7c53cafdb191e7e59ae"
+  },
+  "contracts/lib/account-abstraction": {
+    "rev": "7af70c8993a6f42973f520ae0752386a5032abe7"
+  },
+  "contracts/lib/forge-std": {
+    "rev": "06c5a8f760f7d2392697cb092eda80c864e4fc06"
+  },
+  "contracts/lib/openzeppelin-contracts": {
+    "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"
+  },
+  "contracts/lib/openzeppelin-contracts-upgradeable": {
+    "rev": "fa525310e45f91eb20a6d3baa2644be8e0adba31"
+  },
+  "contracts/lib/safe-contracts": {
+    "rev": "192c7dc67290940fcbc75165522bb86a37187069"
+  },
+  "contracts/lib/safe-modules": {
+    "rev": "08282851e9815a53c13621334628ccb7b656f25a"
+  },
+  "contracts/lib/world-id-contracts": {
+    "rev": "0187d2fdfa9bdb13b47b0ff1b0fd1c3ad7c5356b"
+  },
+  "lib/BokkyPooBahsDateTimeLibrary": {
+    "rev": "1dc26f977c57a6ba3ed6d7c53cafdb191e7e59ae"
+  },
+  "lib/account-abstraction": {
+    "rev": "7af70c8993a6f42973f520ae0752386a5032abe7"
+  },
+  "lib/forge-std": {
+    "rev": "06c5a8f760f7d2392697cb092eda80c864e4fc06"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"
+  },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "rev": "fa525310e45f91eb20a6d3baa2644be8e0adba31"
+  },
+  "lib/safe-contracts": {
+    "rev": "192c7dc67290940fcbc75165522bb86a37187069"
+  },
+  "lib/safe-modules": {
+    "rev": "08282851e9815a53c13621334628ccb7b656f25a"
+  },
+  "lib/world-id-contracts": {
+    "rev": "0187d2fdfa9bdb13b47b0ff1b0fd1c3ad7c5356b"
+  }
+}

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Script} from "@forge-std/Script.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
+import {PBHEntryPointImplV1} from "../../src/pbh/PBHEntryPointImplV1.sol";
 import {console} from "forge-std/console.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {Create2Factory} from "./Create2Deploy.sol";

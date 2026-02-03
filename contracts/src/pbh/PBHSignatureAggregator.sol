@@ -6,8 +6,8 @@ import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator
 import {ISafe} from "@4337/interfaces/Safe.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
-import {ByteHasher} from "./lib/ByteHasher.sol";
-import {SafeModuleSignatures} from "./lib/SafeModuleSignatures.sol";
+import {ByteHasher} from "./libraries/ByteHasher.sol";
+import {SafeModuleSignatures} from "./libraries/SafeModuleSignatures.sol";
 
 /// @title PBH Signature Aggregator
 /// @author Worldcoin

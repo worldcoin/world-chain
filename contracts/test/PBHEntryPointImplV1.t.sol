@@ -5,11 +5,11 @@ import {IWorldIDGroups} from "@world-id-contracts/interfaces/IWorldIDGroups.sol"
 import {MockWorldIDGroups} from "./mocks/MockWorldIDGroups.sol";
 import {CheckInitialized} from "@world-id-contracts/utils/CheckInitialized.sol";
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
-import {ByteHasher} from "@lib/ByteHasher.sol";
-import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
+import {ByteHasher} from "@pbh-lib/ByteHasher.sol";
+import {IPBHEntryPoint} from "../src/pbh/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
-import {IMulticall3} from "../src/interfaces/IMulticall3.sol";
+import {PBHEntryPointImplV1} from "../src/pbh/PBHEntryPointImplV1.sol";
+import {IMulticall3} from "../src/pbh/interfaces/IMulticall3.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
@@ -19,7 +19,7 @@ import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
-import "@lib/PBHExternalNullifier.sol";
+import "@pbh-lib/PBHExternalNullifier.sol";
 
 /// @title PBHEntryPointImplV1 Tests
 /// @notice Contains tests for the PBHEntryPointImplV1 contract
