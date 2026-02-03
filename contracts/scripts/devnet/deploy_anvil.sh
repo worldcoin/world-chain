@@ -22,5 +22,8 @@ export SAFE_OWNER_5=0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092
 # Deploy contracts
 forge script scripts/devnet/DeployDevnet.s.sol:DeployDevnet --rpc-url http://127.0.0.1:8545 --broadcast
 
+# Deploy Fee Vaults
+forge script scripts/devnet/DeployFeeVaults.s.sol:DeployFeeVaults --rpc-url http://127.0.0.1:8545 --broadcast
+
 # Wait for anvil to finish
 wait $ANVIL_PID
