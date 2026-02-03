@@ -135,7 +135,7 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
         uint128 currentPrice = price();
         uint256 balance = address(this).balance;
 
-        uint256 expectedBurn = (uint256(currentPrice) * balance);
+        uint256 expectedBurn = ((uint256(currentPrice) * balance) * (SCALE - SLIPPAGE_TOLERANCE_BASIS_POINTS) / SCALE);
 
         if (balance == 0) revert NothingToBurn();
 
@@ -144,10 +144,11 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
         IBurnCallback(msg.sender).burnCallback{value: balance}(expectedBurn, DEAD_ADDRESS);
 
         uint256 burnBalanceAfter = IERC20(WLD).balanceOf(DEAD_ADDRESS);
-        uint256 adjustedBurn = (burnBalanceAfter * (SCALE - SLIPPAGE_TOLERANCE_BASIS_POINTS)) / SCALE;
 
-        if (adjustedBurn < burnBalanceBefore + expectedBurn) {
-            revert InsufficientBurn(burnBalanceAfter - burnBalanceBefore, adjustedBurn);
+        uint256 totalBurned = burnBalanceAfter - burnBalanceBefore;
+
+        if (totalBurned < expectedBurn) {
+            revert InsufficientBurn(burnBalanceAfter - burnBalanceBefore, expectedBurn);
         }
 
         lastBuybackTimestamp = block.timestamp;

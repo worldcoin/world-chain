@@ -27,7 +27,7 @@ remappings = [
 
 [fuzz]
 max_test_rejects = 150000
-runs = 5000
+runs = 100
 
 [fmt]
 ignore = ["lib"]

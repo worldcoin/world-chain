@@ -48,11 +48,16 @@ contract UniswapV3BurnExecutor is IBurnCallback {
     // Min/max sqrt price limits for swaps
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
     uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
+    bool shouldRepay = true;
 
     constructor(address _wld, address _weth, address _pool) {
         wld = IERC20(_wld);
         weth = IWETH(_weth);
         pool = IUniswapV3Pool(_pool);
+    }
+
+    function setShouldRepay(bool _shouldRepay) external {
+        shouldRepay = _shouldRepay;
     }
 
     function burnCallback(uint256 expectedBurn, address recipient) external payable override {
@@ -73,8 +78,9 @@ contract UniswapV3BurnExecutor is IBurnCallback {
             sqrtPriceLimitX96,
             abi.encode(expectedBurn)
         );
-
-        IERC20(wld).transfer(recipient, wld.balanceOf(address(this)));
+        if (shouldRepay) {
+            IERC20(wld).transfer(recipient, wld.balanceOf(address(this)));
+        }
     }
 
     /// @notice Uniswap V3 callback - pay the pool
@@ -182,8 +188,7 @@ contract TestFeeEscrow is Test {
     function test_BurnInvalid_RevertsInsufficientBurn() public {
         deal(address(escrow), 1 ether);
         vm.warp(block.timestamp + MINIMUM_INTERVAL + 1);
-
-        deal(WLD, address(burnExecutor), 0);
+        burnExecutor.setShouldRepay(false);
         vm.prank(address(burnExecutor));
         vm.expectPartialRevert(FeeEscrow.InsufficientBurn.selector);
         escrow.executeBurn();

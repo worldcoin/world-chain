@@ -40,4 +40,4 @@ jobs:
               run: forge build --sizes
 
             - name: Run Forge tests
-              run: forge test --fork-url ${{ env.ETHEREUM_PROVIDER }}
+              run: forge test
