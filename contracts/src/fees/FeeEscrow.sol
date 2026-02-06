@@ -52,7 +52,7 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
     uint24 private constant SCALE = 1e6;
 
     /// @notice Address that receives burned WLD
-    address public constant DEAD_ADDRESS = 0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF;
+    address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     /// @notice Scaling factor for WLD price calculations
     uint256 public immutable WLD_USDC_SCALE;
@@ -179,7 +179,7 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
         uint256 ethScale = ETH_USDC_SCALE;
 
         assembly ("memory-safe") {
-            // (ethUsdPrice * wldScale * 2^64) / (wldUsdPrice * ethScale)
+            // (ethUsdPrice * wldScale )/ (wldUsdPrice * ethScale)
             let numerator := shl(64, mul(ethUsdPrice, wldScale))
             let denominator := mul(wldUsdPrice, ethScale)
             currentPrice := shr(64, div(numerator, denominator))
