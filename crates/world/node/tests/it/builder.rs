@@ -3,7 +3,7 @@ use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
-use world_chain_node::{context::FlashblocksContext, node::WorldChainNode};
+use world_chain_node::node::WorldChainNode;
 use world_chain_test::node::test_config;
 
 #[test]
@@ -11,10 +11,10 @@ fn test_basic_flashblocks_setup() {
     // parse CLI -> config
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
-    let node = WorldChainNode::<FlashblocksContext>::new(test_config());
+    let node = WorldChainNode::new(test_config());
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types_and_provider::<WorldChainNode<FlashblocksContext>, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode<FlashblocksContext>, _>>>()
+        .with_types_and_provider::<WorldChainNode, BlockchainProvider<NodeTypesWithDBAdapter<WorldChainNode, _>>>()
         .with_components(node.components())
         .with_add_ons(node.add_ons())
         .on_component_initialized(move |ctx| {

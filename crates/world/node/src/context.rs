@@ -5,10 +5,7 @@ use std::time::Duration;
 use crate::{
     args::WorldChainArgs,
     config::WorldChainNodeConfig,
-    node::{
-        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
-        WorldChainPoolBuilder,
-    },
+    node::{WorldChainNode, WorldChainPoolBuilder},
 };
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
@@ -124,8 +121,37 @@ pub struct FlashblocksContext {
     components_context: Option<FlashblocksComponentsContext>,
 }
 
-impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
-    for FlashblocksContext
+/// A [`ComponentsBuilder`] with its generic arguments set to World Chain specific builders.
+pub type WorldChainNodeComponentBuilder<N> = ComponentsBuilder<
+    N,
+    WorldChainPoolBuilder,
+    FlashblocksPayloadServiceBuilder<
+        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
+    >,
+    FlashblocksNetworkBuilder<WorldChainNetworkBuilder>,
+    OpExecutorBuilder,
+    OpConsensusBuilder,
+>;
+
+/// Trait providing the associated types for World Chain node configuration.
+///
+/// This trait abstracts over the reth node type `N` to provide the correct
+/// component builder and add-on types.
+pub trait WorldChainNodeTypes<N: FullNodeTypes<Types = WorldChainNode>> {
+    /// The components builder type.
+    type ComponentsBuilder: NodeComponentsBuilder<N>;
+    /// The add-ons type.
+    type AddOns: reth_node_api::NodeAddOns<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        >;
+
+    /// Returns the components builder.
+    fn components(&self) -> Self::ComponentsBuilder;
+    /// Returns the add-ons.
+    fn add_ons(&self) -> Self::AddOns;
+}
+
+impl<N: FullNodeTypes<Types = WorldChainNode>> WorldChainNodeTypes<N> for FlashblocksContext
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
@@ -135,13 +161,7 @@ where
             OpEvmConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
         >,
 {
-    type Net = FlashblocksNetworkBuilder<WorldChainNetworkBuilder>;
-    type Evm = OpEvmConfig;
-    type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
-        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >;
-
-    type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
+    type ComponentsBuilder = WorldChainNodeComponentBuilder<N>;
 
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
@@ -150,8 +170,6 @@ where
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
     >;
-
-    type ExtContext = Option<FlashblocksComponentsContext>;
 
     fn components(&self) -> Self::ComponentsBuilder {
         let Self {
@@ -299,8 +317,11 @@ where
             1_000_000,
         )
     }
+}
 
-    fn ext_context(&self) -> Self::ExtContext {
+impl FlashblocksContext {
+    /// Returns the extension context.
+    pub fn ext_context(&self) -> Option<FlashblocksComponentsContext> {
         self.components_context.clone()
     }
 }
