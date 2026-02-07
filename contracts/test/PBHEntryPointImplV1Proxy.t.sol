@@ -10,9 +10,9 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {WorldIDImpl} from "@world-id-contracts/abstract/WorldIDImpl.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {PBHEntryPointImplV1} from "../src/PBHEntryPointImplV1.sol";
-import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
-import {IMulticall3} from "../src/interfaces/IMulticall3.sol";
+import {PBHEntryPointImplV1} from "../src/pbh/PBHEntryPointImplV1.sol";
+import {IPBHEntryPoint} from "../src/pbh/interfaces/IPBHEntryPoint.sol";
+import {IMulticall3} from "../src/pbh/interfaces/IMulticall3.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 
 /// @title PBHEntryPointImplV1ProxyTest

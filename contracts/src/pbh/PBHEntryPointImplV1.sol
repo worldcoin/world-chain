@@ -6,11 +6,11 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {IPBHEntryPoint} from "./interfaces/IPBHEntryPoint.sol";
-import {ByteHasher} from "./lib/ByteHasher.sol";
-import {PBHExternalNullifier} from "./lib/PBHExternalNullifier.sol";
+import {ByteHasher} from "./libraries/ByteHasher.sol";
+import {PBHExternalNullifier} from "./libraries/PBHExternalNullifier.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
-import {Base} from "./abstract/Base.sol";
+import {Base} from "../abstract/Base.sol";
 
 /// @title PBH Entry Point Implementation V1
 /// @author Worldcoin
