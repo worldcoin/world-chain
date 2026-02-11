@@ -14,6 +14,7 @@ workspace = true
 # Internal
 flashblocks-builder.workspace = true
 world-chain-pool.workspace = true
+world-chain-pbh.workspace = true
 world-chain-rpc.workspace = true
 
 # reth

@@ -1,21 +1,13 @@
 use IPBHEntryPoint::PBHPayload as IPBHPayload;
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
-use world_chain_pbh::{
+
+use crate::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::{PBHPayload, Proof},
 };
 
 sol! {
-    contract IMulticall3 {
-        #[derive(Default)]
-        struct Call3 {
-            address target;
-            bool allowFailure;
-            bytes callData;
-        }
-    }
-
     contract IEntryPoint {
         #[derive(Default, Serialize, Deserialize, Debug)]
         struct PackedUserOperation {
@@ -53,6 +45,8 @@ sol! {
         ) external;
 
         function spendNullifierHashes(uint256[] memory _nullifierHashes) external;
+        function numPbhPerMonth() external view returns (uint16);
+        function nullifierHashes(uint256 nullifierHash) external view returns (uint256);
     }
 }
 

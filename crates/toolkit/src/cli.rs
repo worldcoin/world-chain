@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use bytes::Bytes;
 use chrono::NaiveDate;
 use clap::Parser;
@@ -29,6 +30,8 @@ pub enum Cmd {
     /// For the inclusion proof you can fetch it dynamically from the (staging) sequencer API via `--inclusion-proof-url https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof`
     /// or `export INCLUSION_PROOF_URL=https://signup-orb-ethereum.stage-crypto.worldcoin.dev/inclusionProof` env var
     Prove(ProveArgs),
+    /// Queries the PBH entrypoint contract directly to find currently available PBH nonces.
+    CheckNonces(CheckNoncesArgs),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -68,3 +71,24 @@ pub struct ProveArgs {
 
 #[derive(Debug, Clone, Parser)]
 pub struct SendArgs {}
+
+#[derive(Debug, Clone, Parser)]
+pub struct CheckNoncesArgs {
+    /// PBH-enabled node RPC URL.
+    #[clap(long, env = "RPC_URL")]
+    pub rpc_url: String,
+
+    /// PBH entrypoint contract address.
+    #[clap(long, env = "PBH_ENTRYPOINT")]
+    pub pbh_entrypoint: Address,
+
+    /// Overrides the current date for PBH external nullifier generation.
+    /// Format: "YYYY-MM-DD"
+    ///
+    /// Dates are always assumed to be in UTC.
+    #[clap(short = 'D', long)]
+    pub custom_date: Option<NaiveDate>,
+
+    #[command(flatten)]
+    pub identity_source: IdentitySource,
+}

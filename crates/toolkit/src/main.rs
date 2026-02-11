@@ -11,6 +11,9 @@ use world_chain_pbh::{
 };
 
 mod cli;
+mod pbh_contract_client;
+
+use pbh_contract_client::PbhContractClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InclusionProof {
@@ -21,6 +24,7 @@ pub struct InclusionProof {
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     dotenvy::dotenv().ok();
+    init_tracing();
 
     let args = Opt::parse();
 
@@ -79,9 +83,31 @@ async fn main() -> eyre::Result<()> {
 
             println!("{encoded_hex}");
         }
+        Cmd::CheckNonces(check_args) => {
+            let date = check_args
+                .custom_date
+                .unwrap_or_else(|| chrono::Utc::now().naive_utc().date());
+            let identity = check_args.identity_source.load();
+            let client = PbhContractClient::new(check_args.rpc_url);
+            let available_nonces = client
+                .find_available_pbh_nonces(check_args.pbh_entrypoint, &identity, date)
+                .await?;
+
+            println!("{}", serde_json::to_string(&available_nonces)?);
+        }
     }
 
     Ok(())
+}
+
+fn init_tracing() {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("toolkit=info"));
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init();
 }
 
 fn load_inclusion_proof_file(path: impl AsRef<std::path::Path>) -> eyre::Result<InclusionProof> {
