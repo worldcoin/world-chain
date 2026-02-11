@@ -12831,6 +12831,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rlp",
  "alloy-rpc-client",
+ "alloy-rpc-types-eth",
  "alloy-sol-types 1.5.0",
  "bytes",
  "chrono",

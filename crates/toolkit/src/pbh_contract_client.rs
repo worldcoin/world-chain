@@ -1,12 +1,12 @@
 use alloy_rpc_client::BatchRequest;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionRequest};
 use alloy_sol_types::{sol_data, SolCall, SolType};
 use chrono::NaiveDate;
 use eyre::eyre::{bail, Context};
 use semaphore_rs::{identity::Identity, Field};
-use serde_json::json;
 use tracing::{debug, info, warn};
 use world_chain_pbh::{
     contracts::IPBHEntryPoint,
@@ -139,14 +139,10 @@ impl PbhContractClient {
                 nullifierHash: *nullifier_hash,
             }
             .abi_encode();
-
-            let tx = json!({
-                "to": format!("{pbh_entrypoint:#x}"),
-                "data": format!("0x{}", hex::encode(calldata)),
-            });
+            let tx = Self::eth_call_tx(pbh_entrypoint, calldata);
 
             let waiter = batch
-                .add_call::<_, String>("eth_call", &(tx, "latest"))
+                .add_call::<_, Bytes>("eth_call", &(tx, BlockNumberOrTag::Latest))
                 .context("failed to queue batch eth_call")?;
 
             waiters.push(waiter);
@@ -164,8 +160,10 @@ impl PbhContractClient {
                     return Err(err).context("failed to receive batch eth_call response");
                 }
             };
-            let output = decode_hex_result(&result)?;
-            let spent_at_block = sol_data::Uint::<256>::abi_decode(&output)
+            if result.is_empty() {
+                bail!("empty eth_call response for batch contract read");
+            }
+            let spent_at_block = sol_data::Uint::<256>::abi_decode(result.as_ref())
                 .context("failed to decode nullifierHashes batch response")?;
             spent_at_blocks.push(spent_at_block);
         }
@@ -178,31 +176,22 @@ impl PbhContractClient {
         provider: &P,
         to: Address,
         data: Vec<u8>,
-    ) -> eyre::Result<Vec<u8>> {
-        let tx = json!({
-            "to": format!("{to:#x}"),
-            "data": format!("0x{}", hex::encode(data)),
-        });
-
-        let result: String = provider
+    ) -> eyre::Result<Bytes> {
+        let tx = Self::eth_call_tx(to, data);
+        let result: Bytes = provider
             .client()
-            .request("eth_call", (tx, "latest"))
+            .request("eth_call", (tx, BlockNumberOrTag::Latest))
             .await
             .context("failed to call eth_call")?;
 
-        let bytes = decode_hex_result(&result)?;
-        if bytes.is_empty() {
+        if result.is_empty() {
             bail!("empty eth_call response for contract read");
         }
 
-        Ok(bytes)
-    }
-}
-
-fn decode_hex_result(result: &str) -> eyre::Result<Vec<u8>> {
-    if result == "0x" {
-        return Ok(Vec::new());
+        Ok(result)
     }
 
-    hex::decode(result.trim_start_matches("0x")).context("failed to decode hex eth_call result")
+    fn eth_call_tx(to: Address, data: Vec<u8>) -> TransactionRequest {
+        TransactionRequest::default().to(to).input(data.into())
+    }
 }

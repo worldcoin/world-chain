@@ -13,6 +13,7 @@ alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest", "reqwest-default-tls"] }
 alloy-rpc-client.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types.workspace = true
 
