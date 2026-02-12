@@ -14,7 +14,7 @@ use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::Flashblocks
 use flashblocks_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     flashblocks::Flashblock,
-    p2p::{Authorization, AuthorizedPayload, FlashblocksAuthorization},
+    p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
 };
 
@@ -252,7 +252,7 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) builder: Builder,
     /// Am optional [`Authorization`] for this payload job. If `Some`, the incremental `committed_payload`s will be published
     /// to the [`FlashblocksHandle`] with this authorization.
-    pub(crate) authorization: FlashblocksAuthorization,
+    pub(crate) authorization: Option<Authorization>,
     /// The deadline when this job should resolve.
     pub(crate) deadline: Pin<Box<Sleep>>,
     /// The interval at which we should attempt to build new payloads
@@ -461,10 +461,7 @@ where
 
         let network_handle = this.p2p_handler.clone();
 
-        let p2p_enabled = matches!(
-            this.authorization,
-            FlashblocksAuthorization::Authorization(_)
-        );
+        let p2p_enabled = this.authorization.is_some();
 
         let await_clearance_fut = async {
             if p2p_enabled {
@@ -502,14 +499,13 @@ where
             {
                 trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, publishing payload");
 
-                if let FlashblocksAuthorization::Authorization(authorization) = &this.authorization
-                {
+                if let Some(authorization) = &this.authorization {
                     // publish the new payload to the p2p network
                     if let Err(err) = this.publish_payload(
                         &payload,
                         access_list.clone(),
                         &this.committed_payload.payload().cloned(),
-                        **authorization,
+                        *authorization,
                     ) {
                         this.metrics.inc_p2p_publishing_errors();
                         error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
