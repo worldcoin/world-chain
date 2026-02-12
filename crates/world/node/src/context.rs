@@ -336,12 +336,12 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .flashblocks
             .expect("Flashblocks args must be present");
 
-        let authorizer_vk = flashblocks.authorizer_vk.unwrap_or(
+        let authorizer_vk = flashblocks.authorizer_vk.unwrap_or_else(|| {
             flashblocks
                 .spoof_authorizer_sk
                 .expect("flashblocks authorizer_vk or spoof_authorizer_sk required")
-                .verifying_key(),
-        );
+                .verifying_key()
+        });
 
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
