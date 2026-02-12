@@ -200,12 +200,13 @@ mod tests {
     }
 
     #[test]
-    fn flashblocks_spoof_authorizer() {
+    fn flashblocks_override_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            force_publish: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
             access_list: false,
@@ -214,7 +215,7 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer_sk",
+            "--flashblocks.override_authorizer_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
@@ -231,9 +232,10 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer_sk: None,
+            override_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
+            force_publish: false,
             flashblocks_interval: 200,
             recommit_interval: 200,
             access_list: false,
@@ -260,7 +262,7 @@ mod tests {
         CommandParser::try_parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
+            "--flashblocks.override_authorizer",
             "--flashblocks.authorizer_vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])

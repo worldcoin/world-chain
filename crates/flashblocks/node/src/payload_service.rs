@@ -32,7 +32,8 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     p2p_handler: Option<FlashblocksHandle>,
     flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
-    spoof_authorizations_sk: Option<SigningKey>,
+    override_authorizer_sk: Option<SigningKey>,
+    force_publish: bool,
     interval: Duration,
     recommitment_interval: Duration,
 }
@@ -44,7 +45,8 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         p2p_handler: Option<FlashblocksHandle>,
         flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
-        spoof_authorizations_sk: Option<SigningKey>,
+        override_authorizer_sk: Option<SigningKey>,
+        force_publish: bool,
         interval: Duration,
         recommitment_interval: Duration,
     ) -> Self {
@@ -53,7 +55,8 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
-            spoof_authorizations_sk,
+            override_authorizer_sk,
+            force_publish,
             interval,
             recommitment_interval,
         }
@@ -113,7 +116,8 @@ where
                 payload_builder,
                 p2p_handler,
                 authorizations_rx.clone(),
-                self.spoof_authorizations_sk,
+                self.override_authorizer_sk,
+                self.force_publish,
                 flashblocks_state.clone(),
                 metrics,
             );

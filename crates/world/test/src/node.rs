@@ -95,9 +95,10 @@ pub fn test_config_with_peers_and_gossip(
     let flashblocks = if flashblocks_enabled {
         Some(FlashblocksArgs {
             enabled: true,
-            spoof_authorizer_sk: None,
+            override_authorizer_sk: None,
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
             builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
+            force_publish: false,
             recommit_interval: 50,
             flashblocks_interval: 200,
             access_list: true,

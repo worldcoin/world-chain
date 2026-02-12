@@ -25,7 +25,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use tokio::runtime::Handle;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     job::{CommittedPayloadState, FlashblocksPayloadJob},
@@ -52,8 +52,10 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     pre_cached: Option<PrecachedState>,
     /// The cached authorizations for payload ids.
     authorizations: tokio::sync::watch::Receiver<Option<Authorization>>,
-    /// An optional signing key used to spoof authorizations.
-    spoof_authorizations_sk: Option<SigningKey>,
+    /// An optional signing key used to override authorizations.
+    override_authorizer_sk: Option<SigningKey>,
+    /// Whether to publish payloads even when no authorization has been received.
+    force_publish: bool,
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
@@ -73,7 +75,8 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        spoof_authorizations_sk: Option<SigningKey>,
+        override_authorizer_sk: Option<SigningKey>,
+        force_publish: bool,
         flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
@@ -86,7 +89,8 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
             pre_cached: None,
             p2p_handler,
             authorizations: auth_rx,
-            spoof_authorizations_sk,
+            override_authorizer_sk,
+            force_publish,
             metrics,
         }
     }
@@ -204,7 +208,7 @@ where
         let mut authorization = self.authorizations.clone();
 
         let pending = async move {
-            info!(
+            debug!(
                 target: "flashblocks::payload_builder",
                 payload_id = %payload_id,
                 "Waiting for authorization for payload",
@@ -220,7 +224,19 @@ where
             Result::<_, PayloadBuilderError>::Ok(
                 *authorization
                     .wait_for(|a| match a {
-                        Some(auth) => auth.payload_id == payload_id,
+                        Some(auth) => {
+                            if auth.payload_id == payload_id {
+                                true
+                            } else {
+                                warn!(
+                                    target: "flashblocks::payload_builder",
+                                    payload_id = %payload_id,
+                                    received_payload_id = %auth.payload_id,
+                                    "Received authorization for different payload, ignoring",
+                                );
+                                false
+                            }
+                        }
                         None => true,
                     })
                     .await
@@ -233,23 +249,21 @@ where
             handle.block_on(pending)
         })?;
 
-        let authorization = authorization.or_else(|| {
-            let sk = self.spoof_authorizations_sk.as_ref()?;
-            let builder_sk = self.p2p_handler.ctx.builder_sk.as_ref().or_else(|| {
-                warn!(
-                    target: "flashblocks::payload_builder",
-                    "Cannot create spoofed authorization without builder key in context"
-                );
-                None
-            })?;
+        let can_override = self.force_publish || authorization.is_some();
 
-            Some(Authorization::new(
+        let authorization = match (
+            &self.override_authorizer_sk,
+            &self.p2p_handler.ctx.builder_sk,
+            can_override,
+        ) {
+            (Some(override_authorizer_sk), Some(builder_sk), true) => Some(Authorization::new(
                 payload_id,
                 timestamp,
-                sk,
+                override_authorizer_sk,
                 builder_sk.verifying_key(),
-            ))
-        });
+            )),
+            _ => authorization,
+        };
 
         if let Some(auth) = authorization {
             // Notify the P2P handler to start publishing for this authorization

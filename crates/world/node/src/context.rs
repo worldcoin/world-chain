@@ -180,18 +180,23 @@ where
         let wc_network_builder =
             WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
-        let (flashblocks_interval, flashblocks_recommit_interval, spoof_authorizer_sk) =
-            if let Some(flashblocks_args) = self.config.args.flashblocks.as_ref() {
-                (
-                    flashblocks_args.flashblocks_interval,
-                    flashblocks_args.recommit_interval,
-                    flashblocks_args.spoof_authorizer_sk.clone(),
-                )
-            } else {
-                // Not important if flashblocks is not enabled. Put some numbers just to make
-                // the compiler work fine.
-                (200, 200, None)
-            };
+        let (
+            flashblocks_interval,
+            flashblocks_recommit_interval,
+            override_authorizer_sk,
+            force_publish,
+        ) = if let Some(flashblocks_args) = self.config.args.flashblocks.as_ref() {
+            (
+                flashblocks_args.flashblocks_interval,
+                flashblocks_args.recommit_interval,
+                flashblocks_args.override_authorizer_sk.clone(),
+                flashblocks_args.force_publish,
+            )
+        } else {
+            // Not important if flashblocks is not enabled. Put some numbers just to make
+            // the compiler work fine.
+            (200, 200, None, false)
+        };
 
         let fb_network_builder = FlashblocksNetworkBuilder::new(
             wc_network_builder,
@@ -245,7 +250,8 @@ where
                             .clone()
                             .subscribe()
                     }),
-                spoof_authorizer_sk,
+                override_authorizer_sk,
+                force_publish,
                 Duration::from_millis(flashblocks_interval),
                 Duration::from_millis(flashblocks_recommit_interval),
             ))
@@ -336,13 +342,13 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .flashblocks
             .expect("Flashblocks args must be present");
 
-        let authorizer_vk = flashblocks.authorizer_vk.unwrap_or(
+        let authorizer_vk = flashblocks.authorizer_vk.unwrap_or_else(|| {
             flashblocks
-                .builder_sk
-                .as_ref()
-                .expect("flashblocks builder_sk required")
-                .verifying_key(),
-        );
+                .override_authorizer_sk
+                .expect("flashblocks authorizer_vk or override_authorizer_sk required")
+                .verifying_key()
+        });
+
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
