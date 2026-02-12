@@ -1,7 +1,7 @@
 use alloy_rpc_types::engine::ClientVersionV1;
 use ed25519_dalek::VerifyingKey;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_primitives::p2p::FlashblocksAuthorization;
+use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::engine::OpEngineApiExt;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth::{
@@ -24,7 +24,7 @@ pub struct FlashblocksEngineApiBuilder<EV> {
     /// The flashblocks handler.
     pub flashblocks_handle: Option<FlashblocksHandle>,
     /// A watch channel notifier to the jobs generator.
-    pub to_jobs_generator: Option<tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>>,
+    pub to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
     /// Verifying key for authorizations.
     pub authorizer_vk: Option<VerifyingKey>,
 }

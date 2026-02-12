@@ -17,7 +17,7 @@ use flashblocks_node::{
     payload_service::FlashblocksPayloadServiceBuilder,
 };
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
-use flashblocks_primitives::p2p::FlashblocksAuthorization;
+use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -180,16 +180,17 @@ where
         let wc_network_builder =
             WorldChainNetworkBuilder::new(disable_txpool_gossip, !discovery_v4, tx_peers);
 
-        let (flashblocks_interval, flashblocks_recommit_interval) =
+        let (flashblocks_interval, flashblocks_recommit_interval, spoof_authorizer_sk) =
             if let Some(flashblocks_args) = self.config.args.flashblocks.as_ref() {
                 (
                     flashblocks_args.flashblocks_interval,
                     flashblocks_args.recommit_interval,
+                    flashblocks_args.spoof_authorizer_sk.clone(),
                 )
             } else {
                 // Not important if flashblocks is not enabled. Put some numbers just to make
                 // the compiler work fine.
-                (200, 200)
+                (200, 200, None)
             };
 
         let fb_network_builder = FlashblocksNetworkBuilder::new(
@@ -244,6 +245,7 @@ where
                             .clone()
                             .subscribe()
                     }),
+                spoof_authorizer_sk,
                 Duration::from_millis(flashblocks_interval),
                 Duration::from_millis(flashblocks_recommit_interval),
             ))
@@ -309,7 +311,7 @@ where
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
-    pub to_jobs_generator: tokio::sync::watch::Sender<Option<FlashblocksAuthorization>>,
+    pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
 

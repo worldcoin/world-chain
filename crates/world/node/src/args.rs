@@ -203,7 +203,7 @@ mod tests {
     fn flashblocks_spoof_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer: true,
+            spoof_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             flashblocks_interval: 200,
@@ -214,7 +214,8 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
+            "--flashblocks.spoof_authorizer_sk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "--builder.enabled",
@@ -230,7 +231,7 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer: false,
+            spoof_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
             flashblocks_interval: 200,

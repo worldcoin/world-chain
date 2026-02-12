@@ -189,7 +189,7 @@ async fn setup_node_extended_cfg(
                 enabled: true,
                 authorizer_vk: Some(authorizer_sk.verifying_key()),
                 builder_sk: Some(builder_sk.clone()),
-                spoof_authorizer: false,
+                spoof_authorizer_sk: None,
                 flashblocks_interval: 200,
                 recommit_interval: 200,
                 access_list: true,

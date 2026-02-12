@@ -9,15 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::FlashblocksError, primitives::FlashblocksPayloadV1};
 
-#[derive(Clone, Debug, Default)]
-pub enum FlashblocksAuthorization {
-    /// An authorization token that grants a builder permission to publish flashblocks.
-    Authorization(Box<Authorization>),
-    /// An empty authorization indicating no permission to publish flashblocks.
-    #[default]
-    EmptyAuthorization,
-}
-
 /// An authorization token that grants a builder permission to publish flashblocks for a specific payload.
 ///
 /// The `authorizer_sig` is made over the `payload_id`, `timestamp`, and `builder_vk`. This is

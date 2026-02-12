@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use ed25519_dalek::SigningKey;
 use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
@@ -8,7 +9,7 @@ use flashblocks_payload::{
     generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
     metrics::PayloadBuilderMetrics,
 };
-use flashblocks_primitives::p2p::FlashblocksAuthorization;
+use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
@@ -30,7 +31,8 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: Option<FlashblocksHandle>,
     flashblocks_state: Option<FlashblocksExecutionCoordinator>,
-    authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
+    authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
+    spoof_authorizations_sk: Option<SigningKey>,
     interval: Duration,
     recommitment_interval: Duration,
 }
@@ -41,7 +43,8 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
         flashblocks_state: Option<FlashblocksExecutionCoordinator>,
-        authorizations_rx: Option<tokio::sync::watch::Receiver<Option<FlashblocksAuthorization>>>,
+        authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
+        spoof_authorizations_sk: Option<SigningKey>,
         interval: Duration,
         recommitment_interval: Duration,
     ) -> Self {
@@ -50,6 +53,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             p2p_handler,
             flashblocks_state,
             authorizations_rx,
+            spoof_authorizations_sk,
             interval,
             recommitment_interval,
         }
@@ -109,6 +113,7 @@ where
                 payload_builder,
                 p2p_handler,
                 authorizations_rx.clone(),
+                self.spoof_authorizations_sk,
                 flashblocks_state.clone(),
                 metrics,
             );

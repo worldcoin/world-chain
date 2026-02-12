@@ -44,13 +44,15 @@ pub struct FlashblocksArgs {
     ///
     /// Should only be used for testing
     #[arg(
-        long = "flashblocks.spoof_authorizer",
-        env = "FLASHBLOCKS_SPOOF_AUTHORIZER",
+        long = "flashblocks.spoof_authorizer_sk",
+        env = "FLASHBLOCKS_SPOOF_AUTHORIZER_SK",
         group = "authorizer",
         requires = "builder_sk",
-        required = false
+        conflicts_with = "authorizer_vk",
+        required = false,
+        value_parser = parse_sk,
     )]
-    pub spoof_authorizer: bool,
+    pub spoof_authorizer_sk: Option<SigningKey>,
 
     /// The interval to publish pre-confirmations
     /// when building a payload in milliseconds.
@@ -114,7 +116,7 @@ mod tests {
     fn flashblocks_spoof_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer: true,
+            spoof_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
             recommit_interval: 200,
@@ -125,7 +127,8 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
+            "--flashblocks.spoof_authorizer_sk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.access_list",
             "--flashblocks.builder_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
@@ -142,7 +145,7 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer: false,
+            spoof_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
             recommit_interval: 200,
