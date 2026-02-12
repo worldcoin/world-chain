@@ -39,20 +39,28 @@ pub struct FlashblocksArgs {
     )]
     pub builder_sk: Option<SigningKey>,
 
-    /// Uses the builder_sk to create spoofed
-    /// flashblocks authorizations.
-    ///
-    /// Should only be used for testing
+    /// Override incoming authorizations from rollup boost.
     #[arg(
-        long = "flashblocks.spoof_authorizer_sk",
-        env = "FLASHBLOCKS_SPOOF_AUTHORIZER_SK",
+        long = "flashblocks.override_authorizer_sk",
+        env = "FLASHBLOCKS_OVERRIDE_AUTHORIZER_SK",
         group = "authorizer",
         requires = "builder_sk",
         conflicts_with = "authorizer_vk",
         required = false,
         value_parser = parse_sk,
     )]
-    pub spoof_authorizer_sk: Option<SigningKey>,
+    pub override_authorizer_sk: Option<SigningKey>,
+
+    /// Publish flashblocks payloads even when an authorization has not been received from rollup boost.
+    ///
+    /// This should only be used for testing and development purposes.
+    #[arg(
+        long = "flashblocks.force_publish",
+        env = "FLASHBLOCKS_FORCE_PUBLISH",
+        requires = "override_authorizer_sk",
+        required = false
+    )]
+    pub force_publish: bool,
 
     /// The interval to publish pre-confirmations
     /// when building a payload in milliseconds.
@@ -113,12 +121,13 @@ mod tests {
     }
 
     #[test]
-    fn flashblocks_spoof_authorizer() {
+    fn flashblocks_override_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
             builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
+            force_publish: false,
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
@@ -127,7 +136,7 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer_sk",
+            "--flashblocks.override_authorizer_sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.access_list",
             "--flashblocks.builder_sk",
@@ -145,9 +154,10 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             enabled: true,
-            spoof_authorizer_sk: None,
+            override_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
             builder_sk: None,
+            force_publish: false,
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: false,
@@ -173,7 +183,7 @@ mod tests {
         CommandParser::try_parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.spoof_authorizer",
+            "--flashblocks.override_authorizer",
             "--flashblocks.authorizer_vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
