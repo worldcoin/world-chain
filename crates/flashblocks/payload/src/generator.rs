@@ -53,7 +53,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The cached authorizations for payload ids.
     authorizations: tokio::sync::watch::Receiver<Option<Authorization>>,
     /// An optional signing key used to override authorizations.
-    override_authorizers_sk: Option<SigningKey>,
+    override_authorizer_sk: Option<SigningKey>,
     /// Whether to publish payloads even when no authorization has been received.
     force_publish: bool,
     /// The P2P handler for flashblocks.
@@ -75,7 +75,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
-        override_authorizers_sk: Option<SigningKey>,
+        override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,
         flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
@@ -89,7 +89,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
             pre_cached: None,
             p2p_handler,
             authorizations: auth_rx,
-            override_authorizers_sk,
+            override_authorizer_sk,
             force_publish,
             metrics,
         }
@@ -252,14 +252,14 @@ where
         let can_override = self.force_publish || authorization.is_some();
 
         let authorization = match (
-            &self.override_authorizers_sk,
+            &self.override_authorizer_sk,
             &self.p2p_handler.ctx.builder_sk,
             can_override,
         ) {
-            (Some(override_authorizers_sk), Some(builder_sk), true) => Some(Authorization::new(
+            (Some(override_authorizer_sk), Some(builder_sk), true) => Some(Authorization::new(
                 payload_id,
                 timestamp,
-                override_authorizers_sk,
+                override_authorizer_sk,
                 builder_sk.verifying_key(),
             )),
             _ => authorization,
