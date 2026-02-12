@@ -338,11 +338,11 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let authorizer_vk = flashblocks.authorizer_vk.unwrap_or(
             flashblocks
-                .builder_sk
-                .as_ref()
-                .expect("flashblocks builder_sk required")
+                .spoof_authorizer_sk
+                .expect("flashblocks authorizer_vk or spoof_authorizer_sk required")
                 .verifying_key(),
         );
+
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
