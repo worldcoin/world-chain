@@ -28,7 +28,7 @@ where
         &self,
     ) -> &tokio::sync::Mutex<Option<PendingBlock<<OpEthApi<N, Rpc> as RpcNodeCore>::Primitives>>>
     {
-        self.inner.pending_block()
+        self.inner.pending_block().into()
     }
 
     #[inline]
@@ -51,7 +51,6 @@ where
                     .receipts
                     .clone()
                     .into_iter()
-                    .flatten()
                     .collect::<Vec<_>>(); // always a single block executed through the state executor
 
                 let block_and_receipts = BlockAndReceipts {

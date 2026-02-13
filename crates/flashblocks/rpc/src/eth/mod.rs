@@ -7,6 +7,8 @@ mod block;
 mod call;
 mod pending_block;
 
+use std::sync::Arc;
+
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
@@ -31,6 +33,7 @@ use reth_tasks::{
     TaskSpawner,
     pool::{BlockingTaskGuard, BlockingTaskPool},
 };
+use tokio::sync::Semaphore;
 
 /// Flashblocks `Eth` API implementation.
 ///
@@ -154,6 +157,11 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.tracing_task_guard()
+    }
+
+    #[inline]
+    fn blocking_io_task_guard(&self) -> &Arc<Semaphore> {
+        self.inner.blocking_io_task_guard()
     }
 }
 
