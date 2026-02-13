@@ -64,85 +64,85 @@ world-chain-pool = { path = "crates/world/pool" }
 world-chain-test = { path = "crates/world/test" }
 
 # reth
-reth = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-cli-util = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-cli = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-engine-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-evm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
+reth = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-cli-util = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-cli = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-engine-primitives = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-evm = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f", features = [
     "op",
 ] }
-reth-db = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-db-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-provider = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
+reth-db = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-db-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-provider = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f", features = [
     "test-utils",
 ] }
-reth-basic-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-transaction-pool = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc-server-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc-eth-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc-eth-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-prune-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-trie = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-chain-state = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+reth-basic-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-transaction-pool = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc-server-types = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc-eth-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc-eth-types = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-prune-types = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-trie = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-chain-state = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-ethereum = { git = "https://github.com/worldcoin/reth", features = [
     "network",
-], rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-eth-wire = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-eth-wire-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-stages-types = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-trie-db = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-primitives-traits = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+], rev = "15d0a8f" }
+reth-eth-wire = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-eth-wire-types = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-stages-types = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-trie-db = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-primitives-traits = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-node-builder = { git = "https://github.com/worldcoin/reth", features = [
     "test-utils",
-], rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-engine-local = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", features = [
+], rev = "15d0a8f" }
+reth-engine-local = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f", features = [
     "op",
 ] }
-reth-node-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-payload-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-payload-util = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-payload-validator = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-revm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d", default-features = false, features = [
+reth-node-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-payload-primitives = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-payload-util = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-payload-validator = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-revm = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f", default-features = false, features = [
     "std",
 ] }
-reth-tasks = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-trie-common = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-chainspec = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc-engine-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-network = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-network-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-network-peers = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+reth-tasks = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-trie-common = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-chainspec = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc-engine-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-network = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-network-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-network-peers = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-primitives = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-e2e-test-utils = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-consensus = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-node-core = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-tracing = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-rpc-layer = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-node-ethereum = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-storage-api = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth_payload_util = { git = "https://github.com/ethereum-optimism/optimism", rev = "15d0a8f" }
 
-# reth-optimism
-reth-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-evm = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-node = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-cli = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-rpc = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-consensus = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-chainspec = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth_payload_util = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-forks = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-primitives = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-e2e-test-utils = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-consensus = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-node-core = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-tracing = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-rpc-layer = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-node-ethereum = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-storage = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-storage-api = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-op = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
-reth-optimism-flashblocks = { git = "https://github.com/worldcoin/reth", rev = "1ca77dcd3caf8e8eb0151e8ebcc42b776b05300d" }
+# reth-optimism 7bf99eb46019
+reth-optimism-evm = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-node = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-cli = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-rpc = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-consensus = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-chainspec = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-payload-builder = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-forks = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-primitives = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-storage = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-op = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+reth-optimism-flashblocks = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
 
 # alloy op
-op-alloy-consensus = { version = "0.22.0", default-features = false }
-op-alloy-rpc-types = { version = "0.22.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.22.0", default-features = false }
-op-alloy-network = { version = "0.22.0", default-features = false }
+op-alloy-consensus = { version = "0.23.1", default-features = false }
+op-alloy-rpc-types = { version = "0.23.1", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
+op-alloy-network = { version = "0.23.1", default-features = false }
 alloy-op-hardforks = { version = "0.4.4", default-features = false }
 
 # alloy
@@ -186,19 +186,19 @@ alloy-trie = { version = "0.9.1", default-features = false, features = [
     "ethereum",
 ] }
 # revm
-revm = { version = "33.1.0", default-features = false }
-revm-bytecode = { version = "7.1.1", default-features = false }
-revm-database = { version = "9.0.5", default-features = false }
-revm-state = { version = "8.1.1", default-features = false }
-revm-primitives = { version = "21.0.2", default-features = false }
-revm-interpreter = { version = "31.1.0", default-features = false }
-revm-database-interface = { version = "8.0.5", default-features = false }
-op-revm = { version = "14.1.0", default-features = false }
-revm-inspectors = "0.33.0"
+revm = { version = "34", default-features = false }
+revm-bytecode = { version = "8", default-features = false }
+revm-database = { version = "10", default-features = false }
+revm-state = { version = "9", default-features = false }
+revm-primitives = { version = "22", default-features = false }
+revm-interpreter = { version = "32", default-features = false }
+revm-database-interface = { version = "9", default-features = false }
+op-revm = { version = "15", default-features = false }
+revm-inspectors = "0.34"
 # revm-inspectors = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 
-alloy-op-evm = { version = "0.24.1", default-features = false }
-alloy-evm = { version = "0.24.1", default-features = false }
+alloy-op-evm = { version = "0.27", default-features = false }
+alloy-evm = { version = "0.27", default-features = false }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
@@ -266,16 +266,11 @@ lazy_static = "1.4"
 proptest = "1.9.0"
 
 [patch.crates-io]
-# TODO: Remove once new versions is published
-revm = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-database = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-bytecode = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-state = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-primitives = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-interpreter = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-revm-database-interface = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-op-revm = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
-# revm-inspectors = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
+op-alloy = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+op-alloy-consensus = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+op-alloy-network = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+op-alloy-rpc-types = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
+op-alloy-rpc-types-engine = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
 
-alloy-op-evm = { git = "https://github.com/0xforerunner/evm", rev = "9de0fb0" }
-alloy-evm = { git = "https://github.com/0xforerunner/evm", rev = "9de0fb0" }
+alloy-op-evm = { git = "https://github.com/0xforerunner/evm", rev = "0833666" }
+alloy-evm = { git = "https://github.com/0xforerunner/evm", rev = "0833666" }
