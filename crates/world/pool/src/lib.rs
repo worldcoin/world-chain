@@ -5,6 +5,7 @@ use reth::{
     api::FullNodeTypes,
     transaction_pool::{Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore},
 };
+use reth_optimism_node::OpEvmConfig;
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
@@ -19,7 +20,7 @@ pub mod validator;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T>>,
+    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, OpEvmConfig>>,
     WorldChainOrdering<WorldChainPooledTransaction>,
     S,
 >;
