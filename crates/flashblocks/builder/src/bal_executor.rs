@@ -396,7 +396,7 @@ where
                 .executed_block()
                 .ok_or(BalExecutorError::MissingExecutedBlock)?
                 .execution_output
-                .bundle
+                .state
                 .clone();
 
             let fees = value.fees();
@@ -410,9 +410,9 @@ where
 
             let receipts: Vec<_> = executed_block
                 .execution_output
-                .receipts()
+                .result
+                .receipts
                 .iter()
-                .flatten()
                 .cloned()
                 .enumerate()
                 .map(|(index, r)| (index as BlockAccessIndex, r))
