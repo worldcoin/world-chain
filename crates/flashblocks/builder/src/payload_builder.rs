@@ -52,7 +52,7 @@ use reth_optimism_payload_builder::{
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProvider, StateProviderFactory,
 };
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -124,8 +124,10 @@ where
             best_payload.clone(),
         );
 
-        let state_provider = Arc::new(self.client.state_by_block_hash(ctx.parent().hash())?);
+        // TODO: there must be a better way.
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let db = StateProviderDatabase::new(&state_provider);
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
 
         let database = cached_reads.as_db_mut(db);
 
@@ -133,7 +135,7 @@ where
             best,
             Some(self.pool.clone()),
             database,
-            state_provider.clone(),
+            state_provider,
             &ctx,
             committed_payload,
             self.config.bal_enabled,
@@ -245,8 +247,8 @@ where
 pub fn build<'a, Txs, Ctx, Pool>(
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
-    db: impl Database<Error = ProviderError> + Send + Sync,
-    state_provider: impl StateProvider + Clone + 'static,
+    db: impl Database<Error = ProviderError>,
+    state_provider: impl StateProvider + 'static,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
     bal_enabled: bool,
@@ -395,7 +397,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
     gas_limit: u64,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
-    state_provider: impl StateProvider + Clone + 'static,
+    state_provider: impl StateProvider + 'static,
     ctx: &Ctx,
     mut builder: impl BlockBuilderExt<
         Primitives = OpPrimitives,
@@ -488,12 +490,10 @@ where
 
     let sealed_block = Arc::new(block.sealed_block().clone());
 
-    let execution_outcome = ExecutionOutcome::new(
-        bundle,
-        vec![execution_result.receipts.clone()],
-        block.number(),
-        Vec::new(),
-    );
+    let execution_outcome = BlockExecutionOutput {
+        state: bundle,
+        result: execution_result,
+    };
 
     // create the executed block data
     let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
