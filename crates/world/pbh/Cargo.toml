@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 alloy-rlp = { workspace = true }
 alloy-primitives = { workspace = true }
+alloy-sol-types.workspace = true
 
 chrono.workspace = true
 thiserror.workspace = true

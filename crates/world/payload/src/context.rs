@@ -45,10 +45,8 @@ use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 use tracing::{error, trace};
 
-use world_chain_pool::{
-    bindings::IPBHEntryPoint::spendNullifierHashesCall,
-    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
-};
+use world_chain_pbh::contracts::IPBHEntryPoint::spendNullifierHashesCall;
+use world_chain_pool::tx::{WorldChainPoolTransaction, WorldChainPooledTransaction};
 use world_chain_rpc::transactions::validate_conditional_options;
 
 /// Container type that holds all necessities to build a new payload.

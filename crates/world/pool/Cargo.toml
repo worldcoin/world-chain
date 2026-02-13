@@ -36,7 +36,6 @@ thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
 reth-transaction-pool.workspace = true

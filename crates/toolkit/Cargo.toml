@@ -11,7 +11,11 @@ world-chain-pbh.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-default-tls"] }
+alloy-rpc-client.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-rlp.workspace = true
+alloy-sol-types.workspace = true
 
 # 3rd party
 bytes.workspace = true
@@ -25,3 +29,5 @@ tokio.workspace = true
 dotenvy.workspace = true
 chrono.workspace = true
 rand.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

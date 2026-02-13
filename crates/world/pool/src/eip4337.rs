@@ -1,7 +1,6 @@
 use alloy_sol_types::SolValue;
 use semaphore_rs::{Field, hash_to_field};
-
-use crate::bindings::IEntryPoint::PackedUserOperation;
+use world_chain_pbh::contracts::IEntryPoint::PackedUserOperation;
 
 pub fn hash_user_op(user_op: &PackedUserOperation) -> Field {
     let hash = SolValue::abi_encode_packed(&(&user_op.sender, &user_op.nonce, &user_op.callData));

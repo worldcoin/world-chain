@@ -4864,6 +4864,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-tls"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+]
+
+[[package]]
 name = "hyper-util"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7528,7 +7544,7 @@ dependencies = [
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.32",
- "hyper-tls",
+ "hyper-tls 0.5.0",
  "ipnet",
  "js-sys",
  "log",
@@ -7569,9 +7585,11 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-rustls",
+ "hyper-tls 0.6.0",
  "hyper-util",
  "js-sys",
  "log",
+ "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -7583,6 +7601,7 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-util",
  "tower",
@@ -12809,7 +12828,11 @@ dependencies = [
  "alloy-consensus",
  "alloy-network",
  "alloy-primitives 1.5.0",
+ "alloy-provider",
  "alloy-rlp",
+ "alloy-rpc-client",
+ "alloy-rpc-types-eth",
+ "alloy-sol-types 1.5.0",
  "bytes",
  "chrono",
  "clap",
@@ -12822,6 +12845,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.22",
  "world-chain-pbh",
 ]
 
@@ -14267,6 +14292,7 @@ dependencies = [
  "semaphore-rs",
  "tokio",
  "tracing",
+ "world-chain-pbh",
  "world-chain-pool",
  "world-chain-rpc",
 ]
@@ -14277,6 +14303,7 @@ version = "1.9.3"
 dependencies = [
  "alloy-primitives 1.5.0",
  "alloy-rlp",
+ "alloy-sol-types 1.5.0",
  "bon",
  "chrono",
  "color-eyre",
@@ -14316,7 +14343,6 @@ dependencies = [
  "reth-transaction-pool",
  "revm-primitives",
  "semaphore-rs",
- "serde",
  "test-case",
  "thiserror 2.0.17",
  "tokio",

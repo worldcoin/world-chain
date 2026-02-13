@@ -8,11 +8,7 @@ use std::{
 };
 
 use super::{root::WorldChainRootValidator, tx::WorldChainPoolTransaction};
-use crate::{
-    bindings::{IPBHEntryPoint, IPBHEntryPoint::PBHPayload},
-    error::WorldChainTransactionPoolError,
-    tx::WorldChainPoolTransactionError,
-};
+use crate::{error::WorldChainTransactionPoolError, tx::WorldChainPoolTransactionError};
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
@@ -28,7 +24,10 @@ use reth_primitives::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
-use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
+use world_chain_pbh::{
+    contracts::{IPBHEntryPoint, IPBHEntryPoint::PBHPayload},
+    payload::{PBHPayload as PbhPayload, PBHValidationError},
+};
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
