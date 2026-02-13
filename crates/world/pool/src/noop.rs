@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::tx::WorldChainPooledTransaction;
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2};
 use alloy_primitives::{Address, B256, TxHash};
 use reth::transaction_pool::{
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
@@ -71,6 +71,13 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         _versioned_hashes: &[B256],
     ) -> Result<Option<Vec<alloy_eips::eip4844::BlobAndProofV2>>, BlobStoreError> {
         Ok(Some(vec![]))
+    }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![])
     }
 
     fn get_pending_transactions_with_predicate(
