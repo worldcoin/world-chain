@@ -293,6 +293,7 @@ mod tests {
         let new_balance = U256::from(500);
 
         let initial_account = AccountInfo {
+            account_id: None,
             balance: initial_balance,
             nonce: 1,
             code_hash: KECCAK_EMPTY,
@@ -342,6 +343,7 @@ mod tests {
         let new_nonce = 10u64;
 
         let initial_account = AccountInfo {
+            account_id: None,
             balance: U256::from(1000),
             nonce: initial_nonce,
             code_hash: KECCAK_EMPTY,
@@ -386,6 +388,7 @@ mod tests {
         let new_code_hash = new_bytecode.hash_slow();
 
         let initial_account = AccountInfo {
+            account_id: None,
             balance: U256::from(1000),
             nonce: 1,
             code_hash: KECCAK_EMPTY,
@@ -434,6 +437,7 @@ mod tests {
         let slot = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
         let initial_account = AccountInfo {
+            account_id: None,
             balance: U256::from(1000),
             nonce: 1,
             code_hash: KECCAK_EMPTY,
@@ -487,6 +491,7 @@ mod tests {
         let other_addr = address!("0000000000000000000000000000000000000002");
 
         let account_info = AccountInfo {
+            account_id: None,
             balance: U256::from(999),
             nonce: 7,
             code_hash: KECCAK_EMPTY,
