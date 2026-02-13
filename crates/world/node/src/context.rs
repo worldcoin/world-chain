@@ -19,6 +19,7 @@ use flashblocks_node::{
 use flashblocks_p2p::{net::FlashblocksNetworkBuilder, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
+use hex::ToHex;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     NodeAdapter, NodeComponentsBuilder,
@@ -32,6 +33,7 @@ use reth_optimism_node::{
 };
 use reth_optimism_rpc::OpEthApiBuilder;
 
+use tracing::info;
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
 
@@ -348,6 +350,11 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
                 .expect("flashblocks authorizer_vk or override_authorizer_sk required")
                 .verifying_key()
         });
+
+        info!(
+            "Flashblocks authorizer_vk: {}",
+            authorizer_vk.as_bytes().encode_hex::<String>()
+        );
 
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
