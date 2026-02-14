@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use flashblocks_primitives::access_list::FlashblockAccessList;
 use rayon::prelude::*;
 
-use revm::state::Bytecode;
+use revm::state::{Bytecode, bal::Bal};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type BlockAccessIndex = u16;
@@ -30,6 +30,60 @@ impl FlashblockAccessListConstruction {
         Self {
             changes: DashMap::new(),
         }
+    }
+
+    /// Convert from revm's [`Bal`] to [`FlashblockAccessListConstruction`].
+    pub fn from_revm_bal(bal: Bal) -> Self {
+        let changes = DashMap::new();
+
+        for (address, account_bal) in bal.accounts {
+            let acc_changes = AccountChangesConstruction {
+                balance_changes: account_bal
+                    .account_info
+                    .balance
+                    .writes
+                    .into_iter()
+                    .map(|(idx, val)| (idx as u16, val))
+                    .collect(),
+
+                nonce_changes: account_bal
+                    .account_info
+                    .nonce
+                    .writes
+                    .into_iter()
+                    .map(|(idx, val)| (idx as u16, val))
+                    .collect(),
+
+                code_changes: account_bal
+                    .account_info
+                    .code
+                    .writes
+                    .into_iter()
+                    .map(|(idx, (_, bytecode))| (idx as u16, bytecode))
+                    .collect(),
+
+                storage_changes: account_bal
+                    .storage
+                    .storage
+                    .into_iter()
+                    .filter(|(_, writes)| !writes.is_empty())
+                    .map(|(slot, writes)| {
+                        let slot_changes = writes
+                            .writes
+                            .into_iter()
+                            .map(|(idx, val)| (idx as u16, val))
+                            .collect();
+                        (slot, slot_changes)
+                    })
+                    .collect(),
+
+                storage_reads: HashSet::new(),
+            };
+
+            changes.insert(address, acc_changes);
+        }
+
+        Self { changes }
     }
 
     /// Merges another [`FlashblockAccessListConstruction`] into this one

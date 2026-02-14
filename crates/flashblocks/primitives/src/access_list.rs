@@ -361,6 +361,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let bundle_account = BundleAccount {
@@ -369,6 +370,7 @@ mod tests {
                 nonce: 2,
                 code_hash: KECCAK_EMPTY,
                 code: None,
+                account_id: None,
             }),
             original_info: Some(info.clone()),
             storage: alloy_primitives::map::HashMap::default(),
@@ -410,6 +412,7 @@ mod tests {
                 nonce: 2,
                 code_hash: KECCAK_EMPTY,
                 code: None,
+                account_id: None
             }
         );
 
@@ -429,6 +432,7 @@ mod tests {
             nonce: 10,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
 
         let db = MockDb::new().with_account(account, db_info.clone());

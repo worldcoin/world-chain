@@ -25,8 +25,18 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // The transaction offset is the number of previously committed transactions offset 1.
-    let transactions_offset = committed_state.transactions.len() as u16 + 1;
+    // The transaction offset is based on the access_list's min_tx_index + 1, since
+    // transactions execute at indices starting from min_tx_index + 1.
+    let access_list = diff
+        .access_list_data
+        .as_ref()
+        .expect("access_list_data required for validation");
+
+    let transactions_offset = if committed_state.transactions.is_empty() {
+        access_list.access_list.min_tx_index + 1
+    } else {
+        access_list.access_list.min_tx_index
+    };
 
     let executor_transactions =
         decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
@@ -97,6 +107,7 @@ mod property_tests {
     /// when the validator processes the second flashblock with committed state from the first.
     #[test]
     fn test_multi_flashblock_same_sender() {
+        reth_tracing::init_test_tracing();
         // Create a sequence where ALICE sends transactions in both flashblocks
         // Flashblock 1: ALICE sends tx with nonce 0, 1, 2, 3
         // Flashblock 2: ALICE sends tx with nonce 4, 5, 6, 7

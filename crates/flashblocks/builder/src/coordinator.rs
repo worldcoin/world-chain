@@ -28,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 use crate::{
     bal_executor::CommittedState,
@@ -43,7 +43,7 @@ use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 const FETCH_PARENT_HEADER_MAX_DELAY: Duration = Duration::from_millis(2000);
 
 /// The minimum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(100);
+const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(25);
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -247,7 +247,7 @@ where
                 .with_max_times(10),
         )
         .notify(|e, duration| {
-            error!(
+            warn!(
                 "waiting for parent header {}: {e:#?}. waited {:#?} so far",
                 base.parent_hash, duration
             )
