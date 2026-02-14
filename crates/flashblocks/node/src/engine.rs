@@ -78,9 +78,12 @@ where
             commit: version_metadata().vergen_git_sha.to_string(),
         };
 
-        let mut capabilities = EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied());
-
-        capabilities.add_capability("flashblocks_forkchoiceUpdatedV3");
+        let capabilities = EngineCapabilities::new(
+            OP_ENGINE_CAPABILITIES
+                .iter()
+                .chain(std::iter::once(&"flashblocks_forkchoiceUpdatedV3"))
+                .copied(),
+        );
 
         let inner = EngineApi::new(
             ctx.node.provider().clone(),
@@ -93,6 +96,7 @@ where
             capabilities,
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
+            ctx.node.network().clone(),
         );
 
         let op_engine_api = OpEngineApi::new(inner);
