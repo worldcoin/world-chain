@@ -185,6 +185,7 @@ alloy-hardforks = { version = "0.4.4", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false, features = [
     "ethereum",
 ] }
+
 # revm
 revm = { version = "34", default-features = false }
 revm-bytecode = { version = "8", default-features = false }
@@ -195,7 +196,6 @@ revm-interpreter = { version = "32", default-features = false }
 revm-database-interface = { version = "9", default-features = false }
 op-revm = { version = "15", default-features = false }
 revm-inspectors = "0.34"
-# revm-inspectors = { git = "https://github.com/0xforerunner/revm", rev = "195c8e9" }
 
 alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
@@ -221,9 +221,8 @@ chrono = "0.4"
 thiserror = "2"
 strum = { version = "0.27", features = ["derive"] }
 bytemuck = "1"
-semaphore-rs = { version = "0.3.1", features = ["depth_30"] }
-semaphore-rs-tree = "0.3.1"
-semaphore-rs-proof = "0.3.1"
+semaphore-rs = { version = "0.5", features = ["depth_30"] }
+semaphore-rs-proof = "0.5"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
@@ -236,7 +235,7 @@ tikv-jemallocator = { version = "0.6" }
 bytes = "1.7.2"
 hex = "0.4.3"
 tempfile = "3"
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 test-case = "3"
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 serde_json = "1"
@@ -259,8 +258,8 @@ once_cell = "1.19"
 either = { version = "1.15.0", default-features = false }
 
 # Test
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["redis"] }
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.14", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 lazy_static = "1.4"
 proptest = "1.9.0"
