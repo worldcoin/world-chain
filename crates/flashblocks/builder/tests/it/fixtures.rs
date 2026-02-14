@@ -1,6 +1,6 @@
 // Test utilities for high entropy property-based testing of Block Level Access Lists (BAL)
 use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, bytes, hex, keccak256};
@@ -21,6 +21,7 @@ use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
 use proptest::prelude::*;
 use reth::revm::{State, database::StateProviderDatabase};
+use reth_chainspec::ChainInfo;
 use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -30,7 +31,10 @@ use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
-use reth_provider::{BytecodeReader, StateProvider};
+use reth_provider::{
+    BlockIdReader, BlockNumReader, BytecodeReader, StateProvider, StateProviderBox,
+    StateProviderFactory,
+};
 use reth_trie_common::HashedPostState;
 use revm::{
     DatabaseRef,
@@ -543,7 +547,7 @@ pub fn execute_serial(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let state_provider = create_test_state_provider();
-    let db = StateProviderDatabase::new(state_provider.clone());
+    let db = StateProviderDatabase::new(state_provider.as_ref());
 
     let bundle = if let Some((_, bundle_state)) = &prev_outcome {
         bundle_state.clone()
@@ -552,7 +556,7 @@ pub fn execute_serial(
     };
 
     let mut state = State::builder()
-        .with_database(db.clone())
+        .with_database(db)
         .with_bundle_prestate(bundle.clone())
         .with_bundle_update()
         .build();
@@ -595,7 +599,7 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider)?;
+    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider.as_ref())?;
 
     let access_list = access_list_rx.recv()?;
 
@@ -618,6 +622,7 @@ fn create_test_db() -> InMemoryDB {
         db.insert_account_info(
             address,
             AccountInfo {
+                account_id: None,
                 balance: account.balance,
                 nonce: account.nonce.unwrap_or_default(),
                 code_hash: account
@@ -771,6 +776,7 @@ impl HashedGenesisState {
 }
 
 /// Test state provider backed by InMemoryDB with in-memory trie for state root computation
+#[derive(Debug, Clone)]
 pub struct TestStateProvider {
     db: InMemoryDB,
     /// Hashed genesis state for computing state roots
@@ -984,5 +990,105 @@ impl reth_provider::HashedPostStateProvider for TestStateProvider {
         reth_trie_common::HashedPostState::from_bundle_state::<reth_trie_common::KeccakKeyHasher>(
             bundle_state.state(),
         )
+    }
+}
+
+impl BlockNumReader for TestStateProvider {
+    fn chain_info(&self) -> reth_provider::ProviderResult<ChainInfo> {
+        Ok(ChainInfo {
+            best_hash: CHAIN_SPEC.genesis_hash(),
+            best_number: 0,
+        })
+    }
+
+    fn best_block_number(&self) -> reth_provider::ProviderResult<alloy_primitives::BlockNumber> {
+        Ok(0)
+    }
+
+    fn last_block_number(&self) -> reth_provider::ProviderResult<alloy_primitives::BlockNumber> {
+        Ok(0)
+    }
+
+    fn block_number(
+        &self,
+        hash: alloy_primitives::B256,
+    ) -> reth_provider::ProviderResult<Option<alloy_primitives::BlockNumber>> {
+        if hash == CHAIN_SPEC.genesis_hash() {
+            Ok(Some(0))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl BlockIdReader for TestStateProvider {
+    fn pending_block_num_hash(&self) -> reth_provider::ProviderResult<Option<BlockNumHash>> {
+        Ok(Some(BlockNumHash {
+            number: 0,
+            hash: CHAIN_SPEC.genesis_hash(),
+        }))
+    }
+
+    fn safe_block_num_hash(&self) -> reth_provider::ProviderResult<Option<BlockNumHash>> {
+        Ok(Some(BlockNumHash {
+            number: 0,
+            hash: CHAIN_SPEC.genesis_hash(),
+        }))
+    }
+
+    fn finalized_block_num_hash(&self) -> reth_provider::ProviderResult<Option<BlockNumHash>> {
+        Ok(Some(BlockNumHash {
+            number: 0,
+            hash: CHAIN_SPEC.genesis_hash(),
+        }))
+    }
+}
+
+impl StateProviderFactory for TestStateProvider {
+    fn latest(&self) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn state_by_block_number_or_tag(
+        &self,
+        _number_or_tag: alloy_eips::BlockNumberOrTag,
+    ) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: alloy_primitives::BlockNumber,
+    ) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn history_by_block_hash(
+        &self,
+        _block: alloy_primitives::BlockHash,
+    ) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn state_by_block_hash(
+        &self,
+        _block: alloy_primitives::BlockHash,
+    ) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn pending(&self) -> reth_provider::ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn pending_state_by_hash(
+        &self,
+        _block_hash: B256,
+    ) -> reth_provider::ProviderResult<Option<StateProviderBox>> {
+        Ok(Some(Box::new(self.clone())))
+    }
+
+    fn maybe_pending(&self) -> reth_provider::ProviderResult<Option<StateProviderBox>> {
+        Ok(Some(Box::new(self.clone())))
     }
 }

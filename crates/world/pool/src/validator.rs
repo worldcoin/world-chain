@@ -317,6 +317,7 @@ pub mod tests {
     use reth::transaction_pool::{
         Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
     };
+    use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
@@ -339,9 +340,11 @@ pub mod tests {
     const PBH_DEV_SIGNATURE_AGGREGATOR: Address =
         address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9");
 
+    type TestValidator =
+        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig>;
+
     /// Create a World Chain validator for testing
-    fn world_chain_validator()
-    -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+    fn world_chain_validator() -> TestValidator {
         use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
         use crate::root::WorldChainRootValidator;
         use reth_optimism_node::txpool::OpTransactionValidator;
@@ -351,7 +354,9 @@ pub mod tests {
         use revm_primitives::U256;
 
         let client = MockEthProvider::default();
-        let evm = reth_evm::Factory::new().create(reth_evm::Config::default());
+        let header = Header::default();
+        client.add_header(header.hash_slow(), header);
+        let evm = OpEvmConfig::optimism(client.chain_spec.clone());
 
         let validator = EthTransactionValidatorBuilder::new(client.clone(), evm)
             .no_shanghai()
@@ -378,11 +383,8 @@ pub mod tests {
         .expect("failed to create world chain validator")
     }
 
-    async fn setup() -> Pool<
-        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>,
-        WorldChainOrdering<WorldChainPooledTransaction>,
-        InMemoryBlobStore,
-    > {
+    async fn setup()
+    -> Pool<TestValidator, WorldChainOrdering<WorldChainPooledTransaction>, InMemoryBlobStore> {
         let validator = world_chain_validator();
 
         // Fund 10 test accounts

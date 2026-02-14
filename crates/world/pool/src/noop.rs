@@ -61,23 +61,23 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     }
     fn get_blobs_for_versioned_hashes_v1(
         &self,
-        _versioned_hashes: &[B256],
+        versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        Ok(vec![])
+        Ok(vec![None; versioned_hashes.len()])
     }
 
     fn get_blobs_for_versioned_hashes_v2(
         &self,
         _versioned_hashes: &[B256],
     ) -> Result<Option<Vec<alloy_eips::eip4844::BlobAndProofV2>>, BlobStoreError> {
-        Ok(Some(vec![]))
+        Ok(None)
     }
 
     fn get_blobs_for_versioned_hashes_v3(
         &self,
-        _versioned_hashes: &[B256],
+        versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
-        Ok(vec![])
+        Ok(vec![None; versioned_hashes.len()])
     }
 
     fn get_pending_transactions_with_predicate(
