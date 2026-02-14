@@ -355,7 +355,14 @@ pub mod tests {
 
         let client = MockEthProvider::default();
         let header = Header::default();
-        client.add_header(header.hash_slow(), header);
+        let hash = header.hash_slow();
+        client.add_block(
+            hash,
+            Block {
+                header,
+                body: Default::default(),
+            },
+        );
         let evm = OpEvmConfig::optimism(client.chain_spec.clone());
 
         let validator = EthTransactionValidatorBuilder::new(client.clone(), evm)
