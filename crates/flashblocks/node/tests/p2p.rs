@@ -8,7 +8,7 @@ use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{
     monitor,
-    protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol, PeerMsg},
+    protocol::handler::{FlashblocksHandle, PeerMsg},
 };
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
@@ -21,7 +21,6 @@ use flashblocks_primitives::{
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_e2e_test_utils::TmpDB;
 use reth_eth_wire::BasicNetworkPrimitives;
-use reth_ethereum::network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
@@ -242,15 +241,8 @@ async fn setup_node_extended_cfg(
         .launch()
         .await?;
 
-    let p2p_protocol = FlashblocksP2PProtocol {
-        network: node.network.clone(),
-        handle: p2p_handle.clone(),
-    };
-
-    node.network
-        .add_rlpx_sub_protocol(p2p_protocol.into_rlpx_sub_protocol());
-
-    // Trusted peers are now added via NetworkArgs (like CLI), so no manual addition needed
+    // The flashblocks sub-protocol is now registered during build_network
+    // (before the network starts), so no manual registration is needed here.
 
     let http_api_addr = node
         .rpc_server_handle()
