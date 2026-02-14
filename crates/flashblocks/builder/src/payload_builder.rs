@@ -38,7 +38,7 @@ use reth_evm::{
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_primitives::NodePrimitives;
-use tracing::{info, warn};
+use tracing::trace;
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -56,7 +56,7 @@ use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, Stat
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span};
+use tracing::span;
 
 /// Flashblocks Paylod builder
 ///
@@ -272,8 +272,6 @@ where
 
     let _enter = span.enter();
 
-    debug!(target: "flashblocks::payload_builder", "building new payload");
-
     let attributes = OpNextBlockEnvAttributes {
         timestamp: ctx.attributes().timestamp(),
         suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
@@ -295,7 +293,7 @@ where
         },
     };
 
-    info!(target: "flashblocks::payload_builder", ?attributes, "prepared next block attributes");
+    trace!(target: "flashblocks::payload_builder", ?attributes, "building new payload");
 
     // Prepare EVM environment.
     let evm_env = ctx
@@ -451,7 +449,7 @@ where
             .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
             .is_some()
         {
-            warn!(target: "flashblocks::payload_builder", "payload build cancelled");
+            trace!(target: "flashblocks::payload_builder", "payload build cancelled");
             if let Some(best_payload) = committed_payload {
                 // we can return the previous best payload since we didn't include any new txs
                 return Ok((BuildOutcomeKind::Freeze(best_payload.clone()), None));
