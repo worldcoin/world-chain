@@ -522,7 +522,9 @@ where
         // executor to finalize the block.
         let mut results = transactions
             .clone()
-            .into_par_iter()
+            // .into_par_iter()
+            // TODO: get rayon to work
+            .into_iter()
             .map(|(index, tx)| {
                 let tx = tx.clone();
                 info!(
