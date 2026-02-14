@@ -72,6 +72,5 @@ where
             .get_recovered_block(block_hash)
             .await
             .map_err(Self::Error::from_eth_err)
-            .into()
     }
 }

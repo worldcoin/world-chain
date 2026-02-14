@@ -28,7 +28,7 @@ where
         &self,
     ) -> &tokio::sync::Mutex<Option<PendingBlock<<OpEthApi<N, Rpc> as RpcNodeCore>::Primitives>>>
     {
-        self.inner.pending_block().into()
+        self.inner.pending_block()
     }
 
     #[inline]

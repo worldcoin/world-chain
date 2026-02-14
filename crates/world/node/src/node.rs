@@ -300,31 +300,31 @@ where
 
         let validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
-            .no_eip4844()
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(
-                pool_config_overrides
-                    .additional_validation_tasks
-                    .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
-            )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
-            .map(|validator| {
-                let client = validator.client().clone();
-                let op_tx_validator = OpTransactionValidator::new(validator)
-                    // In --dev mode we can't require gas fees because we're unable to decode the L1
-                    // block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
-                let root_validator = WorldChainRootValidator::new(client, world_id)
-                    .expect("failed to initialize root validator");
-
-                WorldChainTransactionValidator::new(
-                    op_tx_validator,
-                    root_validator,
-                    pbh_entrypoint,
-                    pbh_signature_aggregator,
+                .no_eip4844()
+                .kzg_settings(ctx.kzg_settings()?)
+                .with_additional_tasks(
+                    pool_config_overrides
+                        .additional_validation_tasks
+                        .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
                 )
-                .expect("failed to create world chain validator")
-            });
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+                .map(|validator| {
+                    let client = validator.client().clone();
+                    let op_tx_validator = OpTransactionValidator::new(validator)
+                        // In --dev mode we can't require gas fees because we're unable to decode the L1
+                        // block info
+                        .require_l1_data_gas_fee(!ctx.config().dev.dev);
+                    let root_validator = WorldChainRootValidator::new(client, world_id)
+                        .expect("failed to initialize root validator");
+
+                    WorldChainTransactionValidator::new(
+                        op_tx_validator,
+                        root_validator,
+                        pbh_entrypoint,
+                        pbh_signature_aggregator,
+                    )
+                    .expect("failed to create world chain validator")
+                });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,
