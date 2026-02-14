@@ -639,7 +639,6 @@ where
 
     let res = executor
         .execute_transaction_with_commit_condition(&tx, |_| CommitChanges::Yes)
-        // .execute_transaction_with_commit_condition(tx.as_executable(), |_| CommitChanges::Yes)
         .map_err(BalExecutorError::BlockExecutionError);
 
     trace!(

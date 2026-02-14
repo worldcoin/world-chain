@@ -125,7 +125,6 @@ where
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let db = StateProviderDatabase::new(state_provider);
         let db = cached_reads.as_db_mut(db);
-        // let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?.into();
 
         build(
             self.client.clone(),
