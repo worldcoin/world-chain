@@ -821,6 +821,17 @@ impl ChangeSetReader for MockEthProvider {
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         unimplemented!()
     }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
 }
 
 impl StateReader for MockEthProvider {

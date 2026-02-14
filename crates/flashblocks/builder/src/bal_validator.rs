@@ -13,7 +13,7 @@ use flashblocks_primitives::{
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 use op_alloy_consensus::OpReceipt;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::IntoParallelIterator;
 use reth::revm::database::StateProviderDatabase;
 use reth_primitives::transaction::SignedTransaction;
 

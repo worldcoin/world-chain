@@ -276,13 +276,17 @@ impl WorldChainPoolBuilder {
     }
 }
 
-impl<Node> PoolBuilder<Node> for WorldChainPoolBuilder
+impl<Node> PoolBuilder<Node, OpEvmConfig> for WorldChainPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: OpEvmConfig,
+    ) -> eyre::Result<Self::Pool> {
         let Self {
             pbh_entrypoint,
             pbh_signature_aggregator,
@@ -294,9 +298,9 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
             .no_eip4844()
-            .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_additional_tasks(
                 pool_config_overrides

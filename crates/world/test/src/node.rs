@@ -18,6 +18,7 @@ use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::OpEvmConfig;
 use reth_primitives::{
     Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
     SealedHeader, TransactionMeta, TransactionSigned,
@@ -519,6 +520,17 @@ impl ChangeSetReader for WorldChainNoopProvider {
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
 }
 
 impl StateRootProvider for WorldChainNoopProvider {
@@ -725,12 +737,16 @@ pub struct WorldChainNoopValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Debug,
 {
-    _inner: WorldChainTransactionValidator<Client, Tx>,
+    _inner: WorldChainTransactionValidator<Client, Tx, OpEvmConfig>,
 }
 
 impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction> {
     pub fn new(
-        inner: WorldChainTransactionValidator<WorldChainNoopProvider, WorldChainPooledTransaction>,
+        inner: WorldChainTransactionValidator<
+            WorldChainNoopProvider,
+            WorldChainPooledTransaction,
+            OpEvmConfig,
+        >,
     ) -> Self {
         Self { _inner: inner }
     }
@@ -742,6 +758,7 @@ where
     Tx: WorldChainPoolTransaction,
 {
     type Transaction = Tx;
+    type Block = reth_optimism_primitives::OpBlock;
 
     async fn validate_transaction(
         &self,
@@ -777,10 +794,5 @@ where
         join_all(futures).await
     }
 
-    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
-    where
-        B: reth_primitives_traits::Block,
-    {
-        unimplemented!()
-    }
+    fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
 }

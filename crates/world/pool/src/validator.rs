@@ -18,7 +18,7 @@ use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth::{
-    api::{ConfigureEvm, NodeTypes},
+    api::ConfigureEvm,
     transaction_pool::{
         TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
         validate::ValidTransaction,
@@ -264,7 +264,7 @@ where
         + StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<Block: NodeTypes>>,
+    Evm: ConfigureEvm,
 {
     type Transaction = Tx;
 
