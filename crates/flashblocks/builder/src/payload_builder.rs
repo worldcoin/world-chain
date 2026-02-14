@@ -51,9 +51,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_provider::{
-    BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProvider, StateProviderFactory,
-};
+use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
@@ -124,18 +122,16 @@ where
             best_payload.clone(),
         );
 
-        // TODO: there must be a better way.
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
-        let db = StateProviderDatabase::new(&state_provider);
-        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
-
-        let database = cached_reads.as_db_mut(db);
+        let db = StateProviderDatabase::new(state_provider);
+        let db = cached_reads.as_db_mut(db);
+        // let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?.into();
 
         build(
+            self.client.clone(),
             best,
             Some(self.pool.clone()),
-            database,
-            state_provider,
+            db,
             &ctx,
             committed_payload,
             self.config.bal_enabled,
@@ -245,10 +241,10 @@ where
 
 /// Builds the payload on top of the state.
 pub fn build<'a, Txs, Ctx, Pool>(
+    client: impl StateProviderFactory + Clone,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
     db: impl Database<Error = ProviderError>,
-    state_provider: impl StateProvider + 'static,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
     bal_enabled: bool,
@@ -350,12 +346,12 @@ where
         )?;
 
         build_inner(
+            client,
             committed_payload,
             visited_transactions,
             gas_limit,
             best,
             pool,
-            state_provider,
             ctx,
             builder,
             &committed_state,
@@ -377,12 +373,12 @@ where
         )?;
 
         build_inner(
+            client,
             committed_payload,
             visited_transactions,
             gas_limit,
             best,
             pool,
-            state_provider,
             ctx,
             builder,
             &committed_state,
@@ -392,12 +388,12 @@ where
 }
 
 fn build_inner<'a, Txs, Ctx, Pool, R>(
+    client: impl StateProviderFactory + Clone,
     committed_payload: Option<&OpBuiltPayload>,
     visited_transactions: Vec<TxHash>,
     gas_limit: u64,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
-    state_provider: impl StateProvider + 'static,
     ctx: &Ctx,
     mut builder: impl BlockBuilderExt<
         Primitives = OpPrimitives,
@@ -478,7 +474,8 @@ where
     }
 
     // 6. Build the block
-    let (build_outcome, bundle) = builder.finish_with_bundle(&state_provider)?;
+    let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+    let (build_outcome, bundle) = builder.finish_with_bundle(state_provider.as_ref())?;
 
     // 7. Seal the block
     let BlockBuilderOutcome {
