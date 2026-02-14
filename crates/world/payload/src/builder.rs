@@ -30,7 +30,7 @@ use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{Block, SealedHeader};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider,
+    BlockExecutionOutput, BlockReaderIdExt, ChainSpecProvider, ProviderError, StateProvider,
     StateProviderFactory,
 };
 use reth_transaction_pool::BlobStore;
@@ -422,12 +422,10 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%op_ctx.payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
-        let execution_outcome = ExecutionOutcome::new(
-            state.take_bundle(),
-            vec![execution_result.receipts],
-            block.number,
-            Vec::new(),
-        );
+        let execution_outcome = BlockExecutionOutput {
+            state: state.take_bundle(),
+            result: execution_result,
+        };
 
         // create the executed block data
         // create the executed block data

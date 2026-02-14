@@ -83,6 +83,22 @@ pub struct NodeContext {
     network_handle: Network,
 }
 
+struct NodeTestFixture {
+    nodes: Vec<NodeContext>,
+    authorizer: SigningKey,
+    _tasks: TaskManager,
+}
+
+impl NodeTestFixture {
+    fn nodes(&self) -> &[NodeContext] {
+        &self.nodes
+    }
+
+    fn authorizer(&self) -> &SigningKey {
+        &self.authorizer
+    }
+}
+
 impl NodeContext {
     pub async fn provider(&self) -> eyre::Result<RootProvider> {
         let url = format!("http://{}", self.http_api_addr);
@@ -303,11 +319,11 @@ fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
     }
 }
 
-async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
+async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
     let mut nodes = Vec::new();
     let mut peers = Vec::new();
-    let tasks = Box::leak(Box::new(TaskManager::current()));
-    let exec = Box::leak(Box::new(tasks.executor()));
+    let tasks = TaskManager::new(tokio::runtime::Handle::current());
+    let exec = tasks.executor();
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 
     for i in 0..n {
@@ -320,7 +336,11 @@ async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
 
     sleep(Duration::from_millis(6000)).await;
 
-    Ok((nodes, authorizer))
+    Ok(NodeTestFixture {
+        nodes,
+        authorizer,
+        _tasks: tasks,
+    })
 }
 
 #[tokio::test]
@@ -328,7 +348,9 @@ async fn setup_nodes(n: u8) -> eyre::Result<(Vec<NodeContext>, SigningKey)> {
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
-    let (nodes, authorizer) = setup_nodes(3).await?;
+    let fixture = setup_nodes(3).await?;
+    let nodes = fixture.nodes();
+    let authorizer = fixture.authorizer();
 
     let mut publish_flashblocks = nodes[0].p2p_handle.ctx.flashblock_tx.subscribe();
     tokio::spawn(async move {
@@ -362,7 +384,7 @@ async fn test_double_failover() -> eyre::Result<()> {
     let authorization_0 = Authorization::new(
         payload_0.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
     let msg = payload_0.clone();
@@ -376,7 +398,7 @@ async fn test_double_failover() -> eyre::Result<()> {
     let authorization_1 = Authorization::new(
         payload_1.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorized_1 = AuthorizedPayload::new(
@@ -395,7 +417,7 @@ async fn test_double_failover() -> eyre::Result<()> {
     let authorization_2 = Authorization::new(
         payload_2.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorized_2 = AuthorizedPayload::new(
@@ -408,6 +430,8 @@ async fn test_double_failover() -> eyre::Result<()> {
     nodes[2].p2p_handle.publish_new(authorized_2).unwrap();
     sleep(Duration::from_millis(100)).await;
 
+    drop(fixture);
+
     Ok(())
 }
 
@@ -416,7 +440,9 @@ async fn test_double_failover() -> eyre::Result<()> {
 async fn test_force_race_condition() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
-    let (nodes, authorizer) = setup_nodes(3).await?;
+    let fixture = setup_nodes(3).await?;
+    let nodes = fixture.nodes();
+    let authorizer = fixture.authorizer();
 
     let mut publish_flashblocks = nodes[0].p2p_handle.ctx.flashblock_tx.subscribe();
     tokio::spawn(async move {
@@ -451,7 +477,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let authorization = Authorization::new(
         payload_0.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
     let msg = payload_0.clone();
@@ -476,7 +502,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let authorization = Authorization::new(
         payload_1.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorized = AuthorizedPayload::new(
@@ -504,13 +530,13 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let authorization_1 = Authorization::new(
         payload_2.payload_id,
         1,
-        &authorizer,
+        authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorization_2 = Authorization::new(
         payload_2.payload_id,
         1,
-        &authorizer,
+        authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
     );
     let msg = payload_2.clone();
@@ -538,6 +564,8 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     nodes[1].p2p_handle.publish_new(authorized_1)?;
     sleep(Duration::from_millis(100)).await;
 
+    drop(fixture);
+
     Ok(())
 }
 
@@ -546,7 +574,9 @@ async fn test_force_race_condition() -> eyre::Result<()> {
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
-    let (nodes, authorizer) = setup_nodes(1).await?;
+    let fixture = setup_nodes(1).await?;
+    let nodes = fixture.nodes();
+    let authorizer = fixture.authorizer();
 
     let provider = nodes[0].provider().await?;
 
@@ -567,7 +597,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let authorization = Authorization::new(
         base_payload.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorized = AuthorizedPayload::new(
@@ -592,7 +622,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let authorization = Authorization::new(
         next_payload.payload_id,
         0,
-        &authorizer,
+        authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorized = AuthorizedPayload::new(
@@ -613,6 +643,8 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     assert_eq!(block.number(), 0);
     assert_eq!(block.transactions.hashes().len(), 2);
 
+    drop(fixture);
+
     Ok(())
 }
 
@@ -620,19 +652,8 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
 async fn test_peer_reputation() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
-    let (nodes, _authorizer) = setup_nodes(2).await?;
-
-    let mut publish_flashblocks = nodes[0].p2p_handle.ctx.flashblock_tx.subscribe();
-    tokio::spawn(async move {
-        while let Ok(payload) = publish_flashblocks.recv().await {
-            println!("\n////////////////////////////////////////////////////////////////////\n");
-            println!(
-                "Received flashblock, payload_id: {}, index: {}",
-                payload.payload_id, payload.index
-            );
-            println!("\n////////////////////////////////////////////////////////////////////\n");
-        }
-    });
+    let fixture = setup_nodes(2).await?;
+    let nodes = fixture.nodes();
 
     let invalid_authorizer = SigningKey::from_bytes(&[99; 32]);
     let latest_block = nodes[0]
@@ -674,6 +695,8 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 
     // Assert that the peer is banned
     assert!(nodes[1].network_handle.get_all_peers().await?.is_empty());
+
+    drop(fixture);
 
     Ok(())
 }

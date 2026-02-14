@@ -357,6 +357,7 @@ mod tests {
         let account = address!("0x1000000000000000000000000000000000000000");
 
         let info = AccountInfo {
+            account_id: None,
             balance: U256::from(1000),
             nonce: 1,
             code_hash: KECCAK_EMPTY,
@@ -365,6 +366,7 @@ mod tests {
 
         let bundle_account = BundleAccount {
             info: Some(AccountInfo {
+                account_id: None,
                 balance: U256::from(1000),
                 nonce: 2,
                 code_hash: KECCAK_EMPTY,
@@ -406,6 +408,7 @@ mod tests {
         assert_eq!(
             new_bundle_account.info.unwrap(),
             AccountInfo {
+                account_id: None,
                 balance: U256::from(1500),
                 nonce: 2,
                 code_hash: KECCAK_EMPTY,
@@ -425,6 +428,7 @@ mod tests {
 
         // Account info in database (simulating existing on-chain state)
         let db_info = AccountInfo {
+            account_id: None,
             balance: U256::from(5000),
             nonce: 10,
             code_hash: KECCAK_EMPTY,

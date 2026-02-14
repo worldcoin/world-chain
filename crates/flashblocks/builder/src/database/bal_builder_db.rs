@@ -463,6 +463,7 @@ mod tests {
     // Helper function to create a simple account
     fn create_account(balance: U256, nonce: u64, code: Option<Bytecode>) -> AccountInfo {
         AccountInfo {
+            account_id: None,
             balance,
             nonce,
             code_hash: code.as_ref().map(|c| c.hash_slow()).unwrap_or(KECCAK_EMPTY),
@@ -498,6 +499,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(U256::from(1), 0, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
@@ -511,6 +513,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(uint!(2_U256), 0, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 1,
@@ -606,6 +609,7 @@ mod tests {
         let mut changes = HashMap::default();
         let new_account = Account {
             info: create_account(uint!(2000_U256), 5, None),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
@@ -636,6 +640,7 @@ mod tests {
         let mut changes = HashMap::default();
         let new_account = Account {
             info: create_account(uint!(1000_U256), 6, None),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
@@ -666,6 +671,7 @@ mod tests {
         let mut changes = HashMap::default();
         let new_account = Account {
             info: create_account(uint!(1000_U256), 5, Some(new_bytecode.clone())),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
@@ -709,6 +715,7 @@ mod tests {
 
         let new_account = Account {
             info: create_account(uint!(1000_U256), 5, None),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage,
             transaction_id: 0,
@@ -740,6 +747,7 @@ mod tests {
         let mut changes = HashMap::default();
         let new_account = Account {
             info: initial_account.clone(),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
@@ -770,6 +778,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(uint!(1500_U256), 0, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
@@ -784,6 +793,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(uint!(1500_U256), 0, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 1,
@@ -812,6 +822,7 @@ mod tests {
         let mut changes = HashMap::default();
         let new_account = Account {
             info: create_account(uint!(1000_U256), 1, Some(bytecode.clone())),
+            original_info: Default::default(),
             status: AccountStatus::Touched,
             storage: Default::default(),
             transaction_id: 0,
@@ -848,6 +859,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(uint!(900_U256), 6, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
@@ -862,6 +874,7 @@ mod tests {
             addr,
             Account {
                 info: create_account(uint!(800_U256), 7, None),
+                original_info: Default::default(),
                 status: AccountStatus::Touched,
                 storage: Default::default(),
                 transaction_id: 0,
@@ -889,6 +902,7 @@ mod tests {
         db.insert_account_info(
             addr,
             AccountInfo {
+                account_id: None,
                 balance: U256::ZERO,
                 nonce: 0,
                 code_hash,

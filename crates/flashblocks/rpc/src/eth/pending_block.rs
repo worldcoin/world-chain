@@ -51,7 +51,6 @@ where
                     .receipts
                     .clone()
                     .into_iter()
-                    .flatten()
                     .collect::<Vec<_>>(); // always a single block executed through the state executor
 
                 let block_and_receipts = BlockAndReceipts {

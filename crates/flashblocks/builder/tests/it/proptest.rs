@@ -1,7 +1,5 @@
 //! Property tests for chaos contract interactions and BAL validation.
 
-use std::sync::Arc;
-
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use flashblocks_builder::{
@@ -12,7 +10,6 @@ use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
-use reth_provider::StateProvider;
 use revm::database::BundleState;
 
 use crate::fixtures::{
@@ -41,12 +38,7 @@ pub fn validate(
     };
 
     let payload_id = PayloadId::default();
-    let payload = validator.validate(
-        state_provider as Arc<dyn StateProvider>,
-        diff.clone(),
-        &SEALED_HEADER,
-        payload_id,
-    )?;
+    let payload = validator.validate(state_provider, diff.clone(), &SEALED_HEADER, payload_id)?;
 
     Ok(payload)
 }

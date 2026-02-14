@@ -38,7 +38,7 @@ use reth_evm::{
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_primitives::NodePrimitives;
-use tracing::{info, warn};
+use tracing::trace;
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -51,14 +51,12 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_provider::{
-    ChainSpecProvider, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
-};
+use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc};
-use tracing::{debug, span};
+use tracing::span;
 
 /// Flashblocks Paylod builder
 ///
@@ -124,16 +122,15 @@ where
             best_payload.clone(),
         );
 
-        let state_provider = Arc::new(self.client.state_by_block_hash(ctx.parent().hash())?);
-        let db = StateProviderDatabase::new(&state_provider);
-
-        let database = cached_reads.as_db_mut(db);
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
+        let db = StateProviderDatabase::new(state_provider);
+        let db = cached_reads.as_db_mut(db);
 
         build(
+            self.client.clone(),
             best,
             Some(self.pool.clone()),
-            database,
-            state_provider.clone(),
+            db,
             &ctx,
             committed_payload,
             self.config.bal_enabled,
@@ -243,10 +240,10 @@ where
 
 /// Builds the payload on top of the state.
 pub fn build<'a, Txs, Ctx, Pool>(
+    client: impl StateProviderFactory + Clone,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
-    db: impl Database<Error = ProviderError> + Send + Sync,
-    state_provider: impl StateProvider + Clone + 'static,
+    db: impl Database<Error = ProviderError>,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
     bal_enabled: bool,
@@ -275,8 +272,6 @@ where
 
     let _enter = span.enter();
 
-    debug!(target: "flashblocks::payload_builder", "building new payload");
-
     let attributes = OpNextBlockEnvAttributes {
         timestamp: ctx.attributes().timestamp(),
         suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
@@ -298,7 +293,7 @@ where
         },
     };
 
-    info!(target: "flashblocks::payload_builder", ?attributes, "prepared next block attributes");
+    trace!(target: "flashblocks::payload_builder", ?attributes, "building new payload");
 
     // Prepare EVM environment.
     let evm_env = ctx
@@ -348,12 +343,12 @@ where
         )?;
 
         build_inner(
+            client,
             committed_payload,
             visited_transactions,
             gas_limit,
             best,
             pool,
-            state_provider,
             ctx,
             builder,
             &committed_state,
@@ -375,12 +370,12 @@ where
         )?;
 
         build_inner(
+            client,
             committed_payload,
             visited_transactions,
             gas_limit,
             best,
             pool,
-            state_provider,
             ctx,
             builder,
             &committed_state,
@@ -390,12 +385,12 @@ where
 }
 
 fn build_inner<'a, Txs, Ctx, Pool, R>(
+    client: impl StateProviderFactory + Clone,
     committed_payload: Option<&OpBuiltPayload>,
     visited_transactions: Vec<TxHash>,
     gas_limit: u64,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
-    state_provider: impl StateProvider + Clone + 'static,
     ctx: &Ctx,
     mut builder: impl BlockBuilderExt<
         Primitives = OpPrimitives,
@@ -454,7 +449,7 @@ where
             .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
             .is_some()
         {
-            warn!(target: "flashblocks::payload_builder", "payload build cancelled");
+            trace!(target: "flashblocks::payload_builder", "payload build cancelled");
             if let Some(best_payload) = committed_payload {
                 // we can return the previous best payload since we didn't include any new txs
                 return Ok((BuildOutcomeKind::Freeze(best_payload.clone()), None));
@@ -476,7 +471,8 @@ where
     }
 
     // 6. Build the block
-    let (build_outcome, bundle) = builder.finish_with_bundle(&state_provider)?;
+    let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+    let (build_outcome, bundle) = builder.finish_with_bundle(state_provider.as_ref())?;
 
     // 7. Seal the block
     let BlockBuilderOutcome {
@@ -488,12 +484,10 @@ where
 
     let sealed_block = Arc::new(block.sealed_block().clone());
 
-    let execution_outcome = ExecutionOutcome::new(
-        bundle,
-        vec![execution_result.receipts.clone()],
-        block.number(),
-        Vec::new(),
-    );
+    let execution_outcome = BlockExecutionOutput {
+        state: bundle,
+        result: execution_result,
+    };
 
     // create the executed block data
     let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {

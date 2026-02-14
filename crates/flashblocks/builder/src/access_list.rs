@@ -72,10 +72,7 @@ impl FlashblockAccessListConstruction {
     where
         F: FnOnce(&mut AccountChangesConstruction),
     {
-        let mut entry = self
-            .changes
-            .entry(address)
-            .or_insert_with(AccountChangesConstruction::default);
+        let mut entry = self.changes.entry(address).or_default();
 
         f(&mut entry);
     }

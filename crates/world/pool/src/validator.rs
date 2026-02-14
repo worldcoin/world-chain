@@ -17,14 +17,17 @@ use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use reth::transaction_pool::{
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
-    validate::ValidTransaction,
+use reth::{
+    api::ConfigureEvm,
+    transaction_pool::{
+        TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+        validate::ValidTransaction,
+    },
 };
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{Block, SealedBlock};
+use reth_primitives::{Block, NodePrimitives, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::{info, warn};
@@ -44,12 +47,12 @@ pub const MAX_U16: U256 = U256::from_limbs([0xFFFF, 0, 0, 0]);
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
-pub struct WorldChainTransactionValidator<Client, Tx>
+pub struct WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
 {
     /// The inner transaction validator.
-    inner: OpTransactionValidator<Client, Tx>,
+    inner: OpTransactionValidator<Client, Tx, Evm>,
     /// Validates World ID proofs contain a valid root in the WorldID account.
     root_validator: WorldChainRootValidator<Client>,
     /// The maximum number of PBH transactions a single World ID can execute in a given month.
@@ -62,16 +65,17 @@ where
     pbh_signature_aggregator: Address,
 }
 
-impl<Client, Tx> WorldChainTransactionValidator<Client, Tx>
+impl<Client, Tx, Evm> WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
         + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction,
+    Evm: ConfigureEvm,
 {
     /// Create a new [`WorldChainTransactionValidator`].
     pub fn new(
-        inner: OpTransactionValidator<Client, Tx>,
+        inner: OpTransactionValidator<Client, Tx, Evm>,
         root_validator: WorldChainRootValidator<Client>,
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
@@ -115,7 +119,7 @@ where
     }
 
     /// Get a reference to the inner transaction validator.
-    pub fn inner(&self) -> &OpTransactionValidator<Client, Tx> {
+    pub fn inner(&self) -> &OpTransactionValidator<Client, Tx, Evm> {
         &self.inner
     }
 
@@ -254,14 +258,17 @@ where
     }
 }
 
-impl<Client, Tx> TransactionValidator for WorldChainTransactionValidator<Client, Tx>
+impl<Client, Tx, Evm> TransactionValidator for WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
+    Evm: ConfigureEvm,
 {
     type Transaction = Tx;
+
+    type Block = <Evm::Primitives as NodePrimitives>::Block;
 
     async fn validate_transaction(
         &self,
@@ -275,10 +282,7 @@ where
         self.validate_pbh(origin, transaction).await
     }
 
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: reth_primitives_traits::Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         // Try and fetch the max pbh nonce and gas limit from the state at the latest block
         if let Ok(state) = self.inner.client().state_by_block_id(BlockId::latest()) {
             if let Some(max_pbh_nonce) = state
@@ -313,6 +317,7 @@ pub mod tests {
     use reth::transaction_pool::{
         Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
     };
+    use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
     use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
@@ -335,9 +340,11 @@ pub mod tests {
     const PBH_DEV_SIGNATURE_AGGREGATOR: Address =
         address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9");
 
+    type TestValidator =
+        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig>;
+
     /// Create a World Chain validator for testing
-    fn world_chain_validator()
-    -> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction> {
+    fn world_chain_validator() -> TestValidator {
         use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
         use crate::root::WorldChainRootValidator;
         use reth_optimism_node::txpool::OpTransactionValidator;
@@ -347,8 +354,18 @@ pub mod tests {
         use revm_primitives::U256;
 
         let client = MockEthProvider::default();
+        let header = Header::default();
+        let hash = header.hash_slow();
+        client.add_block(
+            hash,
+            Block {
+                header,
+                body: Default::default(),
+            },
+        );
+        let evm = OpEvmConfig::optimism(client.chain_spec.clone());
 
-        let validator = EthTransactionValidatorBuilder::new(client.clone())
+        let validator = EthTransactionValidatorBuilder::new(client.clone(), evm)
             .no_shanghai()
             .no_cancun()
             .build(InMemoryBlobStore::default());
@@ -373,11 +390,8 @@ pub mod tests {
         .expect("failed to create world chain validator")
     }
 
-    async fn setup() -> Pool<
-        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction>,
-        WorldChainOrdering<WorldChainPooledTransaction>,
-        InMemoryBlobStore,
-    > {
+    async fn setup()
+    -> Pool<TestValidator, WorldChainOrdering<WorldChainPooledTransaction>, InMemoryBlobStore> {
         let validator = world_chain_validator();
 
         // Fund 10 test accounts

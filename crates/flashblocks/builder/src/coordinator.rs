@@ -254,7 +254,6 @@ where
         })
         .call()?;
 
-    let state_provider = Arc::new(provider.state_by_block_hash(sealed_header.hash())?);
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
@@ -308,7 +307,7 @@ where
         };
 
         block_validator.validate(
-            state_provider.clone(),
+            provider,
             diff.clone(),
             &sealed_header,
             *flashblock.payload_id(),
@@ -348,6 +347,7 @@ where
             min_base_fee: None,
         };
 
+        let state_provider = provider.state_by_block_hash(sealed_header.hash())?;
         let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
         let cancel = CancelOnDrop::default();
 
@@ -361,13 +361,13 @@ where
         );
 
         let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-        let db = StateProviderDatabase::new(&state_provider);
+        let db = StateProviderDatabase::new(state_provider);
 
         let outcome = build(
+            provider,
             best,
             Option::<NoopTransactionPool<EthPooledTransaction>>::None,
             db,
-            state_provider.clone(),
             &builder_ctx,
             latest_payload.as_ref().map(|p| &p.0),
             false,
