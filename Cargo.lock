@@ -14197,7 +14197,6 @@ dependencies = [
  "reth-engine-primitives",
  "reth-eth-wire",
  "reth-eth-wire-types",
- "reth-evm",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
