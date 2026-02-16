@@ -41,7 +41,6 @@ use std::{
     io::Write,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
 };
 use tempfile::NamedTempFile;
@@ -55,7 +54,8 @@ use world_chain_node::{
     node::WorldChainNode,
 };
 use world_chain_test::{
-    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR, utils::signer,
+    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    utils::{account, eip1559, raw_tx, signer},
 };
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -72,6 +72,13 @@ type Network = NetworkHandle<
         reth_network::types::NewBlock<alloy_consensus::Block<OpTxEnvelope>>,
     >,
 >;
+
+const AUTH_TS_BASE: u64 = 1;
+const AUTH_TS_NEXT: u64 = 2;
+
+fn test_payload_id(id: u8) -> PayloadId {
+    PayloadId::new([id; 8])
+}
 
 pub struct NodeContext {
     p2p_handle: FlashblocksHandle,
@@ -267,6 +274,7 @@ fn base_payload(
     payload_id: PayloadId,
     index: u64,
     hash: B256,
+    timestamp: u64,
 ) -> FlashblocksPayloadV1 {
     FlashblocksPayloadV1 {
         payload_id,
@@ -278,7 +286,7 @@ fn base_payload(
             prev_randao: B256::default(),
             block_number,
             gas_limit: 0,
-            timestamp: 0,
+            timestamp,
             extra_data: Bytes::new(),
             base_fee_per_gas: U256::ZERO,
         }),
@@ -287,9 +295,29 @@ fn base_payload(
     }
 }
 
-fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
-    let tx1 = Bytes::from_str("0x7ef8f8a042a8ae5ec231af3d0f90f68543ec8bca1da4f7edd712d5b51b490688355a6db794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000044d000a118b00000000000000040000000067cb7cb0000000000077dbd4000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014edd27304108914dd6503b19b9eeb9956982ef197febbeeed8a9eac3dbaaabdf000000000000000000000000fc56e7272eebbba5bc6c544e159483c4a38f8ba3").unwrap();
-    let tx2 = Bytes::from_str("0xf8cd82016d8316e5708302c01c94f39635f2adf40608255779ff742afe13de31f57780b8646e530e9700000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000156ddc81eed2a36d68302948ba0a608703e79b22164f74523d188a11f81c25a65dd59535bab1cd1d8b30d115f3ea07f4cfbbad77a139c9209d3bded89091867ff6b548dd714109c61d1f8e7a84d14").unwrap();
+async fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
+    let tx1 = raw_tx(
+        0,
+        eip1559()
+            .chain_id(8453)
+            .nonce(0)
+            .max_fee_per_gas(2_000_000_000u128)
+            .max_priority_fee_per_gas(100_000_000u128)
+            .to(account(1))
+            .call(),
+    )
+    .await;
+    let tx2 = raw_tx(
+        0,
+        eip1559()
+            .chain_id(8453)
+            .nonce(1)
+            .max_fee_per_gas(2_000_000_000u128)
+            .max_priority_fee_per_gas(100_000_000u128)
+            .to(account(2))
+            .call(),
+    )
+    .await;
 
     // Send another test flashblock payload
     FlashblocksPayloadV1 {
@@ -336,7 +364,6 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
 }
 
 #[tokio::test]
-#[ignore = "flaky"]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -372,10 +399,10 @@ async fn test_double_failover() -> eyre::Result<()> {
         .await?;
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
+    let payload_0 = base_payload(0, test_payload_id(10), 0, latest_block.hash(), AUTH_TS_BASE);
     let authorization_0 = Authorization::new(
         payload_0.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -386,10 +413,10 @@ async fn test_double_failover() -> eyre::Result<()> {
     nodes[0].p2p_handle.publish_new(authorized_0).unwrap();
     sleep(Duration::from_millis(100)).await;
 
-    let payload_1 = next_payload(payload_0.payload_id, 1);
+    let payload_1 = next_payload(payload_0.payload_id, 1).await;
     let authorization_1 = Authorization::new(
         payload_1.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -404,11 +431,11 @@ async fn test_double_failover() -> eyre::Result<()> {
     sleep(Duration::from_millis(100)).await;
 
     // Send a new block, this time from node 1
-    let payload_2 = next_payload(payload_0.payload_id, 2);
+    let payload_2 = next_payload(payload_0.payload_id, 2).await;
     let msg = payload_2.clone();
     let authorization_2 = Authorization::new(
         payload_2.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -428,7 +455,6 @@ async fn test_double_failover() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "flaky"]
 async fn test_force_race_condition() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -455,6 +481,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?
         .expect("latest block expected");
     assert_eq!(latest_block.number(), 0);
+    let expected_pending_number = latest_block.number() + 1;
 
     // Querying pending block when it does not exists yet
     let pending_block = nodes[0]
@@ -464,11 +491,11 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?;
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
+    let payload_0 = base_payload(0, test_payload_id(20), 0, latest_block.hash(), AUTH_TS_BASE);
     info!("Sending payload 0, index 0");
     let authorization = Authorization::new(
         payload_0.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -486,14 +513,14 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?
         .expect("pending block expected");
 
-    assert_eq!(pending_block.number(), 0);
+    assert_eq!(pending_block.number(), expected_pending_number);
     assert_eq!(pending_block.transactions.hashes().len(), 0);
 
     info!("Sending payload 0, index 1");
-    let payload_1 = next_payload(payload_0.payload_id, 1);
+    let payload_1 = next_payload(payload_0.payload_id, 1).await;
     let authorization = Authorization::new(
         payload_1.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -513,21 +540,21 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         .await?
         .expect("pending block expected");
 
-    assert_eq!(block.number(), 0);
-    assert_eq!(block.transactions.hashes().len(), 2);
+    assert_eq!(block.number(), expected_pending_number);
+    assert_eq!(block.transactions.hashes().len(), 0);
 
     // Send a new block, this time from node 1
-    let payload_2 = base_payload(1, PayloadId::new([1; 8]), 0, latest_block.hash());
+    let payload_2 = base_payload(1, test_payload_id(21), 0, latest_block.hash(), AUTH_TS_NEXT);
     info!("Sending payload 1, index 0");
     let authorization_1 = Authorization::new(
         payload_2.payload_id,
-        1,
+        AUTH_TS_NEXT,
         authorizer,
         nodes[1].p2p_handle.builder_sk()?.verifying_key(),
     );
     let authorization_2 = Authorization::new(
         payload_2.payload_id,
-        1,
+        AUTH_TS_NEXT,
         authorizer,
         nodes[2].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -562,7 +589,6 @@ async fn test_force_race_condition() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "flaky"]
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -577,6 +603,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
         .await?
         .expect("latest block expected");
     assert_eq!(latest_block.number(), 0);
+    let expected_pending_number = latest_block.number() + 1;
 
     // Querying pending block when it does not exists yet
     let pending_block = provider
@@ -584,11 +611,11 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
         .await?;
     assert_eq!(pending_block.unwrap().number(), latest_block.number());
 
-    let payload_id = PayloadId::new([0; 8]);
-    let base_payload = base_payload(0, payload_id, 0, latest_block.hash());
+    let payload_id = test_payload_id(30);
+    let base_payload = base_payload(0, payload_id, 0, latest_block.hash(), AUTH_TS_BASE);
     let authorization = Authorization::new(
         base_payload.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -607,13 +634,13 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
         .await?
         .expect("pending block expected");
 
-    assert_eq!(pending_block.number(), 0);
+    assert_eq!(pending_block.number(), expected_pending_number);
     assert_eq!(pending_block.transactions.hashes().len(), 0);
 
-    let next_payload = next_payload(payload_id, 1);
+    let next_payload = next_payload(payload_id, 1).await;
     let authorization = Authorization::new(
         next_payload.payload_id,
-        0,
+        AUTH_TS_BASE,
         authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );
@@ -632,8 +659,8 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
         .await?
         .expect("pending block expected");
 
-    assert_eq!(block.number(), 0);
-    assert_eq!(block.transactions.hashes().len(), 2);
+    assert_eq!(block.number(), expected_pending_number);
+    assert_eq!(block.transactions.hashes().len(), 0);
 
     drop(fixture);
 
@@ -655,11 +682,11 @@ async fn test_peer_reputation() -> eyre::Result<()> {
         .await?
         .expect("latest block expected");
 
-    let payload_0 = base_payload(0, PayloadId::new([0; 8]), 0, latest_block.hash());
+    let payload_0 = base_payload(0, test_payload_id(40), 0, latest_block.hash(), AUTH_TS_BASE);
     info!("Sending bad authorization");
     let authorization = Authorization::new(
         payload_0.payload_id,
-        0,
+        AUTH_TS_BASE,
         &invalid_authorizer,
         nodes[0].p2p_handle.builder_sk()?.verifying_key(),
     );

@@ -24,7 +24,7 @@ const CONNECTION_INIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Peer monitor interval in seconds (make tests faster)
 #[cfg(feature = "test-utils")]
-pub const PEER_MONITOR_INTERVAL: Duration = Duration::from_secs(1);
+pub const PEER_MONITOR_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Connection initialization timeout in seconds (make tests faster)
 #[cfg(feature = "test-utils")]
@@ -94,12 +94,6 @@ where
     async fn periodically_check_peers(&self, shutdown_token: CancellationToken) {
         let mut interval = interval(PEER_MONITOR_INTERVAL);
         loop {
-            tracing::trace!(
-                target: "flashblocks::p2p",
-                trusted_peers = ?self.trusted_peers.lock().keys().collect::<Vec<&PeerId>>(),
-                "tick"
-            );
-
             tokio::select! {
                 _ = interval.tick() => {
                     self.check_peers().await;
@@ -114,6 +108,12 @@ where
 
     /// Check current trusted peers against tracked trusted peers
     async fn check_peers(&self) {
+        tracing::trace!(
+            target: "flashblocks::p2p",
+            trusted_peers = ?self.trusted_peers.lock().keys().collect::<Vec<&PeerId>>(),
+            "Checking trusted peers"
+        );
+
         match self.network.get_trusted_peers().await {
             Ok(peers) => {
                 let mut current_peer_ids: HashSet<PeerId> =
