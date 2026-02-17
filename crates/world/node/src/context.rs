@@ -20,10 +20,10 @@ use flashblocks_p2p::{
     monitor::PeerMonitor,
     protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol},
 };
-use reth_network::protocol::IntoRlpxSubProtocol;
 use flashblocks_primitives::p2p::Authorization;
 use flashblocks_rpc::eth::FlashblocksEthApiBuilder;
 use hex::ToHex;
+use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     NodeAdapter, NodeComponentsBuilder,
@@ -111,9 +111,6 @@ where
         // Register flashblocks sub-protocol BEFORE starting the network.
         // This ensures the "flblk" capability is included in the RLPx handshake
         // for all peer connections, including the very first trusted peer connections.
-        // Previously, the protocol was registered after network start via an async
-        // message, creating a race where peers could complete handshake without
-        // the "flblk" capability.
         if let Some(ref flashblocks_handle) = flashblocks_p2p_handle {
             let network_handle = network.handle();
             let flashblocks_rlpx = FlashblocksP2PProtocol {

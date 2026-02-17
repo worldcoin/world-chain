@@ -196,6 +196,12 @@ impl FlashblocksHandle {
 
 /// Main protocol handler for the flashblocks P2P protocol.
 ///
+/// # Important
+///
+/// You must call `NetworkBuilder::add_rlpx_sub_protocol` to register the rlpx sub protocol
+/// _before_ starting the network to avoid a race condition where trusted peers are connected
+/// before the protocol is live.
+///
 /// This handler manages incoming and outgoing connections, coordinates flashblock publishing,
 /// and maintains the protocol state across all peer connections. It implements the core
 /// logic for multi-builder coordination and failover scenarios in HA sequencer setups.
