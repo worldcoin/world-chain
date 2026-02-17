@@ -11,3 +11,7 @@ ed25519-dalek.workspace = true
 clap.workspace = true
 eyre.workspace = true
 hex.workspace = true
+
+[[example]]
+name = "sk-to-vk"
+path = "examples/sk_to_vk.rs"
