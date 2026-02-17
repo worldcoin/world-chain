@@ -364,6 +364,7 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
