@@ -174,14 +174,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     if Ok(authorized.authorization.builder_vk)
                         == this.protocol.handle.builder_sk().map(|s| s.verifying_key())
                     {
-                        tracing::warn!(
+                        tracing::trace!(
                             target: "flashblocks::p2p",
                             peer_id = %this.peer_id,
                             "received our own message from peer",
                         );
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                         continue;
                     }
 
