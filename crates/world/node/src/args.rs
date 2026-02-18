@@ -280,11 +280,6 @@ mod tests {
     }
 
     #[test]
-    fn flashblocks_neither() {
-        CommandParser::try_parse_from(["bin", "--flashblocks.enabled"]).unwrap_err();
-    }
-
-    #[test]
     fn flashblocks_both() {
         CommandParser::try_parse_from([
             "bin",

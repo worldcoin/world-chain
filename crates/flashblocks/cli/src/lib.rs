@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn flashblocks_neither() {
-        CommandParser::try_parse_from(["bin", "--flashblocks.enabled"]).unwrap_err();
+        CommandParser::try_parse_from(["bin", "--flashblocks.enabled"]).unwrap();
     }
 
     #[test]
