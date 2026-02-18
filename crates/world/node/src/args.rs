@@ -1,3 +1,4 @@
+use ::eyre::eyre::bail;
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
@@ -106,6 +107,14 @@ impl WorldChainArgs {
                 }
             }
             _ => {
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.authorizer_vk.is_none()
+                    && flashblocks.override_authorizer_sk.is_none()
+                {
+                    bail!(
+                        "--flashblocks.authorizer_vk or --flashblocks.override_authorizer_sk must be set for non world/sepolia chains"
+                    );
+                }
                 if self.pbh.entrypoint == Address::default() {
                     warn!("missing `--builder.pbh_entrypoint`, using default")
                 }

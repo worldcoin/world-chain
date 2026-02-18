@@ -13,7 +13,6 @@ pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.enabled",
         id = "flashblocks.enabled",
-        requires = "authorizer",
         required = false
     )]
     pub enabled: bool,
