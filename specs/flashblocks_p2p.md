@@ -48,6 +48,62 @@ We inherit all terminology from the original Flashblocks spec (Sequencer, Block 
 * **Flashblocks P2P Network** – The peer-to-peer overlay network (using Ethereum’s devp2p protocols) through which flashblock messages are gossiped. Participants include all builders and one or more subscribing nodes (e.g. RPC providers, possibly other sequencer nodes in standby).
 * **Publisher** – The current active builder that is publishing flashblocks for the ongoing L2 block. In an HA setup, the role of publisher can transfer to a new builder if the sequencer fails over.
 
+## Flashblocks Sequence Diagram
+
+```mermaid
+%%{init: {'sequence': {'noteMargin': 15}} }%%
+sequenceDiagram
+    participant ON as op-node<br/>(Sequencer)
+    participant RB as rollup-boost<br/>(Authorizer)
+    participant B as world-chain reth<br/>(Builder)
+    participant P2P as P2P Peers<br/>(Receiving Nodes)
+
+    Note over ON,P2P: ── Slot N (T=0s) ── FCU + Authorization
+    ON->>RB: engine_forkchoiceUpdatedV3(fcs, attributes)
+    Note over RB: Derive payload_id deterministically:<br/>payload_id = hash(parent_block_hash, attributes)<br/>(same algorithm as the builder)
+    Note over RB: Create Authorization token:<br/>sign(payload_id ‖ timestamp ‖ builder_vk)<br/>with authorizer_sk
+    RB->>B: flashblocks_forkchoiceUpdatedV3(fcs, attributes, authorization)
+    Note over B: Derive same payload_id from attributes<br/>Match authorization.payload_id to job
+    B-->>RB: ForkchoiceUpdated { payload_id }
+    RB-->>ON: ForkchoiceUpdated { payload_id }
+
+    Note over ON,P2P: Flashblock production (T≈0s–2s)
+    Note over B: start_publishing(auth)
+    B->>P2P: P2P: StartPublish (Authorized)
+    Note over P2P: Verify authorizer_sig<br/>Verify builder_sig<br/>Track active publisher
+
+    Note over B: spawn_build_job()<br/>reads txpool, builds payload
+
+    Note over B: T≈200ms: flashblock interval fires
+    Note over B: Flashblock #0 diff:<br/>empty → current best
+    B->>P2P: P2P: FlashblocksPayloadV1 #0 (Authorized)
+    Note over P2P: Verify signatures<br/>Apply flashblock #0
+
+    Note over B: ~50ms recommits<br/>rebuild with new txs
+
+    Note over B: T≈400ms: flashblock interval fires
+    Note over B: Flashblock #1 diff:<br/>#0 → new best (new txs only)
+    B->>P2P: P2P: FlashblocksPayloadV1 #1 (Authorized)
+
+    Note over B: ~50ms recommits...
+
+    Note over B: T≈600ms: flashblock interval fires
+    B->>P2P: P2P: FlashblocksPayloadV1 #2 (Authorized)
+
+    Note over B: ... repeats every ~200ms until deadline
+
+    Note over ON,P2P: Seal the block (T≈2s)
+    ON->>RB: engine_getPayloadV3(payload_id)
+    RB->>B: engine_getPayloadV3(payload_id)
+    Note over B: Return committed payload<br/>(state at last flashblock)
+    B-->>RB: ExecutionPayloadEnvelopeV3
+    RB-->>ON: ExecutionPayloadEnvelopeV3
+    Note over B: stop_publishing()
+    B->>P2P: P2P: StopPublish (Authorized)
+    Note over P2P: Verify signatures<br/>Remove active publisher
+    Note over ON,P2P: ── Slot N+1 (T≈2s) ──
+```
+
 ## Data Structures
 
 The fundamental flashblock data structures (`FlashblocksPayloadV1`, `ExecutionPayloadFlashblockResultV1`, `ExecutionPayloadStaticV1`, and the various Metadata containers) remain unchanged. Flashblocks are still represented as a sequence of incremental payloads culminating in a full block.
@@ -190,4 +246,3 @@ In the P2P-enhanced design, Rollup-Boost’s interaction with the external block
 * **No Inline Validation by Sequencer:** In the original design, Rollup-Boost would validate each flashblock against the local execution engine before propagating it. In the P2P model, this is not done synchronously for each flashblock (it would negate some latency benefits). Instead, trust is managed via the Authorization. The sequencer trusts its chosen builder to only send valid blocks (and will ultimately verify the final block when `engine_getPayload` is called). Peers trust the flashblocks because they trust the Rollup-Boost’s signature. 
 
 In summary, Rollup-Boost’s role shifts from being a **middleman for data** to being a **controller and coordinator**. It authorizes the builder and informs the network about which builder is active, but it doesn’t need to ferry every flashblock through itself. This streamlines the path from builder to RPC providers.
-
