@@ -60,15 +60,15 @@ impl WorldChainArgs {
 
         match spec.chain.named() {
             Some(NamedChain::World) => {
-                if let Some(flashblocks) = &mut self.flashblocks {
-                    if flashblocks.authorizer_vk.is_none()
-                        && flashblocks.override_authorizer_sk.is_none()
-                    {
-                        flashblocks.authorizer_vk = Some(parse_vk(
-                            "1361edebf7fd03a72aa23748e17eb5f6901b544cf80d3f410afa5e6e261d7281",
-                        )?);
-                    }
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.authorizer_vk.is_none()
+                    && flashblocks.override_authorizer_sk.is_none()
+                {
+                    flashblocks.authorizer_vk = Some(parse_vk(
+                        "1361edebf7fd03a72aa23748e17eb5f6901b544cf80d3f410afa5e6e261d7281",
+                    )?);
                 }
+
                 if self.pbh.entrypoint == Address::default() {
                     self.pbh.entrypoint =
                         Address::from_str("0x0000000000A21818Ee9F93BB4f2AAad305b5397C")?;
@@ -83,15 +83,15 @@ impl WorldChainArgs {
                 }
             }
             Some(NamedChain::WorldSepolia) => {
-                if let Some(flashblocks) = &mut self.flashblocks {
-                    if flashblocks.authorizer_vk.is_none()
-                        && flashblocks.override_authorizer_sk.is_none()
-                    {
-                        flashblocks.authorizer_vk = Some(parse_vk(
-                            "3b24dba9803930d6b31c85d9809e03f565b05eba0dd59cfd248e4cc95ebd3492",
-                        )?);
-                    }
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.authorizer_vk.is_none()
+                    && flashblocks.override_authorizer_sk.is_none()
+                {
+                    flashblocks.authorizer_vk = Some(parse_vk(
+                        "3b24dba9803930d6b31c85d9809e03f565b05eba0dd59cfd248e4cc95ebd3492",
+                    )?);
                 }
+
                 if self.pbh.entrypoint == Address::default() {
                     self.pbh.entrypoint =
                         Address::from_str("0x0000000000A21818Ee9F93BB4f2AAad305b5397C")?;
