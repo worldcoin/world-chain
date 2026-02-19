@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
@@ -6,7 +8,7 @@ use alloy_consensus::{
     Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
     proofs::ordered_trie_root_with_encoder,
 };
-use alloy_eips::{Decodable2718, Encodable2718, merge::BEACON_NONCE};
+use alloy_eips::{Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
@@ -17,6 +19,7 @@ use reth::{
     payload::PayloadBuilderAttributes,
 };
 use reth_basic_payload_builder::PayloadConfig;
+use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
@@ -195,58 +198,67 @@ impl Flashblock {
     }
 }
 
-impl TryFrom<Flashblock> for RecoveredBlock<Block<OpTxEnvelope>> {
-    type Error = eyre::Report;
+/// Converts a reduced collection of flashblocks into a [`RecoveredBlock`]
+pub fn recovered_block_from_flashblocks(
+    chain_spec: Arc<OpChainSpec>,
+    flashblock: Flashblock,
+) -> eyre::Result<RecoveredBlock<Block<OpTxEnvelope>>> {
+    let base = flashblock
+        .base()
+        .ok_or(eyre!("Flashblock is missing base payload"))?;
 
-    /// Do _not_ use this method unless all flashblocks have been properly reduced
-    fn try_from(value: Flashblock) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
-        let base = value
-            .base()
-            .ok_or(eyre!("Flashblock is missing base payload"))?;
-        let diff = value.flashblock.diff.clone();
-        let header = Header {
-            parent_beacon_block_root: None,
-            state_root: diff.state_root,
-            receipts_root: diff.receipts_root,
-            logs_bloom: diff.logs_bloom,
-            withdrawals_root: Some(diff.withdrawals_root),
-            parent_hash: base.parent_hash,
-            base_fee_per_gas: Some(base.base_fee_per_gas.to()),
-            beneficiary: base.fee_recipient,
-            transactions_root: ordered_trie_root_with_encoder(&diff.transactions, |tx, e| {
-                *e = tx.as_ref().to_vec()
-            }),
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            blob_gas_used: Some(0),
-            difficulty: U256::ZERO,
-            number: base.block_number,
-            gas_limit: base.gas_limit,
-            gas_used: diff.gas_used,
-            timestamp: base.timestamp,
-            extra_data: base.extra_data.clone(),
-            mix_hash: base.prev_randao,
-            nonce: BEACON_NONCE.into(),
-            requests_hash: None, // TODO: Isthmus
-            excess_blob_gas: Some(0),
-        };
+    let diff = flashblock.flashblock.diff.clone();
 
-        let transactions_encoded = diff
-            .transactions
-            .iter()
-            .map(|t| <OpPrimitives as NodePrimitives>::SignedTx::decode_2718(&mut t.as_ref()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
+    let timestamp = base.timestamp;
 
-        let body = BlockBody {
-            transactions: transactions_encoded,
-            withdrawals: Some(alloy_eips::eip4895::Withdrawals(diff.withdrawals.to_vec())),
-            ommers: vec![],
-        };
+    let requests_hash = if chain_spec.is_isthmus_active_at_timestamp(timestamp) {
+        Some(EMPTY_REQUESTS_HASH)
+    } else {
+        None
+    };
 
-        Block::new(header, body)
-            .try_into_recovered()
-            .map_err(|e| eyre!("Failed to recover block: {:?}", e))
-    }
+    let header = Header {
+        parent_beacon_block_root: None,
+        state_root: diff.state_root,
+        receipts_root: diff.receipts_root,
+        logs_bloom: diff.logs_bloom,
+        withdrawals_root: Some(diff.withdrawals_root),
+        parent_hash: base.parent_hash,
+        base_fee_per_gas: Some(base.base_fee_per_gas.to()),
+        beneficiary: base.fee_recipient,
+        transactions_root: ordered_trie_root_with_encoder(&diff.transactions, |tx, e| {
+            *e = tx.as_ref().to_vec()
+        }),
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        blob_gas_used: Some(0),
+        difficulty: U256::ZERO,
+        number: base.block_number,
+        gas_limit: base.gas_limit,
+        gas_used: diff.gas_used,
+        timestamp: base.timestamp,
+        extra_data: base.extra_data.clone(),
+        mix_hash: base.prev_randao,
+        nonce: BEACON_NONCE.into(),
+        requests_hash,
+        excess_blob_gas: Some(0),
+    };
+
+    let transactions_encoded = diff
+        .transactions
+        .iter()
+        .map(|t| <OpPrimitives as NodePrimitives>::SignedTx::decode_2718(&mut t.as_ref()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
+
+    let body = BlockBody {
+        transactions: transactions_encoded,
+        withdrawals: Some(alloy_eips::eip4895::Withdrawals(diff.withdrawals.to_vec())),
+        ommers: vec![],
+    };
+
+    Block::new(header, body)
+        .try_into_recovered()
+        .map_err(|e| eyre!("Failed to recover block: {:?}", e))
 }
 
 /// A collection of flashblocks mapped to the same payload ID.
@@ -364,12 +376,146 @@ impl Flashblocks {
     }
 }
 
-impl TryFrom<Flashblocks> for RecoveredBlock<Block<OpTxEnvelope>> {
-    type Error = eyre::Report;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxEip1559;
+    use alloy_primitives::{Address, B256, Bloom, Bytes, TxKind};
+    use alloy_signer_local::PrivateKeySigner;
+    use op_alloy_consensus::OpTypedTransaction;
+    use op_alloy_network::TxSignerSync;
+    use reth_optimism_chainspec::OpChainSpecBuilder;
+    use std::sync::Arc;
 
-    /// Converts a collection of flashblocks into a single `RecoveredBlock`.
-    fn try_from(value: Flashblocks) -> Result<RecoveredBlock<Block<OpTxEnvelope>>, Self::Error> {
-        let reduced = Flashblock::reduce(value)?;
-        reduced.try_into()
+    /// Creates a signed EIP-1559 transaction encoded as 2718 bytes.
+    fn signed_tx_bytes(signer: &PrivateKeySigner, nonce: u64, chain_id: u64) -> Bytes {
+        let mut tx = TxEip1559 {
+            chain_id,
+            nonce,
+            max_fee_per_gas: 2_000_000_000,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::with_last_byte(0x01)),
+            gas_limit: 21_000,
+            value: U256::from(100),
+            input: Bytes::default(),
+            access_list: Default::default(),
+        };
+
+        let sig = signer
+            .sign_transaction_sync(&mut tx)
+            .expect("signing works");
+        let typed = OpTypedTransaction::Eip1559(tx);
+        let envelope = OpTxEnvelope::from((typed, sig));
+        let mut buf = Vec::new();
+        envelope.encode_2718(&mut buf);
+        Bytes::from(buf)
+    }
+
+    /// Builds a single-flashblock with the given base, transactions, and gas_used.
+    fn make_flashblock(
+        base: ExecutionPayloadBaseV1,
+        transactions: Vec<Bytes>,
+        gas_used: u64,
+    ) -> Flashblock {
+        Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                payload_id: PayloadId::default(),
+                index: 0,
+                base: Some(base),
+                diff: ExecutionPayloadFlashblockDeltaV1 {
+                    state_root: B256::from([0xAA; 32]),
+                    receipts_root: B256::from([0xBB; 32]),
+                    logs_bloom: Bloom::default(),
+                    gas_used,
+                    block_hash: B256::from([0xCC; 32]),
+                    transactions,
+                    withdrawals: vec![],
+                    withdrawals_root: B256::ZERO,
+                    access_list_data: None,
+                },
+                metadata: FlashblockMetadata::default(),
+            },
+        }
+    }
+
+    #[test]
+    fn recovered_block_from_flashblocks_roundtrip() {
+        let chain_spec = Arc::new(
+            OpChainSpecBuilder::base_mainnet()
+                .ecotone_activated()
+                .build(),
+        );
+
+        let signer = PrivateKeySigner::from_bytes(&[1u8; 32].into()).expect("valid private key");
+        let chain_id = chain_spec.chain().id();
+
+        let tx0 = signed_tx_bytes(&signer, 0, chain_id);
+        let tx1 = signed_tx_bytes(&signer, 1, chain_id);
+
+        let base = ExecutionPayloadBaseV1 {
+            parent_beacon_block_root: B256::from([0x05; 32]),
+            parent_hash: B256::from([0x06; 32]),
+            fee_recipient: Address::with_last_byte(0x42),
+            prev_randao: B256::from([0x07; 32]),
+            block_number: 123,
+            gas_limit: 30_000_000,
+            timestamp: 1_700_000_000,
+            extra_data: Bytes::from(b"test".to_vec()),
+            base_fee_per_gas: U256::from(1_000_000_000u64),
+        };
+
+        let flashblock = make_flashblock(base.clone(), vec![tx0.clone(), tx1.clone()], 42_000);
+
+        // Act
+        let recovered = recovered_block_from_flashblocks(chain_spec, flashblock)
+            .expect("conversion should succeed");
+
+        // Assert header fields sourced from base
+        let header = recovered.header();
+        assert_eq!(header.parent_hash, base.parent_hash);
+        assert_eq!(header.beneficiary, base.fee_recipient);
+        assert_eq!(header.number, base.block_number);
+        assert_eq!(header.gas_limit, base.gas_limit);
+        assert_eq!(header.timestamp, base.timestamp);
+        assert_eq!(header.extra_data, base.extra_data);
+        assert_eq!(header.mix_hash, base.prev_randao);
+        assert_eq!(
+            header.base_fee_per_gas,
+            Some(base.base_fee_per_gas.to::<u64>())
+        );
+
+        // Assert header fields sourced from diff
+        assert_eq!(header.state_root, B256::from([0xAA; 32]));
+        assert_eq!(header.receipts_root, B256::from([0xBB; 32]));
+        assert_eq!(header.logs_bloom, Bloom::default());
+        assert_eq!(header.gas_used, 42_000);
+        assert_eq!(header.withdrawals_root, Some(B256::ZERO));
+
+        // Assert body: transactions roundtrip
+        let body = recovered.body();
+        assert_eq!(body.transactions.len(), 2);
+        for (original_bytes, recovered_tx) in [&tx0, &tx1].iter().zip(body.transactions.iter()) {
+            let mut re_encoded = Vec::new();
+            recovered_tx.encode_2718(&mut re_encoded);
+            assert_eq!(
+                original_bytes.as_ref(),
+                re_encoded.as_slice(),
+                "transaction encoding must roundtrip losslessly"
+            );
+        }
+
+        // Assert body: withdrawals are present and empty
+        let withdrawals = body
+            .withdrawals
+            .as_ref()
+            .expect("withdrawals should be present");
+        assert!(withdrawals.is_empty());
+
+        // Assert senders were recovered correctly
+        assert_eq!(recovered.senders().len(), 2);
+        assert!(
+            recovered.senders().iter().all(|s| *s == signer.address()),
+            "all transactions were signed by the same key"
+        );
     }
 }

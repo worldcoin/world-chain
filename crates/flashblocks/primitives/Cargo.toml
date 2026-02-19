@@ -15,6 +15,7 @@ reth-basic-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -31,3 +32,7 @@ blake3.workspace = true
 ed25519-dalek.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+alloy-signer-local.workspace = true
+op-alloy-network.workspace = true

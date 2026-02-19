@@ -7,7 +7,8 @@ use alloy_primitives::B256;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{
-    access_list::FlashblockAccessList, ed25519_dalek::SigningKey, p2p::Authorization,
+    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
+    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
 };
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -20,10 +21,13 @@ use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
 
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
+};
 use tokio::runtime::Handle;
 use tracing::{debug, warn};
 
@@ -140,6 +144,7 @@ impl<Client, Tasks, Builder> PayloadJobGenerator
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + Unpin
         + 'static,
@@ -199,7 +204,7 @@ where
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
         let maybe_pre_state = self
-            .check_for_pre_state(&config.attributes)
+            .check_for_pre_state(self.client.chain_spec(), &config.attributes)
             .inspect_err(|_| {
                 self.metrics.inc_job_creation_errors();
             })?;
@@ -356,6 +361,7 @@ where
     /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
+        chain_spec: Arc<OpChainSpec>,
         attributes: &<Builder as PayloadBuilder>::Attributes,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
@@ -373,12 +379,11 @@ where
             debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
 
             let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                flashblock.clone().try_into().map_err(|_| {
+                recovered_block_from_flashblocks(chain_spec, flashblock.clone()).map_err(|e| {
                     PayloadBuilderError::Other(
-                        eyre!("Failed to convert flashblock to recovered block").into(),
+                        eyre!("Failed to recover block from flashblocks: {}", e).into(),
                     )
                 })?;
-
             let sealed = block.into_sealed_block();
 
             let payload = OpBuiltPayload::new(
