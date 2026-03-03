@@ -5952,7 +5952,7 @@ dependencies = [
  "combine",
  "libc",
  "mach2 0.4.3",
- "nix",
+ "nix 0.26.4",
  "sysctl",
  "thiserror 1.0.69",
  "widestring",
@@ -6055,6 +6055,18 @@ dependencies = [
  "libc",
  "memoffset 0.7.1",
  "pin-utils",
+]
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.11.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -14268,6 +14280,7 @@ dependencies = [
  "futures",
  "hex",
  "jsonrpsee",
+ "nix 0.29.0",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
@@ -14299,6 +14312,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-tracing",
  "reth-transaction-pool",

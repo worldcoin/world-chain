@@ -51,6 +51,9 @@ axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
+nix.workspace = true
+alloy-consensus.workspace = true
+reth-primitives-traits.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true

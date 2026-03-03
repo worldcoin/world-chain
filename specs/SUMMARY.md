@@ -1,5 +1,6 @@
 # Summary
 - [Introduction](./overview.md)
+- [Health Checks](./health_checks.md)
 - [Priority Blockspace for Humans](./pbh/overview.md)
     - [Architecture](./pbh/architecture.md)
     - [PBH Transactions](./pbh/txs.md)

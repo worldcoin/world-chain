@@ -1,10 +1,15 @@
-use std::{sync::Mutex, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use tokio::time::Instant;
 
+use alloy_consensus::BlockHeader;
 use async_trait::async_trait;
 use reth_network_api::{NetworkInfo, PeersInfo};
-use reth_provider::BlockNumReader;
+use reth_provider::{BlockNumReader, HeaderProvider};
 
 use super::{CheckResult, HealthCheck};
 
@@ -129,6 +134,112 @@ impl<P: BlockNumReader + Send + Sync + 'static> HealthCheck for BlockProgressChe
                     }
                 }
             }
+        }
+    }
+}
+
+/// Fails if the latest block's timestamp is older than `max_age` relative to wall-clock time.
+pub struct BlockTimestampCheck<P> {
+    pub max_age: Duration,
+    pub provider: P,
+}
+
+#[async_trait]
+impl<P> HealthCheck for BlockTimestampCheck<P>
+where
+    P: BlockNumReader + HeaderProvider + Send + Sync + 'static,
+{
+    fn name(&self) -> &'static str {
+        "block_timestamp"
+    }
+
+    async fn check(&self) -> CheckResult {
+        let block_num = match self.provider.best_block_number() {
+            Ok(n) => n,
+            Err(e) => {
+                return CheckResult {
+                    healthy: false,
+                    detail: Some(format!("provider error: {e}")),
+                }
+            }
+        };
+
+        let header = match self.provider.header_by_number(block_num) {
+            Ok(Some(h)) => h,
+            Ok(None) => {
+                return CheckResult {
+                    healthy: false,
+                    detail: Some(format!("no header for block {block_num}")),
+                }
+            }
+            Err(e) => {
+                return CheckResult {
+                    healthy: false,
+                    detail: Some(format!("provider error: {e}")),
+                }
+            }
+        };
+
+        let block_ts = header.timestamp();
+        let now_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let age_secs = now_ts.saturating_sub(block_ts);
+        let max_age_secs = self.max_age.as_secs();
+        let healthy = age_secs <= max_age_secs;
+        CheckResult {
+            healthy,
+            detail: (!healthy)
+                .then(|| format!("latest block is {age_secs}s old, limit {max_age_secs}s")),
+        }
+    }
+}
+
+/// Fails if available disk space on the filesystem containing `path` drops below `min_bytes`.
+pub struct DiskSpaceCheck {
+    pub path: PathBuf,
+    pub min_bytes: u64,
+}
+
+fn available_bytes(path: &Path) -> eyre::Result<u64> {
+    let stat = nix::sys::statvfs::statvfs(path)?;
+    Ok(u64::from(stat.blocks_available()) * u64::from(stat.fragment_size()))
+}
+
+fn format_gib(bytes: u64) -> f64 {
+    bytes as f64 / (1u64 << 30) as f64
+}
+
+#[async_trait]
+impl HealthCheck for DiskSpaceCheck {
+    fn name(&self) -> &'static str {
+        "disk_space"
+    }
+
+    async fn check(&self) -> CheckResult {
+        match available_bytes(&self.path) {
+            Ok(avail) => {
+                let healthy = avail >= self.min_bytes;
+                CheckResult {
+                    healthy,
+                    detail: (!healthy).then(|| {
+                        format!(
+                            "{:.1} GiB free on {}, need {:.1} GiB",
+                            format_gib(avail),
+                            self.path.display(),
+                            format_gib(self.min_bytes),
+                        )
+                    }),
+                }
+            }
+            Err(e) => CheckResult {
+                healthy: false,
+                detail: Some(format!(
+                    "failed to read disk stats for {}: {e}",
+                    self.path.display()
+                )),
+            },
         }
     }
 }
@@ -270,5 +381,126 @@ mod tests {
         let result = check.check().await;
         assert!(result.healthy);
         assert!(result.detail.is_none());
+    }
+
+    // ---- BlockTimestampCheck tests ----
+
+    use alloy_consensus::Header as AlloyHeader;
+    use reth_primitives_traits::SealedHeader;
+    use std::ops::RangeBounds;
+
+    #[derive(Clone)]
+    struct MockTimestampProvider {
+        block_num: u64,
+        block_timestamp: u64,
+    }
+
+    impl BlockHashReader for MockTimestampProvider {
+        fn block_hash(&self, _num: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+        fn canonical_hashes_range(
+            &self,
+            _s: BlockNumber,
+            _e: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(vec![])
+        }
+    }
+
+    impl BlockNumReader for MockTimestampProvider {
+        fn chain_info(&self) -> ProviderResult<ChainInfo> {
+            Ok(ChainInfo { best_hash: B256::ZERO, best_number: self.block_num })
+        }
+        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.block_num)
+        }
+        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.block_num)
+        }
+        fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            Ok(None)
+        }
+    }
+
+    impl HeaderProvider for MockTimestampProvider {
+        type Header = AlloyHeader;
+
+        fn header(&self, _hash: alloy_primitives::BlockHash) -> ProviderResult<Option<Self::Header>> {
+            Ok(None)
+        }
+
+        fn header_by_number(&self, _num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+            Ok(Some(AlloyHeader { timestamp: self.block_timestamp, ..Default::default() }))
+        }
+
+        fn headers_range(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<Self::Header>> {
+            Ok(vec![])
+        }
+
+        fn sealed_header(
+            &self,
+            _num: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+            Ok(None)
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn block_timestamp_recent_healthy() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let provider = MockTimestampProvider { block_num: 1, block_timestamp: now - 10 };
+        let check = BlockTimestampCheck { max_age: Duration::from_secs(60), provider };
+        let result = check.check().await;
+        assert!(result.healthy);
+        assert!(result.detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn block_timestamp_stale_unhealthy() {
+        let provider = MockTimestampProvider { block_num: 1, block_timestamp: 0 };
+        let check = BlockTimestampCheck { max_age: Duration::from_secs(60), provider };
+        let result = check.check().await;
+        assert!(!result.healthy);
+        assert!(result.detail.is_some());
+    }
+
+    // ---- DiskSpaceCheck tests ----
+
+    #[tokio::test]
+    async fn disk_space_zero_min_bytes_healthy() {
+        let check = DiskSpaceCheck { path: std::env::temp_dir(), min_bytes: 0 };
+        let result = check.check().await;
+        assert!(result.healthy);
+    }
+
+    #[tokio::test]
+    async fn disk_space_u64_max_unhealthy() {
+        let check = DiskSpaceCheck { path: std::env::temp_dir(), min_bytes: u64::MAX };
+        let result = check.check().await;
+        assert!(!result.healthy);
+        assert!(result.detail.is_some());
+    }
+
+    #[tokio::test]
+    async fn disk_space_bad_path_unhealthy() {
+        let check = DiskSpaceCheck {
+            path: PathBuf::from("/nonexistent/path/that/does/not/exist"),
+            min_bytes: 0,
+        };
+        let result = check.check().await;
+        assert!(!result.healthy);
+        assert!(result.detail.is_some());
     }
 }

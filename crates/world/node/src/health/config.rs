@@ -1,11 +1,14 @@
-use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 use reth_network_api::{NetworkInfo, PeersInfo};
-use reth_provider::BlockNumReader;
+use reth_provider::{BlockNumReader, HeaderProvider};
 use serde::Deserialize;
 
 use super::{
-    checks::{BlockNumberMode, BlockProgressCheck, HeartbeatCheck, MinPeersCheck, NotSyncingCheck},
+    checks::{
+        BlockNumberMode, BlockProgressCheck, BlockTimestampCheck, DiskSpaceCheck, HeartbeatCheck,
+        MinPeersCheck, NotSyncingCheck,
+    },
     HealthCheck, HealthServer, Probe,
 };
 
@@ -40,6 +43,15 @@ pub enum CheckConfig {
         #[serde(default)]
         mode: BlockNumberMode,
     },
+    BlockTimestamp {
+        #[serde(default = "defaults::max_age_secs")]
+        max_age_secs: u64,
+    },
+    DiskSpace {
+        path: PathBuf,
+        #[serde(default = "defaults::min_gb")]
+        min_gb: f64,
+    },
     MinPeers {
         #[serde(default = "defaults::min_peers")]
         min: usize,
@@ -55,6 +67,12 @@ mod defaults {
     pub fn period_secs() -> u64 {
         60
     }
+    pub fn max_age_secs() -> u64 {
+        60
+    }
+    pub fn min_gb() -> f64 {
+        10.0
+    }
     pub fn min_peers() -> usize {
         1
     }
@@ -68,7 +86,7 @@ impl HealthConfig {
 
     pub fn build<P, N>(self, addr: SocketAddr, provider: P, network: N) -> HealthServer
     where
-        P: BlockNumReader + Clone + Send + Sync + 'static,
+        P: BlockNumReader + HeaderProvider + Clone + Send + Sync + 'static,
         N: PeersInfo + NetworkInfo + Clone + Send + Sync + 'static,
     {
         HealthServer::new(
@@ -82,7 +100,7 @@ impl HealthConfig {
 
 fn build_probe<P, N>(config: ProbeConfig, provider: &P, network: &N) -> Probe
 where
-    P: BlockNumReader + Clone + Send + Sync + 'static,
+    P: BlockNumReader + HeaderProvider + Clone + Send + Sync + 'static,
     N: PeersInfo + NetworkInfo + Clone + Send + Sync + 'static,
 {
     let checks: Vec<Arc<dyn HealthCheck>> = config
@@ -100,6 +118,14 @@ where
                 CheckConfig::BlockProgress { period_secs, mode } => Arc::new(
                     BlockProgressCheck::new(Duration::from_secs(period_secs), mode, provider.clone()),
                 ),
+                CheckConfig::BlockTimestamp { max_age_secs } => Arc::new(BlockTimestampCheck {
+                    max_age: Duration::from_secs(max_age_secs),
+                    provider: provider.clone(),
+                }),
+                CheckConfig::DiskSpace { path, min_gb } => Arc::new(DiskSpaceCheck {
+                    path,
+                    min_bytes: (min_gb * (1u64 << 30) as f64) as u64,
+                }),
             }
         })
         .collect();
@@ -183,15 +209,43 @@ mod tests {
     }
 
     #[test]
+    fn block_timestamp_defaults() {
+        let config: ProbeConfig =
+            serde_json::from_str(r#"{"checks":[{"type":"block_timestamp"}]}"#).unwrap();
+        assert!(matches!(config.checks[0], CheckConfig::BlockTimestamp { max_age_secs: 60 }));
+    }
+
+    #[test]
+    fn block_timestamp_explicit() {
+        let config: ProbeConfig =
+            serde_json::from_str(r#"{"checks":[{"type":"block_timestamp","max_age_secs":30}]}"#)
+                .unwrap();
+        assert!(matches!(config.checks[0], CheckConfig::BlockTimestamp { max_age_secs: 30 }));
+    }
+
+    #[test]
+    fn disk_space_deserializes() {
+        let config: ProbeConfig = serde_json::from_str(
+            r#"{"checks":[{"type":"disk_space","path":"/var/lib/data"}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(config.checks[0], CheckConfig::DiskSpace { .. }));
+        if let CheckConfig::DiskSpace { ref path, min_gb } = config.checks[0] {
+            assert_eq!(path, std::path::Path::new("/var/lib/data"));
+            assert!((min_gb - 10.0).abs() < f64::EPSILON);
+        }
+    }
+
+    #[test]
     fn full_health_config_deserializes() {
         let json = r#"{
             "startup":  {"checks":[{"type":"block_progress","mode":"last"}]},
             "readiness":{"checks":[{"type":"not_syncing"},{"type":"min_peers","min":2}]},
-            "liveness": {"checks":[{"type":"heartbeat"}]}
+            "liveness": {"checks":[{"type":"heartbeat"},{"type":"block_timestamp"}]}
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.startup.checks.len(), 1);
         assert_eq!(config.readiness.checks.len(), 2);
-        assert_eq!(config.liveness.checks.len(), 1);
+        assert_eq!(config.liveness.checks.len(), 2);
     }
 }
