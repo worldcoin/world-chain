@@ -10,7 +10,7 @@ use reth::chainspec::NamedChain;
 use reth_network_peers::PeerId;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
-use std::str::FromStr;
+use std::{net::SocketAddr, path::PathBuf, str::FromStr};
 use tracing::{info, warn};
 
 use crate::config::WorldChainNodeConfig;
@@ -36,6 +36,29 @@ pub struct WorldChainArgs {
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
     pub tx_peers: Option<Vec<PeerId>>,
+
+    /// Health check args
+    #[command(flatten)]
+    pub health: HealthArgs,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(next_help_heading = "Health")]
+pub struct HealthArgs {
+    /// Address for the health HTTP server (startup/ready/live endpoints)
+    #[arg(long = "health.addr", default_value = "0.0.0.0:8080")]
+    pub addr: SocketAddr,
+
+    /// Path to health check configuration file (JSON).
+    /// If omitted, all probes return 200 OK unconditionally.
+    #[arg(long = "health.config")]
+    pub config: Option<PathBuf>,
+}
+
+impl Default for HealthArgs {
+    fn default() -> Self {
+        Self { addr: "0.0.0.0:8080".parse().expect("valid default addr"), config: None }
+    }
 }
 
 impl WorldChainArgs {
@@ -365,6 +388,7 @@ mod tests {
             },
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
+            health: HealthArgs::default(),
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());

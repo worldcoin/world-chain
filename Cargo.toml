@@ -201,6 +201,7 @@ alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
 
 # rpc
+axum = "0.8"
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
 jsonrpsee-core = { version = "0.26.0" }
 jsonrpsee-types = "0.26.0"
