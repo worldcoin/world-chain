@@ -3,7 +3,6 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use eyre::eyre;
 use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
@@ -253,59 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn flashblocks_override_authorizer() {
-        let flashblocks = FlashblocksArgs {
-            enabled: true,
-            override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
-            authorizer_vk: None,
-            builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
-            force_publish: false,
-            flashblocks_interval: 200,
-            recommit_interval: 200,
-            access_list: false,
-        };
-
-        let args = CommandParser::parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.override_authorizer_sk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "--flashblocks.builder_sk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "--builder.enabled",
-            "--builder.private_key",
-            "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        ])
-        .world;
-
-        assert_eq!(args.flashblocks.unwrap(), flashblocks);
-    }
-
-    #[test]
-    fn flashblocks_authorizer() {
-        let flashblocks = FlashblocksArgs {
-            enabled: true,
-            override_authorizer_sk: None,
-            authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
-            builder_sk: None,
-            force_publish: false,
-            flashblocks_interval: 200,
-            recommit_interval: 200,
-            access_list: false,
-        };
-
-        let args = CommandParser::parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.authorizer_vk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ])
-        .world;
-
-        assert_eq!(args.flashblocks.unwrap(), flashblocks);
-    }
-
-    #[test]
     fn flashblocks_both() {
         CommandParser::try_parse_from([
             "bin",
@@ -315,6 +261,14 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();
+    }
+
+    #[test]
+    fn flashblocks_bootnodes_default() {
+        let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
+        let bootnodes = args.flashblocks.unwrap().bootnodes;
+
+        assert_eq!(bootnodes.len(), 3);
     }
 
     #[test]

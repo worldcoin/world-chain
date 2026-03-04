@@ -216,6 +216,7 @@ async fn setup_node_extended_cfg(
                 flashblocks_interval: 200,
                 recommit_interval: 200,
                 access_list: true,
+                bootnodes: vec![],
             }),
             tx_peers: None,
             health: Default::default(),

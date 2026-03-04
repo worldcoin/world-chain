@@ -3858,6 +3858,7 @@ dependencies = [
  "ed25519-dalek",
  "flashblocks-builder",
  "hex",
+ "reth-network-peers",
 ]
 
 [[package]]

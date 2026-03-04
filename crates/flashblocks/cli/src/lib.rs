@@ -1,6 +1,9 @@
 use clap::ArgGroup;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use hex::FromHex;
+use reth_network_peers::TrustedPeer;
+
+pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
 /// Flashblocks configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
@@ -94,6 +97,18 @@ pub struct FlashblocksArgs {
         default_value_t = false
     )]
     pub access_list: bool,
+
+    /// Comma-separated list of flashblocks bootnode enodes.
+    ///
+    /// These peers are set as trusted peers in the network.
+    #[arg(
+        long = "flashblocks.bootnodes",
+        env = "FLASHBLOCKS_BOOTNODES",
+        value_delimiter = ',',
+        value_name = "ENODE",
+        default_value = DEFAULT_FLASHBLOCKS_BOOTNODES
+    )]
+    pub bootnodes: Vec<TrustedPeer>,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -113,6 +128,13 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    fn default_bootnodes() -> Vec<TrustedPeer> {
+        DEFAULT_FLASHBLOCKS_BOOTNODES
+            .split(',')
+            .map(|enode| enode.parse().unwrap())
+            .collect()
+    }
+
     #[derive(Debug, Parser)]
     struct CommandParser {
         #[command(flatten)]
@@ -130,6 +152,7 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
+            bootnodes: default_bootnodes(),
         };
 
         let args = CommandParser::parse_from([
@@ -160,6 +183,7 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: false,
+            bootnodes: default_bootnodes(),
         };
 
         let args = CommandParser::parse_from([
@@ -187,5 +211,37 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();
+    }
+
+    #[test]
+    fn flashblocks_bootnodes() {
+        let bootnodes = vec![
+            "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303"
+                .parse()
+                .unwrap(),
+            "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6db18b2a4b46dcd226f73d917f6652a2b0a96b4f78a@10.3.58.7:30303"
+                .parse()
+                .unwrap(),
+        ];
+        let flashblocks = FlashblocksArgs {
+            enabled: true,
+            override_authorizer_sk: None,
+            authorizer_vk: None,
+            builder_sk: None,
+            force_publish: false,
+            recommit_interval: 200,
+            flashblocks_interval: 200,
+            access_list: false,
+            bootnodes,
+        };
+
+        let args = CommandParser::parse_from([
+            "bin",
+            "--flashblocks.enabled",
+            "--flashblocks.bootnodes",
+            "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303,enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6db18b2a4b46dcd226f73d917f6652a2b0a96b4f78a@10.3.58.7:30303",
+        ]);
+
+        assert_eq!(args.flashblocks.unwrap(), flashblocks);
     }
 }

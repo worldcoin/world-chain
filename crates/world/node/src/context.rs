@@ -44,7 +44,7 @@ use world_chain_pool::BasicWorldChainPool;
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
-use reth_network_peers::PeerId;
+use reth_network_peers::{PeerId, TrustedPeer};
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -59,6 +59,7 @@ pub struct WorldChainNetworkBuilder {
     op_network_builder: OpNetworkBuilder,
     tx_peers: Option<Vec<PeerId>>,
     flashblocks_p2p_handle: Option<FlashblocksHandle>,
+    flashblocks_bootnodes: Vec<TrustedPeer>,
 }
 
 impl WorldChainNetworkBuilder {
@@ -67,6 +68,7 @@ impl WorldChainNetworkBuilder {
         disable_discovery_v4: bool,
         tx_peers: Option<Vec<PeerId>>,
         flashblocks_p2p_handle: Option<FlashblocksHandle>,
+        flashblocks_bootnodes: Vec<TrustedPeer>,
     ) -> Self {
         let op_network_builder = OpNetworkBuilder {
             disable_txpool_gossip,
@@ -77,6 +79,7 @@ impl WorldChainNetworkBuilder {
             op_network_builder,
             tx_peers,
             flashblocks_p2p_handle,
+            flashblocks_bootnodes,
         }
     }
 }
@@ -102,9 +105,20 @@ where
             op_network_builder,
             tx_peers,
             flashblocks_p2p_handle,
+            flashblocks_bootnodes,
         } = self;
 
-        let network_config = op_network_builder.network_config(ctx)?;
+        let mut network_config = op_network_builder.network_config(ctx)?;
+        for peer in &flashblocks_bootnodes {
+            if !network_config
+                .peers_config
+                .trusted_nodes
+                .iter()
+                .any(|trusted_peer| trusted_peer == peer)
+            {
+                network_config.peers_config.trusted_nodes.push(peer.clone());
+            }
+        }
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
@@ -149,8 +163,12 @@ where
         // Set up peer monitor for flashblocks trusted peers
         if flashblocks_p2p_handle.is_some() {
             let cli_peers = ctx.config().network.trusted_peers.iter();
-            let toml_peers = ctx.reth_config().peers.trusted_nodes.iter();
-            let all_trusted_peers = cli_peers.chain(toml_peers).map(|peer| peer.id);
+            let trusted_nodes = ctx.reth_config().peers.trusted_nodes.iter();
+            let flashblocks_bootnodes = flashblocks_bootnodes.iter();
+            let all_trusted_peers = cli_peers
+                .chain(trusted_nodes)
+                .chain(flashblocks_bootnodes)
+                .map(|peer| peer.id);
 
             PeerMonitor::new(handle.clone())
                 .with_initial_peers(all_trusted_peers)
@@ -229,6 +247,12 @@ where
                 .map(|flashblocks_components_ctx| {
                     flashblocks_components_ctx.flashblocks_handle.clone()
                 }),
+            self.config
+                .args
+                .flashblocks
+                .as_ref()
+                .map(|flashblocks_args| flashblocks_args.bootnodes.clone())
+                .unwrap_or_default(),
         );
 
         let (
