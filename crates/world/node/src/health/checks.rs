@@ -224,6 +224,7 @@ pub struct DiskSpaceCheck {
 
 fn available_bytes(path: &Path) -> eyre::Result<u64> {
     let stat = nix::sys::statvfs::statvfs(path)?;
+    #[allow(clippy::useless_conversion)]
     Ok(u64::from(stat.blocks_available()) * stat.fragment_size())
 }
 
