@@ -42,7 +42,10 @@ pub struct ProbeResult {
 
 impl Default for ProbeResult {
     fn default() -> Self {
-        Self { healthy: true, checks: vec![] }
+        Self {
+            healthy: true,
+            checks: vec![],
+        }
     }
 }
 
@@ -61,7 +64,11 @@ impl Default for Probe {
 
 impl Probe {
     pub fn new(checks: Vec<Arc<dyn HealthCheck>>, interval: Duration) -> Self {
-        Self { checks, interval, result: Arc::new(RwLock::new(ProbeResult::default())) }
+        Self {
+            checks,
+            interval,
+            result: Arc::new(RwLock::new(ProbeResult::default())),
+        }
     }
 
     pub async fn evaluate(&self) -> ProbeResult {
@@ -86,7 +93,10 @@ impl Probe {
             });
         }
 
-        ProbeResult { healthy, checks: outcomes }
+        ProbeResult {
+            healthy,
+            checks: outcomes,
+        }
     }
 
     async fn init(&self) {
@@ -95,7 +105,10 @@ impl Probe {
     }
 
     pub fn last_result(&self) -> ProbeResult {
-        self.result.read().expect("probe result lock poisoned").clone()
+        self.result
+            .read()
+            .expect("probe result lock poisoned")
+            .clone()
     }
 
     pub async fn run_loop(self) {
@@ -117,7 +130,12 @@ pub struct HealthServer {
 
 impl HealthServer {
     pub fn new(startup: Probe, readiness: Probe, liveness: Probe, addr: SocketAddr) -> Self {
-        Self { startup, readiness, liveness, addr }
+        Self {
+            startup,
+            readiness,
+            liveness,
+            addr,
+        }
     }
 
     pub async fn serve(self) {
@@ -166,8 +184,11 @@ async fn liveness_handler(State(s): State<Arc<HealthServer>>) -> (StatusCode, Js
 }
 
 fn probe_response(result: ProbeResult) -> (StatusCode, Json<ProbeResult>) {
-    let status =
-        if result.healthy { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let status = if result.healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
     (status, Json(result))
 }
 
@@ -188,7 +209,10 @@ mod tests {
         }
 
         async fn check(&self) -> CheckResult {
-            CheckResult { healthy: true, detail: None }
+            CheckResult {
+                healthy: true,
+                detail: None,
+            }
         }
     }
 
@@ -201,7 +225,10 @@ mod tests {
         }
 
         async fn check(&self) -> CheckResult {
-            CheckResult { healthy: false, detail: Some("broken".to_string()) }
+            CheckResult {
+                healthy: false,
+                detail: Some("broken".to_string()),
+            }
         }
     }
 

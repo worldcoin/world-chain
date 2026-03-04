@@ -218,6 +218,7 @@ async fn setup_node_extended_cfg(
                 access_list: true,
             }),
             tx_peers: None,
+            health: Default::default(),
         },
         builder_config: Default::default(),
     };

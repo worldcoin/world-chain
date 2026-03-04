@@ -1,15 +1,20 @@
-use std::{net::SocketAddr, path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::{BlockNumReader, HeaderProvider};
 use serde::Deserialize;
 
 use super::{
+    HealthCheck, HealthServer, Probe,
     checks::{
         BlockNumberMode, BlockProgressCheck, BlockTimestampCheck, DiskSpaceCheck, HeartbeatCheck,
         MinPeersCheck, NotSyncingCheck,
     },
-    HealthCheck, HealthServer, Probe,
 };
 
 #[derive(Debug, Deserialize, Default)]
@@ -30,7 +35,10 @@ pub struct ProbeConfig {
 
 impl Default for ProbeConfig {
     fn default() -> Self {
-        Self { interval_secs: defaults::interval_secs(), checks: vec![] }
+        Self {
+            interval_secs: defaults::interval_secs(),
+            checks: vec![],
+        }
     }
 }
 
@@ -109,15 +117,20 @@ where
         .map(|c| -> Arc<dyn HealthCheck> {
             match c {
                 CheckConfig::Heartbeat => Arc::new(HeartbeatCheck),
-                CheckConfig::MinPeers { min } => {
-                    Arc::new(MinPeersCheck { min, network: network.clone() })
+                CheckConfig::MinPeers { min } => Arc::new(MinPeersCheck {
+                    min,
+                    network: network.clone(),
+                }),
+                CheckConfig::NotSyncing => Arc::new(NotSyncingCheck {
+                    network: network.clone(),
+                }),
+                CheckConfig::BlockProgress { period_secs, mode } => {
+                    Arc::new(BlockProgressCheck::new(
+                        Duration::from_secs(period_secs),
+                        mode,
+                        provider.clone(),
+                    ))
                 }
-                CheckConfig::NotSyncing => {
-                    Arc::new(NotSyncingCheck { network: network.clone() })
-                }
-                CheckConfig::BlockProgress { period_secs, mode } => Arc::new(
-                    BlockProgressCheck::new(Duration::from_secs(period_secs), mode, provider.clone()),
-                ),
                 CheckConfig::BlockTimestamp { max_age_secs } => Arc::new(BlockTimestampCheck {
                     max_age: Duration::from_secs(max_age_secs),
                     provider: provider.clone(),
@@ -192,7 +205,10 @@ mod tests {
             serde_json::from_str(r#"{"checks":[{"type":"block_progress"}]}"#).unwrap();
         assert!(matches!(
             config.checks[0],
-            CheckConfig::BlockProgress { period_secs: 60, mode: BlockNumberMode::Best }
+            CheckConfig::BlockProgress {
+                period_secs: 60,
+                mode: BlockNumberMode::Best
+            }
         ));
     }
 
@@ -204,7 +220,10 @@ mod tests {
         .unwrap();
         assert!(matches!(
             config.checks[0],
-            CheckConfig::BlockProgress { period_secs: 120, mode: BlockNumberMode::Last }
+            CheckConfig::BlockProgress {
+                period_secs: 120,
+                mode: BlockNumberMode::Last
+            }
         ));
     }
 
@@ -212,7 +231,10 @@ mod tests {
     fn block_timestamp_defaults() {
         let config: ProbeConfig =
             serde_json::from_str(r#"{"checks":[{"type":"block_timestamp"}]}"#).unwrap();
-        assert!(matches!(config.checks[0], CheckConfig::BlockTimestamp { max_age_secs: 60 }));
+        assert!(matches!(
+            config.checks[0],
+            CheckConfig::BlockTimestamp { max_age_secs: 60 }
+        ));
     }
 
     #[test]
@@ -220,15 +242,17 @@ mod tests {
         let config: ProbeConfig =
             serde_json::from_str(r#"{"checks":[{"type":"block_timestamp","max_age_secs":30}]}"#)
                 .unwrap();
-        assert!(matches!(config.checks[0], CheckConfig::BlockTimestamp { max_age_secs: 30 }));
+        assert!(matches!(
+            config.checks[0],
+            CheckConfig::BlockTimestamp { max_age_secs: 30 }
+        ));
     }
 
     #[test]
     fn disk_space_deserializes() {
-        let config: ProbeConfig = serde_json::from_str(
-            r#"{"checks":[{"type":"disk_space","path":"/var/lib/data"}]}"#,
-        )
-        .unwrap();
+        let config: ProbeConfig =
+            serde_json::from_str(r#"{"checks":[{"type":"disk_space","path":"/var/lib/data"}]}"#)
+                .unwrap();
         assert!(matches!(config.checks[0], CheckConfig::DiskSpace { .. }));
         if let CheckConfig::DiskSpace { ref path, min_gb } = config.checks[0] {
             assert_eq!(path, std::path::Path::new("/var/lib/data"));

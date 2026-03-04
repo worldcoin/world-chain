@@ -57,7 +57,10 @@ pub struct HealthArgs {
 
 impl Default for HealthArgs {
     fn default() -> Self {
-        Self { addr: "0.0.0.0:8080".parse().expect("valid default addr"), config: None }
+        Self {
+            addr: "0.0.0.0:8080".parse().expect("valid default addr"),
+            config: None,
+        }
     }
 }
 

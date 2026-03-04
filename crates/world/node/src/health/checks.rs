@@ -22,7 +22,10 @@ impl HealthCheck for HeartbeatCheck {
     }
 
     async fn check(&self) -> CheckResult {
-        CheckResult { healthy: true, detail: None }
+        CheckResult {
+            healthy: true,
+            detail: None,
+        }
     }
 }
 
@@ -89,7 +92,12 @@ pub struct BlockProgressCheck<P> {
 
 impl<P> BlockProgressCheck<P> {
     pub fn new(period: Duration, mode: BlockNumberMode, provider: P) -> Self {
-        Self { period, mode, provider, state: Mutex::new(None) }
+        Self {
+            period,
+            mode,
+            provider,
+            state: Mutex::new(None),
+        }
     }
 }
 
@@ -109,27 +117,39 @@ impl<P: BlockNumReader + Send + Sync + 'static> HealthCheck for BlockProgressChe
                 return CheckResult {
                     healthy: false,
                     detail: Some(format!("provider error: {e}")),
-                }
+                };
             }
         };
 
-        let mut state = self.state.lock().expect("block progress check mutex poisoned");
+        let mut state = self
+            .state
+            .lock()
+            .expect("block progress check mutex poisoned");
         match *state {
             None => {
                 *state = Some((current, Instant::now()));
-                CheckResult { healthy: true, detail: None }
+                CheckResult {
+                    healthy: true,
+                    detail: None,
+                }
             }
             Some((last_block, stuck_since)) => {
                 if current > last_block {
                     *state = Some((current, Instant::now()));
-                    CheckResult { healthy: true, detail: None }
+                    CheckResult {
+                        healthy: true,
+                        detail: None,
+                    }
                 } else {
                     let elapsed = stuck_since.elapsed();
                     let healthy = elapsed < self.period;
                     CheckResult {
                         healthy,
                         detail: (!healthy).then(|| {
-                            format!("block stuck at {current} for {elapsed:.0?}, limit {:.0?}", self.period)
+                            format!(
+                                "block stuck at {current} for {elapsed:.0?}, limit {:.0?}",
+                                self.period
+                            )
                         }),
                     }
                 }
@@ -160,7 +180,7 @@ where
                 return CheckResult {
                     healthy: false,
                     detail: Some(format!("provider error: {e}")),
-                }
+                };
             }
         };
 
@@ -170,13 +190,13 @@ where
                 return CheckResult {
                     healthy: false,
                     detail: Some(format!("no header for block {block_num}")),
-                }
+                };
             }
             Err(e) => {
                 return CheckResult {
                     healthy: false,
                     detail: Some(format!("provider error: {e}")),
-                }
+                };
             }
         };
 
@@ -204,7 +224,7 @@ pub struct DiskSpaceCheck {
 
 fn available_bytes(path: &Path) -> eyre::Result<u64> {
     let stat = nix::sys::statvfs::statvfs(path)?;
-    Ok(u64::from(stat.blocks_available()) * u64::from(stat.fragment_size()))
+    Ok(u64::from(stat.blocks_available()) * stat.fragment_size())
 }
 
 fn format_gib(bytes: u64) -> f64 {
@@ -246,10 +266,12 @@ impl HealthCheck for DiskSpaceCheck {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
 
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{B256, BlockNumber};
     use reth_chainspec::ChainInfo;
     use reth_provider::{BlockHashReader, BlockNumReader, ProviderResult};
 
@@ -285,7 +307,10 @@ mod tests {
     impl BlockNumReader for MockProvider {
         fn chain_info(&self) -> ProviderResult<ChainInfo> {
             let n = self.0.load(Ordering::SeqCst);
-            Ok(ChainInfo { best_hash: B256::ZERO, best_number: n })
+            Ok(ChainInfo {
+                best_hash: B256::ZERO,
+                best_number: n,
+            })
         }
 
         fn best_block_number(&self) -> ProviderResult<BlockNumber> {
@@ -410,7 +435,10 @@ mod tests {
 
     impl BlockNumReader for MockTimestampProvider {
         fn chain_info(&self) -> ProviderResult<ChainInfo> {
-            Ok(ChainInfo { best_hash: B256::ZERO, best_number: self.block_num })
+            Ok(ChainInfo {
+                best_hash: B256::ZERO,
+                best_number: self.block_num,
+            })
         }
         fn best_block_number(&self) -> ProviderResult<BlockNumber> {
             Ok(self.block_num)
@@ -426,12 +454,18 @@ mod tests {
     impl HeaderProvider for MockTimestampProvider {
         type Header = AlloyHeader;
 
-        fn header(&self, _hash: alloy_primitives::BlockHash) -> ProviderResult<Option<Self::Header>> {
+        fn header(
+            &self,
+            _hash: alloy_primitives::BlockHash,
+        ) -> ProviderResult<Option<Self::Header>> {
             Ok(None)
         }
 
         fn header_by_number(&self, _num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-            Ok(Some(AlloyHeader { timestamp: self.block_timestamp, ..Default::default() }))
+            Ok(Some(AlloyHeader {
+                timestamp: self.block_timestamp,
+                ..Default::default()
+            }))
         }
 
         fn headers_range(
@@ -459,9 +493,18 @@ mod tests {
 
     #[tokio::test]
     async fn block_timestamp_recent_healthy() {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let provider = MockTimestampProvider { block_num: 1, block_timestamp: now - 10 };
-        let check = BlockTimestampCheck { max_age: Duration::from_secs(60), provider };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let provider = MockTimestampProvider {
+            block_num: 1,
+            block_timestamp: now - 10,
+        };
+        let check = BlockTimestampCheck {
+            max_age: Duration::from_secs(60),
+            provider,
+        };
         let result = check.check().await;
         assert!(result.healthy);
         assert!(result.detail.is_none());
@@ -469,8 +512,14 @@ mod tests {
 
     #[tokio::test]
     async fn block_timestamp_stale_unhealthy() {
-        let provider = MockTimestampProvider { block_num: 1, block_timestamp: 0 };
-        let check = BlockTimestampCheck { max_age: Duration::from_secs(60), provider };
+        let provider = MockTimestampProvider {
+            block_num: 1,
+            block_timestamp: 0,
+        };
+        let check = BlockTimestampCheck {
+            max_age: Duration::from_secs(60),
+            provider,
+        };
         let result = check.check().await;
         assert!(!result.healthy);
         assert!(result.detail.is_some());
@@ -480,14 +529,20 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_zero_min_bytes_healthy() {
-        let check = DiskSpaceCheck { path: std::env::temp_dir(), min_bytes: 0 };
+        let check = DiskSpaceCheck {
+            path: std::env::temp_dir(),
+            min_bytes: 0,
+        };
         let result = check.check().await;
         assert!(result.healthy);
     }
 
     #[tokio::test]
     async fn disk_space_u64_max_unhealthy() {
-        let check = DiskSpaceCheck { path: std::env::temp_dir(), min_bytes: u64::MAX };
+        let check = DiskSpaceCheck {
+            path: std::env::temp_dir(),
+            min_bytes: u64::MAX,
+        };
         let result = check.check().await;
         assert!(!result.healthy);
         assert!(result.detail.is_some());
