@@ -3,10 +3,12 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
+use flashblocks_cli::{
+    DEFAULT_FLASHBLOCKS_BOOTNODES, FlashblocksArgs, FlashblocksPayloadBuilderConfig,
+};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
-use reth_network_peers::PeerId;
+use reth_network_peers::{PeerId, TrustedPeer};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::{net::SocketAddr, path::PathBuf, str::FromStr};
@@ -93,6 +95,11 @@ impl WorldChainArgs {
                     flashblocks.authorizer_vk = Some(parse_vk(
                         "1361edebf7fd03a72aa23748e17eb5f6901b544cf80d3f410afa5e6e261d7281",
                     )?);
+                }
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.bootnodes.is_empty()
+                {
+                    flashblocks.bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -239,6 +246,16 @@ pub fn parse_vk(s: &str) -> eyre::Result<VerifyingKey> {
     Ok(VerifyingKey::from_bytes(&bytes)?)
 }
 
+fn parse_trusted_peer(s: &str) -> eyre::Result<Vec<TrustedPeer>> {
+    s.split(',')
+        .map(|enode| {
+            enode.parse().map_err(|err| {
+                eyre::Report::msg(format!("invalid flashblocks bootnode '{}': {}", enode, err))
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +284,19 @@ mod tests {
     fn flashblocks_bootnodes_default() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
         let bootnodes = args.flashblocks.unwrap().bootnodes;
+
+        assert!(bootnodes.is_empty());
+    }
+
+    #[test]
+    fn flashblocks_bootnodes_default_added_for_world_chain() {
+        let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
+
+        let spec = reth_optimism_chainspec::OpChainSpecBuilder::optimism_mainnet()
+            .chain(NamedChain::World.into())
+            .build();
+        let config = args.into_config(&spec).unwrap();
+        let bootnodes = config.args.flashblocks.unwrap().bootnodes;
 
         assert_eq!(bootnodes.len(), 3);
     }

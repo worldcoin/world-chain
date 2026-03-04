@@ -105,8 +105,7 @@ pub struct FlashblocksArgs {
         long = "flashblocks.bootnodes",
         env = "FLASHBLOCKS_BOOTNODES",
         value_delimiter = ',',
-        value_name = "ENODE",
-        default_value = DEFAULT_FLASHBLOCKS_BOOTNODES
+        value_name = "ENODE"
     )]
     pub bootnodes: Vec<TrustedPeer>,
 }
@@ -128,13 +127,6 @@ mod tests {
     use super::*;
     use clap::Parser;
 
-    fn default_bootnodes() -> Vec<TrustedPeer> {
-        DEFAULT_FLASHBLOCKS_BOOTNODES
-            .split(',')
-            .map(|enode| enode.parse().unwrap())
-            .collect()
-    }
-
     #[derive(Debug, Parser)]
     struct CommandParser {
         #[command(flatten)]
@@ -152,7 +144,7 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
-            bootnodes: default_bootnodes(),
+            bootnodes: vec![],
         };
 
         let args = CommandParser::parse_from([
@@ -183,7 +175,7 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: false,
-            bootnodes: default_bootnodes(),
+            bootnodes: vec![],
         };
 
         let args = CommandParser::parse_from([
