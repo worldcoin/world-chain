@@ -1,10 +1,5 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.10
 FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
-
-ARG FEATURES
-ARG SCCACHE_BUCKET
-ARG SCCACHE_REGION="us-east-1"
-ARG SCCACHE_S3_KEY_PREFIX="sccache/world-chain"
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
@@ -15,9 +10,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends clang libclang-dev gcc curl \
   && rm -rf /var/lib/apt/lists/*
 
-ENV CARGO_HOME=/usr/local/cargo
-ENV RUSTC_WRAPPER=sccache
-ENV SCCACHE_DIR=/sccache
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTC_WRAPPER=sccache \
+    SCCACHE_DIR=/sccache
 
 FROM base AS planner
 WORKDIR /app
@@ -38,48 +33,30 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
 ARG FEATURES="jemalloc"
+ARG SCCACHE_BUCKET
+ARG SCCACHE_REGION
+ARG SCCACHE_S3_KEY_PREFIX
 
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=secret,id=aws_access_key_id,required=false \
-    --mount=type=secret,id=aws_secret_access_key,required=false \
-    --mount=type=secret,id=aws_session_token,required=false \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    if [ -n "${SCCACHE_BUCKET:-}" ]; then \
-      export SCCACHE_BUCKET="${SCCACHE_BUCKET}" SCCACHE_REGION="${SCCACHE_REGION}" SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX}"; \
-      if ! sccache --start-server >/dev/null 2>&1; then \
-        echo "warning: sccache S3 init failed, falling back to local cache" >&2; \
-        unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
-      fi; \
-    else \
-      unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
-    fi; \
-    AWS_ACCESS_KEY_ID="$(cat /run/secrets/aws_access_key_id 2>/dev/null || true)" \
-    AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/aws_secret_access_key 2>/dev/null || true)" \
-    AWS_SESSION_TOKEN="$(cat /run/secrets/aws_session_token 2>/dev/null || true)" \
+    --mount=type=secret,id=aws_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
+    if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
     cargo chef cook --locked --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
+
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=secret,id=aws_access_key_id,required=false \
-    --mount=type=secret,id=aws_secret_access_key,required=false \
-    --mount=type=secret,id=aws_session_token,required=false \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    if [ -n "${SCCACHE_BUCKET:-}" ]; then \
-      export SCCACHE_BUCKET="${SCCACHE_BUCKET}" SCCACHE_REGION="${SCCACHE_REGION}" SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX}"; \
-      if ! sccache --start-server >/dev/null 2>&1; then \
-        echo "warning: sccache S3 init failed, falling back to local cache" >&2; \
-        unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
-      fi; \
-    else \
-      unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
-    fi; \
-    AWS_ACCESS_KEY_ID="$(cat /run/secrets/aws_access_key_id 2>/dev/null || true)" \
-    AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/aws_secret_access_key 2>/dev/null || true)" \
-    AWS_SESSION_TOKEN="$(cat /run/secrets/aws_session_token 2>/dev/null || true)" \
+    --mount=type=secret,id=aws_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
+    if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
     cargo build --locked --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
