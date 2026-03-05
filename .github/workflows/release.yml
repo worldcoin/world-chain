@@ -25,7 +25,6 @@ permissions:
 jobs:
   extract-version:
     name: extract version
-    environment: dev
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
@@ -36,6 +35,7 @@ jobs:
 
   build-and-push:
     name: build and push docker
+    environment: dev
     needs: extract-version
     strategy:
       fail-fast: false
