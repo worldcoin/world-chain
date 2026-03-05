@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: arc-public-8xlarge-arm64-runner
+          - runner: arc-public-8xlarge-amd64-runner
             platform: linux/amd64
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
