@@ -45,6 +45,14 @@ alloy-signer-local.workspace = true
 
 op-alloy-consensus.workspace = true
 
+reth-network-api.workspace = true
+
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+nix.workspace = true
+alloy-consensus.workspace = true
 tokio.workspace = true
 eyre.workspace = true
 clap.workspace = true
@@ -59,6 +67,8 @@ world-chain-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-node.workspace = true
 
+reth-chainspec.workspace = true
+tokio = { version = "1", features = ["test-util"] }
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-engine-primitives.workspace = true
@@ -68,6 +78,7 @@ reth-optimism-node = { workspace = true, features = ["test-utils"] }
 revm-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-tracing.workspace = true
 reth-network-api.workspace = true
 reth-eth-wire.workspace = true
