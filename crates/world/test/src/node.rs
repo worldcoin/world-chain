@@ -120,6 +120,7 @@ pub fn test_config_with_peers_and_gossip(
             pbh,
             flashblocks,
             tx_peers,
+            health: Default::default(),
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
