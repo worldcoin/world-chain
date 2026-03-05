@@ -33,7 +33,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -49,7 +49,7 @@ jobs:
       - build-and-push
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:

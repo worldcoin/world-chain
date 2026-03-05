@@ -48,7 +48,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -64,7 +64,7 @@ jobs:
       - build-and-push
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -90,7 +90,7 @@ jobs:
             binary: world-chain
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -112,7 +112,7 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
           path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
@@ -127,11 +127,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
       - name: Generate full changelog
         id: changelog
         run: |
