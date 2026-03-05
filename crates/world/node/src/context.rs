@@ -109,16 +109,28 @@ where
         } = self;
 
         let mut network_config = op_network_builder.network_config(ctx)?;
-        for peer in &flashblocks_bootnodes {
-            if !network_config
-                .peers_config
-                .trusted_nodes
-                .iter()
-                .any(|trusted_peer| trusted_peer == peer)
-            {
-                network_config.peers_config.trusted_nodes.push(peer.clone());
+        let local_peer_id = network_config.hello_message.id;
+        network_config.peers_config.trusted_nodes.extend(flashblocks_bootnodes.clone());
+        network_config.peers_config.trusted_nodes.retain(|peer| {
+            if peer.id == local_peer_id {
+                info!(
+                    target: "world_chain::network",
+                    peer = %peer,
+                    local_peer_id = %local_peer_id,
+                    "Skipping self-referential trusted peer"
+                );
+                false
+            } else {
+                true
             }
-        }
+        });
+
+        let trusted_peer_ids: Vec<_> = network_config
+            .peers_config
+            .trusted_nodes
+            .iter()
+            .map(|peer| peer.id)
+            .collect();
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
@@ -162,16 +174,8 @@ where
 
         // Set up peer monitor for flashblocks trusted peers
         if flashblocks_p2p_handle.is_some() {
-            let cli_peers = ctx.config().network.trusted_peers.iter();
-            let trusted_nodes = ctx.reth_config().peers.trusted_nodes.iter();
-            let flashblocks_bootnodes = flashblocks_bootnodes.iter();
-            let all_trusted_peers = cli_peers
-                .chain(trusted_nodes)
-                .chain(flashblocks_bootnodes)
-                .map(|peer| peer.id);
-
             PeerMonitor::new(handle.clone())
-                .with_initial_peers(all_trusted_peers)
+                .with_initial_peers(trusted_peer_ids)
                 .run_on_task_executor(ctx.task_executor());
         }
 
