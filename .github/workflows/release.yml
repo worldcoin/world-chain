@@ -14,10 +14,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: workflow-build-cache
 
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 jobs:
   extract-version:
@@ -69,12 +72,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Configure AWS credentials for sccache
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
+          build-args: |
+            SCCACHE_BUCKET=${{ env.SCCACHE_BUCKET }}
+            SCCACHE_REGION=${{ env.AWS_REGION }}
+            SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}
+          secrets: |
+            aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}
+            aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}
+            aws_session_token=${{ env.AWS_SESSION_TOKEN }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
