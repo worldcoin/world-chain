@@ -1,0 +1,88 @@
+name: Docker Build And Push Digest
+description: Build a single-platform Docker image, push by digest, and upload the digest artifact.
+
+inputs:
+  platform:
+    description: Docker target platform (for example linux/amd64).
+    required: true
+  registry:
+    description: Docker registry host.
+    required: true
+  image_name:
+    description: Full image name path (for example org/repo).
+    required: true
+  aws_region:
+    description: AWS region for sccache access.
+    required: true
+  sccache_bucket:
+    description: S3 bucket used by sccache.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare
+      shell: bash
+      run: |
+        platform='${{ inputs.platform }}'
+        echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+    - name: Log in to Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ inputs.registry }}/${{ inputs.image_name }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Configure AWS credentials for sccache
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws_region }}
+        role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile
+        build-args: |
+          SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
+          SCCACHE_REGION=${{ inputs.aws_region }}
+          SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}
+        secrets: |
+          aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token=${{ env.AWS_SESSION_TOKEN }}
+        tags: ${{ inputs.registry }}/${{ inputs.image_name }}
+        platforms: ${{ inputs.platform }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: |
+          type=gha,scope=${{ github.repository }}-${{ github.ref_name }}-${{ env.PLATFORM_PAIR }}
+          type=gha,scope=${{ github.repository }}-main-${{ env.PLATFORM_PAIR }}
+        cache-to: type=gha,scope=${{ github.repository }}-${{ github.ref_name }}-${{ env.PLATFORM_PAIR }},mode=max
+        outputs: type=registry,push-by-digest=true,name-canonical=true,push=true
+
+    - name: Export digest
+      shell: bash
+      run: |
+        mkdir -p "${{ runner.temp }}/digests"
+        digest="${{ steps.build.outputs.digest }}"
+        touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+    - name: Upload digest
+      uses: actions/upload-artifact@v4
+      with:
+        name: digests-${{ env.PLATFORM_PAIR }}
+        path: ${{ runner.temp }}/digests/*
+        if-no-files-found: error
+        retention-days: 1
