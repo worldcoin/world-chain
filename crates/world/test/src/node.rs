@@ -122,6 +122,7 @@ pub fn test_config_with_peers_and_gossip(
             flashblocks,
             tx_peers,
             disable_bootnodes: true,
+            health: Default::default(),
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
