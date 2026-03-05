@@ -3,7 +3,6 @@
 pub mod args;
 pub mod config;
 pub mod context;
-pub mod health;
 pub mod node;
 pub mod tx_propagation;
 
