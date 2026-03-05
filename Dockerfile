@@ -1,12 +1,16 @@
+# syntax=docker/dockerfile:1.7
 FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
 
 ARG FEATURES
 
-RUN cargo install sccache --version ^0.9
-RUN cargo install cargo-chef --version ^0.1
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  --mount=type=cache,target=/usr/local/cargo/git \
+  cargo install --locked sccache --version ^0.9 \
+  && cargo install --locked cargo-chef --version ^0.1
 
 RUN apt-get update \
-  && apt-get install -y clang libclang-dev gcc curl
+  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTC_WRAPPER=sccache
@@ -34,14 +38,16 @@ ARG FEATURES="jemalloc"
 
 COPY --from=planner /app/recipe.json recipe.json
 
-RUN --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo chef cook --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo chef cook --locked --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
+    cargo build --locked --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
