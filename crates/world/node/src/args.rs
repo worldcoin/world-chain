@@ -44,26 +44,18 @@ pub struct WorldChainArgs {
     pub health: HealthArgs,
 }
 
-#[derive(Debug, Clone, clap::Args)]
+#[derive(Debug, Clone, Default, clap::Args)]
 #[command(next_help_heading = "Health")]
 pub struct HealthArgs {
-    /// Address for the health HTTP server (startup/ready/live endpoints)
-    #[arg(long = "health.addr", default_value = "0.0.0.0:8080")]
-    pub addr: SocketAddr,
+    /// Enable the health HTTP server on this address (startup/ready/live endpoints).
+    /// If omitted, no health server is started.
+    #[arg(long = "health.addr")]
+    pub addr: Option<SocketAddr>,
 
     /// Path to health check configuration file (JSON).
     /// If omitted, all probes return 200 OK unconditionally.
     #[arg(long = "health.config")]
     pub config: Option<PathBuf>,
-}
-
-impl Default for HealthArgs {
-    fn default() -> Self {
-        Self {
-            addr: "0.0.0.0:8080".parse().expect("valid default addr"),
-            config: None,
-        }
-    }
 }
 
 impl WorldChainArgs {

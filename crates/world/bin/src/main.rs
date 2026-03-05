@@ -62,16 +62,15 @@ fn main() {
                 .launch()
                 .await?;
 
-            let health_config = match &config.args.health.config {
-                Some(path) => HealthConfig::from_file(path)?,
-                None => HealthConfig::default(),
-            };
-            let health_server = health_config.build(
-                config.args.health.addr,
-                node.provider.clone(),
-                node.network.clone(),
-            );
-            node.task_executor.spawn(health_server.serve());
+            if let Some(addr) = config.args.health.addr {
+                let health_config = match &config.args.health.config {
+                    Some(path) => HealthConfig::from_file(path)?,
+                    None => HealthConfig::default(),
+                };
+                let health_server =
+                    health_config.build(addr, node.provider.clone(), node.network.clone());
+                node.task_executor.spawn(health_server.serve());
+            }
 
             node_exit_future.await?;
 
