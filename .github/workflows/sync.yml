@@ -5,11 +5,11 @@ name: sync test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
   push:
     tags:
-        - v*
-        
+      - v*
+
 env:
   CARGO_TERM_COLOR: always
 
