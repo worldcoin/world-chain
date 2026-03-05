@@ -443,7 +443,8 @@ pub async fn bundle_transactions(args: &BundleArgs) -> eyre::Result<Vec<Bytes>> 
     let signer = args.std_private_key.parse::<PrivateKeySigner>()?;
     let sender = signer.address();
     let mut txs = vec![];
-    for (nonce, _) in (args.std_nonce..).zip(0..args.tx_batch_size) {
+    let mut nonce = args.std_nonce;
+    for _ in 0..args.tx_batch_size {
         let tx = TransactionRequest {
             nonce: Some(nonce),
             value: None,
@@ -460,6 +461,7 @@ pub async fn bundle_transactions(args: &BundleArgs) -> eyre::Result<Vec<Bytes>> 
             ..Default::default()
         };
 
+        nonce += 1;
         txs.push(sign_transaction(tx, signer.clone()).await?)
     }
 
