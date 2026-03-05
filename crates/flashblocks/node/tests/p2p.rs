@@ -227,7 +227,7 @@ async fn setup_node_extended_cfg(
         world_chain_node_config
             .args
             .clone()
-            .into_config(&chain_spec)?,
+            .into_config(&mut node_config)?,
     );
 
     let ext_context = node.ext_context::<FullNodeTypesAdapter<

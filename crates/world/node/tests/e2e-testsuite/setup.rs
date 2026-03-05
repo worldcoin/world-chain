@@ -233,7 +233,7 @@ where
             test_config_with_peers_and_gossip(None, disable_gossip, flashblocks_enabled)
         };
 
-        let node = WorldChainNode::<T>::new(config.args.clone().into_config(&op_chain_spec)?);
+        let node = WorldChainNode::<T>::new(config.args.clone().into_config(&mut node_config)?);
 
         let ext_context = node.ext_context::<FullNodeTypesAdapter<
             WorldChainNode<T>,
