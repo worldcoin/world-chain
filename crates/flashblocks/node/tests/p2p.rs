@@ -216,7 +216,6 @@ async fn setup_node_extended_cfg(
                 flashblocks_interval: 200,
                 recommit_interval: 200,
                 access_list: true,
-                bootnodes: vec![],
             }),
             tx_peers: None,
             health: Default::default(),
@@ -228,7 +227,7 @@ async fn setup_node_extended_cfg(
         world_chain_node_config
             .args
             .clone()
-            .into_config(&chain_spec)?,
+            .into_config(&mut node_config)?,
     );
 
     let ext_context = node.ext_context::<FullNodeTypesAdapter<

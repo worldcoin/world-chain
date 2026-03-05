@@ -103,7 +103,6 @@ pub fn test_config_with_peers_and_gossip(
             recommit_interval: 50,
             flashblocks_interval: 200,
             access_list: true,
-            bootnodes: vec![],
         })
     } else {
         None

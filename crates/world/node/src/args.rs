@@ -3,16 +3,17 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use flashblocks_cli::{
-    DEFAULT_FLASHBLOCKS_BOOTNODES, FlashblocksArgs, FlashblocksPayloadBuilderConfig,
-};
+use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
 use reth_network_peers::{PeerId, TrustedPeer};
+use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::{net::SocketAddr, path::PathBuf, str::FromStr};
 use tracing::{info, warn};
+
+pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
 use crate::config::WorldChainNodeConfig;
 
@@ -66,8 +67,12 @@ impl Default for HealthArgs {
 }
 
 impl WorldChainArgs {
-    pub fn into_config(mut self, spec: &OpChainSpec) -> eyre::Result<WorldChainNodeConfig> {
+    pub fn into_config(
+        mut self,
+        config: &mut NodeConfig<OpChainSpec>,
+    ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+        let spec = &config.chain;
 
         if let Some(peers) = &self.tx_peers {
             if self.rollup.disable_txpool_gossip {
@@ -96,10 +101,12 @@ impl WorldChainArgs {
                         "1361edebf7fd03a72aa23748e17eb5f6901b544cf80d3f410afa5e6e261d7281",
                     )?);
                 }
-                if let Some(flashblocks) = &mut self.flashblocks
-                    && flashblocks.bootnodes.is_empty()
+
+                if let Some(bootnodes) = &mut config.network.bootnodes
+                    && bootnodes.is_empty()
+                    && self.flashblocks.is_some()
                 {
-                    flashblocks.bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
+                    *bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -261,6 +268,8 @@ mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use clap::Parser;
+    use reth_node_builder::NodeConfig;
+    use std::sync::Arc;
 
     #[derive(Debug, Parser)]
     struct CommandParser {
@@ -278,27 +287,6 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();
-    }
-
-    #[test]
-    fn flashblocks_bootnodes_default() {
-        let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
-        let bootnodes = args.flashblocks.unwrap().bootnodes;
-
-        assert!(bootnodes.is_empty());
-    }
-
-    #[test]
-    fn flashblocks_bootnodes_default_added_for_world_chain() {
-        let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
-
-        let spec = reth_optimism_chainspec::OpChainSpecBuilder::optimism_mainnet()
-            .chain(NamedChain::World.into())
-            .build();
-        let config = args.into_config(&spec).unwrap();
-        let bootnodes = config.args.flashblocks.unwrap().bootnodes;
-
-        assert_eq!(bootnodes.len(), 3);
     }
 
     #[test]
@@ -379,7 +367,8 @@ mod tests {
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
-        let config = args.into_config(&spec).unwrap();
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+        let config = args.into_config(&mut node_config).unwrap();
 
         // tx_peers should be set to None due to shadowing
         assert!(config.args.tx_peers.is_none());

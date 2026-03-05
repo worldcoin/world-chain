@@ -59,7 +59,6 @@ pub struct WorldChainNetworkBuilder {
     op_network_builder: OpNetworkBuilder,
     tx_peers: Option<Vec<PeerId>>,
     flashblocks_p2p_handle: Option<FlashblocksHandle>,
-    flashblocks_bootnodes: Vec<TrustedPeer>,
 }
 
 impl WorldChainNetworkBuilder {
@@ -68,7 +67,6 @@ impl WorldChainNetworkBuilder {
         disable_discovery_v4: bool,
         tx_peers: Option<Vec<PeerId>>,
         flashblocks_p2p_handle: Option<FlashblocksHandle>,
-        flashblocks_bootnodes: Vec<TrustedPeer>,
     ) -> Self {
         let op_network_builder = OpNetworkBuilder {
             disable_txpool_gossip,
@@ -79,7 +77,6 @@ impl WorldChainNetworkBuilder {
             op_network_builder,
             tx_peers,
             flashblocks_p2p_handle,
-            flashblocks_bootnodes,
         }
     }
 }
@@ -105,32 +102,24 @@ where
             op_network_builder,
             tx_peers,
             flashblocks_p2p_handle,
-            flashblocks_bootnodes,
         } = self;
 
         let mut network_config = op_network_builder.network_config(ctx)?;
         let local_peer_id = network_config.hello_message.id;
-        network_config.peers_config.trusted_nodes.extend(flashblocks_bootnodes.clone());
-        network_config.peers_config.trusted_nodes.retain(|peer| {
-            if peer.id == local_peer_id {
-                info!(
-                    target: "world_chain::network",
-                    peer = %peer,
-                    local_peer_id = %local_peer_id,
-                    "Skipping self-referential trusted peer"
-                );
-                false
-            } else {
-                true
-            }
-        });
+        let not_self = |peer: &TrustedPeer| {
+            peer.id != local_peer_id
+        };
+        network_config.peers_config.trusted_nodes.retain(not_self);
+        network_config.boot_nodes.retain(not_self);
 
-        let trusted_peer_ids: Vec<_> = network_config
+        let mut trusted_peer_ids: Vec<_> = network_config
             .peers_config
             .trusted_nodes
             .iter()
+            .chain(network_config.boot_nodes.iter())
             .map(|peer| peer.id)
             .collect();
+        trusted_peer_ids.dedup();
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
@@ -251,12 +240,6 @@ where
                 .map(|flashblocks_components_ctx| {
                     flashblocks_components_ctx.flashblocks_handle.clone()
                 }),
-            self.config
-                .args
-                .flashblocks
-                .as_ref()
-                .map(|flashblocks_args| flashblocks_args.bootnodes.clone())
-                .unwrap_or_default(),
         );
 
         let (
