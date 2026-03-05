@@ -18,9 +18,6 @@ RUN apt-get update \
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
-ENV SCCACHE_BUCKET=${SCCACHE_BUCKET}
-ENV SCCACHE_REGION=${SCCACHE_REGION}
-ENV SCCACHE_S3_KEY_PREFIX=${SCCACHE_S3_KEY_PREFIX}
 
 FROM base AS planner
 WORKDIR /app
@@ -50,6 +47,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=secret,id=aws_session_token,required=false \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then \
+      export SCCACHE_BUCKET="${SCCACHE_BUCKET}" SCCACHE_REGION="${SCCACHE_REGION}" SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX}"; \
+      if ! sccache --start-server >/dev/null 2>&1; then \
+        echo "warning: sccache S3 init failed, falling back to local cache" >&2; \
+        unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
+      fi; \
+    else \
+      unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
+    fi; \
     AWS_ACCESS_KEY_ID="$(cat /run/secrets/aws_access_key_id 2>/dev/null || true)" \
     AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/aws_secret_access_key 2>/dev/null || true)" \
     AWS_SESSION_TOKEN="$(cat /run/secrets/aws_session_token 2>/dev/null || true)" \
@@ -62,6 +68,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=secret,id=aws_session_token,required=false \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    if [ -n "${SCCACHE_BUCKET:-}" ]; then \
+      export SCCACHE_BUCKET="${SCCACHE_BUCKET}" SCCACHE_REGION="${SCCACHE_REGION}" SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX}"; \
+      if ! sccache --start-server >/dev/null 2>&1; then \
+        echo "warning: sccache S3 init failed, falling back to local cache" >&2; \
+        unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
+      fi; \
+    else \
+      unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; \
+    fi; \
     AWS_ACCESS_KEY_ID="$(cat /run/secrets/aws_access_key_id 2>/dev/null || true)" \
     AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/aws_secret_access_key 2>/dev/null || true)" \
     AWS_SESSION_TOKEN="$(cat /run/secrets/aws_session_token 2>/dev/null || true)" \

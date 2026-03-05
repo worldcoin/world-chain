@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
   AWS_REGION: us-east-1
-  SCCACHE_BUCKET: workflow-build-cache
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
 
 permissions:
   contents: read
