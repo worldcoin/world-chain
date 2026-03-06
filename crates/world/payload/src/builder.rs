@@ -1,4 +1,5 @@
 use crate::context::WorldChainPayloadBuilderCtx;
+use alloy_eips::Encodable2718;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
 use flashblocks_builder::traits::context::PayloadBuilderCtx;
@@ -54,6 +55,7 @@ where
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub builder_private_key: PrivateKeySigner,
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 impl<Client, S> WorldChainPayloadBuilder<Client, S>
@@ -74,6 +76,7 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: PrivateKeySigner,
+        block_uncompressed_size_limit: Option<u64>,
     ) -> Self {
         Self::with_builder_config(
             pool,
@@ -85,6 +88,7 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
+            block_uncompressed_size_limit,
         )
     }
 
@@ -99,6 +103,7 @@ where
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: PrivateKeySigner,
+        block_uncompressed_size_limit: Option<u64>,
     ) -> Self {
         let inner = OpPayloadBuilder::with_builder_config(pool, client, evm_config, config)
             .set_compute_pending_block(compute_pending_block);
@@ -109,6 +114,7 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
+            block_uncompressed_size_limit,
         }
     }
 }
@@ -137,6 +143,7 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
+            block_uncompressed_size_limit,
         } = self;
 
         WorldChainPayloadBuilder {
@@ -145,6 +152,7 @@ where
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
+            block_uncompressed_size_limit,
         }
     }
 
@@ -205,6 +213,7 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
+            block_uncompressed_size_limit: self.block_uncompressed_size_limit,
         };
 
         let op_ctx = &ctx.inner;
@@ -258,6 +267,7 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
+            block_uncompressed_size_limit: self.block_uncompressed_size_limit,
         };
 
         let state_provider = self
@@ -390,6 +400,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         builder.apply_pre_execution_changes()?;
 
         // 2. execute sequencer transactions
+        let sequencer_transactions_uncompressed_size: u64 = ctx
+            .inner
+            .attributes()
+            .transactions
+            .iter()
+            .map(|tx| tx.1.encode_2718_len() as u64)
+            .sum();
+        let cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
         let mut info = op_ctx.execute_sequencer_transactions(&mut builder)?;
 
         // 3. if mem pool transactions are requested we execute them
@@ -397,7 +415,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
             // TODO: Validate gas limit
             if ctx
-                .execute_best_transactions(pool, &mut info, &mut builder, best_txs, gas_limit)?
+                .execute_best_transactions(
+                    pool,
+                    &mut info,
+                    &mut builder,
+                    best_txs,
+                    gas_limit,
+                    cumulative_uncompressed_bytes,
+                )?
                 .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
@@ -479,6 +504,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let mut builder = PayloadBuilderCtx::block_builder(ctx, &mut db)?;
 
         builder.apply_pre_execution_changes()?;
+        let sequencer_transactions_uncompressed_size: u64 = ctx
+            .inner
+            .attributes()
+            .transactions
+            .iter()
+            .map(|tx| tx.1.encode_2718_len() as u64)
+            .sum();
+        let cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
         let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
         if !ctx.inner.attributes().no_tx_pool {
             let best_txs = best(
@@ -486,7 +519,14 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                     .best_transaction_attributes(builder.evm_mut().block()),
             );
             // TODO: Validate gas limit
-            ctx.execute_best_transactions(pool, &mut info, &mut builder, best_txs, 0)?;
+            ctx.execute_best_transactions(
+                pool,
+                &mut info,
+                &mut builder,
+                best_txs,
+                0,
+                cumulative_uncompressed_bytes,
+            )?;
         }
         builder.into_executor().apply_post_execution_changes()?;
 
