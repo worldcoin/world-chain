@@ -84,6 +84,7 @@ pub fn test_config_with_peers_and_gossip(
     let builder = BuilderArgs {
         enabled: true,
         private_key: signer(6),
+        block_uncompressed_size_limit: None,
     };
 
     let pbh = PbhArgs {
@@ -120,7 +121,6 @@ pub fn test_config_with_peers_and_gossip(
             pbh,
             flashblocks,
             tx_peers,
-            block_uncompressed_size_limit: None,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),

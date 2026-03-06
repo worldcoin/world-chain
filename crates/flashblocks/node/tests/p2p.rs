@@ -200,6 +200,7 @@ async fn setup_node_extended_cfg(
     let builder = BuilderArgs {
         enabled: false,
         private_key: signer(6),
+        block_uncompressed_size_limit: None,
     };
 
     let world_chain_node_config = WorldChainNodeConfig {
@@ -218,7 +219,6 @@ async fn setup_node_extended_cfg(
                 access_list: true,
             }),
             tx_peers: None,
-            block_uncompressed_size_limit: None,
         },
         builder_config: Default::default(),
     };
