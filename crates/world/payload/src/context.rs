@@ -266,7 +266,14 @@ where
             cumulative_uncompressed_bytes += tx_uncompressed_size;
             let is_uncompressed_block_full =
                 if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
-                    cumulative_uncompressed_bytes > block_uncompressed_size_limit
+                    let result = cumulative_uncompressed_bytes > block_uncompressed_size_limit;
+                    if result {
+                        tracing::warn!(
+                            "we've reached block uncompressed size limit - rejecting tx: {:?}",
+                            tx
+                        );
+                    }
+                    result
                 } else {
                     false
                 };
