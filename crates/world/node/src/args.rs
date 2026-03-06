@@ -38,6 +38,10 @@ pub struct WorldChainArgs {
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
     pub tx_peers: Option<Vec<PeerId>>,
+
+    /// Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
+    #[arg(long)]
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 impl WorldChainArgs {
@@ -336,6 +340,7 @@ mod tests {
             },
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
+            block_uncompressed_size_limit: None,
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());

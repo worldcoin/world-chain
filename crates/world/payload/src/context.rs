@@ -1,5 +1,5 @@
 use alloy_consensus::{SignableTransaction, Transaction};
-use alloy_eips::Typed2718;
+use alloy_eips::{Encodable2718, Typed2718};
 use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
@@ -60,6 +60,7 @@ pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider> {
     pub pbh_signature_aggregator: Address,
     pub client: Client,
     pub builder_private_key: PrivateKeySigner,
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,7 @@ pub struct WorldChainPayloadBuilderCtxBuilder {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub builder_private_key: PrivateKeySigner,
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 impl<Client> WorldChainPayloadBuilderCtx<Client>
@@ -232,6 +234,7 @@ where
         builder: &mut Builder,
         mut best_txs: Txs,
         mut gas_limit: u64,
+        mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,
@@ -259,6 +262,14 @@ where
         while let Some(pooled_tx) = best_txs.next(()) {
             let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
+            let tx_uncompressed_size = tx.encode_2718_len() as u64;
+            cumulative_uncompressed_bytes += tx_uncompressed_size;
+            let is_uncompressed_block_full =
+                if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
+                    cumulative_uncompressed_bytes > block_uncompressed_size_limit
+                } else {
+                    false
+                };
 
             if info.is_tx_over_limits(
                 tx_da_size,
@@ -267,7 +278,8 @@ where
                 block_da_limit,
                 tx.gas_limit(),
                 None, // TODO: related to Jovian
-            ) {
+            ) || is_uncompressed_block_full
+            {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -425,6 +437,7 @@ where
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
             builder_private_key: self.builder_private_key.clone(),
+            block_uncompressed_size_limit: self.block_uncompressed_size_limit,
         }
     }
 }

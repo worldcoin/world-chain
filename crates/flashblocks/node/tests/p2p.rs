@@ -218,6 +218,7 @@ async fn setup_node_extended_cfg(
                 access_list: true,
             }),
             tx_peers: None,
+            block_uncompressed_size_limit: None,
         },
         builder_config: Default::default(),
     };
@@ -962,3 +963,4 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     Ok(())
 }
+
