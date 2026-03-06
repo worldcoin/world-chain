@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
@@ -62,13 +64,15 @@ fn main() {
                 .launch()
                 .await?;
 
-            if let Some(addr) = config.args.health.addr {
+            if config.args.health.enabled {
+                let health_addr =
+                    SocketAddr::new(config.args.health.addr, config.args.health.port);
                 let health_config = match &config.args.health.config {
                     Some(path) => HealthConfig::from_file(path)?,
                     None => HealthConfig::default(),
                 };
                 let health_server =
-                    health_config.build(addr, node.provider.clone(), node.network.clone());
+                    health_config.build(health_addr, node.provider.clone(), node.network.clone());
                 node.task_executor.spawn(health_server.serve());
             }
 
