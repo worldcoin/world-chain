@@ -201,7 +201,6 @@ alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
 
 # rpc
-axum = "0.8"
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
 jsonrpsee-core = { version = "0.26.0" }
 jsonrpsee-types = "0.26.0"
@@ -211,7 +210,6 @@ metrics = "0.24.0"
 metrics-derive = "0.1"
 
 tokio = { version = "1.44.2", features = ["full"] }
-nix = { version = "0.29", features = ["fs"] }
 tokio-util = "0.7.15"
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.28.0"
