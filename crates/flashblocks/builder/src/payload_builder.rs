@@ -9,6 +9,7 @@ use crate::{
         payload_builder::FlashblockPayloadBuilder,
     },
 };
+use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
 use reth_evm::{
     Evm, EvmFactory,
@@ -321,6 +322,12 @@ where
         .transaction_hashes_iter()
         .collect::<Vec<_>>();
 
+    let cumulative_uncompressed_bytes: u64 = committed_state
+        .transactions
+        .iter()
+        .map(|(_, tx)| tx.encode_2718_len() as u64)
+        .sum();
+
     if bal_enabled {
         let mut state = State::builder()
             .with_database(db)
@@ -353,6 +360,7 @@ where
             builder,
             &committed_state,
             Some(access_list_rx),
+            cumulative_uncompressed_bytes,
         )
     } else {
         let mut state = State::builder()
@@ -380,6 +388,7 @@ where
             builder,
             &committed_state,
             None,
+            cumulative_uncompressed_bytes,
         )
     }
 }
@@ -402,6 +411,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
     >,
     committed_state: &CommittedState<R>,
     access_list_rx: Option<crossbeam_channel::Receiver<FlashblockAccessList>>,
+    mut cumulative_uncompressed_bytes: u64,
 ) -> Result<
     (
         BuildOutcomeKind<OpBuiltPayload>,
@@ -427,6 +437,13 @@ where
         builder.apply_pre_execution_changes()?;
 
         // 4. Execute Deposit transactions
+        let sequencer_transactions_uncompressed_size: u64 = ctx
+            .attributes()
+            .transactions
+            .iter()
+            .map(|tx| tx.1.encode_2718_len() as u64)
+            .sum();
+        cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
         ctx.execute_sequencer_transactions(&mut builder)
             .map_err(PayloadBuilderError::other)?
     } else {
@@ -446,7 +463,14 @@ where
         let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(visited_transactions);
 
         if ctx
-            .execute_best_transactions(pool, &mut info, &mut builder, best_txns.guard(), gas_limit)?
+            .execute_best_transactions(
+                pool,
+                &mut info,
+                &mut builder,
+                best_txns.guard(),
+                gas_limit,
+                cumulative_uncompressed_bytes,
+            )?
             .is_some()
         {
             trace!(target: "flashblocks::payload_builder", "payload build cancelled");

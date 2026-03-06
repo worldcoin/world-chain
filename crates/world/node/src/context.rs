@@ -265,6 +265,7 @@ where
             pbh_entry_point: pbh.entrypoint,
             pbh_signature_aggregator: pbh.signature_aggregator,
             builder_private_key: builder.private_key,
+            block_uncompressed_size_limit: builder.block_uncompressed_size_limit,
         };
 
         ComponentsBuilder::default()

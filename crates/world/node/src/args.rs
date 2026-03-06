@@ -214,6 +214,13 @@ pub struct BuilderArgs {
         default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )]
     pub private_key: PrivateKeySigner,
+
+    /// Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
+    #[arg(
+        long = "builder.block-uncompressed-size-limit",
+        env = "BUILDER_BLOCK_UNCOMPRESSED_SIZE_LIMIT"
+    )]
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -333,6 +340,7 @@ mod tests {
                 private_key: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
                     .parse()
                     .unwrap(),
+                block_uncompressed_size_limit: None,
             },
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
