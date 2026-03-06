@@ -140,12 +140,40 @@ where
     T: WorldChainTestContextBounds,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
-    setup_with_tx_peers::<T>(
+    setup_inner::<T>(
         num_nodes,
         attributes_generator,
         false,
         false,
         flashblocks_enabled,
+        None,
+    )
+    .await
+}
+
+pub async fn setup_with_block_uncompressed_size_limit<T>(
+    num_nodes: u8,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    flashblocks_enabled: bool,
+    block_uncompressed_size_limit: Option<u64>,
+) -> eyre::Result<(
+    Range<u8>,
+    Vec<WorldChainTestingNodeContext<T>>,
+    TaskManager,
+    Environment<OpEngineTypes>,
+    TxSpammer,
+)>
+where
+    T: WorldChainTestContextBounds,
+    WorldChainNode<T>: WorldChainNodeTestBounds<T>,
+{
+    setup_inner::<T>(
+        num_nodes,
+        attributes_generator,
+        false,
+        false,
+        flashblocks_enabled,
+        block_uncompressed_size_limit,
     )
     .await
 }
@@ -157,6 +185,35 @@ pub async fn setup_with_tx_peers<T>(
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
+) -> eyre::Result<(
+    Range<u8>,
+    Vec<WorldChainTestingNodeContext<T>>,
+    TaskManager,
+    Environment<OpEngineTypes>,
+    TxSpammer,
+)>
+where
+    T: WorldChainTestContextBounds,
+    WorldChainNode<T>: WorldChainNodeTestBounds<T>,
+{
+    setup_inner::<T>(
+        num_nodes,
+        attributes_generator,
+        enable_tx_peers,
+        disable_gossip,
+        flashblocks_enabled,
+        None,
+    )
+    .await
+}
+
+async fn setup_inner<T>(
+    num_nodes: u8,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    enable_tx_peers: bool,
+    disable_gossip: bool,
+    flashblocks_enabled: bool,
+    block_uncompressed_size_limit: Option<u64>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -232,6 +289,8 @@ where
         } else {
             test_config_with_peers_and_gossip(None, disable_gossip, flashblocks_enabled)
         };
+        let mut config = config;
+        config.args.block_uncompressed_size_limit = block_uncompressed_size_limit;
 
         let node = WorldChainNode::<T>::new(config.args.clone().into_config(&mut node_config)?);
 

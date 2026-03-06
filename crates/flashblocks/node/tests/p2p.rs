@@ -963,4 +963,3 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     Ok(())
 }
-
