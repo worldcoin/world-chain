@@ -132,6 +132,8 @@ jobs:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ env.REPO_NAME }}-${{ env.VERSION }}-*.tar.gz
       - name: Generate full changelog
         id: changelog
         run: |
