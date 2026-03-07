@@ -14,7 +14,6 @@ use alloy_rpc_types_eth::{
     Filter, FilterBlockOption, FilterChanges, FilterId, Log, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use flashblocks_builder::event_stream::PendingBlockRef;
 use jsonrpsee::core::RpcResult;
 use reth::rpc::eth::EthFilter;
 use reth_optimism_primitives::OpPrimitives;
@@ -26,23 +25,20 @@ use reth_rpc_eth_types::logs_utils::{ProviderOrBlock, append_matching_block_logs
 use reth_storage_api::{BlockIdReader, BlockReader};
 use tracing::trace;
 
+use crate::eth::PendingBlockWatch;
+
 /// A wrapper around [`EthFilter`] that overrides `eth_getLogs` to handle
 /// pending flashblock logs correctly.
-///
-/// When the user queries `eth_getLogs` with `fromBlock: "pending"`, this
-/// implementation reads the pending block directly from the flashblocks
-/// watch channel and returns matching logs without the `> best_number` check
-/// that causes issues with the standard implementation.
 pub struct FlashblocksEthFilter<Eth: EthApiTypes> {
     inner: EthFilter<Eth>,
-    pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
+    pending_block: Option<tokio::sync::watch::Receiver<PendingBlockWatch>>,
 }
 
 impl<Eth: EthApiTypes> FlashblocksEthFilter<Eth> {
     /// Creates a new `FlashblocksEthFilter` wrapping the given `EthFilter`.
     pub fn new(
         inner: EthFilter<Eth>,
-        pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
+        pending_block: Option<tokio::sync::watch::Receiver<PendingBlockWatch>>,
     ) -> Self {
         Self {
             inner,
@@ -51,20 +47,16 @@ impl<Eth: EthApiTypes> FlashblocksEthFilter<Eth> {
     }
 
     /// Attempts to get pending block logs from the flashblocks watch channel.
-    ///
-    /// Returns `Some(logs)` if a pending flashblock is available and the filter
-    /// matches, or `None` if no pending block is available (caller should fall
-    /// back to default behavior).
     fn pending_flashblock_logs(&self, filter: &Filter) -> Option<Vec<Log>>
     where
         Eth: RpcNodeCore<Primitives = OpPrimitives>,
         Eth::Provider: BlockReader,
     {
         let receiver = self.pending_block.as_ref()?;
-        let pending = receiver.borrow().clone()?;
+        let executed = receiver.borrow().clone()?;
 
-        let block = &pending.recovered_block;
-        let receipts: &[_] = &pending.receipts;
+        let block = &executed.recovered_block;
+        let receipts = &executed.execution_output.receipts;
 
         let block_num_hash = block.num_hash();
         let timestamp = block.timestamp();
@@ -141,15 +133,9 @@ where
         EthFilterApiServer::uninstall_filter(&self.inner, id).await
     }
 
-    /// Returns logs matching given filter object.
-    ///
-    /// Overrides the default `eth_getLogs` to handle `fromBlock: "pending"` by
-    /// reading directly from the flashblocks watch channel instead of relying on
-    /// reth's default pending block resolution which requires `block.number() > best_number`.
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "flashblocks", "Serving eth_getLogs");
 
-        // Check if this is a pending block range query
         if let FilterBlockOption::Range {
             from_block,
             to_block,
@@ -159,15 +145,12 @@ where
             let to_pending = to_block.is_some_and(|b| b.is_pending());
 
             if from_pending || to_pending {
-                // Try to get logs from the flashblocks pending block
                 if let Some(logs) = self.pending_flashblock_logs(&filter) {
                     return Ok(logs);
                 }
-                // No pending flashblock available — fall through to default behavior
             }
         }
 
-        // Delegate to the inner EthFilter for all other cases
         EthFilterApiServer::logs(&self.inner, filter).await
     }
 }

@@ -147,7 +147,6 @@ where
                 payload_job_config,
                 payload_builder,
             );
-
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(
                 payload_generator,
                 ctx.provider().canonical_state_stream(),

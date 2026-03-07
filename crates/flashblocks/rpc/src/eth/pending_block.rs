@@ -46,10 +46,10 @@ where
         if let Some(receiver) = self.pending_block.as_ref() {
             let pending = receiver.borrow().clone();
 
-            if let Some(pending) = pending {
+            if let Some(executed) = pending {
                 let block_and_receipts = BlockAndReceipts {
-                    block: Arc::clone(&pending.recovered_block),
-                    receipts: (*pending.receipts).clone().into(),
+                    block: Arc::clone(&executed.recovered_block),
+                    receipts: executed.execution_output.receipts.clone().into(),
                 };
                 return Ok(Some(block_and_receipts));
             }

@@ -3766,7 +3766,6 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "parking_lot",
- "pin-project",
  "proptest",
  "rayon",
  "reth",
@@ -3795,7 +3794,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -3983,6 +3981,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "reth",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-evm",
  "reth-node-api",
@@ -14238,7 +14237,6 @@ dependencies = [
  "semaphore-rs",
  "serde_json",
  "tokio",
- "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tokio-util",
  "tracing",

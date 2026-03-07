@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.10.1"
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.89.0"
 license = "MIT"
 homepage = "https://world.org/world-chain"
 repository = "https://github.com/worldcoin/world-chain/"
@@ -213,9 +213,8 @@ tokio = { version = "1.44.2", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.28.0"
-crossbeam = "0.8"
+
 crossbeam-channel = "0.5"
-crossbeam-queue = "0.3"
 futures = "0.3"
 futures-util = "0.3"
 chrono = "0.4"
@@ -230,7 +229,6 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
-moka = "0.5"
 derive_more = { version = "2", default-features = false, features = ["full"] }
 dotenvy = "0.15.7"
 tikv-jemallocator = { version = "0.6" }
@@ -265,7 +263,7 @@ testcontainers-modules = { version = "0.14", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 lazy_static = "1.4"
 proptest = "1.9.0"
-pin-project = "1.0.12"
+
 [patch.crates-io]
 op-alloy = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }
 op-alloy-consensus = { git = "https://github.com/0xForerunner/optimism", rev = "79c9153" }

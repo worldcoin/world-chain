@@ -46,7 +46,6 @@ alloy-signer-local.workspace = true
 op-alloy-consensus.workspace = true
 
 tokio.workspace = true
-tokio-stream.workspace = true
 eyre.workspace = true
 clap.workspace = true
 tracing.workspace = true

@@ -11,10 +11,7 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator,
-    event_stream::{FlashblockEvent, PendingBlock, PendingBlockRef},
-};
+use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -36,13 +33,10 @@ use reth_node_builder::{
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpNode, args::RollupArgs,
+    args::RollupArgs,
 };
-use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
@@ -341,32 +335,12 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        // Subscribe to the coordinator's flashblock events broadcast and map
-        // each executed flashblock into a `PendingBlockRef` for the Eth API.
-        // Attribute events reset the pending block to `None`.
-        let maybe_pending_block: Option<
-            tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>,
-        > = self.components_context.as_ref().map(|ctx| {
-            let mut fb_rx = BroadcastStream::new(ctx.flashblock_events.subscribe());
-            let (pending_tx, pending_rx) = tokio::sync::watch::channel(None);
+        // Subscribe to the coordinator's pending block watch channel.
+        let maybe_pending_block = self
+            .components_context
+            .as_ref()
+            .map(|ctx| ctx.flashblocks_state.subscribe_pending_block());
 
-            tokio::spawn(async move {
-                use tokio_stream::StreamExt;
-                while let Some(Ok(event)) = fb_rx.next().await {
-                    match event {
-                        FlashblockEvent::ExecutedFlashblock(fb) => {
-                            let block = PendingBlock::from_executed(&fb);
-                            pending_tx.send_replace(Some(std::sync::Arc::new(block)));
-                        }
-                        FlashblockEvent::Attributes(_) => {
-                            pending_tx.send_replace(None);
-                        }
-                    }
-                }
-            });
-
-            pending_rx
-        });
         let flashblocks_eth_api_builder =
             FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
 
@@ -464,8 +438,6 @@ pub struct FlashblocksComponentsContext {
     pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
-    /// Broadcast sender for flashblock events (executed flashblocks from the coordinator).
-    pub flashblock_events: broadcast::Sender<FlashblockEvent<OpNode>>,
 }
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
@@ -501,14 +473,9 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
-        let flashblocks_state = FlashblocksExecutionCoordinator::new(flashblocks_handle.clone());
-
-        let (flashblock_events, _) = broadcast::channel(256);
-
-        // Register the flashblock events sender with the coordinator so it
-        // broadcasts `FlashblockEvent::ExecutedFlashblock` after executing each
-        // flashblock.
-        flashblocks_state.register_flashblock_events(flashblock_events.clone());
+        let (pending_block_tx, _) = tokio::sync::watch::channel(None);
+        let flashblocks_state =
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block_tx);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
@@ -517,7 +484,6 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
-            flashblock_events,
         }
     }
 }
