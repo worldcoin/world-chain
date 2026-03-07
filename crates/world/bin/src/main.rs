@@ -2,10 +2,11 @@ use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
+use reth_rpc_eth_api::EthFilterApiServer;
 use reth_tracing::tracing::info;
 use world_chain_node::{
-    FlashblocksOpApi, OpApiExtServer, args::WorldChainArgs, config::WorldChainNodeConfig,
-    context::FlashblocksContext, node::WorldChainNode,
+    FlashblocksEthFilter, FlashblocksOpApi, OpApiExtServer, args::WorldChainArgs,
+    config::WorldChainNodeConfig, context::FlashblocksContext, node::WorldChainNode,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
@@ -57,6 +58,15 @@ fn main() {
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
+
+                    // Replace the default EthFilter with FlashblocksEthFilter to handle
+                    // pending flashblock logs in eth_getLogs
+                    let eth_filter = ctx.registry.eth_handlers().filter.clone();
+                    let pending_block = ctx.registry.eth_api().pending_block_receiver();
+                    let flashblocks_filter = FlashblocksEthFilter::new(eth_filter, pending_block);
+                    ctx.modules
+                        .replace_configured(flashblocks_filter.into_rpc())?;
+
                     Ok(())
                 })
                 .launch()

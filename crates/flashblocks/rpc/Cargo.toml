@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 # internal
+flashblocks-builder.workspace = true
 flashblocks-primitives.workspace = true
 
 # reth
@@ -34,6 +35,7 @@ reth-optimism-flashblocks.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
@@ -48,4 +50,5 @@ tokio.workspace = true
 tracing.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee.workspace = true
+async-trait.workspace = true
 eyre.workspace = true

@@ -1,5 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+pub mod filter;
 pub mod receipt;
 pub mod transaction;
 
@@ -10,9 +11,9 @@ mod pending_block;
 use std::sync::Arc;
 
 use alloy_primitives::U256;
+use flashblocks_builder::event_stream::PendingBlockRef;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
-use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes};
@@ -47,7 +48,7 @@ use tokio::sync::Semaphore;
 #[derive(Clone)]
 pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     inner: OpEthApi<N, Rpc>,
-    pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
+    pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
 }
 
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
@@ -57,12 +58,19 @@ where
 {
     pub fn new(
         inner: OpEthApi<N, Rpc>,
-        pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
+        pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
     ) -> Self {
         Self {
             inner,
             pending_block,
         }
+    }
+
+    /// Returns a clone of the pending block watch receiver, if available.
+    pub fn pending_block_receiver(
+        &self,
+    ) -> Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>> {
+        self.pending_block.clone()
     }
 }
 
@@ -259,7 +267,7 @@ where
 #[derive(Debug)]
 pub struct FlashblocksEthApiBuilder<NetworkT = Optimism> {
     inner: OpEthApiBuilder<NetworkT>,
-    pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
+    pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
 }
 
 impl<NetworkT> Default for FlashblocksEthApiBuilder<NetworkT> {
@@ -275,7 +283,7 @@ impl<NetworkT> FlashblocksEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new(
         inner: OpEthApiBuilder<NetworkT>,
-        pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
+        pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
     ) -> Self {
         Self {
             inner,

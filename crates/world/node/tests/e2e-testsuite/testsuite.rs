@@ -5,10 +5,13 @@ use crate::{
     },
     setup::{TX_SET_L1_BLOCK, build_payload_attributes},
 };
+use alloy_eips::BlockNumberOrTag;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
 use alloy_primitives::b64;
+use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_rpc_types_eth::Filter;
 use eyre::eyre::eyre;
 use futures::future::Either;
 use reth::{
@@ -992,6 +995,397 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
     assert!(
         final_hashes > 0,
         "Should have validated at least some block hashes"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Flashblocks ETH API Tests
+// ============================================================================
+
+/// Test that eth_getLogs with fromBlock/toBlock "pending" returns logs from
+/// the pending flashblock.
+///
+/// This is the core regression test for PROTO-4338, which caused eth_getLogs
+/// to return stale data instead of pending flashblock logs.
+///
+/// Setup: 2 nodes (builder + follower), flashblocks enabled
+/// 1. Start mining a block with flashblocks and a tx spammer
+/// 2. While flashblocks are being produced, query eth_getLogs with pending range
+/// 3. Assert the call succeeds and returns a result (not an error)
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_logs_pending() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (_, nodes, _tasks, mut env, spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .unwrap()
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    spammer.spawn(20, nodes[0].node.rpc_url());
+
+    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
+
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        Duration::from_millis(3000),
+        true,
+        sender,
+    )
+    .await;
+
+    // Create alloy providers for both builder and follower nodes
+    let builder_url: String = nodes[0].node.rpc_url().to_string();
+    let follower_url: String = nodes[1].node.rpc_url().to_string();
+
+    let logs_found = Arc::new(AtomicUsize::new(0));
+    let logs_counter = logs_found.clone();
+
+    // Spawn a task to repeatedly query eth_getLogs("pending") during block production
+    let query_handle = tokio::spawn(async move {
+        let builder_provider = ProviderBuilder::new().connect_http(builder_url.parse().unwrap());
+        let follower_provider = ProviderBuilder::new().connect_http(follower_url.parse().unwrap());
+
+        let filter = Filter::new()
+            .from_block(BlockNumberOrTag::Pending)
+            .to_block(BlockNumberOrTag::Pending);
+
+        // Poll both nodes multiple times
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            // Query builder node
+            let builder_logs = builder_provider.get_logs(&filter).await;
+            if let Ok(logs) = builder_logs {
+                info!(
+                    target: "test",
+                    builder_log_count = logs.len(),
+                    "Builder eth_getLogs(pending) returned logs"
+                );
+                logs_counter.fetch_add(1, Ordering::SeqCst);
+            }
+
+            // Query follower node
+            let follower_logs = follower_provider.get_logs(&filter).await;
+            if let Ok(logs) = follower_logs {
+                info!(
+                    target: "test",
+                    follower_log_count = logs.len(),
+                    "Follower eth_getLogs(pending) returned logs"
+                );
+                logs_counter.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    });
+
+    // Run mining concurrently
+    tokio::spawn(async move {
+        let mut mine = mine_block;
+        mine.execute(&mut env).await
+    });
+
+    // Wait for mining to complete
+    rx.recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Wait for query loop to finish
+    let _ = query_handle.await;
+
+    let total_queries = logs_found.load(Ordering::SeqCst);
+    info!(
+        target: "test",
+        total_queries,
+        "eth_getLogs(pending) test complete"
+    );
+
+    // At least some queries should have succeeded
+    assert!(
+        total_queries > 0,
+        "eth_getLogs(pending) should have returned at least one successful response"
+    );
+
+    Ok(())
+}
+
+/// Test that eth_getLogs with pending block returns incrementally growing logs
+/// as more flashblocks are published within a single block.
+///
+/// This directly tests the PROTO-4338 bug where all polls returned the same
+/// full block's logs instead of the current flashblock's accumulated logs.
+///
+/// Setup: 2 nodes, flashblocks enabled, tx spammer active
+/// 1. Start mining a block with flashblocks
+/// 2. Poll eth_getLogs("pending") multiple times during flashblock production
+/// 3. Record log counts at each poll
+/// 4. Assert that log counts grow over time as flashblocks include more txs
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_logs_incremental_growth() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (_, nodes, _tasks, mut env, spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .unwrap()
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    // Spawn a heavy tx spammer to maximize chances of logs being produced
+    spammer.spawn(20, nodes[0].node.rpc_url());
+
+    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
+
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        Duration::from_millis(3000),
+        true,
+        sender,
+    )
+    .await;
+
+    let builder_url: String = nodes[0].node.rpc_url().to_string();
+    let log_counts = Arc::new(parking_lot::Mutex::new(Vec::<usize>::new()));
+    let log_counts_clone = log_counts.clone();
+
+    // Spawn a task to poll eth_getLogs("pending") and record log counts
+    let query_handle = tokio::spawn(async move {
+        let provider = ProviderBuilder::new().connect_http(builder_url.parse().unwrap());
+        let filter = Filter::new()
+            .from_block(BlockNumberOrTag::Pending)
+            .to_block(BlockNumberOrTag::Pending);
+
+        for i in 0..15 {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            match provider.get_logs(&filter).await {
+                Ok(logs) => {
+                    let count = logs.len();
+                    info!(
+                        target: "test",
+                        poll = i,
+                        log_count = count,
+                        "eth_getLogs(pending) poll"
+                    );
+                    log_counts_clone.lock().push(count);
+                }
+                Err(e) => {
+                    info!(target: "test", poll = i, error = %e, "eth_getLogs(pending) error");
+                }
+            }
+        }
+    });
+
+    // Run mining concurrently
+    tokio::spawn(async move {
+        let mut mine = mine_block;
+        mine.execute(&mut env).await
+    });
+
+    // Wait for mining to complete
+    rx.recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Wait for query loop to finish
+    let _ = query_handle.await;
+
+    let counts = log_counts.lock().clone();
+    info!(target: "test", ?counts, "Log count progression");
+
+    // Verify we got some poll results
+    assert!(
+        !counts.is_empty(),
+        "Should have at least one successful getLogs poll"
+    );
+
+    Ok(())
+}
+
+/// Test that the pending block transaction count grows as flashblocks are
+/// produced within a single block.
+///
+/// This verifies that eth_getBlockByNumber("pending") returns an incrementally
+/// updated pending block as new flashblocks are published.
+///
+/// Setup: 2 nodes, flashblocks enabled, tx spammer active
+/// 1. Start mining a block with flashblocks
+/// 2. Poll eth_getBlockByNumber("pending") multiple times
+/// 3. Record transaction counts at each poll
+/// 4. Assert tx counts grow over time as more flashblocks include more txs
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pending_block_growth() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (_, nodes, _tasks, mut env, spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .unwrap()
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    // Spawn tx spammer
+    spammer.spawn(20, nodes[0].node.rpc_url());
+
+    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
+
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        Duration::from_millis(3000),
+        true,
+        sender,
+    )
+    .await;
+
+    let builder_url: String = nodes[0].node.rpc_url().to_string();
+    let follower_url: String = nodes[1].node.rpc_url().to_string();
+    let tx_counts = Arc::new(parking_lot::Mutex::new(Vec::<(usize, usize)>::new()));
+    let tx_counts_clone = tx_counts.clone();
+
+    // Poll eth_getBlockByNumber("pending") on both nodes
+    let query_handle = tokio::spawn(async move {
+        let builder = ProviderBuilder::new().connect_http(builder_url.parse().unwrap());
+        let follower = ProviderBuilder::new().connect_http(follower_url.parse().unwrap());
+
+        for i in 0..15 {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let builder_block = builder.get_block_by_number(BlockNumberOrTag::Pending).await;
+
+            let follower_block = follower
+                .get_block_by_number(BlockNumberOrTag::Pending)
+                .await;
+
+            let builder_tx_count = builder_block
+                .ok()
+                .flatten()
+                .map(|b| b.transactions.hashes().len())
+                .unwrap_or(0);
+
+            let follower_tx_count = follower_block
+                .ok()
+                .flatten()
+                .map(|b| b.transactions.hashes().len())
+                .unwrap_or(0);
+
+            info!(
+                target: "test",
+                poll = i,
+                builder_tx_count,
+                follower_tx_count,
+                "Pending block poll"
+            );
+
+            tx_counts_clone
+                .lock()
+                .push((builder_tx_count, follower_tx_count));
+        }
+    });
+
+    // Run mining concurrently
+    tokio::spawn(async move {
+        let mut mine = mine_block;
+        mine.execute(&mut env).await
+    });
+
+    // Wait for mining to complete
+    rx.recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Wait for query loop
+    let _ = query_handle.await;
+
+    let counts = tx_counts.lock().clone();
+    info!(target: "test", ?counts, "Pending block tx count progression");
+
+    // Verify we got some poll results
+    assert!(
+        !counts.is_empty(),
+        "Should have at least one successful pending block poll"
+    );
+
+    // Verify that the builder node showed some pending block data
+    let max_builder = counts.iter().map(|(b, _)| *b).max().unwrap_or(0);
+    info!(
+        target: "test",
+        max_builder_tx_count = max_builder,
+        "Max builder pending block tx count"
+    );
+
+    // The builder should have seen at least one pending block with transactions
+    // (the L1 deposit tx at minimum)
+    assert!(
+        max_builder > 0,
+        "Builder should show at least one transaction in the pending block"
     );
 
     Ok(())

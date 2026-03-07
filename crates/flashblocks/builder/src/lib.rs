@@ -166,6 +166,11 @@ pub mod bal_validator;
 /// [`FlashblocksExecutionCoordinator`]: coordinator::FlashblocksExecutionCoordinator
 pub mod coordinator;
 
+pub mod event_stream;
+
+/// Shared flashblocks state for RPC consumers.
+pub mod state;
+
 /// Main payload builder implementation.
 pub mod payload_builder;
 

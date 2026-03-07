@@ -79,7 +79,8 @@ impl WorldChainArgs {
                 if config.network.bootnodes.is_none() && self.flashblocks.is_some() {
                     let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
                     debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
-                    config.network.bootnodes = Some(bootnodes);
+                    config.network.bootnodes = Some(bootnodes.clone());
+                    config.network.trusted_peers.extend(bootnodes);
                 }
 
                 if self.pbh.entrypoint == Address::default() {
