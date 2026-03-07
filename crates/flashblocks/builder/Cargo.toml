@@ -38,19 +38,18 @@ alloy-eip7928.workspace = true
 op-alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
-
 flashblocks-primitives.workspace = true
 flashblocks-p2p.workspace = true
-
 # revm
 revm.workspace = true
 revm-database.workspace = true
-
 # tokio
 tokio.workspace = true
+tokio-stream.workspace = true
+pin-project.workspace = true
+crossbeam-channel.workspace = true
 
 # misc
-crossbeam-channel.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 futures.workspace = true

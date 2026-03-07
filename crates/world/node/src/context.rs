@@ -11,7 +11,10 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
+use flashblocks_builder::{
+    coordinator::FlashblocksExecutionCoordinator,
+    event_stream::{FlashblockEvent, PendingBlock, PendingBlockRef},
+};
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -33,10 +36,13 @@ use reth_node_builder::{
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    args::RollupArgs,
+    OpNode, args::RollupArgs,
 };
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
@@ -110,6 +116,9 @@ where
             peer.id != local_peer_id
         };
         network_config.peers_config.trusted_nodes.retain(not_self);
+        // Filter self from boot_nodes before passing to NetworkManager::builder, which derives
+        // the discv5 bootstrap list from boot_nodes. This ensures we don't end up in our own
+        // discv5 routing table.
         network_config.boot_nodes.retain(not_self);
 
         let mut trusted_peer_ids: Vec<_> = network_config
@@ -332,12 +341,32 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let maybe_pending_block =
-            self.components_context
-                .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_state.pending_block()
-                });
+        // Subscribe to the coordinator's flashblock events broadcast and map
+        // each executed flashblock into a `PendingBlockRef` for the Eth API.
+        // Attribute events reset the pending block to `None`.
+        let maybe_pending_block: Option<
+            tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>,
+        > = self.components_context.as_ref().map(|ctx| {
+            let mut fb_rx = BroadcastStream::new(ctx.flashblock_events.subscribe());
+            let (pending_tx, pending_rx) = tokio::sync::watch::channel(None);
+
+            tokio::spawn(async move {
+                use tokio_stream::StreamExt;
+                while let Some(Ok(event)) = fb_rx.next().await {
+                    match event {
+                        FlashblockEvent::ExecutedFlashblock(fb) => {
+                            let block = PendingBlock::from_executed(&fb);
+                            pending_tx.send_replace(Some(std::sync::Arc::new(block)));
+                        }
+                        FlashblockEvent::Attributes(_) => {
+                            pending_tx.send_replace(None);
+                        }
+                    }
+                }
+            });
+
+            pending_rx
+        });
         let flashblocks_eth_api_builder =
             FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
 
@@ -366,24 +395,86 @@ where
     }
 }
 
+impl FlashblocksContext {
+    pub fn payload_service_builder(
+        &self,
+    ) -> FlashblocksPayloadServiceBuilder<
+        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
+    > {
+        FlashblocksPayloadServiceBuilder::new(
+            FlashblocksPayloadBuilderBuilder::new(
+                WorldChainPayloadBuilderCtxBuilder {
+                    verified_blockspace_capacity: self.config.args.pbh.verified_blockspace_capacity,
+                    pbh_entry_point: self.config.args.pbh.entrypoint,
+                    pbh_signature_aggregator: self.config.args.pbh.signature_aggregator,
+                    builder_private_key: self.config.args.builder.private_key.clone(),
+                },
+                self.components_context
+                    .as_ref()
+                    .map(|flashblocks_component_ctx| {
+                        flashblocks_component_ctx.flashblocks_state.clone()
+                    }),
+                self.config.builder_config.clone(),
+            ),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_handle.clone()
+                }),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_state.clone()
+                }),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx
+                        .to_jobs_generator
+                        .clone()
+                        .subscribe()
+                }),
+            self.config
+                .args
+                .flashblocks
+                .as_ref()
+                .and_then(|fb| fb.override_authorizer_sk.clone()),
+            false,
+            Duration::from_millis(
+                self.config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .map_or(200, |fb| fb.flashblocks_interval),
+            ),
+            Duration::from_millis(
+                self.config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .map_or(200, |fb| fb.recommit_interval),
+            ),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
+    /// Broadcast sender for flashblock events (executed flashblocks from the coordinator).
+    pub flashblock_events: broadcast::Sender<FlashblockEvent<OpNode>>,
 }
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let components_context = value
-            .args
-            .flashblocks
-            .as_ref()
-            .map(|_flashblocks_args| value.clone().into());
+        let components_context = FlashblocksComponentsContext::from(value.clone());
+
         Self {
             config: value,
-            components_context,
+            components_context: Some(components_context),
         }
     }
 }
@@ -410,10 +501,14 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
-        let (pending_block, _) = tokio::sync::watch::channel(None);
+        let flashblocks_state = FlashblocksExecutionCoordinator::new(flashblocks_handle.clone());
 
-        let flashblocks_state =
-            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
+        let (flashblock_events, _) = broadcast::channel(256);
+
+        // Register the flashblock events sender with the coordinator so it
+        // broadcasts `FlashblockEvent::ExecutedFlashblock` after executing each
+        // flashblock.
+        flashblocks_state.register_flashblock_events(flashblock_events.clone());
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
@@ -422,6 +517,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
+            flashblock_events,
         }
     }
 }
