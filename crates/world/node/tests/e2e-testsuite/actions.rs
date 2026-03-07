@@ -1978,3 +1978,71 @@ impl Action<OpEngineTypes> for Sleep {
         })
     }
 }
+
+/// Query `eth_getLogs` with `fromBlock: "pending"` after each flashblock,
+/// collecting the log counts for assertion.
+pub struct GetPendingLogs {
+    pub flashblocks_stream:
+        Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static>>,
+    pub node_idxs: Vec<usize>,
+    pub sender: mpsc::Sender<Vec<usize>>,
+}
+
+impl GetPendingLogs {
+    pub fn new(
+        node_idxs: Vec<usize>,
+        flashblocks_stream: impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static,
+        sender: mpsc::Sender<Vec<usize>>,
+    ) -> Self {
+        Self {
+            flashblocks_stream: Box::pin(flashblocks_stream),
+            node_idxs,
+            sender,
+        }
+    }
+}
+
+impl Action<OpEngineTypes> for GetPendingLogs {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut log_counts = Vec::new();
+
+            while let Some(_payload) = self.flashblocks_stream.next().await {
+                // Small backoff to let the node process the flashblock.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                for &idx in &self.node_idxs {
+                    let pending_filter = alloy_rpc_types_eth::Filter::new()
+                        .from_block(alloy_eips::BlockNumberOrTag::Pending)
+                        .to_block(alloy_eips::BlockNumberOrTag::Pending);
+
+                    let logs: Vec<alloy_rpc_types_eth::Log> = reth::rpc::api::EthFilterApiClient::<
+                        reth_primitives::TransactionSigned,
+                    >::logs(
+                        &env.node_clients[idx].rpc,
+                        pending_filter,
+                    )
+                    .await?;
+
+                    info!(
+                        node = idx,
+                        count = logs.len(),
+                        "pending logs query returned"
+                    );
+
+                    log_counts.push(logs.len());
+                }
+            }
+
+            self.sender
+                .send(log_counts)
+                .await
+                .map_err(|e| eyre!("Failed to send log counts: {}", e))?;
+
+            Ok(())
+        })
+    }
+}

@@ -75,7 +75,7 @@ impl<Eth: EthApiTypes> FlashblocksEthFilter<Eth> {
             ProviderOrBlock::<Eth::Provider>::Block(block.clone()),
             filter,
             block_num_hash,
-            &receipts,
+            receipts,
             false,
             timestamp,
         )
@@ -156,7 +156,7 @@ where
         } = &filter.block_option
         {
             let from_pending = from_block.is_some_and(|b| b.is_pending());
-            let to_pending = to_block.map_or(false, |b| b.is_pending());
+            let to_pending = to_block.is_some_and(|b| b.is_pending());
 
             if from_pending || to_pending {
                 // Try to get logs from the flashblocks pending block

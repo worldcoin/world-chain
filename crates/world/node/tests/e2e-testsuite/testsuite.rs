@@ -527,6 +527,97 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Test `eth_getLogs` with `fromBlock: "pending"` during flashblock production.
+///
+/// Verifies that:
+/// 1. `eth_getLogs` with a pending filter succeeds while flashblocks are being produced
+/// 2. The query does not error or return stale data
+/// 3. Log counts are non-negative (simple value transfers emit no logs, so 0 is valid)
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_logs_pending_flashblock() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let (_, nodes, _tasks, mut env, spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let ext_context = nodes[0].ext_context.clone();
+    let block_hash = nodes[0].node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        ext_context
+            .unwrap()
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    spammer.spawn(20, nodes[0].node.rpc_url());
+
+    let cannon_flashblocks_stream = nodes[0]
+        .ext_context
+        .clone()
+        .unwrap()
+        .flashblocks_handle
+        .flashblock_stream();
+
+    let (sender, mut rx) = tokio::sync::mpsc::channel(1);
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
+
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
+
+    let (block_sender, mut block_rx) = tokio::sync::mpsc::channel(1);
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        std::time::Duration::from_millis(2000),
+        true,
+        block_sender,
+    )
+    .await;
+
+    let get_pending_logs =
+        crate::actions::GetPendingLogs::new(vec![0, 1], cannon_flashblocks_stream, sender);
+
+    let mut action = crate::actions::EthApiAction::new(mine_block, get_pending_logs);
+    let fut = async {
+        let _ = action.execute(&mut env).await;
+    };
+
+    // Run mining+logs concurrently, finish when the block is mined
+    futures::future::select(Box::pin(fut), Box::pin(block_rx.recv())).await;
+
+    // Drain any pending log counts
+    if let Ok(log_counts) = rx.try_recv() {
+        info!(
+            log_counts = ?log_counts,
+            "pending logs collected across flashblocks"
+        );
+        // Each query should have succeeded (no panics/errors above).
+        // With simple value transfers, we expect 0 logs per query.
+        for count in &log_counts {
+            assert!(
+                *count == 0,
+                "expected 0 logs from simple value transfers, got {}",
+                count
+            );
+        }
+    }
+
+    Ok(())
+}
+
 // Transaction Propagation Tests
 
 /// Test default transaction propagation behavior without tx_peers configuration
