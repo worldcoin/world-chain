@@ -446,15 +446,15 @@ where
 
     // Broadcast the executed flashblock to the event stream if a channel is
     // registered and we have an executed block.
-    if let Some(fb_tx) = flashblock_events.as_ref()
-        && let Some(executed) = executed_block
-    {
-        let event = FlashblockEvent::ExecutedFlashblock(ExecutedFlashblock {
-            block: executed.into_executed_payload(),
-            index,
-        });
-        if let Err(e) = fb_tx.send(event) {
-            error!("error broadcasting flashblock event: {e:#?}");
+    if let Some(fb_tx) = flashblock_events.as_ref() {
+        if let Some(executed) = executed_block {
+            let event = FlashblockEvent::ExecutedFlashblock(ExecutedFlashblock {
+                block: executed.into_executed_payload(),
+                index,
+            });
+            if let Err(e) = fb_tx.send(event) {
+                error!("error broadcasting flashblock event: {e:#?}");
+            }
         }
     }
 
