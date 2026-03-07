@@ -44,7 +44,7 @@ use world_chain_pool::BasicWorldChainPool;
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
-use reth_network_peers::{PeerId, TrustedPeer};
+use reth_network_peers::PeerId;
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -106,17 +106,14 @@ where
 
         let mut network_config = op_network_builder.network_config(ctx)?;
         let local_peer_id = network_config.hello_message.id;
-        let not_self = |peer: &TrustedPeer| {
+        network_config.peers_config.trusted_nodes.retain(|peer| {
             peer.id != local_peer_id
-        };
-        network_config.peers_config.trusted_nodes.retain(not_self);
-        network_config.boot_nodes.retain(not_self);
+        });
 
         let mut trusted_peer_ids: Vec<_> = network_config
             .peers_config
             .trusted_nodes
             .iter()
-            .chain(network_config.boot_nodes.iter())
             .map(|peer| peer.id)
             .collect();
         trusted_peer_ids.dedup();

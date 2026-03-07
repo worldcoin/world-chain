@@ -38,6 +38,14 @@ pub struct WorldChainArgs {
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
     pub tx_peers: Option<Vec<PeerId>>,
+
+    /// Disable the default World Chain bootnodes.
+    #[arg(
+        long = "worldchain.disable-bootnodes",
+        value_name = "WORLDCHAIN_DISABLE_BOOTNODES",
+        default_value_t = false
+    )]
+    pub disable_bootnodes: bool,
 }
 
 impl WorldChainArgs {
@@ -76,10 +84,11 @@ impl WorldChainArgs {
                     )?);
                 }
 
-                if config.network.bootnodes.is_none() && self.flashblocks.is_some() {
+                if self.flashblocks.is_some() && !self.disable_bootnodes {
                     let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
                     debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
-                    config.network.bootnodes = Some(bootnodes);
+                    // dedup happens later
+                    config.network.trusted_peers.extend(bootnodes);
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -344,6 +353,7 @@ mod tests {
             },
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
+            disable_bootnodes: true,
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());

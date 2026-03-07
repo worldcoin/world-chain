@@ -219,6 +219,7 @@ async fn setup_node_extended_cfg(
                 access_list: true,
             }),
             tx_peers: None,
+            disable_bootnodes: true,
         },
         builder_config: Default::default(),
     };
