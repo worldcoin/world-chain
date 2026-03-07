@@ -167,6 +167,7 @@ pub mod bal_validator;
 pub mod coordinator;
 
 pub mod event_stream;
+pub use event_stream::FlashblockExecutor;
 
 /// Shared flashblocks state for RPC consumers.
 pub mod state;

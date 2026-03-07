@@ -59,6 +59,7 @@ op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 url.workspace = true
 tracing.workspace = true

@@ -3,7 +3,6 @@ use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
-use futures::StreamExt as _;
 use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
 use reth::{
@@ -12,12 +11,11 @@ use reth::{
 };
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
-use reth_node_builder::BuilderContext;
+use reth_node_api::{BuiltPayload as _, Events};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes};
-
+use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::BestPayloadTransactions;
 use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
@@ -31,7 +29,7 @@ use tracing::{error, trace, warn};
 use crate::{
     bal_executor::CommittedState,
     bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
-    event_stream::{ExecutedFlashblock, FlashblockEvent},
+    event_stream::{ExecutedFlashblock, FlashblockExecutor},
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
@@ -63,9 +61,6 @@ pub struct FlashblocksExecutionCoordinatorInner {
     latest_payload: Option<(OpBuiltPayload, u64)>,
     /// Broadcast channel for built payload events
     payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
-    /// Broadcast channel for executed flashblock events consumed by the
-    /// [`FlashblocksEventStream`](crate::event_stream::FlashblocksEventStream).
-    flashblock_events: Option<broadcast::Sender<FlashblockEvent<reth_optimism_node::OpNode>>>,
 }
 
 impl FlashblocksExecutionCoordinator {
@@ -75,35 +70,9 @@ impl FlashblocksExecutionCoordinator {
             flashblocks: Default::default(),
             latest_payload: None,
             payload_events: None,
-            flashblock_events: None,
         }));
 
         Self { inner, p2p_handle }
-    }
-
-    /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
-    where
-        Node: FullNodeTypes,
-        Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
-        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
-    {
-        let mut stream = self.p2p_handle.flashblock_stream();
-        let this = self.clone();
-        let provider = ctx.provider().clone();
-        let chain_spec = ctx.chain_spec().clone();
-
-        ctx.task_executor()
-            .spawn_critical("flashblocks executor", async move {
-                while let Some(flashblock) = stream.next().await {
-                    let provider = provider.clone();
-                    if let Err(e) =
-                        process_flashblock(provider, &evm_config, &this, &chain_spec, flashblock)
-                    {
-                        error!("error processing flashblock: {e:#?}")
-                    }
-                }
-            });
     }
 
     pub fn publish_built_payload(
@@ -143,17 +112,6 @@ impl FlashblocksExecutionCoordinator {
     /// Registers a new broadcast channel for built payloads.
     pub fn register_payload_events(&self, tx: broadcast::Sender<Events<OpEngineTypes>>) {
         self.inner.write().payload_events = Some(tx);
-    }
-
-    /// Registers a broadcast channel for executed flashblock events.
-    ///
-    /// The [`FlashblocksEventStream`](crate::event_stream::FlashblocksEventStream)
-    /// subscribes to this channel to receive executed flashblocks.
-    pub fn register_flashblock_events(
-        &self,
-        tx: broadcast::Sender<FlashblockEvent<reth_optimism_node::OpNode>>,
-    ) {
-        self.inner.write().flashblock_events = Some(tx);
     }
 
     /// Broadcasts a new payload to cache in the in memory tree.
@@ -410,63 +368,92 @@ where
     Ok((payload, index))
 }
 
-fn process_flashblock<Provider>(
-    provider: Provider,
-    evm_config: &OpEvmConfig,
-    coordinator: &FlashblocksExecutionCoordinator,
-    chain_spec: &Arc<OpChainSpec>,
-    flashblock: FlashblocksPayloadV1,
-) -> eyre::Result<()>
+// ---------------------------------------------------------------------------
+// FlashblocksPayloadExecutor
+// ---------------------------------------------------------------------------
+
+/// Executor that transforms raw P2P flashblock payloads into executed blocks.
+///
+/// Wraps the [`execute_flashblock`] function with the provider, EVM config,
+/// chain spec, and mutable execution state (flashblocks list + latest payload).
+pub struct FlashblocksPayloadExecutor<P> {
+    provider: P,
+    evm_config: OpEvmConfig,
+    chain_spec: Arc<OpChainSpec>,
+    flashblocks: Flashblocks,
+    latest_payload: Option<(OpBuiltPayload, u64)>,
+    /// Optional broadcast sender for payload events (built payloads).
+    payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
+}
+
+impl<P> FlashblocksPayloadExecutor<P> {
+    /// Create a new executor with the given provider, EVM config, and chain spec.
+    pub fn new(provider: P, evm_config: OpEvmConfig, chain_spec: Arc<OpChainSpec>) -> Self {
+        Self {
+            provider,
+            evm_config,
+            chain_spec,
+            flashblocks: Default::default(),
+            latest_payload: None,
+            payload_events: None,
+        }
+    }
+
+    /// Attach a broadcast sender for built payload events.
+    pub fn with_payload_events(mut self, tx: broadcast::Sender<Events<OpEngineTypes>>) -> Self {
+        self.payload_events = Some(tx);
+        self
+    }
+}
+
+impl<P> FlashblockExecutor for FlashblocksPayloadExecutor<P>
 where
-    Provider: StateProviderFactory
+    P: StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + 'static,
 {
-    let FlashblocksExecutionCoordinatorInner {
-        ref mut flashblocks,
-        ref mut latest_payload,
-        ref mut payload_events,
-        ref mut flashblock_events,
-    } = *coordinator.inner.write();
+    type Primitives = OpPrimitives;
 
-    let (payload, index) = execute_flashblock(
-        provider,
-        evm_config,
-        chain_spec,
-        flashblocks,
-        latest_payload,
-        flashblock,
-    )?;
+    fn execute(
+        &mut self,
+        payload: FlashblocksPayloadV1,
+    ) -> eyre::Result<ExecutedFlashblock<OpPrimitives>> {
+        let (built_payload, index) = execute_flashblock(
+            self.provider.clone(),
+            &self.evm_config,
+            &self.chain_spec,
+            &mut self.flashblocks,
+            &mut self.latest_payload,
+            payload,
+        )?;
 
-    let payload_id = payload.id();
-    let block_hash = payload.block().hash();
-    let executed_block = payload.executed_block();
+        let payload_id = built_payload.id();
+        let block_hash = built_payload.block().hash();
 
-    // Broadcast the executed flashblock to the event stream if a channel is
-    // registered and we have an executed block.
-    if let Some(fb_tx) = flashblock_events.as_ref() {
-        if let Some(executed) = executed_block {
-            let event = FlashblockEvent::ExecutedFlashblock(ExecutedFlashblock {
-                block: executed.into_executed_payload(),
-                index,
-            });
-            if let Err(e) = fb_tx.send(event) {
-                error!("error broadcasting flashblock event: {e:#?}");
+        // Broadcast the built payload event if a sender is registered.
+        if let Some(ref payload_events) = self.payload_events {
+            if let Err(e) = payload_events.send(Events::BuiltPayload(built_payload.clone())) {
+                error!("error broadcasting payload: {e:#?}");
             }
         }
+
+        let executed_block = built_payload
+            .executed_block()
+            .ok_or_else(|| eyre!("no executed block in built payload"))?;
+
+        trace!(
+            target: "flashblocks::state_executor",
+            id = %payload_id,
+            index = %index,
+            block_hash = %block_hash,
+            "built payload from flashblock"
+        );
+
+        Ok(ExecutedFlashblock {
+            block: executed_block.into_executed_payload(),
+            index,
+        })
     }
-
-    trace!(
-        target: "flashblocks::state_executor",
-        id = %payload_id,
-        index = %index,
-        block_hash = %block_hash,
-        "built payload from flashblock"
-    );
-
-    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
-
-    Ok(())
 }

@@ -62,7 +62,7 @@ fn main() {
                     // Replace the default EthFilter with FlashblocksEthFilter to handle
                     // pending flashblock logs in eth_getLogs
                     let eth_filter = ctx.registry.eth_handlers().filter.clone();
-                    let pending_block = ctx.registry.eth_api().pending_block_receiver();
+                    let pending_block = ctx.registry.eth_api().pending_block_state();
                     let flashblocks_filter = FlashblocksEthFilter::new(eth_filter, pending_block);
                     ctx.modules
                         .replace_configured(flashblocks_filter.into_rpc())?;

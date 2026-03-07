@@ -43,8 +43,8 @@ where
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
         // check the pending block from the executor
-        if let Some(receiver) = self.pending_block.as_ref() {
-            let pending = receiver.borrow().clone();
+        if let Some(state) = self.pending_block.as_ref() {
+            let pending = state.pending_block();
 
             if let Some(pending) = pending {
                 let block_and_receipts = BlockAndReceipts {

@@ -12,8 +12,8 @@ use crate::{
 };
 use ed25519_dalek::VerifyingKey;
 use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator,
-    event_stream::{FlashblockEvent, PendingBlock, PendingBlockRef},
+    coordinator::FlashblocksExecutionCoordinator, event_stream::PendingBlockRef,
+    state::FlashblocksState,
 };
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
@@ -36,13 +36,11 @@ use reth_node_builder::{
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    OpNode, args::RollupArgs,
+    args::RollupArgs,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
 use world_chain_payload::context::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
@@ -54,12 +52,6 @@ use reth_network_peers::{PeerId, TrustedPeer};
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-/// Network builder for World Chain that optionally applies custom transaction propagation policy
-/// and registers the flashblocks P2P sub-protocol.
-///
-/// Extends OpNetworkBuilder to support restricting transaction gossip to specific peers
-/// and ensures the flashblocks "flblk" capability is registered on the NetworkManager
-/// before the network starts connecting to peers.
 #[derive(Debug, Clone)]
 pub struct WorldChainNetworkBuilder {
     op_network_builder: OpNetworkBuilder,
@@ -112,13 +104,8 @@ where
 
         let mut network_config = op_network_builder.network_config(ctx)?;
         let local_peer_id = network_config.hello_message.id;
-        let not_self = |peer: &TrustedPeer| {
-            peer.id != local_peer_id
-        };
+        let not_self = |peer: &TrustedPeer| peer.id != local_peer_id;
         network_config.peers_config.trusted_nodes.retain(not_self);
-        // Filter self from boot_nodes before passing to NetworkManager::builder, which derives
-        // the discv5 bootstrap list from boot_nodes. This ensures we don't end up in our own
-        // discv5 routing table.
         network_config.boot_nodes.retain(not_self);
 
         let mut trusted_peer_ids: Vec<_> = network_config
@@ -132,9 +119,6 @@ where
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
-        // Register flashblocks sub-protocol BEFORE starting the network.
-        // This ensures the "flblk" capability is included in the RLPx handshake
-        // for all peer connections, including the very first trusted peer connections.
         if let Some(ref flashblocks_handle) = flashblocks_p2p_handle {
             let network_handle = network.handle();
             let flashblocks_rlpx = FlashblocksP2PProtocol {
@@ -146,7 +130,6 @@ where
                 .add_rlpx_sub_protocol(flashblocks_rlpx.into_rlpx_sub_protocol());
         }
 
-        // Start network with custom policy if specified, otherwise use default
         let handle = if let Some(peers) = tx_peers {
             tracing::info!(
                 target: "world_chain::network",
@@ -170,7 +153,6 @@ where
             "World Chain P2P networking initialized"
         );
 
-        // Set up peer monitor for flashblocks trusted peers
         if flashblocks_p2p_handle.is_some() {
             PeerMonitor::new(handle.clone())
                 .with_initial_peers(trusted_peer_ids)
@@ -203,9 +185,7 @@ where
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;
-
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
-
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         FlashblocksEthApiBuilder,
@@ -213,7 +193,6 @@ where
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
     >;
-
     type ExtContext = Option<FlashblocksComponentsContext>;
 
     fn components(&self) -> Self::ComponentsBuilder {
@@ -246,9 +225,7 @@ where
             tx_peers,
             components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_handle.clone()
-                }),
+                .map(|ctx| ctx.flashblocks_handle.clone()),
         );
 
         let (
@@ -264,8 +241,6 @@ where
                 flashblocks_args.force_publish,
             )
         } else {
-            // Not important if flashblocks is not enabled. Put some numbers just to make
-            // the compiler work fine.
             (200, 200, None, false)
         };
 
@@ -289,29 +264,21 @@ where
                     ctx_builder,
                     components_context
                         .as_ref()
-                        .map(|flashblocks_component_ctx| {
-                            flashblocks_component_ctx.flashblocks_state.clone()
-                        }),
+                        .map(|ctx| ctx.flashblocks_handle.clone()),
+                    components_context
+                        .as_ref()
+                        .map(|ctx| ctx.pending_block_tx.clone()),
                     builder_config,
                 ),
                 components_context
                     .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx.flashblocks_handle.clone()
-                    }),
+                    .map(|ctx| ctx.flashblocks_handle.clone()),
                 components_context
                     .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx.flashblocks_state.clone()
-                    }),
+                    .map(|ctx| ctx.flashblocks_state.clone()),
                 components_context
                     .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx
-                            .to_jobs_generator
-                            .clone()
-                            .subscribe()
-                    }),
+                    .map(|ctx| ctx.to_jobs_generator.clone().subscribe()),
                 override_authorizer_sk,
                 force_publish,
                 Duration::from_millis(flashblocks_interval),
@@ -324,51 +291,29 @@ where
     fn add_ons(&self) -> Self::AddOns {
         let engine_api_builder = FlashblocksEngineApiBuilder {
             engine_validator_builder: Default::default(),
-            flashblocks_handle: self.components_context.as_ref().map(
-                |flashblocks_components_ctx| flashblocks_components_ctx.flashblocks_handle.clone(),
-            ),
+            flashblocks_handle: self
+                .components_context
+                .as_ref()
+                .map(|ctx| ctx.flashblocks_handle.clone()),
             to_jobs_generator: self
                 .components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.to_jobs_generator.clone()
-                }),
+                .map(|ctx| ctx.to_jobs_generator.clone()),
             authorizer_vk: self
                 .components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| flashblocks_components_ctx.authorizer_vk),
+                .map(|ctx| ctx.authorizer_vk),
         };
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        // Subscribe to the coordinator's flashblock events broadcast and map
-        // each executed flashblock into a `PendingBlockRef` for the Eth API.
-        // Attribute events reset the pending block to `None`.
-        let maybe_pending_block: Option<
-            tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>,
-        > = self.components_context.as_ref().map(|ctx| {
-            let mut fb_rx = BroadcastStream::new(ctx.flashblock_events.subscribe());
-            let (pending_tx, pending_rx) = tokio::sync::watch::channel(None);
+        let flashblocks_state: Option<FlashblocksState<OpPrimitives>> = self
+            .components_context
+            .as_ref()
+            .map(|ctx| FlashblocksState::new(ctx.pending_block_tx.subscribe()));
 
-            tokio::spawn(async move {
-                use tokio_stream::StreamExt;
-                while let Some(Ok(event)) = fb_rx.next().await {
-                    match event {
-                        FlashblockEvent::ExecutedFlashblock(fb) => {
-                            let block = PendingBlock::from_executed(&fb);
-                            pending_tx.send_replace(Some(std::sync::Arc::new(block)));
-                        }
-                        FlashblockEvent::Attributes(_) => {
-                            pending_tx.send_replace(None);
-                        }
-                    }
-                }
-            });
-
-            pending_rx
-        });
         let flashblocks_eth_api_builder =
-            FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
+            FlashblocksEthApiBuilder::new(op_eth_api_builder, flashblocks_state);
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
@@ -411,29 +356,21 @@ impl FlashblocksContext {
                 },
                 self.components_context
                     .as_ref()
-                    .map(|flashblocks_component_ctx| {
-                        flashblocks_component_ctx.flashblocks_state.clone()
-                    }),
+                    .map(|ctx| ctx.flashblocks_handle.clone()),
+                self.components_context
+                    .as_ref()
+                    .map(|ctx| ctx.pending_block_tx.clone()),
                 self.config.builder_config.clone(),
             ),
             self.components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_handle.clone()
-                }),
+                .map(|ctx| ctx.flashblocks_handle.clone()),
             self.components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_state.clone()
-                }),
+                .map(|ctx| ctx.flashblocks_state.clone()),
             self.components_context
                 .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx
-                        .to_jobs_generator
-                        .clone()
-                        .subscribe()
-                }),
+                .map(|ctx| ctx.to_jobs_generator.clone().subscribe()),
             self.config
                 .args
                 .flashblocks
@@ -464,14 +401,12 @@ pub struct FlashblocksComponentsContext {
     pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
-    /// Broadcast sender for flashblock events (executed flashblocks from the coordinator).
-    pub flashblock_events: broadcast::Sender<FlashblockEvent<OpNode>>,
+    pub pending_block_tx: tokio::sync::watch::Sender<PendingBlockRef<OpPrimitives>>,
 }
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
         let components_context = FlashblocksComponentsContext::from(value.clone());
-
         Self {
             config: value,
             components_context: Some(components_context),
@@ -500,16 +435,8 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
-
         let flashblocks_state = FlashblocksExecutionCoordinator::new(flashblocks_handle.clone());
-
-        let (flashblock_events, _) = broadcast::channel(256);
-
-        // Register the flashblock events sender with the coordinator so it
-        // broadcasts `FlashblockEvent::ExecutedFlashblock` after executing each
-        // flashblock.
-        flashblocks_state.register_flashblock_events(flashblock_events.clone());
-
+        let (pending_block_tx, _) = tokio::sync::watch::channel(None);
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
         Self {
@@ -517,7 +444,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
-            flashblock_events,
+            pending_block_tx,
         }
     }
 }

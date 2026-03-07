@@ -14,7 +14,7 @@ use alloy_rpc_types_eth::{
     Filter, FilterBlockOption, FilterChanges, FilterId, Log, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use flashblocks_builder::event_stream::PendingBlockRef;
+use flashblocks_builder::state::FlashblocksState;
 use jsonrpsee::core::RpcResult;
 use reth::rpc::eth::EthFilter;
 use reth_optimism_primitives::OpPrimitives;
@@ -35,14 +35,14 @@ use tracing::trace;
 /// that causes issues with the standard implementation.
 pub struct FlashblocksEthFilter<Eth: EthApiTypes> {
     inner: EthFilter<Eth>,
-    pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
+    pending_block: Option<FlashblocksState<OpPrimitives>>,
 }
 
 impl<Eth: EthApiTypes> FlashblocksEthFilter<Eth> {
     /// Creates a new `FlashblocksEthFilter` wrapping the given `EthFilter`.
     pub fn new(
         inner: EthFilter<Eth>,
-        pending_block: Option<tokio::sync::watch::Receiver<PendingBlockRef<OpPrimitives>>>,
+        pending_block: Option<FlashblocksState<OpPrimitives>>,
     ) -> Self {
         Self {
             inner,
@@ -60,8 +60,8 @@ impl<Eth: EthApiTypes> FlashblocksEthFilter<Eth> {
         Eth: RpcNodeCore<Primitives = OpPrimitives>,
         Eth::Provider: BlockReader,
     {
-        let receiver = self.pending_block.as_ref()?;
-        let pending = receiver.borrow().clone()?;
+        let state = self.pending_block.as_ref()?;
+        let pending = state.pending_block()?;
 
         let block = &pending.recovered_block;
         let receipts: &[_] = &pending.receipts;

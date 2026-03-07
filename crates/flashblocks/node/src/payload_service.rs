@@ -25,7 +25,7 @@ use reth_provider::{
 };
 use reth_transaction_pool::TransactionPool;
 
-/// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
+/// Spawns the payload builder service.
 #[derive(Debug)]
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
@@ -39,8 +39,7 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
-    /// Create a new [`FlashblocksPayloadServiceBuilder`].
-    pub const fn new(
+    pub fn new(
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
         flashblocks_state: Option<FlashblocksExecutionCoordinator>,
@@ -108,7 +107,6 @@ where
             self.authorizations_rx,
             self.flashblocks_state,
         ) {
-            // flashblocks enabled
             let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
                 ctx.provider().clone(),
                 ctx.task_executor().clone(),
@@ -135,7 +133,6 @@ where
 
             Ok(payload_service_handle)
         } else {
-            // flahsblocks disabled
             let payload_job_config = BasicPayloadJobGeneratorConfig::default()
                 .interval(conf.interval)
                 .deadline(conf.deadline)
