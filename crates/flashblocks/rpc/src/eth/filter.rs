@@ -136,21 +136,39 @@ where
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "flashblocks", "Serving eth_getLogs");
 
+        // Check if this is a pending block range query
         if let FilterBlockOption::Range {
             from_block,
             to_block,
         } = &filter.block_option
         {
             let from_pending = from_block.is_some_and(|b| b.is_pending());
-            let to_pending = to_block.is_some_and(|b| b.is_pending());
+            let to_pending = to_block.map_or(false, |b| b.is_pending());
 
-            if from_pending || to_pending {
+            if from_pending {
                 if let Some(logs) = self.pending_flashblock_logs(&filter) {
                     return Ok(logs);
                 }
+            } else if to_pending {
+                let historical_filter = Filter {
+                    block_option: FilterBlockOption::Range {
+                        from_block: *from_block,
+                        to_block: Some(BlockNumberOrTag::Latest),
+                    },
+                    ..filter.clone()
+                };
+
+                let mut logs = EthFilterApiServer::logs(&self.inner, historical_filter).await?;
+
+                if let Some(pending_logs) = self.pending_flashblock_logs(&filter) {
+                    logs.extend(pending_logs);
+                }
+
+                return Ok(logs);
             }
         }
 
+        // Delegate to the inner EthFilter for all other cases
         EthFilterApiServer::logs(&self.inner, filter).await
     }
 }
