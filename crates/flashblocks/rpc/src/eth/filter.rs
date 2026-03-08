@@ -144,7 +144,7 @@ where
         } = &filter.block_option
         {
             let from_pending = from_block.is_some_and(|b| b.is_pending());
-            let to_pending = to_block.map_or(false, |b| b.is_pending());
+            let to_pending = to_block.is_some_and(|b| b.is_pending());
 
             if from_pending {
                 if let Some(logs) = self.pending_flashblock_logs(&filter) {
