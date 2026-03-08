@@ -19,7 +19,7 @@ use crate::{error::FlashblocksError, primitives::FlashblocksPayloadV1};
 pub struct Authorization {
     /// The unique identifier of the payload this authorization applies to
     pub payload_id: PayloadId,
-    /// Unix timestamp when this authorization was created
+    /// Unix timestamp in seconds corresponding to the PayloadAttributes timestamp
     pub timestamp: u64,
     /// The public key of the builder who is authorized to sign messages
     pub builder_vk: VerifyingKey,
