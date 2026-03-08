@@ -21,7 +21,7 @@ use reth::{
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{Address, B256, U256};
+use revm_primitives::{Address, B256, Bytes, U256};
 use std::{
     sync::{
         Arc,

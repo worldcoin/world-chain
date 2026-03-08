@@ -383,6 +383,11 @@ impl FlashblocksContext {
                     pbh_entry_point: self.config.args.pbh.entrypoint,
                     pbh_signature_aggregator: self.config.args.pbh.signature_aggregator,
                     builder_private_key: self.config.args.builder.private_key.clone(),
+                    block_uncompressed_size_limit: self
+                        .config
+                        .args
+                        .builder
+                        .block_uncompressed_size_limit,
                 },
                 self.components_context
                     .as_ref()

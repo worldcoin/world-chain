@@ -3973,7 +3973,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "async-trait",
  "color-eyre",
- "flashblocks-builder",
  "flashblocks-primitives",
  "jsonrpsee",
  "jsonrpsee-core",
