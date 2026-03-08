@@ -88,6 +88,16 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
+    /// Subscribe to the pending block watch channel.
+    ///
+    /// Returns a receiver that yields the latest `ExecutedBlock` whenever
+    /// a flashblock is processed.
+    pub fn subscribe_pending_block(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>> {
+        self.pending_block.subscribe()
+    }
+
     /// Launches the executor to listen for new flashblocks and build payloads.
     pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
     where

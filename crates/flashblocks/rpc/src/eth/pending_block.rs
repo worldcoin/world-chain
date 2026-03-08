@@ -1,5 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
+use std::sync::Arc;
+
 use alloy_eips::BlockNumberOrTag;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
@@ -41,21 +43,13 @@ where
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
         // check the pending block from the executor
-        if let Some(pending_block) = self.pending_block.as_ref() {
-            let pending_block = pending_block.borrow().clone();
+        if let Some(receiver) = self.pending_block.as_ref() {
+            let pending = receiver.borrow().clone();
 
-            if let Some(pending_block) = pending_block {
-                let block = pending_block.recovered_block;
-                let receipts = pending_block
-                    .execution_output
-                    .receipts
-                    .clone()
-                    .into_iter()
-                    .collect::<Vec<_>>(); // always a single block executed through the state executor
-
+            if let Some(executed) = pending {
                 let block_and_receipts = BlockAndReceipts {
-                    block,
-                    receipts: receipts.into(),
+                    block: Arc::clone(&executed.recovered_block),
+                    receipts: executed.execution_output.receipts.clone().into(),
                 };
                 return Ok(Some(block_and_receipts));
             }

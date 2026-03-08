@@ -3970,6 +3970,8 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
+ "async-trait",
  "color-eyre",
  "flashblocks-primitives",
  "jsonrpsee",

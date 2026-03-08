@@ -330,12 +330,12 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let maybe_pending_block =
-            self.components_context
-                .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_state.pending_block()
-                });
+        // Subscribe to the coordinator's pending block watch channel.
+        let maybe_pending_block = self
+            .components_context
+            .as_ref()
+            .map(|ctx| ctx.flashblocks_state.subscribe_pending_block());
+
         let flashblocks_eth_api_builder =
             FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
 
@@ -364,6 +364,74 @@ where
     }
 }
 
+impl FlashblocksContext {
+    pub fn payload_service_builder(
+        &self,
+    ) -> FlashblocksPayloadServiceBuilder<
+        FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
+    > {
+        FlashblocksPayloadServiceBuilder::new(
+            FlashblocksPayloadBuilderBuilder::new(
+                WorldChainPayloadBuilderCtxBuilder {
+                    verified_blockspace_capacity: self.config.args.pbh.verified_blockspace_capacity,
+                    pbh_entry_point: self.config.args.pbh.entrypoint,
+                    pbh_signature_aggregator: self.config.args.pbh.signature_aggregator,
+                    builder_private_key: self.config.args.builder.private_key.clone(),
+                    block_uncompressed_size_limit: self
+                        .config
+                        .args
+                        .builder
+                        .block_uncompressed_size_limit,
+                },
+                self.components_context
+                    .as_ref()
+                    .map(|flashblocks_component_ctx| {
+                        flashblocks_component_ctx.flashblocks_state.clone()
+                    }),
+                self.config.builder_config.clone(),
+            ),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_handle.clone()
+                }),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_state.clone()
+                }),
+            self.components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx
+                        .to_jobs_generator
+                        .clone()
+                        .subscribe()
+                }),
+            self.config
+                .args
+                .flashblocks
+                .as_ref()
+                .and_then(|fb| fb.override_authorizer_sk.clone()),
+            false,
+            Duration::from_millis(
+                self.config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .map_or(200, |fb| fb.flashblocks_interval),
+            ),
+            Duration::from_millis(
+                self.config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .map_or(200, |fb| fb.recommit_interval),
+            ),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
@@ -374,11 +442,12 @@ pub struct FlashblocksComponentsContext {
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let components_context = value
-            .args
-            .flashblocks
-            .as_ref()
-            .map(|_flashblocks_args| value.clone().into());
+        let components_context = if value.args.flashblocks.as_ref().is_some() {
+            Some(FlashblocksComponentsContext::from(value.clone()))
+        } else {
+            None
+        };
+
         Self {
             config: value,
             components_context,
@@ -408,10 +477,9 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let builder_sk = flashblocks.builder_sk.clone();
         let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
 
-        let (pending_block, _) = tokio::sync::watch::channel(None);
-
+        let (pending_block_tx, _) = tokio::sync::watch::channel(None);
         let flashblocks_state =
-            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block_tx);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

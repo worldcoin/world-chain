@@ -964,3 +964,79 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_get_logs_pending_flashblock() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let fixture = setup_nodes(1).await?;
+    let nodes = fixture.nodes();
+    let authorizer = fixture.authorizer();
+
+    let provider = nodes[0].provider().await?;
+
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    assert_eq!(latest_block.number(), 0);
+
+    // Query eth_getLogs with pending block before any flashblock exists.
+    // Should return logs from the latest block (which has no logs at genesis).
+    let pending_filter = alloy_rpc_types_eth::Filter::new()
+        .from_block(alloy_eips::BlockNumberOrTag::Pending)
+        .to_block(alloy_eips::BlockNumberOrTag::Pending);
+    let logs = provider.get_logs(&pending_filter).await?;
+    assert!(logs.is_empty(), "No logs expected at genesis");
+
+    // Send a flashblock base payload
+    let payload_id = test_payload_id(50);
+    let base_payload = base_payload(0, payload_id, 0, latest_block.hash(), AUTH_TS_BASE);
+    let authorization = Authorization::new(
+        base_payload.payload_id,
+        AUTH_TS_BASE,
+        authorizer,
+        nodes[0].p2p_handle.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(
+        nodes[0].p2p_handle.builder_sk()?,
+        authorization,
+        base_payload,
+    );
+    nodes[0].p2p_handle.start_publishing(authorization)?;
+    nodes[0].p2p_handle.publish_new(authorized).unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    // Query eth_getLogs with pending block after flashblock is published.
+    // The flashblock has no event-emitting txs, so logs should be empty,
+    // but the query itself must succeed (not error or return stale data).
+    let logs = provider.get_logs(&pending_filter).await?;
+    assert!(
+        logs.is_empty(),
+        "Expected no logs from flashblock with simple value transfers"
+    );
+
+    // Send another flashblock delta with two transactions
+    let next = next_payload(payload_id, 1).await;
+    let authorization = Authorization::new(
+        next.payload_id,
+        AUTH_TS_BASE,
+        authorizer,
+        nodes[0].p2p_handle.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(nodes[0].p2p_handle.builder_sk()?, authorization, next);
+    nodes[0].p2p_handle.start_publishing(authorization)?;
+    nodes[0].p2p_handle.publish_new(authorized).unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    // Query again after second flashblock
+    let logs = provider.get_logs(&pending_filter).await?;
+    assert!(
+        logs.is_empty(),
+        "Expected no logs from flashblock with value transfers (no events emitted)"
+    );
+
+    drop(fixture);
+
+    Ok(())
+}
