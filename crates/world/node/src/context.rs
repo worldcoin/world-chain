@@ -442,11 +442,15 @@ pub struct FlashblocksComponentsContext {
 
 impl From<WorldChainNodeConfig> for FlashblocksContext {
     fn from(value: WorldChainNodeConfig) -> Self {
-        let components_context = FlashblocksComponentsContext::from(value.clone());
+        let components_context = if value.args.flashblocks.as_ref().is_some() {
+            Some(FlashblocksComponentsContext::from(value.clone()))
+        } else {
+            None
+        };
 
         Self {
             config: value,
-            components_context: Some(components_context),
+            components_context,
         }
     }
 }
