@@ -65,8 +65,7 @@ fn main() {
                 .await?;
 
             if config.args.health.enabled {
-                let health_addr =
-                    SocketAddr::new(config.args.health.addr, config.args.health.port);
+                let health_addr = SocketAddr::new(config.args.health.addr, config.args.health.port);
                 let health_config = match &config.args.health.config {
                     Some(path) => HealthConfig::from_file(path)?,
                     None => HealthConfig::default(),

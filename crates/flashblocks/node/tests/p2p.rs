@@ -219,11 +219,8 @@ async fn setup_node_extended_cfg(
                 access_list: true,
             }),
             tx_peers: None,
-<<<<<<< HEAD
             disable_bootnodes: true,
-=======
             health: Default::default(),
->>>>>>> dff87cb (Add health server.)
         },
         builder_config: Default::default(),
     };
