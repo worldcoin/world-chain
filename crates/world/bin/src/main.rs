@@ -45,12 +45,12 @@ fn main() {
             let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
             info!(target: "reth::cli", "Starting in Flashblocks mode");
-            let node = WorldChainNode::<FlashblocksContext>::new(config.clone());
+            let worldchain_node = WorldChainNode::<FlashblocksContext>::new(config.clone());
             let NodeHandle {
                 node_exit_future,
-                node: _node,
+                node,
             } = builder
-                .node(node)
+                .node(worldchain_node)
                 .extend_rpc_modules(move |ctx| {
                     let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
