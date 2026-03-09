@@ -48,7 +48,7 @@ fn main() {
             let node = WorldChainNode::<FlashblocksContext>::new(config.clone());
             let NodeHandle {
                 node_exit_future,
-                node,
+                node: _node,
             } = builder
                 .node(node)
                 .extend_rpc_modules(move |ctx| {
