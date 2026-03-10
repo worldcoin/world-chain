@@ -119,7 +119,7 @@ async fn flashblock_stream_is_ordered() {
         handle.publish_new(signed).unwrap();
     }
 
-    let mut flashblock_stream = handle.flashblock_stream();
+    let mut flashblock_stream = handle.live_flashblock_stream();
 
     // Expect to receive 0, then 1 over the ordered broadcast.
     let first = flashblock_stream.next().await.unwrap();
@@ -232,7 +232,7 @@ async fn flashblock_stream_buffers_and_live() {
     handle.publish_new(signed0).unwrap();
 
     // now create the combined stream
-    let mut stream = handle.flashblock_stream();
+    let mut stream = handle.live_flashblock_stream();
 
     // first item comes from the cached vector
     let first = stream.next().await.unwrap();
@@ -259,7 +259,7 @@ async fn flashblock_stream_recovers_after_receiver_lag() {
 
     // Create the stream first, then publish more messages than the broadcast buffer can retain
     // before polling it. The stream must resync from protocol state instead of terminating.
-    let mut stream = handle.live_flashblock_stream();
+    let mut stream = handle.live.live_flashblock_stream();
 
     for idx in 0..=200 {
         let signed = AuthorizedPayload::new(builder_sk, auth, payload(pid, idx));
@@ -297,7 +297,7 @@ async fn live_flashblock_stream_skips_stale_flashblocks() {
 
     // Create the stream first, then partially consume payload A before payload B starts.
     // The stream should skip the unread remainder of payload A once protocol state rolls over.
-    let mut stream = handle.live_flashblock_stream();
+    let mut stream = handle.live.live_flashblock_stream();
 
     for idx in 0..=10u64 {
         let signed = AuthorizedPayload::new(builder_sk, auth_a, payload(pid_a, idx));
@@ -336,7 +336,7 @@ async fn live_flashblock_stream_handles_out_of_order() {
 
     // Create the stream first, then publish more messages than the broadcast buffer can retain
     // before polling it. The stream must resync from protocol state instead of terminating.
-    let mut stream = handle.live_flashblock_stream();
+    let mut stream = handle.live.live_flashblock_stream();
 
     handle
         .publish_new(AuthorizedPayload::new(builder_sk, auth, payload(pid, 0)))

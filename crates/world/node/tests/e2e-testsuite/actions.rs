@@ -1813,7 +1813,7 @@ impl Action<OpEngineTypes> for DynamicValidateFlashblocks {
         env: &'a mut Environment<OpEngineTypes>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let stream = Box::pin(self.flashblocks_handle.flashblock_stream());
+            let stream = Box::pin(self.flashblocks_handle.live_flashblock_stream());
 
             let mut validate_action = ValidateFlashblocksWithState::new(
                 stream,
@@ -1834,7 +1834,7 @@ impl ReadOnlyAction for DynamicValidateFlashblocks {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let mut flashblocks = Flashblocks::default();
-            let mut stream = Box::pin(self.flashblocks_handle.flashblock_stream());
+            let mut stream = Box::pin(self.flashblocks_handle.live_flashblock_stream());
 
             // Wait for payload to be available
             let target_hash = loop {

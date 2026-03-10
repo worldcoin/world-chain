@@ -95,7 +95,7 @@ impl FlashblocksExecutionCoordinator {
         Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
-        let mut stream = self.p2p_handle.flashblock_stream();
+        let mut stream = self.p2p_handle.live_flashblock_stream();
         let this = self.clone();
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
