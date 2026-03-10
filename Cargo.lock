@@ -3888,7 +3888,6 @@ version = "1.10.1"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "blake3",
  "chrono",
  "ed25519-dalek",
  "flashblocks-primitives",

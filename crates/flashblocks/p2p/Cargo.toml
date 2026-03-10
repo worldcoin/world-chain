@@ -29,4 +29,3 @@ parking_lot.workspace = true
 chrono.workspace = true
 reth-tasks = { workspace = true }
 rand.workspace = true
-blake3.workspace = true
