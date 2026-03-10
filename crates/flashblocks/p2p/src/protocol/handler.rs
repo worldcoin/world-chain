@@ -108,18 +108,6 @@ impl Default for FanoutConfig {
     }
 }
 
-#[derive(Debug, Default)]
-struct FanoutState {
-    /// Peers we are actively sending flashblocks to.
-    send_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
-    /// Peers we are actively receiving flashblocks from.
-    receive_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
-    /// Peers that are connected but idle, i.e. not currently sending or receiving flashblocks.
-    idle_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
-    /// State for an ongoing rotation, if any.
-    awaiting_flashblocks_req: Option<(PeerId, Instant)>,
-}
-
 /// The current publishing status of this node in the flashblocks P2P network.
 ///
 /// This enum tracks whether we are actively publishing flashblocks, waiting to publish,
@@ -178,8 +166,14 @@ pub struct FlashblocksP2PState {
     /// Contains `None` for flashblocks not yet received, enabling out-of-order receipt
     /// while maintaining in-order delivery.
     pub flashblocks: Vec<Option<FlashblocksPayloadV1>>,
-    /// Fanout and peer-selection state for flashblock forwarding.
-    pub fanout: FanoutState,
+    /// Peers we are actively sending flashblocks to.
+    pub send_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// Peers we are actively receiving flashblocks from.
+    pub receive_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// Peers that are connected but idle, i.e. not currently sending or receiving flashblocks.
+    pub idle_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// State for an ongoing rotation, if any.
+    pub awaiting_flashblocks_req: Option<(PeerId, Instant)>,
 }
 
 impl Default for FlashblocksP2PState {
@@ -193,7 +187,10 @@ impl Default for FlashblocksP2PState {
             flashblock_timestamp: 0,
             flashblock_index: 0,
             flashblocks: Vec::new(),
-            fanout: FanoutState::default(),
+            send_set: HashMap::new(),
+            receive_set: HashMap::new(),
+            idle_set: HashMap::new(),
+            awaiting_flashblocks_req: None,
         }
     }
 }
@@ -208,31 +205,7 @@ impl FlashblocksP2PState {
     }
 }
 
-impl FanoutState {
-    fn connection_state(&self, peer_id: &PeerId) -> Option<Arc<FlashblocksConnectionState>> {
-        self.idle_set.get(peer_id).and_then(Weak::upgrade)
-    }
-
-    fn is_trusted(&self, peer_id: &PeerId) -> bool {
-        self.connection_state(peer_id)
-            .is_some_and(|peer| peer.flags().trusted)
-    }
-
-    fn non_trusted_send_count(&self) -> usize {
-        self.send_set
-            .iter()
-            .filter(|peer_id| !self.is_trusted(peer_id))
-            .count()
-    }
-
-    fn request_in_flight_count(&self) -> usize {
-        self.idle_set
-            .values()
-            .filter_map(Weak::upgrade)
-            .filter(|peer| peer.flags().request_in_flight)
-            .count()
-    }
-
+impl FlashblocksP2PState {
     fn available_receive_candidates(&self) -> Vec<PeerId> {
         let mut trusted = Vec::new();
         let mut unknown = Vec::new();
@@ -652,7 +625,7 @@ impl FlashblocksHandle {
         &self,
         network: N,
         peer_id: PeerId,
-        fanout_state: Arc<FlashblocksConnectionState>,
+        fanout_state: Arc<Mutex<FlashblocksConnectionState>>,
     ) {
         {
             let mut state = self.state.lock();
