@@ -273,6 +273,89 @@ async fn flashblock_stream_recovers_after_receiver_lag() {
 }
 
 #[tokio::test]
+async fn live_flashblock_stream_skips_stale_flashblocks() {
+    let timestamp = 1000;
+    let handle = fresh_handle();
+    let builder_sk = handle.builder_sk().unwrap();
+
+    let pid_a = PayloadId::new([8; 8]);
+    let auth_a = Authorization::new(
+        pid_a,
+        timestamp,
+        &signing_key(1),
+        builder_sk.verifying_key(),
+    );
+    handle.start_publishing(auth_a).unwrap();
+
+    // Create the stream first, then partially consume payload A before payload B starts.
+    // The stream should skip the unread remainder of payload A once protocol state rolls over.
+    let mut stream = handle.live_flashblock_stream();
+
+    for idx in 0..=10u64 {
+        let signed = AuthorizedPayload::new(builder_sk, auth_a, payload(pid_a, idx));
+        handle.publish_new(signed).unwrap();
+    }
+
+    let first = stream.next().await.unwrap();
+    assert_eq!(first.payload_id, pid_a);
+    assert_eq!(first.index, 0);
+
+    let pid_b = PayloadId::new([9; 8]);
+    let auth_b = Authorization::new(
+        pid_b,
+        timestamp + 1,
+        &signing_key(1),
+        builder_sk.verifying_key(),
+    );
+    handle.start_publishing(auth_b).unwrap();
+    let signed = AuthorizedPayload::new(builder_sk, auth_b, payload(pid_b, 0));
+    handle.publish_new(signed).unwrap();
+
+    let flashblock = stream.next().await.unwrap();
+    assert_eq!(flashblock.payload_id, pid_b);
+    assert_eq!(flashblock.index, 0);
+}
+
+#[tokio::test]
+async fn live_flashblock_stream_handles_out_of_order() {
+    let timestamp = 1000;
+    let handle = fresh_handle();
+    let builder_sk = handle.builder_sk().unwrap();
+
+    let pid = PayloadId::new([8; 8]);
+    let auth = Authorization::new(pid, timestamp, &signing_key(1), builder_sk.verifying_key());
+    handle.start_publishing(auth).unwrap();
+
+    // Create the stream first, then publish more messages than the broadcast buffer can retain
+    // before polling it. The stream must resync from protocol state instead of terminating.
+    let mut stream = handle.live_flashblock_stream();
+
+    handle
+        .publish_new(AuthorizedPayload::new(builder_sk, auth, payload(pid, 0)))
+        .unwrap();
+
+    assert_eq!(stream.next().await.unwrap().index, 0);
+
+    handle
+        .publish_new(AuthorizedPayload::new(builder_sk, auth, payload(pid, 2)))
+        .unwrap();
+
+    // Assert not ready
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), stream.next())
+            .await
+            .is_err()
+    );
+
+    handle
+        .publish_new(AuthorizedPayload::new(builder_sk, auth, payload(pid, 1)))
+        .unwrap();
+
+    assert_eq!(stream.next().await.unwrap().index, 1);
+    assert_eq!(stream.next().await.unwrap().index, 2);
+}
+
+#[tokio::test]
 async fn await_clearance_unblocks_on_publish() {
     let handle = fresh_handle();
     let builder_sk = handle.builder_sk().unwrap();
