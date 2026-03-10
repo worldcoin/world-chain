@@ -35,7 +35,7 @@ const RECEIVED_CACHE_LEN: u32 = AUTHORIZATION_TIMESTAMP_GRACE_SEC as u32 * 20;
 
 /// A lightweight moving average with a configurable smoothing window.
 #[derive(Clone, Debug)]
-pub(crate) struct MovingAverage {
+pub struct MovingAverage {
     value: Option<i64>,
     window: i64,
 }
@@ -66,53 +66,18 @@ impl MovingAverage {
 
 /// Shared fanout metadata for a single peer connection.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct FlashblocksConnectionFlags {
-    pub(crate) trusted: bool,
-    pub(crate) trusted_known: bool,
-    pub(crate) send_enabled: bool,
-    pub(crate) receive_enabled: bool,
-    pub(crate) request_in_flight: bool,
-    pub(crate) cancel_in_flight: bool,
-}
+pub struct FlashblocksConnectionFlags {}
 
 /// Shared fanout metadata for a single peer connection.
 #[derive(Debug)]
-pub(crate) struct FlashblocksConnectionState {
-    flags: Mutex<FlashblocksConnectionFlags>,
-    latency_average: Mutex<MovingAverage>,
-}
-
-impl FlashblocksConnectionState {
-    pub(crate) fn new(latency_window: i64) -> Self {
-        Self {
-            flags: Mutex::new(FlashblocksConnectionFlags::default()),
-            latency_average: Mutex::new(MovingAverage::new(latency_window)),
-        }
-    }
-
-    pub(crate) fn flags(&self) -> FlashblocksConnectionFlags {
-        *self.flags.lock()
-    }
-
-    pub(crate) fn update_flags<F>(&self, update: F)
-    where
-        F: FnOnce(&mut FlashblocksConnectionFlags),
-    {
-        let mut flags = self.flags.lock();
-        update(&mut flags);
-    }
-
-    pub(crate) fn record_latency(&self, sample: i64) {
-        self.latency_average.lock().record(sample);
-    }
-
-    pub(crate) fn average_latency(&self) -> Option<i64> {
-        self.latency_average.lock().value()
-    }
-
-    pub(crate) fn reset_latency(&self) {
-        self.latency_average.lock().reset();
-    }
+pub struct FlashblocksConnectionState {
+    pub latency_average: MovingAverage,
+    pub trusted: bool,
+    pub trusted_known: bool,
+    pub send_enabled: bool,
+    pub receive_enabled: bool,
+    pub request_in_flight: bool,
+    pub cancel_in_flight: bool,
 }
 
 /// Represents a single P2P connection for the flashblocks protocol.
@@ -133,8 +98,8 @@ pub struct FlashblocksConnection<N> {
     /// Receiver for peer messages to be sent to all peers.
     /// We send bytes over this stream to avoid repeatedly having to serialize the payloads.
     peer_rx: BroadcastStream<PeerMsg>,
-    /// Shared fanout state for this peer, also visible to the protocol handler.
-    fanout_state: Arc<FlashblocksConnectionState>,
+    /// Shared connection state for this peer, also visible to the protocol handler.
+    state: Arc<Mutex<FlashblocksConnectionState>>,
     /// Per-peer tracking of flashblocks this peer has already sent us.
     /// Uses `peek` for lookups to avoid LRU promotion, giving FIFO eviction semantics.
     received_cache: LruMap<(PayloadId, usize), ()>,
@@ -153,12 +118,12 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         conn: ProtocolConnection,
         peer_id: PeerId,
         peer_rx: BroadcastStream<PeerMsg>,
-        fanout_state: Arc<FlashblocksConnectionState>,
+        state: Arc<Mutex<FlashblocksConnectionState>>,
     ) -> Self {
         protocol.handle.ensure_background_tasks();
         protocol
             .handle
-            .on_peer_connected(protocol.network.clone(), peer_id, fanout_state.clone());
+            .on_peer_connected(protocol.network.clone(), peer_id, state.clone());
 
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
 
@@ -167,7 +132,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             conn,
             peer_id,
             peer_rx,
-            fanout_state,
+            state,
             received_cache: LruMap::new(RECEIVED_CACHE_LEN),
         }
     }
@@ -225,7 +190,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                 bytes,
                             )) => {
                                 // Check if this flashblock actually originated from this peer.
-                                let send_enabled = this.fanout_state.flags().send_enabled;
+                                let send_enabled = this.state.flags().send_enabled;
                                 if send_enabled
                                     && !this
                                         .received_cache_contains(&(payload_id, flashblock_index))
@@ -418,7 +383,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if !self.fanout_state.flags().receive_enabled {
+        if !self.state.flags().receive_enabled {
             trace!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
@@ -484,7 +449,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            self.fanout_state.record_latency(latency);
+            self.state.record_latency(latency);
         }
 
         self.protocol
