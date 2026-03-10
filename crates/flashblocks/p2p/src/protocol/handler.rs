@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
-use reth_network::{Peers, cache::LruCache};
+use reth_network::Peers;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -57,9 +57,6 @@ const MAX_PUBLISH_WAIT_SEC: u64 = 2;
 /// before dropping them. In practice, we should rarely need to buffer any messages.
 const BROADCAST_BUFFER_CAPACITY: usize = 100;
 
-/// Number of recently forwarded `StartPublish`/`StopPublish` messages we remember to avoid loops.
-const CONTROL_MESSAGE_CACHE_LEN: u32 = 2048;
-
 /// Trait bound for network handles that can be used with the flashblocks P2P protocol.
 ///
 /// This trait combines all the necessary bounds for a network handle to be used
@@ -93,8 +90,8 @@ pub struct FanoutConfig {
     pub max_receive_peers: usize,
     /// How often to evaluate latency-based peer rotation.
     pub rotation_interval: Duration,
-    /// How long to wait for a rotation request to be answered.
-    pub rotation_timeout: Duration,
+    /// How long to wait for request flashblocks to be answered.
+    pub request_flashblocks_timeout: Duration,
     /// Number of latency measurements to retain per receive peer.
     pub latency_window: i64,
 }
@@ -102,34 +99,25 @@ pub struct FanoutConfig {
 impl Default for FanoutConfig {
     fn default() -> Self {
         Self {
-            max_send_peers: 6,
-            max_receive_peers: 6,
+            max_send_peers: 10,
+            max_receive_peers: 3,
             rotation_interval: Duration::from_secs(30),
-            rotation_timeout: Duration::from_secs(10),
-            latency_window: 50,
+            request_flashblocks_timeout: Duration::from_secs(2),
+            latency_window: 1000,
         }
     }
 }
 
-#[derive(Clone, Debug)]
-enum RotationState {
-    WaitingForResponse {
-        candidate: PeerId,
-        evict: PeerId,
-        requested_at: Instant,
-    },
-    WaitingForCancelAck {
-        candidate: PeerId,
-        evict: PeerId,
-    },
-}
-
 #[derive(Debug, Default)]
 struct FanoutState {
-    send_set: HashSet<PeerId>,
-    receive_set: HashSet<PeerId>,
-    connections: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
-    rotation: Option<RotationState>,
+    /// Peers we are actively sending flashblocks to.
+    send_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// Peers we are actively receiving flashblocks from.
+    receive_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// Peers that are connected but idle, i.e. not currently sending or receiving flashblocks.
+    idle_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    /// State for an ongoing rotation, if any.
+    awaiting_flashblocks_req: Option<(PeerId, Instant)>,
 }
 
 /// The current publishing status of this node in the flashblocks P2P network.
@@ -191,9 +179,7 @@ pub struct FlashblocksP2PState {
     /// while maintaining in-order delivery.
     pub flashblocks: Vec<Option<FlashblocksPayloadV1>>,
     /// Fanout and peer-selection state for flashblock forwarding.
-    fanout: FanoutState,
-    /// Recently processed control messages to prevent rebroadcast loops.
-    seen_control_messages: LruCache<[u8; 32]>,
+    pub fanout: FanoutState,
 }
 
 impl Default for FlashblocksP2PState {
@@ -208,7 +194,6 @@ impl Default for FlashblocksP2PState {
             flashblock_index: 0,
             flashblocks: Vec::new(),
             fanout: FanoutState::default(),
-            seen_control_messages: LruCache::new(CONTROL_MESSAGE_CACHE_LEN),
         }
     }
 }
@@ -225,7 +210,7 @@ impl FlashblocksP2PState {
 
 impl FanoutState {
     fn connection_state(&self, peer_id: &PeerId) -> Option<Arc<FlashblocksConnectionState>> {
-        self.connections.get(peer_id).and_then(Weak::upgrade)
+        self.idle_set.get(peer_id).and_then(Weak::upgrade)
     }
 
     fn is_trusted(&self, peer_id: &PeerId) -> bool {
@@ -241,7 +226,7 @@ impl FanoutState {
     }
 
     fn request_in_flight_count(&self) -> usize {
-        self.connections
+        self.idle_set
             .values()
             .filter_map(Weak::upgrade)
             .filter(|peer| peer.flags().request_in_flight)
@@ -253,7 +238,7 @@ impl FanoutState {
         let mut unknown = Vec::new();
         let mut untrusted = Vec::new();
 
-        for (peer_id, peer_state) in &self.connections {
+        for (peer_id, peer_state) in &self.idle_set {
             let Some(peer_state) = peer_state.upgrade() else {
                 continue;
             };
@@ -372,7 +357,7 @@ impl FanoutState {
             return;
         };
 
-        if requested_at.elapsed() < ctx.fanout_config.rotation_timeout {
+        if requested_at.elapsed() < ctx.fanout_config.request_flashblocks_timeout {
             return;
         }
 
@@ -385,7 +370,7 @@ impl FanoutState {
     }
 
     fn handle_disconnect(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) {
-        self.connections.remove(&peer_id);
+        self.idle_set.remove(&peer_id);
         self.send_set.remove(&peer_id);
         self.receive_set.remove(&peer_id);
 
@@ -558,44 +543,6 @@ impl FanoutState {
             self.rotation = None;
         }
 
-        ctx.send_direct(peer_id, FlashblocksP2PMsg::CancelFlashblocksAck);
-        self.maybe_request_receive_peers(ctx);
-    }
-
-    fn handle_cancel_ack(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) {
-        let Some(peer_state) = self.connection_state(&peer_id) else {
-            return;
-        };
-
-        let clear_rotation = self.rotation.as_ref().is_some_and(|rotation| {
-            matches!(
-                rotation,
-                RotationState::WaitingForCancelAck { evict, .. } if *evict == peer_id
-            )
-        });
-
-        if !peer_state.flags().cancel_in_flight {
-            return;
-        }
-        peer_state.update_flags(|flags| {
-            flags.cancel_in_flight = false;
-            flags.request_in_flight = false;
-
-            if clear_rotation {
-                flags.receive_enabled = false;
-            } else {
-                flags.send_enabled = false;
-            }
-        });
-
-        if clear_rotation {
-            peer_state.reset_latency();
-            self.rotation = None;
-            self.receive_set.remove(&peer_id);
-        } else {
-            self.send_set.remove(&peer_id);
-        }
-
         self.maybe_request_receive_peers(ctx);
     }
 }
@@ -711,7 +658,7 @@ impl FlashblocksHandle {
             let mut state = self.state.lock();
             state
                 .fanout
-                .connections
+                .idle_set
                 .insert(peer_id, Arc::downgrade(&fanout_state));
             state.fanout.maybe_request_receive_peers(&self.ctx);
         }
@@ -728,7 +675,7 @@ impl FlashblocksHandle {
                     let mut state = handle.state.lock();
                     if state
                         .fanout
-                        .connections
+                        .idle_set
                         .get(&peer_id)
                         .and_then(Weak::upgrade)
                         .is_some_and(|current| Arc::ptr_eq(&current, &fanout_state))
@@ -754,15 +701,6 @@ impl FlashblocksHandle {
         state.fanout.handle_disconnect(&self.ctx, peer_id);
     }
 
-    pub(crate) fn remember_control_message(&self, authorized: &Authorized) -> bool {
-        let encoded = FlashblocksP2PMsg::Authorized(authorized.clone()).encode();
-        let hash = blake3::hash(&encoded);
-        self.state
-            .lock()
-            .seen_control_messages
-            .insert(*hash.as_bytes())
-    }
-
     pub(crate) fn handle_request_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
         state.fanout.handle_request(&self.ctx, peer_id);
@@ -781,11 +719,6 @@ impl FlashblocksHandle {
     pub(crate) fn handle_cancel_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
         state.fanout.handle_cancel(&self.ctx, peer_id);
-    }
-
-    pub(crate) fn handle_cancel_ack_message(&self, peer_id: PeerId) {
-        let mut state = self.state.lock();
-        state.fanout.handle_cancel_ack(&self.ctx, peer_id);
     }
 }
 
@@ -1391,10 +1324,10 @@ mod tests {
         let trusted_state = test_peer_state(latency_window, true, true);
         let untrusted_state = test_peer_state(latency_window, false, true);
         fanout
-            .connections
+            .idle_set
             .insert(trusted_peer, Arc::downgrade(&trusted_state));
         fanout
-            .connections
+            .idle_set
             .insert(untrusted_peer, Arc::downgrade(&untrusted_state));
 
         fanout.maybe_request_receive_peers(&ctx);
@@ -1430,10 +1363,10 @@ mod tests {
         let requester_state = test_peer_state(latency_window, true, true);
         victim_state.update_flags(|flags| flags.send_enabled = true);
         fanout
-            .connections
+            .idle_set
             .insert(victim, Arc::downgrade(&victim_state));
         fanout
-            .connections
+            .idle_set
             .insert(trusted_requester, Arc::downgrade(&requester_state));
         fanout.send_set.insert(victim);
 
@@ -1486,10 +1419,10 @@ mod tests {
         current_state.update_flags(|flags| flags.receive_enabled = true);
         current_state.record_latency(42);
         fanout
-            .connections
+            .idle_set
             .insert(current_peer, Arc::downgrade(&current_state));
         fanout
-            .connections
+            .idle_set
             .insert(candidate_peer, Arc::downgrade(&candidate_state));
         fanout.receive_set.insert(current_peer);
 
@@ -1535,8 +1468,6 @@ mod tests {
             }
             other => panic!("unexpected peer message: {other:?}"),
         }
-
-        fanout.handle_cancel_ack(&ctx, current_peer);
 
         assert!(!fanout.receive_set.contains(&current_peer));
         assert!(fanout.receive_set.contains(&candidate_peer));

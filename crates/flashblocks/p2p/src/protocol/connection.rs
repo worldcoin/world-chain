@@ -33,14 +33,14 @@ const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 /// This should be large enough to retain entries across the grace window.
 const RECEIVED_CACHE_LEN: u32 = AUTHORIZATION_TIMESTAMP_GRACE_SEC as u32 * 20;
 
-/// A lightweight rolling average with a configurable smoothing window.
+/// A lightweight moving average with a configurable smoothing window.
 #[derive(Clone, Debug)]
-pub(crate) struct RollingAverage {
+pub(crate) struct MovingAverage {
     value: Option<i64>,
     window: i64,
 }
 
-impl RollingAverage {
+impl MovingAverage {
     pub(crate) fn new(window: i64) -> Self {
         Self {
             value: None,
@@ -79,14 +79,14 @@ pub(crate) struct FlashblocksConnectionFlags {
 #[derive(Debug)]
 pub(crate) struct FlashblocksConnectionState {
     flags: Mutex<FlashblocksConnectionFlags>,
-    latency_average: Mutex<RollingAverage>,
+    latency_average: Mutex<MovingAverage>,
 }
 
 impl FlashblocksConnectionState {
     pub(crate) fn new(latency_window: i64) -> Self {
         Self {
             flags: Mutex::new(FlashblocksConnectionFlags::default()),
-            latency_average: Mutex::new(RollingAverage::new(latency_window)),
+            latency_average: Mutex::new(MovingAverage::new(latency_window)),
         }
     }
 
@@ -354,9 +354,6 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                 FlashblocksP2PMsg::CancelFlashblocks => {
                     this.protocol.handle.handle_cancel_message(this.peer_id);
                 }
-                FlashblocksP2PMsg::CancelFlashblocksAck => {
-                    this.protocol.handle.handle_cancel_ack_message(this.peer_id);
-                }
             }
         }
     }
@@ -531,19 +528,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if !self
-            .protocol
-            .handle
-            .remember_control_message(&authorized_payload.authorized)
-        {
-            trace!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                "ignoring duplicate StartPublish message",
-            );
-            return;
-        }
-
         let state = self.protocol.handle.state.lock();
         state.publishing_status.send_modify(|status| {
             let active_publishers = match status {
@@ -638,19 +622,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             self.protocol
                 .network
                 .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
-            return;
-        }
-
-        if !self
-            .protocol
-            .handle
-            .remember_control_message(&authorized_payload.authorized)
-        {
-            trace!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                "ignoring duplicate StopPublish message",
-            );
             return;
         }
 
