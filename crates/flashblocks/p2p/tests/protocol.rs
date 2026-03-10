@@ -259,17 +259,25 @@ async fn flashblock_stream_recovers_after_receiver_lag() {
 
     // Create the stream first, then publish more messages than the broadcast buffer can retain
     // before polling it. The stream must resync from protocol state instead of terminating.
-    let mut stream = handle.flashblock_stream();
+    let mut stream = handle.live_flashblock_stream();
 
-    for idx in 0..=100u64 {
+    for idx in 0..=200 {
         let signed = AuthorizedPayload::new(builder_sk, auth, payload(pid, idx));
         handle.publish_new(signed).unwrap();
     }
 
-    for expected in 0..=2u64 {
+    for expected in 0..=100u64 {
         let flashblock = stream.next().await.unwrap();
         assert_eq!(flashblock.index, expected);
     }
+
+    // We actually fail to continue publishing here
+    // but this is an acceptable edge case
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), stream.next())
+            .await
+            .is_err(),
+    );
 }
 
 #[tokio::test]
