@@ -17,6 +17,7 @@ use reth::payload::PayloadId;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
 use reth_network::{cache::LruMap, types::ReputationChangeKind};
 use std::{
+    fmt,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll, ready},
@@ -64,20 +65,70 @@ impl MovingAverage {
     }
 }
 
-/// Shared fanout metadata for a single peer connection.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FlashblocksConnectionFlags {}
-
-/// Shared fanout metadata for a single peer connection.
-#[derive(Debug)]
+/// Shared connection metadata for a single peer connection.
 pub struct FlashblocksConnectionState {
-    pub latency_average: MovingAverage,
     pub trusted: bool,
     pub trusted_known: bool,
     pub send_enabled: bool,
     pub receive_enabled: bool,
     pub request_in_flight: bool,
-    pub cancel_in_flight: bool,
+    score_average: MovingAverage,
+    received_cache: LruMap<(PayloadId, usize), ()>,
+}
+
+impl fmt::Debug for FlashblocksConnectionState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FlashblocksConnectionState")
+            .field("trusted", &self.trusted)
+            .field("trusted_known", &self.trusted_known)
+            .field("send_enabled", &self.send_enabled)
+            .field("receive_enabled", &self.receive_enabled)
+            .field("request_in_flight", &self.request_in_flight)
+            .field("score_average", &self.score_average)
+            .finish()
+    }
+}
+
+impl FlashblocksConnectionState {
+    pub(crate) fn new(latency_window: i64) -> Self {
+        Self {
+            trusted: false,
+            trusted_known: false,
+            send_enabled: false,
+            receive_enabled: false,
+            request_in_flight: false,
+            score_average: MovingAverage::new(latency_window),
+            received_cache: LruMap::new(RECEIVED_CACHE_LEN),
+        }
+    }
+
+    pub(crate) fn record_latency(&mut self, sample: i64) {
+        self.score_average.record(sample);
+    }
+
+    pub(crate) fn record_missed_flashblock(&mut self, penalty: i64) {
+        self.score_average.record(penalty);
+    }
+
+    pub(crate) fn score(&self) -> Option<i64> {
+        self.score_average.value()
+    }
+
+    pub(crate) fn note_received_flashblock(&mut self, key: (PayloadId, usize)) -> bool {
+        if self.received_cache.peek(&key).is_some() {
+            return false;
+        }
+        self.received_cache.insert(key, ())
+    }
+
+    pub(crate) fn has_received_flashblock(&self, key: &(PayloadId, usize)) -> bool {
+        self.received_cache.peek(key).is_some()
+    }
+
+    pub(crate) fn reset_receive_tracking(&mut self) {
+        self.score_average.reset();
+        self.received_cache = LruMap::new(RECEIVED_CACHE_LEN);
+    }
 }
 
 /// Represents a single P2P connection for the flashblocks protocol.
@@ -100,9 +151,6 @@ pub struct FlashblocksConnection<N> {
     peer_rx: BroadcastStream<PeerMsg>,
     /// Shared connection state for this peer, also visible to the protocol handler.
     state: Arc<Mutex<FlashblocksConnectionState>>,
-    /// Per-peer tracking of flashblocks this peer has already sent us.
-    /// Uses `peek` for lookups to avoid LRU promotion, giving FIFO eviction semantics.
-    received_cache: LruMap<(PayloadId, usize), ()>,
 }
 
 impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
@@ -133,29 +181,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             peer_id,
             peer_rx,
             state,
-            received_cache: LruMap::new(RECEIVED_CACHE_LEN),
         }
-    }
-}
-
-impl<N> FlashblocksConnection<N> {
-    /// Insert a `(payload_id, flashblock_index)` into the received cache.
-    ///
-    /// Uses [`LruMap::peek`] before insert to avoid promoting duplicates,
-    /// giving FIFO eviction semantics instead of LRU.
-    ///
-    /// Returns `true` if the key was newly inserted, `false` if it already existed.
-    fn received_cache_insert(&mut self, key: (PayloadId, usize)) -> bool {
-        if self.received_cache.peek(&key).is_some() {
-            return false;
-        }
-        self.received_cache.insert(key, ())
-    }
-
-    /// Check if a `(payload_id, flashblock_index)` exists in the received cache
-    /// without promoting it (preserves FIFO eviction order).
-    fn received_cache_contains(&self, key: &(PayloadId, usize)) -> bool {
-        self.received_cache.peek(key).is_some()
     }
 }
 
@@ -190,11 +216,15 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                 bytes,
                             )) => {
                                 // Check if this flashblock actually originated from this peer.
-                                let send_enabled = this.state.flags().send_enabled;
-                                if send_enabled
-                                    && !this
-                                        .received_cache_contains(&(payload_id, flashblock_index))
-                                {
+                                let should_send = {
+                                    let state = this.state.lock();
+                                    state.send_enabled
+                                        && !state.has_received_flashblock(&(
+                                            payload_id,
+                                            flashblock_index,
+                                        ))
+                                };
+                                if should_send {
                                     trace!(
                                         target: "flashblocks::p2p",
                                         peer_id = %this.peer_id,
@@ -383,7 +413,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if !self.state.flags().receive_enabled {
+        if !self.state.lock().receive_enabled {
             trace!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
@@ -395,7 +425,11 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         }
 
         // Check if this peer is spamming us with the same payload index
-        if !self.received_cache_insert((msg.payload_id, msg.index as usize)) {
+        if !self
+            .state
+            .lock()
+            .note_received_flashblock((msg.payload_id, msg.index as usize))
+        {
             // We've already seen this index from this peer.
             // They could be trying to DOS us.
             tracing::warn!(
@@ -449,13 +483,13 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            self.state.record_latency(latency);
+            self.state.lock().record_latency(latency);
         }
 
         self.protocol
             .handle
             .ctx
-            .publish(&mut state, authorized_payload);
+            .publish(&mut state, authorized_payload, Some(self.peer_id));
     }
 
     /// Handles incoming `StartPublish` messages from a peer.

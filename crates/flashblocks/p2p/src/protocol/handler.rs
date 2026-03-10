@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::{
-        Arc, Weak,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -57,6 +57,11 @@ const MAX_PUBLISH_WAIT_SEC: u64 = 2;
 /// before dropping them. In practice, we should rarely need to buffer any messages.
 const BROADCAST_BUFFER_CAPACITY: usize = 100;
 
+/// A missed flashblock should dominate modest latency differences when rotating receive peers.
+const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 10_000_000_000;
+/// Grace window for peers in the receive set to deliver a flashblock after we first observe it.
+const RECEIVE_FLASHBLOCK_GRACE_WINDOW: Duration = Duration::from_secs(10);
+
 /// Trait bound for network handles that can be used with the flashblocks P2P protocol.
 ///
 /// This trait combines all the necessary bounds for a network handle to be used
@@ -79,6 +84,18 @@ pub enum PeerMsg {
     StopPublishing(BytesMut),
     /// Send an already serialized control message to a single peer.
     Direct { peer_id: PeerId, bytes: BytesMut },
+}
+
+#[derive(Clone, Debug)]
+struct ObservedFlashblock {
+    observed_at: Instant,
+    expected_peers: HashSet<PeerId>,
+    scored: bool,
+}
+
+#[derive(Debug, Default)]
+struct ObservedPayload {
+    flashblocks: Vec<Option<ObservedFlashblock>>,
 }
 
 /// Runtime configuration for bounded flashblocks fanout.
@@ -166,12 +183,14 @@ pub struct FlashblocksP2PState {
     /// Contains `None` for flashblocks not yet received, enabling out-of-order receipt
     /// while maintaining in-order delivery.
     pub flashblocks: Vec<Option<FlashblocksPayloadV1>>,
+    /// Flashblocks observed from network peers, tracked until their receive grace windows expire.
+    observed_payloads: HashMap<PayloadId, ObservedPayload>,
+    /// All currently connected peers and their shared connection state.
+    pub connections: HashMap<PeerId, Arc<Mutex<FlashblocksConnectionState>>>,
     /// Peers we are actively sending flashblocks to.
-    pub send_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    pub send_set: HashSet<PeerId>,
     /// Peers we are actively receiving flashblocks from.
-    pub receive_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
-    /// Peers that are connected but idle, i.e. not currently sending or receiving flashblocks.
-    pub idle_set: HashMap<PeerId, Weak<FlashblocksConnectionState>>,
+    pub receive_set: HashSet<PeerId>,
     /// State for an ongoing rotation, if any.
     pub awaiting_flashblocks_req: Option<(PeerId, Instant)>,
 }
@@ -187,9 +206,10 @@ impl Default for FlashblocksP2PState {
             flashblock_timestamp: 0,
             flashblock_index: 0,
             flashblocks: Vec::new(),
-            send_set: HashMap::new(),
-            receive_set: HashMap::new(),
-            idle_set: HashMap::new(),
+            observed_payloads: HashMap::new(),
+            connections: HashMap::new(),
+            send_set: HashSet::new(),
+            receive_set: HashSet::new(),
             awaiting_flashblocks_req: None,
         }
     }
@@ -203,25 +223,69 @@ impl FlashblocksP2PState {
     pub fn publishing_status(&self) -> PublishingStatus {
         self.publishing_status.borrow().clone()
     }
-}
 
-impl FlashblocksP2PState {
+    fn connection_state(&self, peer_id: &PeerId) -> Option<Arc<Mutex<FlashblocksConnectionState>>> {
+        self.connections.get(peer_id).cloned()
+    }
+
+    fn insert_connection(
+        &mut self,
+        peer_id: PeerId,
+        peer_state: &Arc<Mutex<FlashblocksConnectionState>>,
+    ) {
+        self.connections.insert(peer_id, Arc::clone(peer_state));
+    }
+
+    fn remove_connection(&mut self, peer_id: &PeerId) {
+        self.connections.remove(peer_id);
+        self.send_set.remove(peer_id);
+        self.receive_set.remove(peer_id);
+    }
+
+    fn set_send_enabled(&mut self, peer_id: PeerId, enabled: bool) {
+        if enabled {
+            self.send_set.insert(peer_id);
+        } else {
+            self.send_set.remove(&peer_id);
+        }
+    }
+
+    fn set_receive_enabled(&mut self, peer_id: PeerId, enabled: bool) {
+        if enabled {
+            self.receive_set.insert(peer_id);
+        } else {
+            self.receive_set.remove(&peer_id);
+        }
+    }
+
+    fn is_trusted(&self, peer_id: &PeerId) -> bool {
+        self.connection_state(peer_id)
+            .is_some_and(|peer| peer.lock().trusted)
+    }
+
+    fn non_trusted_send_count(&self) -> usize {
+        self.send_set
+            .iter()
+            .filter(|peer_id| !self.is_trusted(peer_id))
+            .count()
+    }
+
     fn available_receive_candidates(&self) -> Vec<PeerId> {
         let mut trusted = Vec::new();
         let mut unknown = Vec::new();
         let mut untrusted = Vec::new();
 
-        for (peer_id, peer_state) in &self.idle_set {
-            let Some(peer_state) = peer_state.upgrade() else {
-                continue;
-            };
-
+        for peer_id in self.connections.keys() {
             if self.receive_set.contains(peer_id) {
                 continue;
             }
 
-            let peer_state = peer_state.flags();
-            if peer_state.request_in_flight || peer_state.cancel_in_flight {
+            let Some(peer_state) = self.connection_state(peer_id) else {
+                continue;
+            };
+
+            let peer_state = peer_state.lock();
+            if peer_state.request_in_flight {
                 continue;
             }
 
@@ -243,55 +307,52 @@ impl FlashblocksP2PState {
     }
 
     fn maybe_request_receive_peers(&mut self, ctx: &FlashblocksP2PCtx) {
-        if self.rotation.is_some() {
+        if self.awaiting_flashblocks_req.is_some()
+            || self.receive_set.len() >= ctx.fanout_config.max_receive_peers
+        {
             return;
         }
 
-        let target = ctx
-            .fanout_config
-            .max_receive_peers
-            .saturating_sub(self.receive_set.len() + self.request_in_flight_count());
-        if target == 0 {
+        let Some(peer_id) = self.available_receive_candidates().into_iter().next() else {
             return;
-        }
+        };
+        let Some(peer_state) = self.connection_state(&peer_id) else {
+            return;
+        };
 
-        for peer_id in self.available_receive_candidates().into_iter().take(target) {
-            let Some(peer_state) = self.connection_state(&peer_id) else {
-                continue;
-            };
-
-            let flags = peer_state.flags();
-            if flags.request_in_flight || flags.receive_enabled || flags.cancel_in_flight {
-                continue;
+        {
+            let mut peer_state = peer_state.lock();
+            if peer_state.request_in_flight || peer_state.receive_enabled {
+                return;
             }
-            peer_state.update_flags(|flags| flags.request_in_flight = true);
-
-            ctx.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
+            peer_state.request_in_flight = true;
         }
+
+        self.awaiting_flashblocks_req = Some((peer_id, Instant::now()));
+        ctx.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
     fn worst_receive_peer(&self) -> Option<PeerId> {
         self.receive_set
             .iter()
             .filter_map(|peer_id| {
-                self.connection_state(peer_id).and_then(|peer_state| {
-                    peer_state
-                        .average_latency()
-                        .map(|average| (*peer_id, average))
-                })
+                self.connection_state(peer_id)
+                    .and_then(|peer_state| peer_state.lock().score().map(|score| (*peer_id, score)))
             })
             .max_by(|(_, lhs), (_, rhs)| lhs.cmp(rhs))
             .map(|(peer_id, _)| peer_id)
     }
 
     fn maybe_start_rotation(&mut self, ctx: &FlashblocksP2PCtx) {
-        if self.rotation.is_some() || self.receive_set.len() < ctx.fanout_config.max_receive_peers {
+        if self.awaiting_flashblocks_req.is_some()
+            || self.receive_set.len() < ctx.fanout_config.max_receive_peers
+        {
             return;
         }
 
-        let Some(evict) = self.worst_receive_peer() else {
+        if self.worst_receive_peer().is_none() {
             return;
-        };
+        }
 
         let mut candidates = self.available_receive_candidates();
         if candidates.is_empty() {
@@ -306,27 +367,20 @@ impl FlashblocksP2PState {
             return;
         };
 
-        let flags = candidate_state.flags();
-        if flags.request_in_flight || flags.receive_enabled || flags.cancel_in_flight {
-            return;
+        {
+            let mut candidate_state = candidate_state.lock();
+            if candidate_state.request_in_flight || candidate_state.receive_enabled {
+                return;
+            }
+            candidate_state.request_in_flight = true;
         }
-        candidate_state.update_flags(|flags| flags.request_in_flight = true);
 
-        self.rotation = Some(RotationState::WaitingForResponse {
-            candidate,
-            evict,
-            requested_at: Instant::now(),
-        });
+        self.awaiting_flashblocks_req = Some((candidate, Instant::now()));
         ctx.send_direct(candidate, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
     fn check_rotation_timeout(&mut self, ctx: &FlashblocksP2PCtx) {
-        let Some(RotationState::WaitingForResponse {
-            candidate,
-            requested_at,
-            ..
-        }) = self.rotation.as_ref()
-        else {
+        let Some((candidate, requested_at)) = self.awaiting_flashblocks_req else {
             return;
         };
 
@@ -334,32 +388,21 @@ impl FlashblocksP2PState {
             return;
         }
 
-        let candidate = *candidate;
         if let Some(candidate_state) = self.connection_state(&candidate) {
-            candidate_state.update_flags(|flags| flags.request_in_flight = false);
+            candidate_state.lock().request_in_flight = false;
         }
-        self.rotation = None;
+        self.awaiting_flashblocks_req = None;
         self.maybe_request_receive_peers(ctx);
     }
 
     fn handle_disconnect(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) {
-        self.idle_set.remove(&peer_id);
-        self.send_set.remove(&peer_id);
-        self.receive_set.remove(&peer_id);
+        self.remove_connection(&peer_id);
 
         if self
-            .rotation
-            .as_ref()
-            .is_some_and(|rotation| match rotation {
-                RotationState::WaitingForResponse {
-                    candidate, evict, ..
-                } => *candidate == peer_id || *evict == peer_id,
-                RotationState::WaitingForCancelAck { candidate, evict } => {
-                    *candidate == peer_id || *evict == peer_id
-                }
-            })
+            .awaiting_flashblocks_req
+            .is_some_and(|(candidate, _)| candidate == peer_id)
         {
-            self.rotation = None;
+            self.awaiting_flashblocks_req = None;
         }
 
         self.maybe_request_receive_peers(ctx);
@@ -370,55 +413,47 @@ impl FlashblocksP2PState {
             return;
         };
 
-        let flags = peer_state.flags();
-        let peer_is_trusted = flags.trusted;
-        let send_enabled = flags.send_enabled;
-        let cancel_in_flight = flags.cancel_in_flight;
+        let (peer_is_trusted, send_enabled) = {
+            let peer_state = peer_state.lock();
+            (peer_state.trusted, peer_state.send_enabled)
+        };
 
         if send_enabled {
             ctx.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
             return;
         }
 
-        if cancel_in_flight {
-            ctx.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
-            return;
-        }
-
         if peer_is_trusted {
             if self.non_trusted_send_count() >= ctx.fanout_config.max_send_peers {
-                if let Some(evicted_peer) = self.send_set.iter().copied().find(|candidate| {
-                    !self.is_trusted(candidate)
-                        && self
-                            .connection_state(candidate)
-                            .is_some_and(|state| !state.flags().cancel_in_flight)
-                }) {
+                if let Some(evicted_peer) = self
+                    .send_set
+                    .iter()
+                    .copied()
+                    .find(|candidate| !self.is_trusted(candidate))
+                {
                     if let Some(evicted_state) = self.connection_state(&evicted_peer) {
-                        evicted_state.update_flags(|flags| {
-                            flags.send_enabled = false;
-                            flags.cancel_in_flight = true;
-                        });
+                        evicted_state.lock().send_enabled = false;
+                        self.set_send_enabled(evicted_peer, false);
                     }
-                    self.send_set.remove(&evicted_peer);
                     ctx.send_direct(evicted_peer, FlashblocksP2PMsg::CancelFlashblocks);
                 }
             }
 
-            peer_state.update_flags(|flags| {
-                flags.send_enabled = true;
-                flags.cancel_in_flight = false;
-            });
-            self.send_set.insert(peer_id);
+            {
+                let mut peer_state = peer_state.lock();
+                peer_state.send_enabled = true;
+            }
+            self.set_send_enabled(peer_id, true);
             ctx.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
             return;
         }
 
         if self.non_trusted_send_count() < ctx.fanout_config.max_send_peers {
-            peer_state.update_flags(|flags| {
-                flags.send_enabled = true;
-                flags.cancel_in_flight = false;
-            });
-            self.send_set.insert(peer_id);
+            {
+                let mut peer_state = peer_state.lock();
+                peer_state.send_enabled = true;
+            }
+            self.set_send_enabled(peer_id, true);
             ctx.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
         } else {
             ctx.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
@@ -430,35 +465,40 @@ impl FlashblocksP2PState {
             return;
         };
 
-        if !peer_state.flags().request_in_flight {
+        if !peer_state.lock().request_in_flight {
             return;
         }
-        peer_state.update_flags(|flags| {
-            flags.request_in_flight = false;
-            flags.receive_enabled = true;
-        });
-
-        self.receive_set.insert(peer_id);
-
-        if let Some(RotationState::WaitingForResponse {
-            candidate, evict, ..
-        }) = self.rotation.as_ref()
+        let evict = if self.receive_set.len() >= ctx.fanout_config.max_receive_peers
+            && !self.receive_set.contains(&peer_id)
         {
-            if *candidate == peer_id {
-                let evict = *evict;
-                if let Some(evict_state) = self.connection_state(&evict) {
-                    evict_state.update_flags(|flags| flags.cancel_in_flight = true);
-                } else {
-                    self.rotation = None;
-                    self.maybe_request_receive_peers(ctx);
-                    return;
+            self.worst_receive_peer()
+        } else {
+            None
+        };
+
+        {
+            let mut peer_state = peer_state.lock();
+            peer_state.request_in_flight = false;
+            peer_state.receive_enabled = true;
+        }
+        self.set_receive_enabled(peer_id, true);
+
+        if self
+            .awaiting_flashblocks_req
+            .is_some_and(|(candidate, _)| candidate == peer_id)
+        {
+            self.awaiting_flashblocks_req = None;
+        }
+
+        if let Some(evict) = evict.filter(|evict| *evict != peer_id) {
+            if let Some(evict_state) = self.connection_state(&evict) {
+                {
+                    let mut evict_state = evict_state.lock();
+                    evict_state.receive_enabled = false;
+                    evict_state.reset_receive_tracking();
                 }
-                self.rotation = Some(RotationState::WaitingForCancelAck {
-                    candidate: peer_id,
-                    evict,
-                });
+                self.set_receive_enabled(evict, false);
                 ctx.send_direct(evict, FlashblocksP2PMsg::CancelFlashblocks);
-                return;
             }
         }
 
@@ -470,53 +510,109 @@ impl FlashblocksP2PState {
             return;
         };
 
-        if !peer_state.flags().request_in_flight {
+        if !peer_state.lock().request_in_flight {
             return;
         }
-        peer_state.update_flags(|flags| flags.request_in_flight = false);
+        peer_state.lock().request_in_flight = false;
 
-        if self.rotation.as_ref().is_some_and(|rotation| {
-            matches!(
-                rotation,
-                RotationState::WaitingForResponse { candidate, .. } if *candidate == peer_id
-            )
-        }) {
-            self.rotation = None;
+        if self
+            .awaiting_flashblocks_req
+            .is_some_and(|(candidate, _)| candidate == peer_id)
+        {
+            self.awaiting_flashblocks_req = None;
         }
 
         self.maybe_request_receive_peers(ctx);
     }
 
     fn handle_cancel(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) {
-        self.send_set.remove(&peer_id);
-        self.receive_set.remove(&peer_id);
-
         if let Some(peer_state) = self.connection_state(&peer_id) {
-            peer_state.update_flags(|flags| {
-                flags.send_enabled = false;
-                flags.receive_enabled = false;
-                flags.request_in_flight = false;
-                flags.cancel_in_flight = false;
-            });
-            peer_state.reset_latency();
+            {
+                let mut peer_state = peer_state.lock();
+                peer_state.send_enabled = false;
+                peer_state.receive_enabled = false;
+                peer_state.request_in_flight = false;
+                peer_state.reset_receive_tracking();
+            }
+            self.set_send_enabled(peer_id, false);
+            self.set_receive_enabled(peer_id, false);
+        } else {
+            self.remove_connection(&peer_id);
         }
 
         if self
-            .rotation
-            .as_ref()
-            .is_some_and(|rotation| match rotation {
-                RotationState::WaitingForResponse {
-                    candidate, evict, ..
-                } => *candidate == peer_id || *evict == peer_id,
-                RotationState::WaitingForCancelAck { candidate, evict } => {
-                    *candidate == peer_id || *evict == peer_id
-                }
-            })
+            .awaiting_flashblocks_req
+            .is_some_and(|(candidate, _)| candidate == peer_id)
         {
-            self.rotation = None;
+            self.awaiting_flashblocks_req = None;
         }
 
         self.maybe_request_receive_peers(ctx);
+    }
+
+    fn record_receive_observation(&mut self, payload_id: PayloadId, flashblock_index: usize) {
+        let expected_peers = self.receive_set.clone();
+
+        let payload = self.observed_payloads.entry(payload_id).or_default();
+        if flashblock_index >= payload.flashblocks.len() {
+            payload
+                .flashblocks
+                .resize_with(flashblock_index + 1, || None);
+        }
+        payload.flashblocks[flashblock_index].get_or_insert_with(|| ObservedFlashblock {
+            observed_at: Instant::now(),
+            expected_peers,
+            scored: false,
+        });
+    }
+
+    fn score_expired_receive_observations(&mut self) {
+        let mut expired = Vec::new();
+
+        for (payload_id, observed_payload) in &mut self.observed_payloads {
+            for (index, observed_flashblock) in observed_payload.flashblocks.iter_mut().enumerate()
+            {
+                let Some(observed_flashblock) = observed_flashblock.as_mut() else {
+                    continue;
+                };
+
+                if observed_flashblock.scored
+                    || observed_flashblock.observed_at.elapsed() < RECEIVE_FLASHBLOCK_GRACE_WINDOW
+                {
+                    continue;
+                }
+
+                observed_flashblock.scored = true;
+                expired.push((
+                    *payload_id,
+                    index,
+                    observed_flashblock.expected_peers.clone(),
+                ));
+            }
+        }
+
+        for (payload_id, index, expected_peers) in expired {
+            for peer_id in expected_peers {
+                let Some(peer_state) = self.connection_state(&peer_id) else {
+                    continue;
+                };
+
+                let mut peer_state = peer_state.lock();
+                if !peer_state.has_received_flashblock(&(payload_id, index)) {
+                    peer_state.record_missed_flashblock(MISSED_FLASHBLOCK_PENALTY_NS);
+                }
+            }
+        }
+
+        self.observed_payloads
+            .retain(|payload_id, observed_payload| {
+                *payload_id == self.payload_id
+                    || observed_payload
+                        .flashblocks
+                        .iter()
+                        .flatten()
+                        .any(|observed_flashblock| !observed_flashblock.scored)
+            });
     }
 }
 
@@ -610,11 +706,12 @@ impl FlashblocksHandle {
                 tokio::select! {
                     _ = rotation_interval.tick() => {
                         let mut state = handle.state.lock();
-                        state.fanout.maybe_start_rotation(&handle.ctx);
+                        state.maybe_start_rotation(&handle.ctx);
                     }
                     _ = timeout_interval.tick() => {
                         let mut state = handle.state.lock();
-                        state.fanout.check_rotation_timeout(&handle.ctx);
+                        state.check_rotation_timeout(&handle.ctx);
+                        state.score_expired_receive_observations();
                     }
                 }
             }
@@ -629,31 +726,25 @@ impl FlashblocksHandle {
     ) {
         {
             let mut state = self.state.lock();
-            state
-                .fanout
-                .idle_set
-                .insert(peer_id, Arc::downgrade(&fanout_state));
-            state.fanout.maybe_request_receive_peers(&self.ctx);
+            state.insert_connection(peer_id, &fanout_state);
+            state.maybe_request_receive_peers(&self.ctx);
         }
 
         let handle = self.clone();
         tokio::spawn(async move {
             match network.get_peer_by_id(peer_id).await {
                 Ok(Some(peer_info)) => {
-                    fanout_state.update_flags(|flags| {
-                        flags.trusted = peer_info.kind.is_trusted();
-                        flags.trusted_known = true;
-                    });
+                    let mut fanout_state_guard = fanout_state.lock();
+                    fanout_state_guard.trusted = peer_info.kind.is_trusted();
+                    fanout_state_guard.trusted_known = true;
+                    drop(fanout_state_guard);
 
                     let mut state = handle.state.lock();
                     if state
-                        .fanout
-                        .idle_set
-                        .get(&peer_id)
-                        .and_then(Weak::upgrade)
+                        .connection_state(&peer_id)
                         .is_some_and(|current| Arc::ptr_eq(&current, &fanout_state))
                     {
-                        state.fanout.maybe_request_receive_peers(&handle.ctx);
+                        state.maybe_request_receive_peers(&handle.ctx);
                     }
                 }
                 Ok(None) => {}
@@ -671,27 +762,27 @@ impl FlashblocksHandle {
 
     pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.fanout.handle_disconnect(&self.ctx, peer_id);
+        state.handle_disconnect(&self.ctx, peer_id);
     }
 
     pub(crate) fn handle_request_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.fanout.handle_request(&self.ctx, peer_id);
+        state.handle_request(&self.ctx, peer_id);
     }
 
     pub(crate) fn handle_accept_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.fanout.handle_accept(&self.ctx, peer_id);
+        state.handle_accept(&self.ctx, peer_id);
     }
 
     pub(crate) fn handle_reject_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.fanout.handle_reject(&self.ctx, peer_id);
+        state.handle_reject(&self.ctx, peer_id);
     }
 
     pub(crate) fn handle_cancel_message(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.fanout.handle_cancel(&self.ctx, peer_id);
+        state.handle_cancel(&self.ctx, peer_id);
     }
 }
 
@@ -803,7 +894,7 @@ impl FlashblocksHandle {
         if authorization != authorized_payload.authorized.authorization {
             return Err(FlashblocksP2PError::ExpiredAuthorization);
         }
-        self.ctx.publish(&mut state, authorized_payload);
+        self.ctx.publish(&mut state, authorized_payload, None);
         Ok(())
     }
 
@@ -1071,6 +1162,7 @@ impl FlashblocksP2PCtx {
         &self,
         state: &mut FlashblocksP2PState,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        source_peer_id: Option<PeerId>,
     ) {
         let payload = authorized_payload.msg();
         let authorization = authorized_payload.authorized.authorization;
@@ -1157,6 +1249,10 @@ impl FlashblocksP2PCtx {
 
             self.peer_tx.send(peer_msg).ok();
 
+            if source_peer_id.is_some() {
+                state.record_receive_observation(payload.payload_id, payload.index as usize);
+            }
+
             let now = Utc::now()
                 .timestamp_nanos_opt()
                 .expect("time went backwards");
@@ -1236,9 +1332,9 @@ impl<N: FlashblocksP2PNetworkHandle> ConnectionHandler for FlashblocksP2PProtoco
         );
 
         let peer_rx = self.handle.ctx.peer_tx.subscribe();
-        let fanout_state = Arc::new(FlashblocksConnectionState::new(
+        let fanout_state = Arc::new(Mutex::new(FlashblocksConnectionState::new(
             self.handle.ctx.fanout_config.latency_window,
-        ));
+        )));
 
         FlashblocksConnection::new(
             self,
@@ -1272,12 +1368,13 @@ mod tests {
         latency_window: i64,
         trusted: bool,
         trusted_known: bool,
-    ) -> Arc<FlashblocksConnectionState> {
-        let state = Arc::new(FlashblocksConnectionState::new(latency_window));
-        state.update_flags(|flags| {
-            flags.trusted = trusted;
-            flags.trusted_known = trusted_known;
-        });
+    ) -> Arc<Mutex<FlashblocksConnectionState>> {
+        let state = Arc::new(Mutex::new(FlashblocksConnectionState::new(latency_window)));
+        {
+            let mut state_guard = state.lock();
+            state_guard.trusted = trusted;
+            state_guard.trusted_known = trusted_known;
+        }
         state
     }
 
@@ -1289,24 +1386,20 @@ mod tests {
         };
         let latency_window = config.latency_window;
         let ctx = test_ctx(config);
-        let mut fanout = FanoutState::default();
+        let mut fanout = FlashblocksP2PState::default();
         let mut rx = ctx.peer_tx.subscribe();
 
         let trusted_peer = PeerId::random();
         let untrusted_peer = PeerId::random();
         let trusted_state = test_peer_state(latency_window, true, true);
         let untrusted_state = test_peer_state(latency_window, false, true);
-        fanout
-            .idle_set
-            .insert(trusted_peer, Arc::downgrade(&trusted_state));
-        fanout
-            .idle_set
-            .insert(untrusted_peer, Arc::downgrade(&untrusted_state));
+        fanout.insert_connection(trusted_peer, &trusted_state);
+        fanout.insert_connection(untrusted_peer, &untrusted_state);
 
         fanout.maybe_request_receive_peers(&ctx);
 
-        assert!(trusted_state.flags().request_in_flight);
-        assert!(!untrusted_state.flags().request_in_flight);
+        assert!(trusted_state.lock().request_in_flight);
+        assert!(!untrusted_state.lock().request_in_flight);
         match rx.try_recv().expect("request sent") {
             PeerMsg::Direct { peer_id, bytes } => {
                 assert_eq!(peer_id, trusted_peer);
@@ -1327,28 +1420,24 @@ mod tests {
         };
         let latency_window = config.latency_window;
         let ctx = test_ctx(config);
-        let mut fanout = FanoutState::default();
+        let mut fanout = FlashblocksP2PState::default();
         let mut rx = ctx.peer_tx.subscribe();
 
         let victim = PeerId::random();
         let trusted_requester = PeerId::random();
         let victim_state = test_peer_state(latency_window, false, true);
         let requester_state = test_peer_state(latency_window, true, true);
-        victim_state.update_flags(|flags| flags.send_enabled = true);
-        fanout
-            .idle_set
-            .insert(victim, Arc::downgrade(&victim_state));
-        fanout
-            .idle_set
-            .insert(trusted_requester, Arc::downgrade(&requester_state));
-        fanout.send_set.insert(victim);
+        victim_state.lock().send_enabled = true;
+        fanout.insert_connection(victim, &victim_state);
+        fanout.insert_connection(trusted_requester, &requester_state);
+        fanout.set_send_enabled(victim, true);
 
         fanout.handle_request(&ctx, trusted_requester);
 
         assert!(!fanout.send_set.contains(&victim));
         assert!(fanout.send_set.contains(&trusted_requester));
-        assert!(victim_state.flags().cancel_in_flight);
-        assert!(requester_state.flags().send_enabled);
+        assert!(!victim_state.lock().send_enabled);
+        assert!(requester_state.lock().send_enabled);
 
         match rx.try_recv().expect("cancel sent") {
             PeerMsg::Direct { peer_id, bytes } => {
@@ -1374,7 +1463,7 @@ mod tests {
     }
 
     #[test]
-    fn rotation_accepts_candidate_then_waits_for_cancel_ack() {
+    fn rotation_accepts_candidate_and_cancels_current_peer() {
         let config = FanoutConfig {
             max_receive_peers: 1,
             latency_window: 4,
@@ -1382,30 +1471,25 @@ mod tests {
         };
         let latency_window = config.latency_window;
         let ctx = test_ctx(config);
-        let mut fanout = FanoutState::default();
+        let mut fanout = FlashblocksP2PState::default();
         let mut rx = ctx.peer_tx.subscribe();
 
         let current_peer = PeerId::random();
         let candidate_peer = PeerId::random();
         let current_state = test_peer_state(latency_window, false, true);
         let candidate_state = test_peer_state(latency_window, false, true);
-        current_state.update_flags(|flags| flags.receive_enabled = true);
-        current_state.record_latency(42);
-        fanout
-            .idle_set
-            .insert(current_peer, Arc::downgrade(&current_state));
-        fanout
-            .idle_set
-            .insert(candidate_peer, Arc::downgrade(&candidate_state));
-        fanout.receive_set.insert(current_peer);
+        current_state.lock().receive_enabled = true;
+        current_state.lock().record_latency(42);
+        fanout.insert_connection(current_peer, &current_state);
+        fanout.insert_connection(candidate_peer, &candidate_state);
+        fanout.set_receive_enabled(current_peer, true);
 
         fanout.maybe_start_rotation(&ctx);
 
-        assert!(candidate_state.flags().request_in_flight);
+        assert!(candidate_state.lock().request_in_flight);
         assert!(matches!(
-            fanout.rotation,
-            Some(RotationState::WaitingForResponse { candidate, evict, .. })
-                if candidate == candidate_peer && evict == current_peer
+            fanout.awaiting_flashblocks_req,
+            Some((candidate, _)) if candidate == candidate_peer
         ));
 
         match rx.try_recv().expect("rotation request sent") {
@@ -1421,15 +1505,11 @@ mod tests {
 
         fanout.handle_accept(&ctx, candidate_peer);
 
-        assert!(fanout.receive_set.contains(&current_peer));
+        assert!(!fanout.receive_set.contains(&current_peer));
         assert!(fanout.receive_set.contains(&candidate_peer));
-        assert!(candidate_state.flags().receive_enabled);
-        assert!(current_state.flags().cancel_in_flight);
-        assert!(matches!(
-            fanout.rotation,
-            Some(RotationState::WaitingForCancelAck { candidate, evict })
-                if candidate == candidate_peer && evict == current_peer
-        ));
+        assert!(candidate_state.lock().receive_enabled);
+        assert!(!current_state.lock().receive_enabled);
+        assert!(fanout.awaiting_flashblocks_req.is_none());
 
         match rx.try_recv().expect("cancel sent to old peer") {
             PeerMsg::Direct { peer_id, bytes } => {
@@ -1444,7 +1524,59 @@ mod tests {
 
         assert!(!fanout.receive_set.contains(&current_peer));
         assert!(fanout.receive_set.contains(&candidate_peer));
-        assert!(!current_state.flags().receive_enabled);
-        assert!(fanout.rotation.is_none());
+        assert!(!current_state.lock().receive_enabled);
+        assert!(fanout.awaiting_flashblocks_req.is_none());
+    }
+
+    #[test]
+    fn peer_score_penalizes_missed_flashblocks() {
+        let config = FanoutConfig {
+            max_receive_peers: 2,
+            latency_window: 4,
+            ..Default::default()
+        };
+        let latency_window = config.latency_window;
+        let mut fanout = FlashblocksP2PState::default();
+
+        let steady_peer = PeerId::random();
+        let lagging_peer = PeerId::random();
+        let steady_state = test_peer_state(latency_window, false, true);
+        let lagging_state = test_peer_state(latency_window, false, true);
+
+        {
+            let mut steady = steady_state.lock();
+            steady.receive_enabled = true;
+            steady.record_latency(10);
+            steady.note_received_flashblock((PayloadId::default(), 0));
+        }
+        {
+            let mut lagging = lagging_state.lock();
+            lagging.receive_enabled = true;
+            lagging.record_latency(100);
+        }
+
+        fanout.insert_connection(steady_peer, &steady_state);
+        fanout.insert_connection(lagging_peer, &lagging_state);
+        fanout.set_receive_enabled(steady_peer, true);
+        fanout.set_receive_enabled(lagging_peer, true);
+
+        fanout.record_receive_observation(PayloadId::default(), 0);
+        fanout
+            .observed_payloads
+            .get_mut(&PayloadId::default())
+            .unwrap()
+            .flashblocks[0]
+            .as_mut()
+            .unwrap()
+            .observed_at =
+            Instant::now() - RECEIVE_FLASHBLOCK_GRACE_WINDOW - Duration::from_secs(1);
+        fanout.score_expired_receive_observations();
+
+        assert_eq!(fanout.worst_receive_peer(), Some(lagging_peer));
+        assert_eq!(steady_state.lock().score(), Some(10));
+        assert_eq!(
+            lagging_state.lock().score(),
+            Some((100 * (latency_window - 1) + MISSED_FLASHBLOCK_PENALTY_NS) / latency_window)
+        );
     }
 }
