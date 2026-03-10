@@ -9,7 +9,7 @@ use flashblocks_primitives::{
     },
     primitives::FlashblocksPayloadV1,
 };
-use futures::{Stream, stream};
+use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
@@ -240,6 +240,11 @@ impl<N> FlashblocksP2PProtocol<N> {
 }
 
 impl FlashblocksHandle {
+    /// Retrieves the next flashblock from the protocol state based on the provided cursor.
+    ///
+    /// Will return the flashblock at the cursor if it exists.
+    /// Will return the first flashblock if the cursor points to a different payload or is None.
+    /// Returns None if the flashblock at the cursor or the first flashblock does not exist.
     fn next_flashblock_from_state(
         state: &FlashblocksP2PState,
         cursor: Option<&(PayloadId, usize)>,
@@ -472,9 +477,33 @@ impl FlashblocksHandle {
     /// Returns a stream of ordered flashblocks starting from the beginning of the current payload.
     ///
     /// # Behavior
-    /// The stream will continue to yield flashblocks for consecutive payloads as well, so
-    /// consumers should take care to handle the stream appropriately.
-    pub fn flashblock_stream(
+    /// The stream will continue to yield flashblocks for consecutive payloads.
+    pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
+        // Seed the stream with already-buffered contiguous flashblocks, then rely on the broadcast
+        // channel for future ones so ordering stays strict even if inserts arrive out of order.
+        let flashblocks = self
+            .state
+            .lock()
+            .flashblocks
+            .clone()
+            .into_iter()
+            .map_while(|x| x);
+
+        let receiver = self.ctx.flashblock_tx.subscribe();
+
+        let current = stream::iter(flashblocks);
+        let future = tokio_stream::StreamExt::map_while(BroadcastStream::new(receiver), |x| x.ok());
+        current.chain(future)
+    }
+
+    /// Returns a stream of ordered flashblocks starting from the beginning of the current payload.
+    ///
+    /// # Behavior
+    ///
+    /// The stream will continue to yield flashblocks for consecutive payloads.
+    ///
+    /// Items not consumed from the stream by the time the next payload starts will be skipped.
+    pub fn live_flashblock_stream(
         &self,
     ) -> impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static {
         let state = self.state.clone();
