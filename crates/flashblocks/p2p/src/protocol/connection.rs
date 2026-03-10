@@ -12,11 +12,13 @@ use flashblocks_primitives::{
 };
 use futures::{Stream, StreamExt};
 use metrics::gauge;
+use parking_lot::Mutex;
 use reth::payload::PayloadId;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
 use reth_network::{cache::LruMap, types::ReputationChangeKind};
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll, ready},
 };
 use tokio_stream::wrappers::BroadcastStream;
@@ -30,6 +32,88 @@ const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 ///
 /// This should be large enough to retain entries across the grace window.
 const RECEIVED_CACHE_LEN: u32 = AUTHORIZATION_TIMESTAMP_GRACE_SEC as u32 * 20;
+
+/// A lightweight rolling average with a configurable smoothing window.
+#[derive(Clone, Debug)]
+pub(crate) struct RollingAverage {
+    value: Option<i64>,
+    window: i64,
+}
+
+impl RollingAverage {
+    pub(crate) fn new(window: i64) -> Self {
+        Self {
+            value: None,
+            window: window.max(1),
+        }
+    }
+
+    pub(crate) fn record(&mut self, sample: i64) {
+        self.value = Some(match self.value {
+            Some(current) => (current * (self.window - 1) + sample) / self.window,
+            None => sample,
+        });
+    }
+
+    pub(crate) fn value(&self) -> Option<i64> {
+        self.value
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.value = None;
+    }
+}
+
+/// Shared fanout metadata for a single peer connection.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct FlashblocksConnectionFlags {
+    pub(crate) trusted: bool,
+    pub(crate) trusted_known: bool,
+    pub(crate) send_enabled: bool,
+    pub(crate) receive_enabled: bool,
+    pub(crate) request_in_flight: bool,
+    pub(crate) cancel_in_flight: bool,
+}
+
+/// Shared fanout metadata for a single peer connection.
+#[derive(Debug)]
+pub(crate) struct FlashblocksConnectionState {
+    flags: Mutex<FlashblocksConnectionFlags>,
+    latency_average: Mutex<RollingAverage>,
+}
+
+impl FlashblocksConnectionState {
+    pub(crate) fn new(latency_window: i64) -> Self {
+        Self {
+            flags: Mutex::new(FlashblocksConnectionFlags::default()),
+            latency_average: Mutex::new(RollingAverage::new(latency_window)),
+        }
+    }
+
+    pub(crate) fn flags(&self) -> FlashblocksConnectionFlags {
+        *self.flags.lock()
+    }
+
+    pub(crate) fn update_flags<F>(&self, update: F)
+    where
+        F: FnOnce(&mut FlashblocksConnectionFlags),
+    {
+        let mut flags = self.flags.lock();
+        update(&mut flags);
+    }
+
+    pub(crate) fn record_latency(&self, sample: i64) {
+        self.latency_average.lock().record(sample);
+    }
+
+    pub(crate) fn average_latency(&self) -> Option<i64> {
+        self.latency_average.lock().value()
+    }
+
+    pub(crate) fn reset_latency(&self) {
+        self.latency_average.lock().reset();
+    }
+}
 
 /// Represents a single P2P connection for the flashblocks protocol.
 ///
@@ -49,6 +133,8 @@ pub struct FlashblocksConnection<N> {
     /// Receiver for peer messages to be sent to all peers.
     /// We send bytes over this stream to avoid repeatedly having to serialize the payloads.
     peer_rx: BroadcastStream<PeerMsg>,
+    /// Shared fanout state for this peer, also visible to the protocol handler.
+    fanout_state: Arc<FlashblocksConnectionState>,
     /// Per-peer tracking of flashblocks this peer has already sent us.
     /// Uses `peek` for lookups to avoid LRU promotion, giving FIFO eviction semantics.
     received_cache: LruMap<(PayloadId, usize), ()>,
@@ -62,12 +148,18 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// * `conn` - The underlying protocol connection for sending and receiving messages.
     /// * `peer_id` - The unique identifier of the connected peer.
     /// * `peer_rx` - Receiver for peer messages to be sent to all peers.
-    pub fn new(
+    pub(crate) fn new(
         protocol: FlashblocksP2PProtocol<N>,
         conn: ProtocolConnection,
         peer_id: PeerId,
         peer_rx: BroadcastStream<PeerMsg>,
+        fanout_state: Arc<FlashblocksConnectionState>,
     ) -> Self {
+        protocol.handle.ensure_background_tasks();
+        protocol
+            .handle
+            .on_peer_connected(protocol.network.clone(), peer_id, fanout_state.clone());
+
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
 
         Self {
@@ -75,6 +167,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             conn,
             peer_id,
             peer_rx,
+            fanout_state,
             received_cache: LruMap::new(RECEIVED_CACHE_LEN),
         }
     }
@@ -109,6 +202,7 @@ impl<N> Drop for FlashblocksConnection<N> {
             "dropping flashblocks connection"
         );
 
+        self.protocol.handle.on_peer_disconnected(self.peer_id);
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
 }
@@ -131,7 +225,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                 bytes,
                             )) => {
                                 // Check if this flashblock actually originated from this peer.
-                                if !this.received_cache_contains(&(payload_id, flashblock_index)) {
+                                let send_enabled = this.fanout_state.flags().send_enabled;
+                                if send_enabled
+                                    && !this
+                                        .received_cache_contains(&(payload_id, flashblock_index))
+                                {
                                     trace!(
                                         target: "flashblocks::p2p",
                                         peer_id = %this.peer_id,
@@ -160,6 +258,16 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                     "Broadcasting `StopPublishing` to peer"
                                 );
                                 return Poll::Ready(Some(bytes_mut));
+                            }
+                            PeerMsg::Direct { peer_id, bytes } => {
+                                if peer_id == this.peer_id {
+                                    trace!(
+                                        target: "flashblocks::p2p",
+                                        peer_id = %this.peer_id,
+                                        "Sending direct flashblocks control message to peer"
+                                    );
+                                    return Poll::Ready(Some(bytes));
+                                }
                             }
                         }
                     }
@@ -234,6 +342,21 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         }
                     }
                 }
+                FlashblocksP2PMsg::RequestFlashblocks => {
+                    this.protocol.handle.handle_request_message(this.peer_id);
+                }
+                FlashblocksP2PMsg::AcceptFlashblocks => {
+                    this.protocol.handle.handle_accept_message(this.peer_id);
+                }
+                FlashblocksP2PMsg::RejectFlashblocks => {
+                    this.protocol.handle.handle_reject_message(this.peer_id);
+                }
+                FlashblocksP2PMsg::CancelFlashblocks => {
+                    this.protocol.handle.handle_cancel_message(this.peer_id);
+                }
+                FlashblocksP2PMsg::CancelFlashblocksAck => {
+                    this.protocol.handle.handle_cancel_ack_message(this.peer_id);
+                }
             }
         }
     }
@@ -298,6 +421,17 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
+        if !self.fanout_state.flags().receive_enabled {
+            trace!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                payload_id = %msg.payload_id,
+                index = msg.index,
+                "ignoring flashblock from peer outside receive set",
+            );
+            return;
+        }
+
         // Check if this peer is spamming us with the same payload index
         if !self.received_cache_insert((msg.payload_id, msg.index as usize)) {
             // We've already seen this index from this peer.
@@ -353,6 +487,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
+            self.fanout_state.record_latency(latency);
         }
 
         self.protocol
@@ -362,8 +497,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     }
 
     /// Handles incoming `StartPublish` messages from a peer.
-    ///
-    /// TODO: handle propogating this if we care. For now we assume direct peering.
     ///
     /// # Arguments
     /// * `authorized_payload` - The authorized `StartPublish` message received from the peer
@@ -375,20 +508,20 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// - If we are waiting to publish, updates the list of active publishers
     /// - If we are not publishing, adds the new publisher to the list of active publishers
     fn handle_start_publish(&mut self, authorized_payload: AuthorizedPayload<StartPublish>) {
-        let state = self.protocol.handle.state.lock();
         let Ok(builder_sk) = self.protocol.handle.builder_sk() else {
             return;
         };
         let authorization = &authorized_payload.authorized.authorization;
+        let payload_timestamp = self.protocol.handle.state.lock().payload_timestamp;
 
         // Check if the request is expired for dos protection.
         // It's important to ensure that this `StartPublish` request
         // is very recent, or it could be used in a replay attack.
-        if state.payload_timestamp > authorization.timestamp {
+        if payload_timestamp > authorization.timestamp {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                current_timestamp = state.payload_timestamp,
+                current_timestamp = payload_timestamp,
                 timestamp = authorized_payload.authorized.authorization.timestamp,
                 "received initiate build request with outdated timestamp",
             );
@@ -398,6 +531,20 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
+        if !self
+            .protocol
+            .handle
+            .remember_control_message(&authorized_payload.authorized)
+        {
+            trace!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                "ignoring duplicate StartPublish message",
+            );
+            return;
+        }
+
+        let state = self.protocol.handle.state.lock();
         state.publishing_status.send_modify(|status| {
             let active_publishers = match status {
                 PublishingStatus::Publishing {
@@ -452,12 +599,18 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 active_publishers.push((authorization.builder_vk, authorization.timestamp));
             }
         });
+
+        let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
+        self.protocol
+            .handle
+            .ctx
+            .peer_tx
+            .send(PeerMsg::StartPublishing(p2p_msg.encode()))
+            .ok();
     }
 
     /// Handles incoming `StopPublish` messages from a peer.
-    ///
-    /// TODO: handle propogating this if we care. For now we assume direct peering.
-    ///
+
     /// # Arguments
     /// * `authorized_payload` - The authorized `StopPublish` message received from the peer
     ///
@@ -468,17 +621,17 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// - If we are waiting to publish, removes the publisher from the list of active publishers and checks if we can start publishing
     /// - If we are not publishing, removes the publisher from the list of active publishers
     fn handle_stop_publish(&mut self, authorized_payload: AuthorizedPayload<StopPublish>) {
-        let state = self.protocol.handle.state.lock();
         let authorization = &authorized_payload.authorized.authorization;
+        let payload_timestamp = self.protocol.handle.state.lock().payload_timestamp;
 
         // Check if the request is expired for dos protection.
         // It's important to ensure that this `StartPublish` request
         // is very recent, or it could be used in a replay attack.
-        if state.payload_timestamp > authorization.timestamp {
+        if payload_timestamp > authorization.timestamp {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                current_timestamp = state.payload_timestamp,
+                current_timestamp = payload_timestamp,
                 timestamp = authorized_payload.authorized.authorization.timestamp,
                 "Received initiate build response with outdated timestamp",
             );
@@ -488,6 +641,20 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
+        if !self
+            .protocol
+            .handle
+            .remember_control_message(&authorized_payload.authorized)
+        {
+            trace!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                "ignoring duplicate StopPublish message",
+            );
+            return;
+        }
+
+        let state = self.protocol.handle.state.lock();
         state.publishing_status.send_modify(|status| {
             match status {
                 PublishingStatus::Publishing { .. } => {
@@ -556,5 +723,13 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 }
             }
         });
+
+        let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
+        self.protocol
+            .handle
+            .ctx
+            .peer_tx
+            .send(PeerMsg::StopPublishing(p2p_msg.encode()))
+            .ok();
     }
 }
