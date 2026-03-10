@@ -9,7 +9,7 @@ use flashblocks_primitives::{
     },
     primitives::FlashblocksPayloadV1,
 };
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
 use reth::payload::PayloadId;
@@ -18,15 +18,14 @@ use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
 use reth_network::Peers;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, watch};
-use tracing::{debug, info};
+use tokio_stream::wrappers::BroadcastStream;
+use tracing::{debug, info, warn};
 
 use reth_ethereum::network::{
     api::Direction,
     eth_wire::{capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol},
     protocol::{ConnectionHandler, OnNotSupported},
 };
-use tokio_stream::wrappers::BroadcastStream;
-
 /// Maximum frame size for rlpx messages.
 const MAX_FRAME: usize = 1 << 24; // 16 MiB
 
@@ -241,6 +240,22 @@ impl<N> FlashblocksP2PProtocol<N> {
 }
 
 impl FlashblocksHandle {
+    fn next_flashblock_from_state(
+        state: &FlashblocksP2PState,
+        cursor: Option<&(PayloadId, usize)>,
+    ) -> Option<FlashblocksPayloadV1> {
+        match cursor {
+            Some((payload_id, next_index)) if *payload_id == state.payload_id => state
+                .flashblocks
+                .get(*next_index)
+                .and_then(|flashblock| flashblock.clone()),
+            _ => state
+                .flashblocks
+                .first()
+                .and_then(|flashblock| flashblock.clone()),
+        }
+    }
+
     /// Publishes a newly created flashblock from the payload builder to the P2P network.
     ///
     /// This method validates that the builder has authorization to publish and that
@@ -459,22 +474,38 @@ impl FlashblocksHandle {
     /// # Behavior
     /// The stream will continue to yield flashblocks for consecutive payloads as well, so
     /// consumers should take care to handle the stream appropriately.
-    pub fn flashblock_stream(&self) -> impl Stream<Item = FlashblocksPayloadV1> + Send + 'static {
-        // Seed the stream with already-buffered contiguous flashblocks, then rely on the broadcast
-        // channel for future ones so ordering stays strict even if inserts arrive out of order.
-        let flashblocks = self
-            .state
-            .lock()
-            .flashblocks
-            .clone()
-            .into_iter()
-            .map_while(|x| x);
-
+    pub fn flashblock_stream(
+        &self,
+    ) -> impl Stream<Item = FlashblocksPayloadV1> + Send + Unpin + 'static {
+        let state = self.state.clone();
         let receiver = self.ctx.flashblock_tx.subscribe();
 
-        let current = stream::iter(flashblocks);
-        let future = tokio_stream::StreamExt::map_while(BroadcastStream::new(receiver), |x| x.ok());
-        current.chain(future)
+        Box::pin(stream::unfold(
+            (state, receiver, None::<(PayloadId, usize)>),
+            |(state, mut receiver, mut cursor)| async move {
+                loop {
+                    if let Some(flashblock) = {
+                        let state = state.lock();
+                        Self::next_flashblock_from_state(&state, cursor.as_ref())
+                    } {
+                        cursor = Some((flashblock.payload_id, flashblock.index as usize + 1));
+                        return Some((flashblock, (state, receiver, cursor)));
+                    }
+
+                    match receiver.recv().await {
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(
+                                target: "flashblocks::p2p",
+                                skipped,
+                                "flashblock stream lagged; resyncing from protocol state"
+                            );
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                    }
+                }
+            },
+        ))
     }
 }
 

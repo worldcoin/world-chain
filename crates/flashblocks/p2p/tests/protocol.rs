@@ -248,6 +248,31 @@ async fn flashblock_stream_buffers_and_live() {
 }
 
 #[tokio::test]
+async fn flashblock_stream_recovers_after_receiver_lag() {
+    let timestamp = 1000;
+    let handle = fresh_handle();
+    let builder_sk = handle.builder_sk().unwrap();
+
+    let pid = PayloadId::new([8; 8]);
+    let auth = Authorization::new(pid, timestamp, &signing_key(1), builder_sk.verifying_key());
+    handle.start_publishing(auth).unwrap();
+
+    // Create the stream first, then publish more messages than the broadcast buffer can retain
+    // before polling it. The stream must resync from protocol state instead of terminating.
+    let mut stream = handle.flashblock_stream();
+
+    for idx in 0..=100u64 {
+        let signed = AuthorizedPayload::new(builder_sk, auth, payload(pid, idx));
+        handle.publish_new(signed).unwrap();
+    }
+
+    for expected in 0..=2u64 {
+        let flashblock = stream.next().await.unwrap();
+        assert_eq!(flashblock.index, expected);
+    }
+}
+
+#[tokio::test]
 async fn await_clearance_unblocks_on_publish() {
     let handle = fresh_handle();
     let builder_sk = handle.builder_sk().unwrap();
