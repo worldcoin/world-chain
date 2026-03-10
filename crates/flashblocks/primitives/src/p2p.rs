@@ -55,8 +55,6 @@ pub enum FlashblocksP2PMsg {
     RejectFlashblocks = 0x03,
     /// Terminates an active flashblocks feed.
     CancelFlashblocks = 0x04,
-    /// Acknowledges termination of an active flashblocks feed.
-    CancelFlashblocksAck = 0x05,
 }
 
 /// The different types of authorized messages that can be sent over the Flashblocks P2P network.
@@ -457,7 +455,6 @@ impl FlashblocksP2PMsg {
             FlashblocksP2PMsg::AcceptFlashblocks => buf.put_u8(0x02),
             FlashblocksP2PMsg::RejectFlashblocks => buf.put_u8(0x03),
             FlashblocksP2PMsg::CancelFlashblocks => buf.put_u8(0x04),
-            FlashblocksP2PMsg::CancelFlashblocksAck => buf.put_u8(0x05),
         }
         buf
     }
@@ -477,7 +474,6 @@ impl FlashblocksP2PMsg {
             0x02 => Ok(FlashblocksP2PMsg::AcceptFlashblocks),
             0x03 => Ok(FlashblocksP2PMsg::RejectFlashblocks),
             0x04 => Ok(FlashblocksP2PMsg::CancelFlashblocks),
-            0x05 => Ok(FlashblocksP2PMsg::CancelFlashblocksAck),
             _ => Err(FlashblocksError::UnknownMessageType),
         }
     }
@@ -846,7 +842,6 @@ mod tests {
             FlashblocksP2PMsg::AcceptFlashblocks,
             FlashblocksP2PMsg::RejectFlashblocks,
             FlashblocksP2PMsg::CancelFlashblocks,
-            FlashblocksP2PMsg::CancelFlashblocksAck,
         ];
 
         for msg in variants {
