@@ -238,23 +238,25 @@ impl TxSpammer {
     async fn broadcast_batch_with_hashes(&self, batch: &[Bytes]) -> Vec<B256> {
         let mut tx_hashes = Vec::with_capacity(batch.len());
 
-        while let Some(client) = self.rpc.first() {
-            for tx in batch {
-                let result = EthApiClient::<
-                    TransactionRequest,
-                    OpTransactionSigned,
-                    alloy_consensus::Block<OpTransactionSigned>,
-                    OpReceipt,
-                    Header,
-                    Bytes,
-                >::send_raw_transaction(&client.rpc, tx.clone())
-                .await
-                .inspect_err(|e| error!("Error sending transaction: {:?}", e));
+        let Some(client) = self.rpc.first() else {
+            return tx_hashes;
+        };
 
-                if let Ok(tx_hash) = result {
-                    info!("Submitted tx: {:?}", tx_hash);
-                    tx_hashes.push(tx_hash);
-                }
+        for tx in batch {
+            let result = EthApiClient::<
+                TransactionRequest,
+                OpTransactionSigned,
+                alloy_consensus::Block<OpTransactionSigned>,
+                OpReceipt,
+                Header,
+                Bytes,
+            >::send_raw_transaction(&client.rpc, tx.clone())
+            .await
+            .inspect_err(|e| error!("Error sending transaction: {:?}", e));
+
+            if let Ok(tx_hash) = result {
+                info!("Submitted tx: {:?}", tx_hash);
+                tx_hashes.push(tx_hash);
             }
         }
 
