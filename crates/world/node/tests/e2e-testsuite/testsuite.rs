@@ -779,7 +779,6 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 /// - Inject tx into Node 2 -> should propagate to both Node 0 and Node 1
 /// - Verifies multi-peer whitelist works correctly
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO: flaky - not sure what's causing this to fail"]
 async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -877,9 +876,27 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
         .node
         .inner
         .network
-        .add_peer(node_0_peer_id, node_0_addr);
+        .connect_peer(node_0_peer_id, node_0_addr);
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Wait for reconnection to establish
+    let start = tokio::time::Instant::now();
+    loop {
+        let peer = node_2_ctx
+            .node
+            .inner
+            .network
+            .get_peer_by_id(node_0_peer_id)
+            .await?;
+        if peer.is_some() {
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            panic!("Timeout waiting for Node 0 <-> Node 2 reconnection");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // Extra time for sync state to stabilize
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Create a new transaction and inject into Node 2
     // Node 2 has tx_peers = [Node 0, Node 1], so it should propagate to both
@@ -984,7 +1001,6 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "flaky test"]
 async fn test_continuous_block_production_with_validation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

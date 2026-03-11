@@ -32,10 +32,11 @@ const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 pub struct FlashblocksConnectionState {
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
-    /// Whether we have loaded the peer's trust classification from the network yet.
-    pub trusted_known: bool,
     /// Whether we currently have an outstanding flashblocks request to this peer.
     pub request_in_flight: bool,
+    /// Whether we intentionally abandoned an in-flight request and should treat a late
+    /// Accept/Reject as stale instead of malicious.
+    pub abandoned_request_in_flight: bool,
     /// Whether we are currently sending flashblocks to this peer.
     pub send_enabled: bool,
     /// Whether we are currently requesting flashblocks from this peer.
@@ -47,8 +48,10 @@ pub struct FlashblocksConnectionState {
     pub receive_enabled: Option<Score>,
     /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
     pub receive_enabled_timestamp: u64,
-    /// Earliest time at which this peer is eligible for another control-plane retry.
-    pub request_backoff_until: Option<Instant>,
+    /// Earliest time at which this peer is eligible for another receive-side request.
+    pub receive_request_backoff_until: Option<Instant>,
+    /// Earliest time at which this peer may retry an inbound send-set request after rejection.
+    pub send_request_backoff_until: Option<Instant>,
     /// Per-peer channel for sending direct (control) messages without broadcasting.
     pub direct_tx: Option<mpsc::UnboundedSender<BytesMut>>,
     /// Number of control messages received in the current rate-limit window.
@@ -61,12 +64,13 @@ impl FlashblocksConnectionState {
     pub(crate) fn new() -> Self {
         Self {
             trusted: false,
-            trusted_known: false,
             request_in_flight: false,
+            abandoned_request_in_flight: false,
             send_enabled: false,
             receive_enabled: None,
             receive_enabled_timestamp: 0,
-            request_backoff_until: None,
+            receive_request_backoff_until: None,
+            send_request_backoff_until: None,
             direct_tx: None,
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
