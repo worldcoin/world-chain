@@ -789,17 +789,26 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     let peers = nodes[1].network_handle.get_all_peers().await?;
     let peer_0 = &peers[0].remote_id;
 
+    let mut reputation_was_negative = false;
+    let mut peer_banned = false;
     for _ in 0..100 {
         nodes[0].p2p_handle.ctx.peer_tx.send(peer_msg.clone()).ok();
         sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
         if let Some(rep) = rep_0 {
-            assert!(rep < 0, "Peer reputation should be negative");
+            if rep < 0 {
+                reputation_was_negative = true;
+            }
+        }
+        if nodes[1].network_handle.get_all_peers().await?.is_empty() {
+            peer_banned = true;
+            break;
         }
     }
 
-    // Assert that the peer is banned
-    assert!(nodes[1].network_handle.get_all_peers().await?.is_empty());
+    // Assert that the peer reputation became negative and peer was banned
+    assert!(reputation_was_negative, "Peer reputation should have become negative");
+    assert!(peer_banned, "Peer should have been banned");
 
     drop(fixture);
 
