@@ -410,7 +410,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
             .as_ref()
             .unwrap()
             .flashblocks_handle
-            .flashblock_stream(),
+            .live_flashblock_stream(),
     );
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
@@ -488,7 +488,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .clone()
         .unwrap()
         .flashblocks_handle
-        .flashblock_stream();
+        .live_flashblock_stream();
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
@@ -652,7 +652,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         .clone()
         .unwrap()
         .flashblocks_handle
-        .flashblock_stream();
+        .live_flashblock_stream();
 
     let (sender, mut rx) = tokio::sync::mpsc::channel(1);
     let timestamp = crate::setup::current_timestamp();
