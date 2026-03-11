@@ -13,11 +13,9 @@ use flashblocks_primitives::{
 use futures::{Stream, StreamExt};
 use metrics::gauge;
 use parking_lot::Mutex;
-use reth::payload::PayloadId;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
-use reth_network::{cache::LruMap, types::ReputationChangeKind};
+use reth_network::types::ReputationChangeKind;
 use std::{
-    fmt,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll, ready},
@@ -28,11 +26,6 @@ use tracing::{info, trace};
 /// Grace period for authorization timestamp checks to reduce false positives from
 /// minor skew/races between peers.
 const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
-
-/// Number of payload receive-sets cached per peer.
-///
-/// This should be large enough to retain entries across the grace window.
-const RECEIVED_CACHE_LEN: u32 = AUTHORIZATION_TIMESTAMP_GRACE_SEC as u32 * 20;
 
 /// A lightweight moving average with a configurable smoothing window.
 #[derive(Clone, Debug)]
@@ -66,68 +59,35 @@ impl MovingAverage {
 }
 
 /// Shared connection metadata for a single peer connection.
+#[derive(Clone, Debug)]
 pub struct FlashblocksConnectionState {
+    /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
-    pub trusted_known: bool,
-    pub send_enabled: bool,
-    pub receive_enabled: bool,
+    /// Whether we currently have an outstanding flashblocks request to this peer.
     pub request_in_flight: bool,
-    score_average: MovingAverage,
-    received_cache: LruMap<(PayloadId, usize), ()>,
-}
-
-impl fmt::Debug for FlashblocksConnectionState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FlashblocksConnectionState")
-            .field("trusted", &self.trusted)
-            .field("trusted_known", &self.trusted_known)
-            .field("send_enabled", &self.send_enabled)
-            .field("receive_enabled", &self.receive_enabled)
-            .field("request_in_flight", &self.request_in_flight)
-            .field("score_average", &self.score_average)
-            .finish()
-    }
+    /// Whether we are currently sending flashblocks to this peer.
+    pub send_enabled: bool,
+    /// Whether we are currently requesting flashblocks from this peer.
+    pub receive_enabled: bool,
+    /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
+    pub receive_enabled_timestamp: u64,
+    /// Score for this peer connection, used for adaptive timeouts and peer selection.
+    ///
+    /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
+    /// counting as 10s
+    pub score: MovingAverage,
 }
 
 impl FlashblocksConnectionState {
     pub(crate) fn new(latency_window: i64) -> Self {
         Self {
             trusted: false,
-            trusted_known: false,
+            request_in_flight: false,
             send_enabled: false,
             receive_enabled: false,
-            request_in_flight: false,
-            score_average: MovingAverage::new(latency_window),
-            received_cache: LruMap::new(RECEIVED_CACHE_LEN),
+            receive_enabled_timestamp: 0,
+            score: MovingAverage::new(latency_window),
         }
-    }
-
-    pub(crate) fn record_latency(&mut self, sample: i64) {
-        self.score_average.record(sample);
-    }
-
-    pub(crate) fn record_missed_flashblock(&mut self, penalty: i64) {
-        self.score_average.record(penalty);
-    }
-
-    pub(crate) fn score(&self) -> Option<i64> {
-        self.score_average.value()
-    }
-
-    pub(crate) fn note_received_flashblock(&mut self, key: (PayloadId, usize)) -> bool {
-        if self.received_cache.peek(&key).is_some() {
-            return false;
-        }
-        self.received_cache.insert(key, ())
-    }
-
-    pub(crate) fn has_received_flashblock(&self, key: &(PayloadId, usize)) -> bool {
-        self.received_cache.peek(key).is_some()
-    }
-
-    pub(crate) fn reset_receive_tracking(&mut self) {
-        self.score_average.reset();
-        self.received_cache = LruMap::new(RECEIVED_CACHE_LEN);
     }
 }
 
@@ -217,12 +177,14 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             )) => {
                                 // Check if this flashblock actually originated from this peer.
                                 let should_send = {
-                                    let state = this.state.lock();
-                                    state.send_enabled
-                                        && !state.has_received_flashblock(&(
+                                    let is_send_enabled = this.state.lock().send_enabled;
+                                    let already_received =
+                                        this.protocol.handle.state.lock().peer_received_flashblock(
+                                            this.peer_id,
                                             payload_id,
-                                            flashblock_index,
-                                        ))
+                                            flashblock_index as u64,
+                                        );
+                                    is_send_enabled && !already_received
                                 };
                                 if should_send {
                                     trace!(
@@ -375,21 +337,23 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) {
         let state_handle = self.protocol.handle.state.clone();
-        let mut state = state_handle.lock();
+        let conn_state = self.state.lock().clone();
+        let mut p2p_state = state_handle.lock();
+
         let authorization = &authorized_payload.authorized.authorization;
         let msg = authorized_payload.msg();
 
         // Check if this payload is older than our current view by more than the allowed
         // grace window.
         if authorization.timestamp
-            < state
+            < p2p_state
                 .payload_timestamp
                 .saturating_sub(AUTHORIZATION_TIMESTAMP_GRACE_SEC)
         {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                current_timestamp = state.payload_timestamp,
+                current_timestamp = p2p_state.payload_timestamp,
                 timestamp = authorization.timestamp,
                 grace_sec = AUTHORIZATION_TIMESTAMP_GRACE_SEC,
                 "received flashblock with outdated timestamp",
@@ -413,7 +377,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if !self.state.lock().receive_enabled {
+        if !conn_state.receive_enabled {
             trace!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
@@ -424,12 +388,45 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        // Check if this peer is spamming us with the same payload index
-        if !self
-            .state
-            .lock()
-            .note_received_flashblock((msg.payload_id, msg.index as usize))
+        if msg.payload_id == p2p_state.payload_id
+            && (msg.index as usize)
+                .saturating_add(crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW)
+                < p2p_state.flashblock_index
         {
+            tracing::warn!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                payload_id = %msg.payload_id,
+                index = msg.index,
+                current_index = p2p_state.flashblock_index,
+                grace_window = crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW,
+                "received flashblock outside receive grace window",
+            );
+            self.protocol
+                .network
+                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            return;
+        }
+
+        // Check if we're expecting to see flashblocks from this peer
+        if !conn_state.receive_enabled
+            && conn_state.receive_enabled_timestamp + 2 < authorization.timestamp
+        {
+            tracing::warn!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                payload_id = %msg.payload_id,
+                index = msg.index,
+                "received flashblock from peer outside receive window",
+            );
+            self.protocol
+                .network
+                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            return;
+        }
+
+        // Check if this peer is spamming us with the same payload index
+        if !p2p_state.note_peer_received_flashblock(&authorization, &msg, self.peer_id) {
             // We've already seen this index from this peer.
             // They could be trying to DOS us.
             tracing::warn!(
@@ -445,7 +442,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        state.publishing_status.send_modify(|status| {
+        p2p_state.publishing_status.send_modify(|status| {
             let active_publishers = match status {
                 PublishingStatus::Publishing { .. } => {
                     // We are currently building, so we should not be seeing any new flashblocks
@@ -483,13 +480,13 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            self.state.lock().record_latency(latency);
+            self.state.lock().score.record(latency);
         }
 
         self.protocol
             .handle
             .ctx
-            .publish(&mut state, authorized_payload, Some(self.peer_id));
+            .publish(&mut p2p_state, authorized_payload, Some(self.peer_id));
     }
 
     /// Handles incoming `StartPublish` messages from a peer.
