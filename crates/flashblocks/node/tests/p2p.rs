@@ -807,7 +807,10 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     }
 
     // Assert that the peer reputation became negative and peer was banned
-    assert!(reputation_was_negative, "Peer reputation should have become negative");
+    assert!(
+        reputation_was_negative,
+        "Peer reputation should have become negative"
+    );
     assert!(peer_banned, "Peer should have been banned");
 
     drop(fixture);
