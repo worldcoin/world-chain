@@ -122,11 +122,7 @@ impl<N> Drop for FlashblocksConnection<N> {
             "dropping flashblocks connection"
         );
 
-        let handle = &self.protocol.handle;
-        let peer_id = self.peer_id;
-        let mut state = handle.state.lock();
-        state.connections.remove(&peer_id);
-        state.maybe_request_receive_peers(&handle.ctx);
+        self.protocol.handle.on_peer_disconnected(self.peer_id);
 
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
@@ -543,13 +539,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             }
         });
 
-        let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
-        self.protocol
-            .handle
-            .ctx
-            .peer_tx
-            .send(PeerMsg::StartPublishing(p2p_msg.encode()))
-            .ok();
     }
 
     /// Handles incoming `StopPublish` messages from a peer.
@@ -654,13 +643,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             }
         });
 
-        let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
-        self.protocol
-            .handle
-            .ctx
-            .peer_tx
-            .send(PeerMsg::StopPublishing(p2p_msg.encode()))
-            .ok();
     }
 }
 
