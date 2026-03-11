@@ -46,12 +46,9 @@ pub struct FlashblocksConnectionState {
     /// counting as 10s. While `request_in_flight` is true, the peer is only a provisional
     /// candidate and must not deliver flashblocks yet.
     pub receive_enabled: Option<Score>,
-    /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
+    /// Timestamp of the last receive-side state transition for this peer.
+    /// Used for late-message grace checks and receive retry cooldown.
     pub receive_enabled_timestamp: u64,
-    /// Earliest time at which this peer is eligible for another receive-side request.
-    pub receive_request_backoff_until: Option<Instant>,
-    /// Earliest time at which this peer may retry an inbound send-set request after rejection.
-    pub send_request_backoff_until: Option<Instant>,
     /// Per-peer channel for sending direct (control) messages without broadcasting.
     pub direct_tx: Option<mpsc::UnboundedSender<BytesMut>>,
     /// Number of control messages received in the current rate-limit window.
@@ -69,8 +66,6 @@ impl FlashblocksConnectionState {
             send_enabled: false,
             receive_enabled: None,
             receive_enabled_timestamp: 0,
-            receive_request_backoff_until: None,
-            send_request_backoff_until: None,
             direct_tx: None,
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
