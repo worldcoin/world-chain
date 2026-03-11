@@ -323,45 +323,41 @@ impl FlashblocksP2PState {
             .count()
     }
 
-    fn request_backoff_deadline(ctx: &FlashblocksP2PCtx) -> Instant {
-        Instant::now() + ctx.fanout_config.rotation_interval
+    fn receive_retry_cooldown_secs(ctx: &FlashblocksP2PCtx) -> u64 {
+        ctx.fanout_config.rotation_interval.as_secs().max(1)
     }
 
     fn clear_receive_state(
         peer_state: &mut FlashblocksConnectionState,
         receive_enabled_timestamp: u64,
-        receive_request_backoff_until: Option<Instant>,
     ) {
         peer_state.receive_enabled = None;
         peer_state.request_in_flight = false;
         peer_state.abandoned_request_in_flight = false;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
-        peer_state.receive_request_backoff_until = receive_request_backoff_until;
     }
 
     fn abandon_receive_request(
         peer_state: &mut FlashblocksConnectionState,
         receive_enabled_timestamp: u64,
-        receive_request_backoff_until: Option<Instant>,
     ) {
         peer_state.receive_enabled = None;
         peer_state.request_in_flight = false;
         peer_state.abandoned_request_in_flight = true;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
-        peer_state.receive_request_backoff_until = receive_request_backoff_until;
     }
 
-    fn available_receive_candidates(&self) -> Vec<(PeerId, bool)> {
-        let now = Instant::now();
+    fn available_receive_candidates(&self, ctx: &FlashblocksP2PCtx) -> Vec<(PeerId, bool)> {
+        let now = Utc::now().timestamp() as u64;
+        let retry_cooldown = Self::receive_retry_cooldown_secs(ctx);
         self.connections
             .iter()
             .filter_map(|(peer_id, peer_state)| {
                 if peer_state.receive_enabled.is_none()
                     && !peer_state.request_in_flight
                     && !peer_state.abandoned_request_in_flight
-                    && peer_state
-                        .receive_request_backoff_until
-                        .is_none_or(|until| until <= now)
+                    && (peer_state.receive_enabled_timestamp == 0
+                        || peer_state.receive_enabled_timestamp + retry_cooldown <= now)
                 {
                     Some((*peer_id, peer_state.trusted))
                 } else {
@@ -380,13 +376,12 @@ impl FlashblocksP2PState {
         peer_state.abandoned_request_in_flight = false;
         peer_state.receive_enabled = Some(Score::new(ctx.fanout_config.latency_window));
         peer_state.receive_enabled_timestamp = timestamp;
-        peer_state.receive_request_backoff_until = None;
         self.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
     pub fn maybe_request_receive_peers(&mut self, ctx: &FlashblocksP2PCtx) {
         while self.num_receive_peers() < ctx.fanout_config.max_receive_peers {
-            let candidates = self.available_receive_candidates();
+            let candidates = self.available_receive_candidates(ctx);
             if candidates.is_empty() {
                 return;
             }
@@ -442,7 +437,7 @@ impl FlashblocksP2PState {
             return;
         };
 
-        let mut candidates = self.available_receive_candidates();
+        let mut candidates = self.available_receive_candidates(ctx);
         if candidates.is_empty() {
             return;
         }
@@ -458,17 +453,9 @@ impl FlashblocksP2PState {
         let mut should_cancel = false;
         if let Some(evict_state) = self.connection_state_mut(&evict) {
             if evict_state.request_in_flight {
-                Self::abandon_receive_request(
-                    evict_state,
-                    evict_timestamp,
-                    Some(Self::request_backoff_deadline(ctx)),
-                );
+                Self::abandon_receive_request(evict_state, evict_timestamp);
             } else {
-                Self::clear_receive_state(
-                    evict_state,
-                    evict_timestamp,
-                    Some(Self::request_backoff_deadline(ctx)),
-                );
+                Self::clear_receive_state(evict_state, evict_timestamp);
                 should_cancel = true;
             }
         }
@@ -493,15 +480,6 @@ impl FlashblocksP2PState {
             // Already sending to this peer — repeated request is spam.
             return true;
         }
-        let now = Instant::now();
-        if !peer_state.trusted
-            && peer_state
-                .send_request_backoff_until
-                .is_some_and(|until| until > now)
-        {
-            // Non-trusted peer requesting during backoff is spam.
-            return true;
-        }
         let peer_is_trusted = peer_state.trusted;
         let non_trusted_send_count = self
             .connections
@@ -510,16 +488,12 @@ impl FlashblocksP2PState {
             .count();
 
         if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_config.max_send_peers {
-            self.connection_state_mut(&peer_id)
-                .expect("peer exists")
-                .send_request_backoff_until = Some(Self::request_backoff_deadline(ctx));
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
             return false;
         }
 
         let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
         peer_state.send_enabled = true;
-        peer_state.send_request_backoff_until = None;
         self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
         false
     }
@@ -536,7 +510,6 @@ impl FlashblocksP2PState {
 
         if peer_state.request_in_flight {
             peer_state.request_in_flight = false;
-            peer_state.receive_request_backoff_until = None;
             return false;
         }
 
@@ -561,11 +534,7 @@ impl FlashblocksP2PState {
         };
 
         if peer_state.request_in_flight {
-            Self::clear_receive_state(
-                peer_state,
-                Utc::now().timestamp() as u64,
-                Some(Self::request_backoff_deadline(ctx)),
-            );
+            Self::clear_receive_state(peer_state, Utc::now().timestamp() as u64);
             self.maybe_request_receive_peers(ctx);
             return false;
         }
@@ -1746,12 +1715,22 @@ mod tests {
 
         assert!(!peer_state(&fanout, peer).request_in_flight);
         assert!(peer_state(&fanout, peer).receive_enabled.is_none());
-        assert!(
-            peer_state(&fanout, peer)
-                .receive_request_backoff_until
-                .is_some()
-        );
         assert!(peer_rx.try_recv().is_err());
+
+        fanout.maybe_request_receive_peers(&ctx);
+        assert!(peer_rx.try_recv().is_err());
+
+        fanout
+            .connection_state_mut(&peer)
+            .expect("peer exists")
+            .receive_enabled_timestamp =
+            Utc::now().timestamp() as u64 - ctx.fanout_config.rotation_interval.as_secs().max(1);
+
+        fanout.maybe_request_receive_peers(&ctx);
+        assert_eq!(
+            recv_direct(&mut peer_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
     }
 
     #[test]
@@ -2069,14 +2048,14 @@ mod tests {
     }
 
     #[test]
-    fn receive_backoff_does_not_penalize_inbound_request() {
+    fn receive_retry_cooldown_does_not_penalize_inbound_request() {
         let config = FanoutConfig::default();
         let ctx = test_ctx(config);
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
         let (mut state, mut rx) = test_peer_state_with_channel(false);
-        state.receive_request_backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        state.receive_enabled_timestamp = Utc::now().timestamp() as u64;
         fanout.connections.insert(peer, state);
 
         assert!(!fanout.handle_request(&ctx, peer));
@@ -2085,23 +2064,23 @@ mod tests {
     }
 
     #[test]
-    fn send_backoff_does_not_block_receive_selection() {
+    fn repeated_rejected_requests_are_rate_limited() {
         let config = FanoutConfig {
-            max_receive_peers: 1,
+            max_send_peers: 0,
             ..Default::default()
         };
         let ctx = test_ctx(config);
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let (mut state, mut rx) = test_peer_state_with_channel(false);
-        state.send_request_backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        let (state, mut rx) = test_peer_state_with_channel(false);
         fanout.connections.insert(peer, state);
 
-        fanout.maybe_request_receive_peers(&ctx);
-
-        assert!(peer_state(&fanout, peer).request_in_flight);
-        assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::RequestFlashblocks);
+        for _ in 0..MAX_CONTROL_MSGS_PER_WINDOW {
+            assert!(!fanout.handle_request(&ctx, peer));
+            assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::RejectFlashblocks);
+        }
+        assert!(fanout.handle_request(&ctx, peer));
     }
 
     #[test]
