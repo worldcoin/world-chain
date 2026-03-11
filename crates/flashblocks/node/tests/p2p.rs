@@ -76,8 +76,12 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for SharedLogBuffer {
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let mut visitor = LogVisitor(String::new());
-        visitor.0.push_str(&format!("{} ", event.metadata().level()));
-        visitor.0.push_str(&format!("{}: ", event.metadata().target()));
+        visitor
+            .0
+            .push_str(&format!("{} ", event.metadata().level()));
+        visitor
+            .0
+            .push_str(&format!("{}: ", event.metadata().target()));
         event.record(&mut visitor);
         self.0.lock().unwrap().push(visitor.0);
     }
@@ -403,7 +407,6 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -766,8 +769,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     let log_buffer = SharedLogBuffer::default();
     let subscriber = tracing_subscriber::registry().with(log_buffer.clone());
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("failed to set global subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("failed to set global subscriber");
 
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 

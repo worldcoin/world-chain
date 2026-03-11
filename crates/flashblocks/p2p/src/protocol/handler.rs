@@ -70,6 +70,12 @@ const MAX_CONTROL_MSGS_PER_WINDOW: u32 = 10;
 /// Duration of the per-peer control-message rate-limit window.
 const CONTROL_MSG_WINDOW: Duration = Duration::from_secs(30);
 
+/// Maximum time to wait for the network manager to expose the newly connected peer's trust info.
+const PEER_INFO_LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Poll interval while waiting for connected peer metadata to become available.
+const PEER_INFO_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
 /// Trait bound for network handles that can be used with the flashblocks P2P protocol.
 ///
 /// This trait combines all the necessary bounds for a network handle to be used
@@ -325,12 +331,25 @@ impl FlashblocksP2PState {
     fn clear_receive_state(
         peer_state: &mut FlashblocksConnectionState,
         receive_enabled_timestamp: u64,
-        request_backoff_until: Option<Instant>,
+        receive_request_backoff_until: Option<Instant>,
     ) {
         peer_state.receive_enabled = None;
         peer_state.request_in_flight = false;
+        peer_state.abandoned_request_in_flight = false;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
-        peer_state.request_backoff_until = request_backoff_until;
+        peer_state.receive_request_backoff_until = receive_request_backoff_until;
+    }
+
+    fn abandon_receive_request(
+        peer_state: &mut FlashblocksConnectionState,
+        receive_enabled_timestamp: u64,
+        receive_request_backoff_until: Option<Instant>,
+    ) {
+        peer_state.receive_enabled = None;
+        peer_state.request_in_flight = false;
+        peer_state.abandoned_request_in_flight = true;
+        peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
+        peer_state.receive_request_backoff_until = receive_request_backoff_until;
     }
 
     fn available_receive_candidates(&self) -> Vec<(PeerId, bool)> {
@@ -338,11 +357,11 @@ impl FlashblocksP2PState {
         self.connections
             .iter()
             .filter_map(|(peer_id, peer_state)| {
-                if peer_state.trusted_known
-                    && peer_state.receive_enabled.is_none()
+                if peer_state.receive_enabled.is_none()
                     && !peer_state.request_in_flight
+                    && !peer_state.abandoned_request_in_flight
                     && peer_state
-                        .request_backoff_until
+                        .receive_request_backoff_until
                         .is_none_or(|until| until <= now)
                 {
                     Some((*peer_id, peer_state.trusted))
@@ -359,9 +378,10 @@ impl FlashblocksP2PState {
         };
         let timestamp = Utc::now().timestamp() as u64;
         peer_state.request_in_flight = true;
+        peer_state.abandoned_request_in_flight = false;
         peer_state.receive_enabled = Some(Score::new(ctx.fanout_config.latency_window));
         peer_state.receive_enabled_timestamp = timestamp;
-        peer_state.request_backoff_until = None;
+        peer_state.receive_request_backoff_until = None;
         self.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
@@ -435,14 +455,27 @@ impl FlashblocksP2PState {
             .find_map(|(peer_id, trusted)| (*trusted).then_some(*peer_id))
             .unwrap_or(candidates[0].0);
 
+        let evict_timestamp = Utc::now().timestamp() as u64;
+        let mut should_cancel = false;
         if let Some(evict_state) = self.connection_state_mut(&evict) {
-            Self::clear_receive_state(
-                evict_state,
-                Utc::now().timestamp() as u64,
-                Some(Self::request_backoff_deadline(ctx)),
-            );
+            if evict_state.request_in_flight {
+                Self::abandon_receive_request(
+                    evict_state,
+                    evict_timestamp,
+                    Some(Self::request_backoff_deadline(ctx)),
+                );
+            } else {
+                Self::clear_receive_state(
+                    evict_state,
+                    evict_timestamp,
+                    Some(Self::request_backoff_deadline(ctx)),
+                );
+                should_cancel = true;
+            }
         }
-        self.send_direct(evict, FlashblocksP2PMsg::CancelFlashblocks);
+        if should_cancel {
+            self.send_direct(evict, FlashblocksP2PMsg::CancelFlashblocks);
+        }
 
         self.begin_requesting_peer(ctx, candidate);
     }
@@ -457,11 +490,6 @@ impl FlashblocksP2PState {
             return false;
         };
 
-        if !peer_state.trusted_known {
-            // Wait until trust classification is known before deciding whether this peer should
-            // bypass the non-trusted limit.
-            return false;
-        }
         if peer_state.send_enabled {
             // Already sending to this peer — repeated request is spam.
             return true;
@@ -469,7 +497,7 @@ impl FlashblocksP2PState {
         let now = Instant::now();
         if !peer_state.trusted
             && peer_state
-                .request_backoff_until
+                .send_request_backoff_until
                 .is_some_and(|until| until > now)
         {
             // Non-trusted peer requesting during backoff is spam.
@@ -485,14 +513,14 @@ impl FlashblocksP2PState {
         if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_config.max_send_peers {
             self.connection_state_mut(&peer_id)
                 .expect("peer exists")
-                .request_backoff_until = Some(Self::request_backoff_deadline(ctx));
+                .send_request_backoff_until = Some(Self::request_backoff_deadline(ctx));
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
             return false;
         }
 
         let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
         peer_state.send_enabled = true;
-        peer_state.request_backoff_until = None;
+        peer_state.send_request_backoff_until = None;
         self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
         false
     }
@@ -507,14 +535,20 @@ impl FlashblocksP2PState {
             return false;
         };
 
-        if !peer_state.request_in_flight {
-            // Unsolicited accept — we never asked this peer.
-            return true;
+        if peer_state.request_in_flight {
+            peer_state.request_in_flight = false;
+            peer_state.receive_request_backoff_until = None;
+            return false;
         }
 
-        peer_state.request_in_flight = false;
-        peer_state.request_backoff_until = None;
-        false
+        if peer_state.abandoned_request_in_flight {
+            peer_state.abandoned_request_in_flight = false;
+            self.send_direct(peer_id, FlashblocksP2PMsg::CancelFlashblocks);
+            return false;
+        }
+
+        // Unsolicited accept — we never asked this peer.
+        true
     }
 
     /// Returns `true` if the peer should receive a reputation penalty.
@@ -527,18 +561,23 @@ impl FlashblocksP2PState {
             return false;
         };
 
-        if !peer_state.request_in_flight {
-            // Unsolicited reject — we never asked this peer.
-            return true;
+        if peer_state.request_in_flight {
+            Self::clear_receive_state(
+                peer_state,
+                Utc::now().timestamp() as u64,
+                Some(Self::request_backoff_deadline(ctx)),
+            );
+            self.maybe_request_receive_peers(ctx);
+            return false;
         }
 
-        Self::clear_receive_state(
-            peer_state,
-            Utc::now().timestamp() as u64,
-            Some(Self::request_backoff_deadline(ctx)),
-        );
-        self.maybe_request_receive_peers(ctx);
-        false
+        if peer_state.abandoned_request_in_flight {
+            peer_state.abandoned_request_in_flight = false;
+            return false;
+        }
+
+        // Unsolicited reject — we never asked this peer.
+        true
     }
 
     /// Returns `true` if the peer should receive a reputation penalty.
@@ -642,27 +681,58 @@ impl FlashblocksHandle {
         direct_tx: mpsc::UnboundedSender<BytesMut>,
     ) {
         let trusted = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(network.get_peer_by_id(peer_id))
+            let network = network.clone();
+            tokio::runtime::Handle::current().block_on(async move {
+                let deadline = Instant::now() + PEER_INFO_LOOKUP_TIMEOUT;
+
+                loop {
+                    match network.get_peer_by_id(peer_id).await {
+                        Ok(Some(peer_info)) => return Ok(peer_info.kind.is_trusted()),
+                        Ok(None) if Instant::now() < deadline => {
+                            time::sleep(PEER_INFO_LOOKUP_RETRY_INTERVAL).await;
+                        }
+                        Ok(None) => {
+                            return Err(
+                                "timed out waiting for peer info after connection".to_owned()
+                            );
+                        }
+                        Err(error) if Instant::now() < deadline => {
+                            time::sleep(PEER_INFO_LOOKUP_RETRY_INTERVAL).await;
+                            tracing::debug!(
+                                target: "flashblocks::p2p",
+                                %peer_id,
+                                %error,
+                                "retrying peer info lookup for flashblocks fanout"
+                            );
+                        }
+                        Err(error) => {
+                            return Err(format!(
+                                "failed to load peer info for flashblocks fanout: {error}"
+                            ));
+                        }
+                    }
+                }
+            })
         });
 
-        let mut state = self.state.lock();
-        let mut conn_state = FlashblocksConnectionState::new();
-        conn_state.direct_tx = Some(direct_tx);
-        conn_state.trusted_known = true;
-        match trusted {
-            Ok(Some(peer_info)) => {
-                conn_state.trusted = peer_info.kind.is_trusted();
-            }
-            Ok(None) => {}
+        let trusted = match trusted {
+            Ok(trusted) => trusted,
             Err(error) => {
                 warn!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     %error,
-                    "failed to load peer info for flashblocks fanout",
+                    "failed to classify peer for flashblocks fanout; disconnecting"
                 );
+                network.disconnect_peer(peer_id);
+                return;
             }
-        }
+        };
+
+        let mut state = self.state.lock();
+        let mut conn_state = FlashblocksConnectionState::new();
+        conn_state.direct_tx = Some(direct_tx);
+        conn_state.trusted = trusted;
         state.connections.insert(peer_id, conn_state);
         state.maybe_request_receive_peers(&self.ctx);
     }
@@ -1192,6 +1262,126 @@ impl<N: FlashblocksP2PNetworkHandle> ConnectionHandler for FlashblocksP2PProtoco
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
+    use enr::{Enr, secp256k1::SecretKey};
+    use reth_eth_wire::{Capabilities, EthVersion, Status, StatusMessage, UnifiedStatus};
+    use reth_network::{
+        PeerInfo, PeersInfo,
+        types::{PeerKind, Reputation, ReputationChangeKind},
+    };
+    use reth_network_api::{NetworkError, noop::NoopNetwork};
+    use reth_network_peers::NodeRecord;
+    use std::{
+        collections::VecDeque,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    #[derive(Clone, Debug, Default)]
+    struct MockNetwork {
+        noop: NoopNetwork,
+        peer_lookup_responses: Arc<Mutex<VecDeque<Option<PeerInfo>>>>,
+        lookup_calls: Arc<AtomicUsize>,
+        disconnected_peers: Arc<Mutex<Vec<PeerId>>>,
+    }
+
+    impl MockNetwork {
+        fn with_peer_lookup_responses(peer_lookup_responses: Vec<Option<PeerInfo>>) -> Self {
+            Self {
+                peer_lookup_responses: Arc::new(Mutex::new(peer_lookup_responses.into())),
+                ..Default::default()
+            }
+        }
+
+        fn lookup_calls(&self) -> usize {
+            self.lookup_calls.load(Ordering::SeqCst)
+        }
+
+        fn disconnected_peers(&self) -> Vec<PeerId> {
+            self.disconnected_peers.lock().clone()
+        }
+    }
+
+    impl PeersInfo for MockNetwork {
+        fn num_connected_peers(&self) -> usize {
+            self.noop.num_connected_peers()
+        }
+
+        fn local_node_record(&self) -> NodeRecord {
+            self.noop.local_node_record()
+        }
+
+        fn local_enr(&self) -> Enr<SecretKey> {
+            self.noop.local_enr()
+        }
+    }
+
+    impl Peers for MockNetwork {
+        fn add_trusted_peer_id(&self, _peer: PeerId) {}
+
+        fn add_peer_kind(
+            &self,
+            _peer: PeerId,
+            _kind: PeerKind,
+            _tcp_addr: SocketAddr,
+            _udp_addr: Option<SocketAddr>,
+        ) {
+        }
+
+        async fn get_peers_by_kind(&self, _kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
+            Ok(vec![])
+        }
+
+        async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
+            Ok(vec![])
+        }
+
+        async fn get_peer_by_id(&self, _peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError> {
+            self.lookup_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.peer_lookup_responses.lock().pop_front().flatten())
+        }
+
+        async fn get_peers_by_id(
+            &self,
+            _peer_ids: Vec<PeerId>,
+        ) -> Result<Vec<PeerInfo>, NetworkError> {
+            Ok(vec![])
+        }
+
+        fn remove_peer(&self, _peer: PeerId, _kind: PeerKind) {}
+
+        fn disconnect_peer(&self, peer: PeerId) {
+            self.disconnected_peers.lock().push(peer);
+        }
+
+        fn disconnect_peer_with_reason(
+            &self,
+            peer: PeerId,
+            _reason: reth_eth_wire::DisconnectReason,
+        ) {
+            self.disconnect_peer(peer);
+        }
+
+        fn connect_peer_kind(
+            &self,
+            _peer: PeerId,
+            _kind: PeerKind,
+            _tcp_addr: SocketAddr,
+            _udp_addr: Option<SocketAddr>,
+        ) {
+        }
+
+        fn reputation_change(&self, _peer_id: PeerId, _kind: ReputationChangeKind) {}
+
+        async fn reputation_by_id(
+            &self,
+            _peer_id: PeerId,
+        ) -> Result<Option<Reputation>, NetworkError> {
+            Ok(None)
+        }
+    }
 
     fn test_ctx(config: FanoutConfig) -> FlashblocksP2PCtx {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
@@ -1205,17 +1395,15 @@ mod tests {
         }
     }
 
-    fn test_peer_state(trusted: bool, trusted_known: bool) -> FlashblocksConnectionState {
+    fn test_peer_state(trusted: bool) -> FlashblocksConnectionState {
         let mut state = FlashblocksConnectionState::new();
         state.trusted = trusted;
-        state.trusted_known = trusted_known;
         state
     }
 
     /// Creates a peer state with a per-peer direct channel for message assertions.
     fn test_peer_state_with_channel(
         trusted: bool,
-        trusted_known: bool,
     ) -> (
         FlashblocksConnectionState,
         mpsc::UnboundedReceiver<BytesMut>,
@@ -1223,7 +1411,6 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut state = FlashblocksConnectionState::new();
         state.trusted = trusted;
-        state.trusted_known = trusted_known;
         state.direct_tx = Some(tx);
         (state, rx)
     }
@@ -1247,6 +1434,89 @@ mod tests {
         fanout.note_peer_received_flashblock(authorization, flashblock, peer_id);
     }
 
+    fn test_peer_info(peer_id: PeerId, trusted: bool) -> PeerInfo {
+        PeerInfo {
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            remote_id: peer_id,
+            client_version: Arc::<str>::from("mock"),
+            enode: "enode://mock".to_owned(),
+            enr: None,
+            remote_addr: SocketAddr::from((IpAddr::V4(Ipv4Addr::LOCALHOST), 30303)),
+            local_addr: None,
+            direction: Direction::Incoming,
+            eth_version: EthVersion::Eth67,
+            status: Arc::new(UnifiedStatus::from_message(StatusMessage::Legacy(Status {
+                version: EthVersion::Eth67,
+                ..Status::default()
+            }))),
+            session_established: Instant::now(),
+            kind: if trusted {
+                PeerKind::Trusted
+            } else {
+                PeerKind::Basic
+            },
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_peer_connected_retries_until_peer_info_is_available() {
+        let authorizer = SigningKey::from_bytes(&[7; 32]);
+        let handle = FlashblocksHandle::with_fanout_config(
+            authorizer.verifying_key(),
+            Some(SigningKey::from_bytes(&[8; 32])),
+            FanoutConfig {
+                max_receive_peers: 1,
+                ..Default::default()
+            },
+        );
+        let peer_id = PeerId::random();
+        let network = MockNetwork::with_peer_lookup_responses(vec![
+            None,
+            Some(test_peer_info(peer_id, true)),
+        ]);
+        let (direct_tx, mut direct_rx) = mpsc::unbounded_channel();
+
+        handle.on_peer_connected(network.clone(), peer_id, direct_tx);
+
+        assert!(network.lookup_calls() >= 2);
+        assert!(network.disconnected_peers().is_empty());
+        let state = handle.state.lock();
+        assert!(
+            state
+                .connection_state(&peer_id)
+                .expect("peer exists")
+                .trusted
+        );
+        drop(state);
+        assert_eq!(
+            recv_direct(&mut direct_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_peer_connected_disconnects_when_peer_info_never_arrives() {
+        let authorizer = SigningKey::from_bytes(&[7; 32]);
+        let handle = FlashblocksHandle::with_fanout_config(
+            authorizer.verifying_key(),
+            Some(SigningKey::from_bytes(&[8; 32])),
+            FanoutConfig {
+                max_receive_peers: 1,
+                ..Default::default()
+            },
+        );
+        let peer_id = PeerId::random();
+        let network = MockNetwork::default();
+        let (direct_tx, mut direct_rx) = mpsc::unbounded_channel();
+
+        handle.on_peer_connected(network.clone(), peer_id, direct_tx);
+
+        assert!(network.lookup_calls() > 1);
+        assert_eq!(network.disconnected_peers(), vec![peer_id]);
+        assert!(handle.state.lock().connection_state(&peer_id).is_none());
+        assert!(direct_rx.try_recv().is_err());
+    }
+
     #[test]
     fn trusted_peers_are_requested_first() {
         let config = FanoutConfig {
@@ -1258,8 +1528,8 @@ mod tests {
 
         let trusted_peer = PeerId::random();
         let untrusted_peer = PeerId::random();
-        let (trusted_state, mut trusted_rx) = test_peer_state_with_channel(true, true);
-        let untrusted_state = test_peer_state(false, true);
+        let (trusted_state, mut trusted_rx) = test_peer_state_with_channel(true);
+        let untrusted_state = test_peer_state(false);
         fanout.connections.insert(trusted_peer, trusted_state);
         fanout.connections.insert(untrusted_peer, untrusted_state);
 
@@ -1275,30 +1545,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_peers_are_not_requested_until_trust_is_known() {
-        let config = FanoutConfig {
-            max_receive_peers: 1,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
-        let mut fanout = FlashblocksP2PState::default();
-
-        let trusted_peer = PeerId::random();
-        let untrusted_peer = PeerId::random();
-        let (trusted_state, mut trusted_rx) = test_peer_state_with_channel(true, false);
-        let (untrusted_state, mut untrusted_rx) = test_peer_state_with_channel(false, false);
-        fanout.connections.insert(trusted_peer, trusted_state);
-        fanout.connections.insert(untrusted_peer, untrusted_state);
-
-        fanout.maybe_request_receive_peers(&ctx);
-
-        assert!(!peer_state(&fanout, trusted_peer).request_in_flight);
-        assert!(!peer_state(&fanout, untrusted_peer).request_in_flight);
-        assert!(trusted_rx.try_recv().is_err());
-        assert!(untrusted_rx.try_recv().is_err());
-    }
-
-    #[test]
     fn trusted_request_bypasses_non_trusted_limit() {
         let config = FanoutConfig {
             max_send_peers: 1,
@@ -1309,8 +1555,8 @@ mod tests {
 
         let victim = PeerId::random();
         let trusted_requester = PeerId::random();
-        let (mut victim_state, mut victim_rx) = test_peer_state_with_channel(false, true);
-        let (requester_state, mut requester_rx) = test_peer_state_with_channel(true, true);
+        let (mut victim_state, mut victim_rx) = test_peer_state_with_channel(false);
+        let (requester_state, mut requester_rx) = test_peer_state_with_channel(true);
         victim_state.send_enabled = true;
         fanout.connections.insert(victim, victim_state);
         fanout
@@ -1341,8 +1587,8 @@ mod tests {
 
         let current_peer = PeerId::random();
         let candidate_peer = PeerId::random();
-        let (mut current_state, mut current_rx) = test_peer_state_with_channel(false, true);
-        let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false, true);
+        let (mut current_state, mut current_rx) = test_peer_state_with_channel(false);
+        let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false);
         let mut score = Score::new(latency_window);
         score.record(42);
         current_state.receive_enabled = Some(score);
@@ -1389,8 +1635,8 @@ mod tests {
 
         let first_peer = PeerId::random();
         let second_peer = PeerId::random();
-        let (first_state, mut first_rx) = test_peer_state_with_channel(false, true);
-        let (second_state, mut second_rx) = test_peer_state_with_channel(false, true);
+        let (first_state, mut first_rx) = test_peer_state_with_channel(false);
+        let (second_state, mut second_rx) = test_peer_state_with_channel(false);
         fanout.connections.insert(first_peer, first_state);
         fanout.connections.insert(second_peer, second_state);
 
@@ -1427,7 +1673,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let (candidate_state, mut peer_rx) = test_peer_state_with_channel(false, true);
+        let (candidate_state, mut peer_rx) = test_peer_state_with_channel(false);
         fanout.connections.insert(peer, candidate_state);
 
         fanout.maybe_request_receive_peers(&ctx);
@@ -1440,8 +1686,58 @@ mod tests {
 
         assert!(!peer_state(&fanout, peer).request_in_flight);
         assert!(peer_state(&fanout, peer).receive_enabled.is_none());
-        assert!(peer_state(&fanout, peer).request_backoff_until.is_some());
+        assert!(
+            peer_state(&fanout, peer)
+                .receive_request_backoff_until
+                .is_some()
+        );
         assert!(peer_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn stale_accept_after_abandoned_request_is_canceled_without_penalty() {
+        let config = FanoutConfig {
+            max_receive_peers: 1,
+            latency_window: 4,
+            ..Default::default()
+        };
+        let ctx = test_ctx(config);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let abandoned_peer = PeerId::random();
+        let replacement_peer = PeerId::random();
+        let (mut abandoned_state, mut abandoned_rx) = test_peer_state_with_channel(false);
+        let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(true);
+
+        abandoned_state.receive_enabled = Some(Score::new(4));
+        abandoned_state.request_in_flight = true;
+        abandoned_state.receive_enabled_timestamp = 1;
+
+        fanout.connections.insert(abandoned_peer, abandoned_state);
+        fanout
+            .connections
+            .insert(replacement_peer, replacement_state);
+
+        fanout.maybe_start_rotation(&ctx);
+
+        assert!(
+            peer_state(&fanout, abandoned_peer)
+                .receive_enabled
+                .is_none()
+        );
+        assert!(peer_state(&fanout, abandoned_peer).abandoned_request_in_flight);
+        assert!(abandoned_rx.try_recv().is_err());
+        assert_eq!(
+            recv_direct(&mut replacement_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+
+        assert!(!fanout.handle_accept(&ctx, abandoned_peer));
+        assert!(!peer_state(&fanout, abandoned_peer).abandoned_request_in_flight);
+        assert_eq!(
+            recv_direct(&mut abandoned_rx),
+            FlashblocksP2PMsg::CancelFlashblocks
+        );
     }
 
     #[test]
@@ -1457,15 +1753,13 @@ mod tests {
         let newer_peer = PeerId::random();
         let replacement_peer = PeerId::random();
 
-        let (mut oldest_state, mut oldest_rx) = test_peer_state_with_channel(false, true);
-        let mut newer_state = test_peer_state(false, true);
-        let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(true, true);
+        let (mut oldest_state, mut oldest_rx) = test_peer_state_with_channel(false);
+        let mut newer_state = test_peer_state(false);
+        let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(true);
 
         oldest_state.receive_enabled = Some(Score::new(4));
-        oldest_state.request_in_flight = true;
         oldest_state.receive_enabled_timestamp = 1;
         newer_state.receive_enabled = Some(Score::new(4));
-        newer_state.request_in_flight = true;
         newer_state.receive_enabled_timestamp = 2;
 
         fanout.connections.insert(oldest_peer, oldest_state);
@@ -1501,8 +1795,8 @@ mod tests {
 
         let steady_peer = PeerId::random();
         let lagging_peer = PeerId::random();
-        let mut steady_state = test_peer_state(false, true);
-        let mut lagging_state = test_peer_state(false, true);
+        let mut steady_state = test_peer_state(false);
+        let mut lagging_state = test_peer_state(false);
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let builder = SigningKey::from_bytes(&[9; 32]);
 
@@ -1570,10 +1864,10 @@ mod tests {
         let candidate_peer = PeerId::random();
         let replacement_peer = PeerId::random();
 
-        let mut steady_state = test_peer_state(false, true);
-        let mut rotating_state = test_peer_state(false, true);
-        let candidate_state = test_peer_state(true, true);
-        let replacement_state = test_peer_state(true, true);
+        let mut steady_state = test_peer_state(false);
+        let mut rotating_state = test_peer_state(false);
+        let candidate_state = test_peer_state(true);
+        let replacement_state = test_peer_state(true);
 
         steady_state.receive_enabled = Some(Score::new(latency_window));
         rotating_state.receive_enabled = Some(Score::new(latency_window));
@@ -1633,7 +1927,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let state = test_peer_state(false, true);
+        let state = test_peer_state(false);
         fanout.connections.insert(peer, state);
 
         // Accept without a prior request should be penalized.
@@ -1647,7 +1941,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let state = test_peer_state(false, true);
+        let state = test_peer_state(false);
         fanout.connections.insert(peer, state);
 
         // Reject without a prior request should be penalized.
@@ -1661,7 +1955,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let state = test_peer_state(false, true);
+        let state = test_peer_state(false);
         fanout.connections.insert(peer, state);
 
         // Cancel with no send/receive relationship should be penalized.
@@ -1675,7 +1969,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let mut state = test_peer_state(false, true);
+        let mut state = test_peer_state(false);
         state.send_enabled = true;
         state.receive_enabled = Some(Score::new(4));
         fanout.connections.insert(peer, state);
@@ -1693,26 +1987,11 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let mut state = test_peer_state(false, true);
+        let mut state = test_peer_state(false);
         state.receive_enabled = Some(Score::new(4));
         fanout.connections.insert(peer, state);
 
         assert!(fanout.handle_cancel(&ctx, peer));
-    }
-
-    #[test]
-    fn request_from_unknown_trust_peer_is_deferred() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
-        let mut fanout = FlashblocksP2PState::default();
-
-        let peer = PeerId::random();
-        let (state, mut rx) = test_peer_state_with_channel(false, false);
-        fanout.connections.insert(peer, state);
-
-        assert!(!fanout.handle_request(&ctx, peer));
-        assert!(!peer_state(&fanout, peer).send_enabled);
-        assert!(rx.try_recv().is_err());
     }
 
     #[test]
@@ -1722,11 +2001,47 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let mut state = test_peer_state(false, true);
+        let mut state = test_peer_state(false);
         state.send_enabled = true;
         fanout.connections.insert(peer, state);
 
         assert!(fanout.handle_request(&ctx, peer));
+    }
+
+    #[test]
+    fn receive_backoff_does_not_penalize_inbound_request() {
+        let config = FanoutConfig::default();
+        let ctx = test_ctx(config);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let peer = PeerId::random();
+        let (mut state, mut rx) = test_peer_state_with_channel(false);
+        state.receive_request_backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        fanout.connections.insert(peer, state);
+
+        assert!(!fanout.handle_request(&ctx, peer));
+        assert!(peer_state(&fanout, peer).send_enabled);
+        assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::AcceptFlashblocks);
+    }
+
+    #[test]
+    fn send_backoff_does_not_block_receive_selection() {
+        let config = FanoutConfig {
+            max_receive_peers: 1,
+            ..Default::default()
+        };
+        let ctx = test_ctx(config);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let peer = PeerId::random();
+        let (mut state, mut rx) = test_peer_state_with_channel(false);
+        state.send_request_backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        fanout.connections.insert(peer, state);
+
+        fanout.maybe_request_receive_peers(&ctx);
+
+        assert!(peer_state(&fanout, peer).request_in_flight);
+        assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::RequestFlashblocks);
     }
 
     #[test]
@@ -1736,7 +2051,7 @@ mod tests {
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
-        let mut state = test_peer_state(false, true);
+        let mut state = test_peer_state(false);
         state.send_enabled = true;
         fanout.connections.insert(peer, state);
 
