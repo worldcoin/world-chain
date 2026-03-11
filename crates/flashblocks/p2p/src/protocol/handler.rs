@@ -690,10 +690,9 @@ impl FlashblocksHandle {
                     target: "flashblocks::p2p",
                     %peer_id,
                     %error,
-                    "failed to classify peer for flashblocks fanout; disconnecting"
+                    "failed to classify peer for flashblocks fanout; defaulting to untrusted"
                 );
-                network.disconnect_peer(peer_id);
-                return;
+                false
             }
         };
 
@@ -1524,7 +1523,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn on_peer_connected_disconnects_when_peer_info_never_arrives() {
+    async fn on_peer_connected_defaults_to_untrusted_when_peer_info_never_arrives() {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let handle = FlashblocksHandle::with_fanout_config(
             authorizer.verifying_key(),
@@ -1541,9 +1540,19 @@ mod tests {
         handle.on_peer_connected(network.clone(), peer_id, direct_tx);
 
         assert!(network.lookup_calls() > 1);
-        assert_eq!(network.disconnected_peers(), vec![peer_id]);
-        assert!(handle.state.lock().connection_state(&peer_id).is_none());
-        assert!(direct_rx.try_recv().is_err());
+        assert!(network.disconnected_peers().is_empty());
+        let state = handle.state.lock();
+        assert!(
+            !state
+                .connection_state(&peer_id)
+                .expect("peer exists")
+                .trusted
+        );
+        drop(state);
+        assert_eq!(
+            recv_direct(&mut direct_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
     }
 
     #[test]
