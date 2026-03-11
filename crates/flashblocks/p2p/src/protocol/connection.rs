@@ -429,7 +429,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         }
 
         // Check if this peer is spamming us with the same payload index.
-        if !p2p_state.note_peer_received_flashblock(&authorization, &msg, self.peer_id) {
+        if !p2p_state.note_peer_received_flashblock(authorization, msg, self.peer_id) {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
@@ -582,7 +582,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     }
 
     /// Handles incoming `StopPublish` messages from a peer.
-
+    ///
     /// # Arguments
     /// * `authorized_payload` - The authorized `StopPublish` message received from the peer
     ///

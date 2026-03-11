@@ -42,6 +42,7 @@ pub struct StopPublish;
 /// This enum represents the top-level message types that can be transmitted
 /// over the P2P network. Currently all messages are wrapped in authorization to ensure
 /// only authorized builders can create new messages.
+#[allow(clippy::large_enum_variant)]
 #[repr(u8)]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
 pub enum FlashblocksP2PMsg {

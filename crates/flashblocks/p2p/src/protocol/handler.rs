@@ -253,17 +253,16 @@ impl FlashblocksP2PState {
             for (peer_id, connection) in &mut self.connections {
                 if connection.receive_enabled_timestamp < evicted.timestamp + 2
                     && !evicted.received_peers.contains(peer_id)
+                    && let Some(score) = connection.receive_enabled.as_mut()
                 {
-                    if let Some(score) = connection.receive_enabled.as_mut() {
-                        debug!(
-                            target: "flashblocks::p2p",
-                            %peer_id,
-                            payload_id = %evicted.payload_id,
-                            flashblock_index = evicted.flashblock_index,
-                            "scoring peer for missed flashblock",
-                        );
-                        score.record(MISSED_FLASHBLOCK_PENALTY_NS);
-                    }
+                    debug!(
+                        target: "flashblocks::p2p",
+                        %peer_id,
+                        payload_id = %evicted.payload_id,
+                        flashblock_index = evicted.flashblock_index,
+                        "scoring peer for missed flashblock",
+                    );
+                    score.record(MISSED_FLASHBLOCK_PENALTY_NS);
                 }
             }
         }
@@ -296,10 +295,10 @@ impl FlashblocksP2PState {
 
     /// Sends a control message directly to a specific peer via its per-peer channel.
     fn send_direct(&self, peer_id: PeerId, msg: FlashblocksP2PMsg) {
-        if let Some(conn) = self.connections.get(&peer_id) {
-            if let Some(tx) = &conn.direct_tx {
-                tx.send(msg.encode()).ok();
-            }
+        if let Some(conn) = self.connections.get(&peer_id)
+            && let Some(tx) = &conn.direct_tx
+        {
+            tx.send(msg.encode()).ok();
         }
     }
 
