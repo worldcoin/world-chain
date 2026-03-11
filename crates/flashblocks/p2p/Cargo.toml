@@ -28,3 +28,9 @@ thiserror.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
 reth-tasks = { workspace = true }
+rand.workspace = true
+
+[dev-dependencies]
+reth-network-api.workspace = true
+reth-network-peers.workspace = true
+enr = { version = "0.13.0", default-features = false, features = ["rust-secp256k1"] }

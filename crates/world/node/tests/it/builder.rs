@@ -6,8 +6,8 @@ use reth_provider::providers::BlockchainProvider;
 use world_chain_node::{context::FlashblocksContext, node::WorldChainNode};
 use world_chain_test::node::test_config;
 
-#[test]
-fn test_basic_flashblocks_setup() {
+#[tokio::test]
+async fn test_basic_flashblocks_setup() {
     // parse CLI -> config
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
