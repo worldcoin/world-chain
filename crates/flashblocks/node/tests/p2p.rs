@@ -6,10 +6,7 @@ use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
-use flashblocks_p2p::{
-    monitor,
-    protocol::handler::{FlashblocksHandle, PeerMsg},
-};
+use flashblocks_p2p::{monitor, protocol::handler::FlashblocksHandle};
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
     p2p::{
@@ -785,7 +782,7 @@ async fn test_peer_reputation() -> eyre::Result<()> {
         authorized_msg,
     );
     let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-    let peer_msg = PeerMsg::StartPublishing(p2p_msg.encode());
+    let bytes = p2p_msg.encode();
 
     let peers = nodes[1].network_handle.get_all_peers().await?;
     let peer_0 = &peers[0].remote_id;
@@ -793,7 +790,9 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     let mut reputation_was_negative = false;
     let mut peer_banned = false;
     for _ in 0..100 {
-        nodes[0].p2p_handle.ctx.peer_tx.send(peer_msg.clone()).ok();
+        nodes[0]
+            .p2p_handle
+            .send_serialized_to_all_peers(bytes.clone());
         sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
         if let Some(rep) = rep_0 {
