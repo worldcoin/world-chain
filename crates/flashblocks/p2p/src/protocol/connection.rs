@@ -1,6 +1,5 @@
 use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PeerMsg,
-    PublishingStatus,
+    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
 };
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
@@ -20,7 +19,6 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, trace};
 
 /// Grace period for authorization timestamp checks to reduce false positives from
@@ -49,8 +47,8 @@ pub struct FlashblocksConnectionState {
     /// Timestamp of the last receive-side state transition for this peer.
     /// Used for late-message grace checks and receive retry cooldown.
     pub receive_enabled_timestamp: u64,
-    /// Per-peer channel for sending direct (control) messages without broadcasting.
-    pub direct_tx: Option<mpsc::UnboundedSender<BytesMut>>,
+    /// Per-peer channel for sending serialized protocol messages to this peer.
+    pub outbound_tx: Option<mpsc::UnboundedSender<BytesMut>>,
     /// Number of control messages received in the current rate-limit window.
     pub control_msg_count: u32,
     /// Start of the current rate-limit window.
@@ -66,7 +64,7 @@ impl FlashblocksConnectionState {
             send_enabled: false,
             receive_enabled: None,
             receive_enabled_timestamp: 0,
-            direct_tx: None,
+            outbound_tx: None,
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
         }
@@ -77,7 +75,7 @@ impl FlashblocksConnectionState {
 ///
 /// This struct manages the bidirectional communication with a single peer in the flashblocks
 /// P2P network. It handles incoming messages from the peer, validates and processes them,
-/// and also streams outgoing messages that need to be broadcast.
+/// and also streams serialized outgoing messages queued for this peer.
 ///
 /// The connection implements the `Stream` trait to provide outgoing message bytes that
 /// should be sent to the connected peer over the underlying protocol connection.
@@ -88,11 +86,8 @@ pub struct FlashblocksConnection<N> {
     conn: ProtocolConnection,
     /// The unique identifier of the connected peer.
     peer_id: PeerId,
-    /// Receiver for peer messages to be sent to all peers.
-    /// We send bytes over this stream to avoid repeatedly having to serialize the payloads.
-    peer_rx: BroadcastStream<PeerMsg>,
-    /// Receiver for direct (control) messages targeted at this specific peer.
-    direct_rx: mpsc::UnboundedReceiver<BytesMut>,
+    /// Receiver for already serialized protocol messages targeted at this specific peer.
+    outbound_rx: mpsc::UnboundedReceiver<BytesMut>,
 }
 
 impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
@@ -102,18 +97,16 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// * `protocol` - The flashblocks protocol handler managing the connection.
     /// * `conn` - The underlying protocol connection for sending and receiving messages.
     /// * `peer_id` - The unique identifier of the connected peer.
-    /// * `peer_rx` - Receiver for peer messages to be sent to all peers.
     pub(crate) fn new(
         protocol: FlashblocksP2PProtocol<N>,
         conn: ProtocolConnection,
         peer_id: PeerId,
-        peer_rx: BroadcastStream<PeerMsg>,
-        direct_tx: mpsc::UnboundedSender<BytesMut>,
-        direct_rx: mpsc::UnboundedReceiver<BytesMut>,
     ) -> Self {
+        let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+
         protocol
             .handle
-            .on_peer_connected(protocol.network.clone(), peer_id, direct_tx);
+            .on_peer_connected(protocol.network.clone(), peer_id, outbound_tx);
 
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
 
@@ -121,8 +114,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             protocol,
             conn,
             peer_id,
-            peer_rx,
-            direct_rx,
+            outbound_rx,
         }
     }
 }
@@ -148,79 +140,13 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
         let this = self.get_mut();
 
         loop {
-            // Check per-peer direct channel first (control messages).
-            if let Poll::Ready(Some(bytes)) = this.direct_rx.poll_recv(cx) {
+            if let Poll::Ready(Some(bytes)) = this.outbound_rx.poll_recv(cx) {
                 trace!(
                     target: "flashblocks::p2p",
                     peer_id = %this.peer_id,
-                    "Sending direct flashblocks control message to peer"
+                    "Sending serialized flashblocks protocol message to peer"
                 );
                 return Poll::Ready(Some(bytes));
-            }
-
-            // Check if there are any flashblocks ready to broadcast to our peers.
-            if let Poll::Ready(Some(res)) = this.peer_rx.poll_next_unpin(cx) {
-                match res {
-                    Ok(peer_msg) => {
-                        match peer_msg {
-                            PeerMsg::FlashblocksPayloadV1((
-                                payload_id,
-                                flashblock_index,
-                                bytes,
-                            )) => {
-                                // Check if this flashblock actually originated from this peer.
-                                let should_send = {
-                                    let state = this.protocol.handle.state.lock();
-                                    let already_received = state.peer_received_flashblock(
-                                        this.peer_id,
-                                        payload_id,
-                                        flashblock_index as u64,
-                                    );
-                                    let is_send_enabled = state
-                                        .connection_state(&this.peer_id)
-                                        .is_some_and(|peer_state| peer_state.send_enabled);
-                                    is_send_enabled && !already_received
-                                };
-                                if should_send {
-                                    trace!(
-                                        target: "flashblocks::p2p",
-                                        peer_id = %this.peer_id,
-                                        %payload_id,
-                                        %flashblock_index,
-                                        "Broadcasting `FlashblocksPayloadV1` message to peer"
-                                    );
-                                    metrics::counter!("flashblocks.bandwidth_outbound")
-                                        .increment(bytes.len() as u64);
-
-                                    return Poll::Ready(Some(bytes));
-                                }
-                            }
-                            PeerMsg::StartPublishing(bytes_mut) => {
-                                trace!(
-                                    target: "flashblocks::p2p",
-                                    peer_id = %this.peer_id,
-                                    "Broadcasting `StartPublishing` to peer"
-                                );
-                                return Poll::Ready(Some(bytes_mut));
-                            }
-                            PeerMsg::StopPublishing(bytes_mut) => {
-                                trace!(
-                                    target: "flashblocks::p2p",
-                                    peer_id = %this.peer_id,
-                                    "Broadcasting `StopPublishing` to peer"
-                                );
-                                return Poll::Ready(Some(bytes_mut));
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        tracing::error!(
-                            target: "flashblocks::p2p",
-                            %error,
-                            "failed to receive flashblocks message from peer_rx"
-                        );
-                    }
-                }
             }
 
             // Check if there are any messages from the peer.
@@ -539,8 +465,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                     let authorized =
                         Authorized::new(builder_sk, *our_authorization, StopPublish.into());
                     let p2p_msg = FlashblocksP2PMsg::Authorized(authorized);
-                    let peer_msg = PeerMsg::StopPublishing(p2p_msg.encode());
-                    self.protocol.handle.ctx.peer_tx.send(peer_msg).ok();
+                    state.send_to_all_peers(&p2p_msg.encode());
 
                     *status = PublishingStatus::NotPublishing {
                         active_publishers: vec![(

@@ -83,28 +83,6 @@ pub trait FlashblocksP2PNetworkHandle: Clone + Unpin + Peers + std::fmt::Debug +
 
 impl<N: Clone + Unpin + Peers + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle for N {}
 
-/// Messages that can be broadcast over a channel to each internal peer connection.
-///
-/// These messages are used internally to coordinate the broadcasting of flashblocks
-/// and publishing status changes to all connected peers.
-#[derive(Clone, Debug)]
-pub enum PeerMsg {
-    /// Send an already serialized flashblock to all peers.
-    FlashblocksPayloadV1((PayloadId, usize, BytesMut)),
-    /// Send a previously serialized StartPublish message to all peers.
-    StartPublishing(BytesMut),
-    /// Send a previously serialized StopPublish message to all peers.
-    StopPublishing(BytesMut),
-}
-
-#[derive(Clone, Debug)]
-pub struct ObservedPayload {
-    payload_id: PayloadId,
-    timestamp: u64,
-    flashblock_index: u64,
-    received_peers: HashSet<PeerId>,
-}
-
 /// Runtime configuration for bounded flashblocks fanout.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FanoutConfig {
@@ -163,6 +141,16 @@ impl Default for PublishingStatus {
             active_publishers: Vec::new(),
         }
     }
+}
+
+/// Tracked information about a flashblock payload observed from the network.
+#[derive(Clone, Debug)]
+pub struct ObservedPayload {
+    payload_id: PayloadId,
+    timestamp: u64,
+    flashblock_index: u64,
+    /// Peers from which we've received this flashblock
+    received_peers: HashSet<PeerId>,
 }
 
 /// Protocol state that stores the flashblocks P2P protocol events and coordination data.
@@ -292,13 +280,50 @@ impl FlashblocksP2PState {
             .is_some_and(|observed_payload| observed_payload.received_peers.contains(&peer_id))
     }
 
-    /// Sends a control message directly to a specific peer via its per-peer channel.
-    fn send_direct(&self, peer_id: PeerId, msg: FlashblocksP2PMsg) {
+    /// Sends an already serialized message to a specific peer.
+    fn send_to_peer(&self, peer_id: PeerId, bytes: &BytesMut) {
         if let Some(conn) = self.connections.get(&peer_id)
-            && let Some(tx) = &conn.direct_tx
+            && let Some(tx) = &conn.outbound_tx
         {
-            tx.send(msg.encode()).ok();
+            tx.send(bytes.clone()).ok();
         }
+    }
+
+    /// Sends an already serialized message to all connected peers.
+    pub(crate) fn send_to_all_peers(&self, bytes: &BytesMut) {
+        for conn in self.connections.values() {
+            if let Some(tx) = &conn.outbound_tx {
+                tx.send(bytes.clone()).ok();
+            }
+        }
+    }
+
+    /// Sends a serialized flashblock to peers in the current send set that have not
+    /// already delivered that flashblock to us.
+    fn send_flashblock_to_send_set(
+        &self,
+        payload_id: PayloadId,
+        flashblock_index: u64,
+        bytes: &BytesMut,
+    ) {
+        for (peer_id, conn) in &self.connections {
+            if !conn.send_enabled
+                || self.peer_received_flashblock(*peer_id, payload_id, flashblock_index)
+            {
+                continue;
+            }
+
+            if let Some(tx) = &conn.outbound_tx
+                && tx.send(bytes.clone()).is_ok()
+            {
+                metrics::counter!("flashblocks.bandwidth_outbound").increment(bytes.len() as u64);
+            }
+        }
+    }
+
+    /// Sends a control message directly to a specific peer.
+    fn send_direct(&self, peer_id: PeerId, msg: FlashblocksP2PMsg) {
+        self.send_to_peer(peer_id, &msg.encode());
     }
 
     /// Returns `true` if the peer has exceeded the control-message rate limit.
@@ -580,9 +605,6 @@ pub struct FlashblocksP2PCtx {
     pub builder_sk: Option<SigningKey>,
     /// Fanout configuration for peer selection and rotation.
     pub fanout_config: FanoutConfig,
-    /// Broadcast sender for peer messages that will be sent to all connected peers.
-    /// Messages may not be strictly ordered due to network conditions.
-    pub peer_tx: broadcast::Sender<PeerMsg>,
     /// Broadcast sender for verified and strictly ordered flashblock payloads.
     /// Used by RPC overlays and other consumers of flashblock data.
     pub flashblock_tx: broadcast::Sender<FlashblocksPayloadV1>,
@@ -612,13 +634,11 @@ impl FlashblocksHandle {
         fanout_config: FanoutConfig,
     ) -> Self {
         let flashblock_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
-        let peer_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
         let state = Arc::new(Mutex::new(FlashblocksP2PState::default()));
         let ctx = FlashblocksP2PCtx {
             authorizer_vk,
             builder_sk,
             fanout_config,
-            peer_tx,
             flashblock_tx,
         };
         let handle = Self { ctx, state };
@@ -645,7 +665,7 @@ impl FlashblocksHandle {
         &self,
         network: N,
         peer_id: PeerId,
-        direct_tx: mpsc::UnboundedSender<BytesMut>,
+        outbound_tx: mpsc::UnboundedSender<BytesMut>,
     ) {
         let trusted = tokio::task::block_in_place(|| {
             let network = network.clone();
@@ -697,7 +717,7 @@ impl FlashblocksHandle {
 
         let mut state = self.state.lock();
         let mut conn_state = FlashblocksConnectionState::new();
-        conn_state.direct_tx = Some(direct_tx);
+        conn_state.outbound_tx = Some(outbound_tx);
         conn_state.trusted = trusted;
         state.connections.insert(peer_id, conn_state);
         state.maybe_request_receive_peers(&self.ctx);
@@ -814,7 +834,7 @@ impl FlashblocksHandle {
     ///
     /// This method validates that the builder has authorization to publish and that
     /// the authorization matches the current publishing session. The flashblock is
-    /// then processed, cached, and broadcast to all connected peers.
+    /// then processed, cached, and forwarded to peers in the current send set.
     ///
     /// # Arguments
     /// * `authorized_payload` - The signed flashblock payload with authorization
@@ -841,6 +861,11 @@ impl FlashblocksHandle {
         }
         self.ctx.publish(&mut state, authorized_payload);
         Ok(())
+    }
+
+    /// Sends an already serialized protocol message to all currently connected peers.
+    pub fn send_serialized_to_all_peers(&self, bytes: BytesMut) {
+        self.state.lock().send_to_all_peers(&bytes);
     }
 
     /// Returns the current publishing status of this node.
@@ -935,8 +960,7 @@ impl FlashblocksHandle {
                     let authorized_payload =
                         Authorized::new(builder_sk, new_authorization, authorized_msg);
                     let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    let peer_msg = PeerMsg::StartPublishing(p2p_msg.encode());
-                    self.ctx.peer_tx.send(peer_msg).ok();
+                    state.send_to_all_peers(&p2p_msg.encode());
 
                     if active_publishers.is_empty() {
                         // If we have no previous publishers, we can start publishing immediately.
@@ -989,8 +1013,7 @@ impl FlashblocksHandle {
                     let authorized_payload =
                         Authorized::new(builder_sk, *authorization, StopPublish.into());
                     let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    let peer_msg = PeerMsg::StopPublishing(p2p_msg.encode());
-                    self.ctx.peer_tx.send(peer_msg).ok();
+                    state.send_to_all_peers(&p2p_msg.encode());
                     *status = PublishingStatus::NotPublishing {
                         active_publishers: Vec::new(),
                     };
@@ -1010,8 +1033,7 @@ impl FlashblocksHandle {
                     let authorized_payload =
                         Authorized::new(builder_sk, *authorization, StopPublish.into());
                     let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    let peer_msg = PeerMsg::StopPublishing(p2p_msg.encode());
-                    self.ctx.peer_tx.send(peer_msg).ok();
+                    state.send_to_all_peers(&p2p_msg.encode());
                     *status = PublishingStatus::NotPublishing {
                         active_publishers: active_publishers.clone(),
                     };
@@ -1102,7 +1124,8 @@ impl FlashblocksP2PCtx {
     /// - Validates payload consistency with authorization
     /// - Updates global state for new payloads with newer timestamps
     /// - Caches flashblocks and maintains ordering for sequential delivery
-    /// - Broadcasts to peers and publishes ordered flashblocks to the stream
+    /// - Forwards flashblocks to peers in the current send set and publishes ordered
+    ///   flashblocks to the local stream
     pub fn publish(
         &self,
         state: &mut FlashblocksP2PState,
@@ -1188,10 +1211,7 @@ impl FlashblocksP2PCtx {
             metrics::histogram!("flashblocks.tx_count")
                 .record(payload.diff.transactions.len() as f64);
 
-            let peer_msg =
-                PeerMsg::FlashblocksPayloadV1((payload.payload_id, payload.index as usize, bytes));
-
-            self.peer_tx.send(peer_msg).ok();
+            state.send_flashblock_to_send_set(payload.payload_id, payload.index, &bytes);
 
             let now = Utc::now()
                 .timestamp_nanos_opt()
@@ -1271,17 +1291,7 @@ impl<N: FlashblocksP2PNetworkHandle> ConnectionHandler for FlashblocksP2PProtoco
             "new flashblocks connection"
         );
 
-        let peer_rx = self.handle.ctx.peer_tx.subscribe();
-        let (direct_tx, direct_rx) = mpsc::unbounded_channel();
-
-        FlashblocksConnection::new(
-            self,
-            conn,
-            peer_id,
-            BroadcastStream::new(peer_rx),
-            direct_tx,
-            direct_rx,
-        )
+        FlashblocksConnection::new(self, conn, peer_id)
     }
 }
 
@@ -1417,7 +1427,6 @@ mod tests {
             authorizer_vk: authorizer.verifying_key(),
             builder_sk: Some(SigningKey::from_bytes(&[8; 32])),
             fanout_config: config,
-            peer_tx: broadcast::Sender::new(16),
             flashblock_tx: broadcast::Sender::new(16),
         }
     }
@@ -1428,7 +1437,7 @@ mod tests {
         state
     }
 
-    /// Creates a peer state with a per-peer direct channel for message assertions.
+    /// Creates a peer state with a per-peer outbound channel for message assertions.
     fn test_peer_state_with_channel(
         trusted: bool,
     ) -> (
@@ -1438,7 +1447,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut state = FlashblocksConnectionState::new();
         state.trusted = trusted;
-        state.direct_tx = Some(tx);
+        state.outbound_tx = Some(tx);
         (state, rx)
     }
 
@@ -1501,9 +1510,9 @@ mod tests {
             None,
             Some(test_peer_info(peer_id, true)),
         ]);
-        let (direct_tx, mut direct_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
 
-        handle.on_peer_connected(network.clone(), peer_id, direct_tx);
+        handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 
         assert!(network.lookup_calls() >= 2);
         assert!(network.disconnected_peers().is_empty());
@@ -1516,7 +1525,7 @@ mod tests {
         );
         drop(state);
         assert_eq!(
-            recv_direct(&mut direct_rx),
+            recv_direct(&mut outbound_rx),
             FlashblocksP2PMsg::RequestFlashblocks
         );
     }
@@ -1534,9 +1543,9 @@ mod tests {
         );
         let peer_id = PeerId::random();
         let network = MockNetwork::default();
-        let (direct_tx, mut direct_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
 
-        handle.on_peer_connected(network.clone(), peer_id, direct_tx);
+        handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 
         assert!(network.lookup_calls() > 1);
         assert!(network.disconnected_peers().is_empty());
@@ -1549,9 +1558,48 @@ mod tests {
         );
         drop(state);
         assert_eq!(
-            recv_direct(&mut direct_rx),
+            recv_direct(&mut outbound_rx),
             FlashblocksP2PMsg::RequestFlashblocks
         );
+    }
+
+    #[test]
+    fn publish_sends_flashblocks_only_to_send_enabled_peers() {
+        let ctx = test_ctx(FanoutConfig::default());
+        let mut fanout = FlashblocksP2PState::default();
+        let authorizer = SigningKey::from_bytes(&[7; 32]);
+        let builder = SigningKey::from_bytes(&[9; 32]);
+        let payload_id = PayloadId::new([1; 8]);
+        let authorization = Authorization::new(payload_id, 1, &authorizer, builder.verifying_key());
+        let flashblock = FlashblocksPayloadV1 {
+            payload_id,
+            index: 0,
+            ..Default::default()
+        };
+        let authorized_payload =
+            AuthorizedPayload::new(&builder, authorization, flashblock.clone());
+        let expected = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
+
+        let source_peer = PeerId::random();
+        let send_peer = PeerId::random();
+        let non_send_peer = PeerId::random();
+
+        let (mut source_state, mut source_rx) = test_peer_state_with_channel(false);
+        source_state.send_enabled = true;
+        let (mut send_state, mut send_rx) = test_peer_state_with_channel(false);
+        send_state.send_enabled = true;
+        let (non_send_state, mut non_send_rx) = test_peer_state_with_channel(false);
+
+        fanout.connections.insert(source_peer, source_state);
+        fanout.connections.insert(send_peer, send_state);
+        fanout.connections.insert(non_send_peer, non_send_state);
+        apply_observation(&mut fanout, &authorization, &flashblock, source_peer);
+
+        ctx.publish(&mut fanout, authorized_payload);
+
+        assert_eq!(recv_direct(&mut send_rx), expected);
+        assert!(source_rx.try_recv().is_err());
+        assert!(non_send_rx.try_recv().is_err());
     }
 
     #[test]
