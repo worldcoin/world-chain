@@ -19,6 +19,7 @@ use std::{
     task::{Context, Poll, ready},
     time::Instant,
 };
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, trace};
 
@@ -47,6 +48,12 @@ pub struct FlashblocksConnectionState {
     pub receive_enabled_timestamp: u64,
     /// Earliest time at which this peer is eligible for another control-plane retry.
     pub request_backoff_until: Option<Instant>,
+    /// Per-peer channel for sending direct (control) messages without broadcasting.
+    pub direct_tx: Option<mpsc::UnboundedSender<BytesMut>>,
+    /// Number of control messages received in the current rate-limit window.
+    pub control_msg_count: u32,
+    /// Start of the current rate-limit window.
+    pub control_msg_window_start: Instant,
 }
 
 impl FlashblocksConnectionState {
@@ -59,6 +66,9 @@ impl FlashblocksConnectionState {
             receive_enabled: None,
             receive_enabled_timestamp: 0,
             request_backoff_until: None,
+            direct_tx: None,
+            control_msg_count: 0,
+            control_msg_window_start: Instant::now(),
         }
     }
 }
@@ -81,6 +91,8 @@ pub struct FlashblocksConnection<N> {
     /// Receiver for peer messages to be sent to all peers.
     /// We send bytes over this stream to avoid repeatedly having to serialize the payloads.
     peer_rx: BroadcastStream<PeerMsg>,
+    /// Receiver for direct (control) messages targeted at this specific peer.
+    direct_rx: mpsc::UnboundedReceiver<BytesMut>,
 }
 
 impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
@@ -96,10 +108,12 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         conn: ProtocolConnection,
         peer_id: PeerId,
         peer_rx: BroadcastStream<PeerMsg>,
+        direct_tx: mpsc::UnboundedSender<BytesMut>,
+        direct_rx: mpsc::UnboundedReceiver<BytesMut>,
     ) -> Self {
         protocol
             .handle
-            .on_peer_connected(protocol.network.clone(), peer_id);
+            .on_peer_connected(protocol.network.clone(), peer_id, direct_tx);
 
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
 
@@ -108,6 +122,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             conn,
             peer_id,
             peer_rx,
+            direct_rx,
         }
     }
 }
@@ -133,6 +148,16 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
         let this = self.get_mut();
 
         loop {
+            // Check per-peer direct channel first (control messages).
+            if let Poll::Ready(Some(bytes)) = this.direct_rx.poll_recv(cx) {
+                trace!(
+                    target: "flashblocks::p2p",
+                    peer_id = %this.peer_id,
+                    "Sending direct flashblocks control message to peer"
+                );
+                return Poll::Ready(Some(bytes));
+            }
+
             // Check if there are any flashblocks ready to broadcast to our peers.
             if let Poll::Ready(Some(res)) = this.peer_rx.poll_next_unpin(cx) {
                 match res {
@@ -185,16 +210,6 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                                     "Broadcasting `StopPublishing` to peer"
                                 );
                                 return Poll::Ready(Some(bytes_mut));
-                            }
-                            PeerMsg::Direct { peer_id, bytes } => {
-                                if peer_id == this.peer_id {
-                                    trace!(
-                                        target: "flashblocks::p2p",
-                                        peer_id = %this.peer_id,
-                                        "Sending direct flashblocks control message to peer"
-                                    );
-                                    return Poll::Ready(Some(bytes));
-                                }
                             }
                         }
                     }
@@ -270,16 +285,32 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RequestFlashblocks => {
-                    this.protocol.handle.handle_request_message(this.peer_id);
+                    if this.protocol.handle.handle_request_message(this.peer_id) {
+                        this.protocol
+                            .network
+                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    }
                 }
                 FlashblocksP2PMsg::AcceptFlashblocks => {
-                    this.protocol.handle.handle_accept_message(this.peer_id);
+                    if this.protocol.handle.handle_accept_message(this.peer_id) {
+                        this.protocol
+                            .network
+                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    }
                 }
                 FlashblocksP2PMsg::RejectFlashblocks => {
-                    this.protocol.handle.handle_reject_message(this.peer_id);
+                    if this.protocol.handle.handle_reject_message(this.peer_id) {
+                        this.protocol
+                            .network
+                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    }
                 }
                 FlashblocksP2PMsg::CancelFlashblocks => {
-                    this.protocol.handle.handle_cancel_message(this.peer_id);
+                    if this.protocol.handle.handle_cancel_message(this.peer_id) {
+                        this.protocol
+                            .network
+                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    }
                 }
             }
         }
@@ -458,26 +489,26 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         };
         let authorization = &authorized_payload.authorized.authorization;
-        let payload_timestamp = self.protocol.handle.state.lock().payload_timestamp;
+        let state = self.protocol.handle.state.lock();
 
         // Check if the request is expired for dos protection.
         // It's important to ensure that this `StartPublish` request
         // is very recent, or it could be used in a replay attack.
-        if payload_timestamp > authorization.timestamp {
+        if state.payload_timestamp > authorization.timestamp {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                current_timestamp = payload_timestamp,
+                current_timestamp = state.payload_timestamp,
                 timestamp = authorized_payload.authorized.authorization.timestamp,
                 "received initiate build request with outdated timestamp",
             );
+            drop(state);
             self.protocol
                 .network
                 .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
             return;
         }
 
-        let state = self.protocol.handle.state.lock();
         state.publishing_status.send_modify(|status| {
             let active_publishers = match status {
                 PublishingStatus::Publishing {
@@ -548,26 +579,26 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// - If we are not publishing, removes the publisher from the list of active publishers
     fn handle_stop_publish(&mut self, authorized_payload: AuthorizedPayload<StopPublish>) {
         let authorization = &authorized_payload.authorized.authorization;
-        let payload_timestamp = self.protocol.handle.state.lock().payload_timestamp;
+        let state = self.protocol.handle.state.lock();
 
         // Check if the request is expired for dos protection.
-        // It's important to ensure that this `StartPublish` request
+        // It's important to ensure that this `StopPublish` request
         // is very recent, or it could be used in a replay attack.
-        if payload_timestamp > authorization.timestamp {
+        if state.payload_timestamp > authorization.timestamp {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
-                current_timestamp = payload_timestamp,
+                current_timestamp = state.payload_timestamp,
                 timestamp = authorized_payload.authorized.authorization.timestamp,
                 "Received initiate build response with outdated timestamp",
             );
+            drop(state);
             self.protocol
                 .network
                 .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
             return;
         }
 
-        let state = self.protocol.handle.state.lock();
         state.publishing_status.send_modify(|status| {
             match status {
                 PublishingStatus::Publishing { .. } => {
