@@ -155,6 +155,67 @@ impl NodeContext {
     }
 }
 
+async fn wait_for_pending_block(
+    node: &NodeContext,
+    expected_number: u64,
+    expected_txs: usize,
+) -> eyre::Result<()> {
+    let provider = node.provider().await?;
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(50);
+    let start = Instant::now();
+    let mut last_observed = "no pending block".to_string();
+
+    loop {
+        let pending_block = provider
+            .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+            .await?;
+
+        if let Some(pending_block) = pending_block {
+            let observed_number = pending_block.number();
+            let observed_txs = pending_block.transactions.hashes().len();
+            if observed_number == expected_number && observed_txs == expected_txs {
+                return Ok(());
+            }
+
+            last_observed = format!("number {observed_number}, txs {observed_txs}");
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(eyre!(
+                "timed out waiting for pending block state: expected number {expected_number}, txs {expected_txs}; last observed {last_observed}"
+            ));
+        }
+
+        sleep(poll_interval).await;
+    }
+}
+
+async fn wait_for_trusted_peers(
+    node: &NodeContext,
+    expected_connections: usize,
+) -> eyre::Result<()> {
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let trusted_peers = node.network_handle.get_trusted_peers().await?;
+        if trusted_peers.len() == expected_connections {
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(eyre!(
+                "timed out waiting for trusted peers: expected {expected_connections}, last observed {}",
+                trusted_peers.len()
+            ));
+        }
+
+        sleep(poll_interval).await;
+    }
+}
+
 fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
     let sub = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -392,12 +453,13 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
     for i in 0..n {
         let builder = SigningKey::from_bytes(&[(i + 1) % n; 32]);
         let node = setup_node(exec.clone(), authorizer.clone(), builder, peers.clone()).await?;
+        if !peers.is_empty() {
+            wait_for_trusted_peers(&node, peers.len()).await?;
+        }
         let enr = node.local_node_record;
         peers.push((enr.id, enr.tcp_addr()));
         nodes.push(node);
     }
-
-    sleep(Duration::from_millis(6000)).await;
 
     Ok(NodeTestFixture {
         nodes,
@@ -546,18 +608,9 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     let authorized = AuthorizedPayload::new(nodes[0].p2p_handle.builder_sk()?, authorization, msg);
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the base payload with an empty delta
-    let pending_block = nodes[1]
-        .provider()
-        .await?
-        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
-        .await?
-        .expect("pending block expected");
-
-    assert_eq!(pending_block.number(), expected_pending_number);
-    assert_eq!(pending_block.transactions.hashes().len(), 0);
+    wait_for_pending_block(&nodes[0], expected_pending_number, 0).await?;
 
     info!("Sending payload 0, index 1");
     let payload_1 = next_payload(payload_0.payload_id, 1).await;
@@ -573,18 +626,9 @@ async fn test_force_race_condition() -> eyre::Result<()> {
         payload_1.clone(),
     );
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    sleep(Duration::from_millis(100)).await;
 
     // Query pending block after sending the second payload with two transactions
-    let block = nodes[1]
-        .provider()
-        .await?
-        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
-        .await?
-        .expect("pending block expected");
-
-    assert_eq!(block.number(), expected_pending_number);
-    assert_eq!(block.transactions.hashes().len(), 0);
+    wait_for_pending_block(&nodes[0], expected_pending_number, 0).await?;
 
     // Send a new block, this time from node 1
     let payload_2 = base_payload(1, test_payload_id(21), 0, latest_block.hash(), AUTH_TS_NEXT);
