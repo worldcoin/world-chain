@@ -325,13 +325,11 @@ impl FlashblocksP2PState {
         peer_state: &mut FlashblocksConnectionState,
         receive_enabled_timestamp: u64,
         request_backoff_until: Option<Instant>,
-    ) -> bool {
-        let had_receive_state = peer_state.receive_enabled.is_some() || peer_state.request_in_flight;
+    ) {
         peer_state.receive_enabled = None;
         peer_state.request_in_flight = false;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
         peer_state.request_backoff_until = request_backoff_until;
-        had_receive_state
     }
 
     fn available_receive_candidates(&self) -> Vec<(PeerId, bool)> {
@@ -470,20 +468,19 @@ impl FlashblocksP2PState {
             return true;
         }
         let peer_is_trusted = peer_state.trusted;
+        let non_trusted_send_count = self
+            .connections
+            .values()
+            .filter(|s| s.send_enabled && !s.trusted)
+            .count();
+
         if peer_is_trusted {
-            let non_trusted_send_count = self
-                .connections
-                .values()
-                .filter(|candidate_state| candidate_state.send_enabled && !candidate_state.trusted)
-                .count();
+            // Trusted peers always get accepted; evict an untrusted sender if at capacity.
             if non_trusted_send_count >= ctx.fanout_config.max_send_peers {
                 if let Some(evicted_peer) =
                     self.connections
                         .iter()
-                        .find_map(|(candidate, candidate_state)| {
-                            (candidate_state.send_enabled && !candidate_state.trusted)
-                                .then_some(*candidate)
-                        })
+                        .find_map(|(id, s)| (s.send_enabled && !s.trusted).then_some(*id))
                 {
                     if let Some(evicted_state) = self.connection_state_mut(&evicted_peer) {
                         evicted_state.send_enabled = false;
@@ -491,30 +488,18 @@ impl FlashblocksP2PState {
                     self.send_direct(evicted_peer, FlashblocksP2PMsg::CancelFlashblocks);
                 }
             }
-
-            let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
-            peer_state.send_enabled = true;
-            peer_state.request_backoff_until = None;
-            self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
-            return false;
-        }
-
-        let non_trusted_send_count = self
-            .connections
-            .values()
-            .filter(|candidate_state| candidate_state.send_enabled && !candidate_state.trusted)
-            .count();
-        if non_trusted_send_count < ctx.fanout_config.max_send_peers {
-            let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
-            peer_state.send_enabled = true;
-            peer_state.request_backoff_until = None;
-            self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
-        } else {
+        } else if non_trusted_send_count >= ctx.fanout_config.max_send_peers {
             self.connection_state_mut(&peer_id)
                 .expect("peer exists")
                 .request_backoff_until = Some(Self::request_backoff_deadline(ctx));
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
+            return false;
         }
+
+        let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
+        peer_state.send_enabled = true;
+        peer_state.request_backoff_until = None;
+        self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
         false
     }
 
