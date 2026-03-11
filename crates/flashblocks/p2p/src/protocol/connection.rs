@@ -42,7 +42,8 @@ pub struct FlashblocksConnectionState {
     ///
     /// Optional score for this peer connection, used for adaptive timeouts and peer selection.
     /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
-    /// counting as 10s
+    /// counting as 10s. While `request_in_flight` is true, the peer is only a provisional
+    /// candidate and must not deliver flashblocks yet.
     pub receive_enabled: Option<Score>,
     /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
     pub receive_enabled_timestamp: u64,
@@ -399,6 +400,19 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         let Some(conn_state) = p2p_state.connection_state(&self.peer_id) else {
             return;
         };
+        if conn_state.request_in_flight {
+            tracing::warn!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                payload_id = %msg.payload_id,
+                index = msg.index,
+                "received flashblock before request was accepted",
+            );
+            self.protocol
+                .network
+                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            return;
+        }
         if conn_state.receive_enabled.is_none() {
             if conn_state.receive_enabled_timestamp + 2 < authorization.timestamp {
                 tracing::warn!(
@@ -470,7 +484,10 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             }
         }
 
-        self.protocol.handle.ctx.publish(&mut p2p_state, authorized_payload);
+        self.protocol
+            .handle
+            .ctx
+            .publish(&mut p2p_state, authorized_payload);
     }
 
     /// Handles incoming `StartPublish` messages from a peer.
@@ -563,7 +580,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 active_publishers.push((authorization.builder_vk, authorization.timestamp));
             }
         });
-
     }
 
     /// Handles incoming `StopPublish` messages from a peer.
@@ -667,7 +683,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 }
             }
         });
-
     }
 }
 

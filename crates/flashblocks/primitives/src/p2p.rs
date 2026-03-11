@@ -53,7 +53,7 @@ pub enum FlashblocksP2PMsg {
     AcceptFlashblocks = 0x02,
     /// Rejects a previously sent [`Self::RequestFlashblocks`] request.
     RejectFlashblocks = 0x03,
-    /// Terminates an active flashblocks feed.
+    /// Sent by a receiver to terminate an active flashblocks feed from a sender.
     CancelFlashblocks = 0x04,
 }
 

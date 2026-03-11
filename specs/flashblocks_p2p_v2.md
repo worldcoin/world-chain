@@ -38,7 +38,7 @@ Four unsigned control messages are added to `FlashblocksP2PMsg`:
 | `0x01` | `RequestFlashblocks` | Receiver → Sender | "I want to receive flashblocks from you" |
 | `0x02` | `AcceptFlashblocks` | Sender → Receiver | "Accepted. I will send you flashblocks" |
 | `0x03` | `RejectFlashblocks` | Sender → Receiver | "Rejected. I am at capacity" |
-| `0x04` | `CancelFlashblocks` | Either → Either | "I am ending our flashblock feed" |
+| `0x04` | `CancelFlashblocks` | Receiver → Sender | "Stop sending me flashblocks" |
 
 These messages carry no payload. The connection context (peer ID) provides all necessary information.
 
@@ -59,20 +59,16 @@ pub enum FlashblocksP2PMsg {
 **`RequestFlashblocks`** — Sent by a node that wants to receive flashblocks from the connected peer. The recipient evaluates:
 
 1. Is the requester a trusted peer? → Always accept (trusted peers bypass `max_send_peers`).
-2. Is the send set below `max_send_peers`? → Accept.
-3. Is the send set full but contains non-trusted peers, AND the requester is trusted? → Evict a non-trusted peer (send it `CancelFlashblocks`), then accept.
-4. Otherwise → Reject.
+2. Is the number of non-trusted peers in the send set below `max_send_peers`? → Accept.
+3. Otherwise → Reject.
 
 **`AcceptFlashblocks`** — Response to `RequestFlashblocks`. After this, the sender begins forwarding all `Authorized` messages to the receiver and adds the receiver to its send set.
 
 **`RejectFlashblocks`** — Response to `RequestFlashblocks` when the sender cannot accommodate more peers. The requester should try another peer.
 
-**`CancelFlashblocks`** — Either side may send this to terminate the flashblock feed:
+**`CancelFlashblocks`** — Sent only by a receiver to the sender it no longer wants to receive flashblocks from (e.g., during peer rotation).
 
-- **Receiver-initiated**: "Stop sending me flashblocks." (e.g., during peer rotation)
-- **Sender-initiated**: "I am going to stop sending you flashblocks." (e.g., evicting a non-trusted peer to make room for a trusted one)
-
-After receiving `CancelFlashblocks`, the other side immediately updates its local send/receive state for that feed.
+After receiving `CancelFlashblocks`, the sender immediately stops forwarding flashblocks to that peer and removes it from its send set.
 
 ## Peer Management
 
@@ -108,12 +104,10 @@ When a node starts and connects to peers via devp2p:
 receive RequestFlashblocks from peer P:
 
 if P is trusted:
-    if send_set has non-trusted peers AND send_set.len() >= max_send_peers:
-        evict lowest-priority non-trusted peer (send CancelFlashblocks, await ack)
     add P to send_set
     send AcceptFlashblocks to P
 
-else if send_set.len() < max_send_peers:
+else if non_trusted_send_count < max_send_peers:
     add P to send_set
     send AcceptFlashblocks to P
 
@@ -137,7 +131,7 @@ When a node receives an `Authorized` message from a peer in its receive set:
 - **`StartPublish`**: Verify signatures and process locally. Do not relay it beyond the direct neighbor that sent it.
 - **`StopPublish`**: Same as `StartPublish` — process locally, do not relay.
 
-If a node receives an `Authorized(FlashblocksPayloadV1)` from a peer **not** in its receive set, the message should be ignored. This prevents unsolicited data delivery.
+If a node receives an `Authorized(FlashblocksPayloadV1)` from a peer **not** in its receive set, or from a peer whose `RequestFlashblocks` is still pending, the message should be ignored and the peer should be penalized. This prevents unsolicited data delivery.
 
 ### Duplicate Handling
 

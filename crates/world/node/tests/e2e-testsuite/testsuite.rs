@@ -63,7 +63,7 @@ async fn create_priority_transaction(
     Ok((signed.encoded_2718().into(), *signed.tx_hash()))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) =
@@ -93,7 +93,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -139,7 +139,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -238,7 +238,7 @@ async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_without_block_uncompressed_size_limit_includes_all_transactions() -> eyre::Result<()>
 {
     reth_tracing::init_test_tracing();
@@ -287,7 +287,7 @@ async fn test_without_block_uncompressed_size_limit_includes_all_transactions() 
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) =
@@ -301,7 +301,7 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -704,7 +704,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 ///
 /// Verifies that without tx_peers configuration, transactions propagate to ALL connected peers
 /// using Reth's default TransactionPropagationKind::All policy.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_default_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -778,7 +778,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 /// Test Part 2:
 /// - Inject tx into Node 2 -> should propagate to both Node 0 and Node 1
 /// - Verifies multi-peer whitelist works correctly
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "TODO: flaky - not sure what's causing this to fail"]
 async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -924,7 +924,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
 /// - Inject tx into Node 0 -> should NOT propagate to any node
 /// - Inject tx into Node 1 -> should NOT propagate to any node (even though Node 0 is whitelisted)
 /// - Verifies that disable_txpool_gossip takes precedence over tx_peers
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

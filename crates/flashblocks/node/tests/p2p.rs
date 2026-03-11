@@ -38,10 +38,11 @@ use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     collections::HashMap,
+    fmt,
     io::Write,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, Instant, sleep};
@@ -57,6 +58,42 @@ use world_chain_test::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
     utils::{account, eip1559, raw_tx, signer},
 };
+
+/// Thread-safe log buffer for capturing tracing output across threads.
+#[derive(Clone, Default)]
+struct SharedLogBuffer(Arc<Mutex<Vec<String>>>);
+
+impl SharedLogBuffer {
+    fn logs(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for SharedLogBuffer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut visitor = LogVisitor(String::new());
+        visitor.0.push_str(&format!("{} ", event.metadata().level()));
+        visitor.0.push_str(&format!("{}: ", event.metadata().target()));
+        event.record(&mut visitor);
+        self.0.lock().unwrap().push(visitor.0);
+    }
+}
+
+struct LogVisitor(String);
+
+impl tracing::field::Visit for LogVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+        if field.name() == "message" {
+            self.0.push_str(&format!("{:?}", value));
+        } else {
+            self.0.push_str(&format!(" {}={:?}", field.name(), value));
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Metadata {
@@ -365,7 +402,7 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
     })
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
@@ -457,7 +494,7 @@ async fn test_double_failover() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_force_race_condition() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -591,7 +628,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -670,7 +707,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_peer_reputation() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -723,9 +760,15 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[tracing_test::traced_test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_peer_monitoring() -> eyre::Result<()> {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let log_buffer = SharedLogBuffer::default();
+    let subscriber = tracing_subscriber::registry().with(log_buffer.clone());
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("failed to set global subscriber");
+
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 
     // Create a temporary P2P secret key file for node1 to ensure consistent peer ID across restarts
@@ -804,18 +847,17 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     sleep(Duration::from_millis(500)).await;
 
     // Check that disconnection was logged by the event listener (immediate detection)
-    logs_assert(|logs: &[&str]| {
+    {
+        let logs = log_buffer.logs();
         let disconnect_log_exists = logs.iter().any(|log| {
             log.contains("trusted peer disconnected") && log.contains(&peer1_id.to_string())
         });
-
         assert!(
             disconnect_log_exists,
             "Should have logged 'trusted peer disconnected' for peer {} from event listener",
             peer1_id
         );
-        Ok(())
-    });
+    }
 
     // Wait for PeerMonitor periodic checks to detect the disconnection and emit multiple warning logs
     // Wait for at least 2 periodic ticks to ensure we get multiple log outputs (1s * 3 + 1s buffer for safety)
@@ -892,75 +934,63 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     }
 
     // Assert that the "connection to trusted peer established" log appears for node1
-    logs_assert(|logs: &[&str]| {
+    {
+        let logs = log_buffer.logs();
         let reconnection_log_exists = logs.iter().any(|log| {
             log.contains("connection to trusted peer established")
                 && log.contains(&peer1_id.to_string())
         });
-
         assert!(
             reconnection_log_exists,
             "Should have logged 'connection to trusted peer established' for peer {} after restart",
             peer1_id
         );
-        Ok(())
-    });
+    }
 
     // Wait for at least one more monitor tick to verify warnings stopped (1s interval + 1s buffer)
     sleep(monitor::PEER_MONITOR_INTERVAL + Duration::from_secs(1)).await;
 
     // Count the number of warning logs before and after reconnection to ensure they stopped
-    logs_assert(|logs: &[&str]| {
-        // Find the index where reconnection happened (use rposition to find the LAST occurrence)
+    {
+        let logs = log_buffer.logs();
         let reconnection_log_idx = logs
             .iter()
             .rposition(|log| log.contains("connection to trusted peer established"))
-            .ok_or_else(|| {
-                "Could not find 'connection to trusted peer established' log".to_string()
-            })?;
+            .expect("Could not find 'connection to trusted peer established' log");
 
-        // Split logs at the reconnection point
         let (logs_before_reconnect, logs_after_reconnect) = logs.split_at(reconnection_log_idx);
 
-        // Filter for disconnect warnings in logs before reconnection
-        let warnings_before_reconnect: Vec<&str> = logs_before_reconnect
+        let warnings_before_reconnect: Vec<&String> = logs_before_reconnect
             .iter()
             .filter(|log| {
                 log.contains(&peer1_id.to_string())
                     && log.contains("WARN")
                     && log.contains("trusted peer disconnected")
             })
-            .copied()
             .collect();
 
-        // We should have seen at least 2 warnings before reconnection
         assert!(
             warnings_before_reconnect.len() >= 2,
             "Should have had at least 2 warnings before reconnection, found {}",
             warnings_before_reconnect.len()
         );
 
-        // Filter for disconnect warnings in logs after reconnection
-        let warnings_after_reconnect: Vec<&str> = logs_after_reconnect
+        let warnings_after_reconnect: Vec<&String> = logs_after_reconnect
             .iter()
             .filter(|log| {
                 log.contains(&peer1_id.to_string())
                     && log.contains("WARN")
                     && log.contains("trusted peer disconnected")
             })
-            .copied()
             .collect();
 
-        // There should be no warnings after reconnection
         assert!(
             warnings_after_reconnect.is_empty(),
             "Should have no warnings after reconnection, found {}: {:?}",
             warnings_after_reconnect.len(),
             warnings_after_reconnect
         );
-
-        Ok(())
-    });
+    }
 
     Ok(())
 }
