@@ -27,66 +27,36 @@ use tracing::{info, trace};
 /// minor skew/races between peers.
 const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 
-/// A lightweight moving average with a configurable smoothing window.
-#[derive(Clone, Debug)]
-pub struct MovingAverage {
-    value: Option<i64>,
-    window: i64,
-}
-
-impl MovingAverage {
-    pub(crate) fn new(window: i64) -> Self {
-        Self {
-            value: None,
-            window: window.max(1),
-        }
-    }
-
-    pub(crate) fn record(&mut self, sample: i64) {
-        self.value = Some(match self.value {
-            Some(current) => (current * (self.window - 1) + sample) / self.window,
-            None => sample,
-        });
-    }
-
-    pub(crate) fn value(&self) -> Option<i64> {
-        self.value
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.value = None;
-    }
-}
-
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
 pub struct FlashblocksConnectionState {
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
+    /// Whether we have loaded the peer's trust classification from the network yet.
+    pub trusted_known: bool,
     /// Whether we currently have an outstanding flashblocks request to this peer.
     pub request_in_flight: bool,
     /// Whether we are currently sending flashblocks to this peer.
     pub send_enabled: bool,
     /// Whether we are currently requesting flashblocks from this peer.
-    pub receive_enabled: bool,
-    /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
-    pub receive_enabled_timestamp: u64,
-    /// Score for this peer connection, used for adaptive timeouts and peer selection.
     ///
+    /// Optional score for this peer connection, used for adaptive timeouts and peer selection.
     /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
     /// counting as 10s
-    pub score: MovingAverage,
+    pub receive_enabled: Option<MovingAverage>,
+    /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
+    pub receive_enabled_timestamp: u64,
 }
 
 impl FlashblocksConnectionState {
-    pub(crate) fn new(latency_window: i64) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             trusted: false,
+            trusted_known: false,
             request_in_flight: false,
             send_enabled: false,
-            receive_enabled: false,
+            receive_enabled: None,
             receive_enabled_timestamp: 0,
-            score: MovingAverage::new(latency_window),
         }
     }
 }
@@ -128,7 +98,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         peer_rx: BroadcastStream<PeerMsg>,
         state: Arc<Mutex<FlashblocksConnectionState>>,
     ) -> Self {
-        protocol.handle.ensure_background_tasks();
         protocol
             .handle
             .on_peer_connected(protocol.network.clone(), peer_id, state.clone());
@@ -337,7 +306,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) {
         let state_handle = self.protocol.handle.state.clone();
-        let conn_state = self.state.lock().clone();
+        let mut conn_state = self.state.lock();
         let mut p2p_state = state_handle.lock();
 
         let authorization = &authorized_payload.authorized.authorization;
@@ -377,17 +346,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if !conn_state.receive_enabled {
-            trace!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                payload_id = %msg.payload_id,
-                index = msg.index,
-                "ignoring flashblock from peer outside receive set",
-            );
-            return;
-        }
-
         if msg.payload_id == p2p_state.payload_id
             && (msg.index as usize)
                 .saturating_add(crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW)
@@ -409,21 +367,21 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         }
 
         // Check if we're expecting to see flashblocks from this peer
-        if !conn_state.receive_enabled
-            && conn_state.receive_enabled_timestamp + 2 < authorization.timestamp
-        {
-            tracing::warn!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                payload_id = %msg.payload_id,
-                index = msg.index,
-                "received flashblock from peer outside receive window",
-            );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+        let Some(score) = conn_state.receive_enabled.as_mut() else {
+            if conn_state.receive_enabled_timestamp + 2 < authorization.timestamp {
+                tracing::warn!(
+                    target: "flashblocks::p2p",
+                    peer_id = %self.peer_id,
+                    payload_id = %msg.payload_id,
+                    index = msg.index,
+                    "received flashblock from peer outside receive window",
+                );
+                self.protocol
+                    .network
+                    .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            }
             return;
-        }
+        };
 
         // Check if this peer is spamming us with the same payload index
         if !p2p_state.note_peer_received_flashblock(&authorization, &msg, self.peer_id) {
@@ -480,7 +438,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         if let Some(flashblock_timestamp) = msg.metadata.flashblock_timestamp {
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            self.state.lock().score.record(latency);
+            score.record(latency);
         }
 
         self.protocol
@@ -698,5 +656,36 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             .peer_tx
             .send(PeerMsg::StopPublishing(p2p_msg.encode()))
             .ok();
+    }
+}
+
+/// A lightweight moving average with a configurable smoothing window.
+#[derive(Clone, Debug)]
+pub struct MovingAverage {
+    value: Option<i64>,
+    window: i64,
+}
+
+impl MovingAverage {
+    pub(crate) fn new(window: i64) -> Self {
+        Self {
+            value: None,
+            window: window.max(1),
+        }
+    }
+
+    pub(crate) fn record(&mut self, sample: i64) {
+        self.value = Some(match self.value {
+            Some(current) => (current * (self.window - 1) + sample) / self.window,
+            None => sample,
+        });
+    }
+
+    pub(crate) fn value(&self) -> Option<i64> {
+        self.value
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.value = None;
     }
 }
