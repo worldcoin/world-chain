@@ -43,7 +43,7 @@ pub struct FlashblocksConnectionState {
     /// Optional score for this peer connection, used for adaptive timeouts and peer selection.
     /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
     /// counting as 10s
-    pub receive_enabled: Option<MovingAverage>,
+    pub receive_enabled: Option<Score>,
     /// Timestamp of when we enabled/disabled receiving flashblocks from this peer.
     pub receive_enabled_timestamp: u64,
 }
@@ -122,7 +122,12 @@ impl<N> Drop for FlashblocksConnection<N> {
             "dropping flashblocks connection"
         );
 
-        self.protocol.handle.on_peer_disconnected(self.peer_id);
+        let handle = &self.protocol.handle;
+        let peer_id = self.peer_id;
+        let mut state = handle.state.lock();
+        state.connections.remove(&peer_id);
+        state.maybe_request_receive_peers(&handle.ctx);
+
         gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
 }
@@ -661,12 +666,12 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
 /// A lightweight moving average with a configurable smoothing window.
 #[derive(Clone, Debug)]
-pub struct MovingAverage {
+pub struct Score {
     value: Option<i64>,
     window: i64,
 }
 
-impl MovingAverage {
+impl Score {
     pub(crate) fn new(window: i64) -> Self {
         Self {
             value: None,
@@ -683,9 +688,5 @@ impl MovingAverage {
 
     pub(crate) fn value(&self) -> Option<i64> {
         self.value
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.value = None;
     }
 }
