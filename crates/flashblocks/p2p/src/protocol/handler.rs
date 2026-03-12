@@ -212,7 +212,7 @@ impl FlashblocksP2PState {
         if self.observed_payloads.len() >= RECEIVE_FLASHBLOCK_GRACE_WINDOW {
             let evicted = self.observed_payloads.pop_front().unwrap();
             for (peer_id, connection) in &mut self.connections {
-                if connection.receive_status_timestamp < evicted.timestamp + 2
+                if connection.receive_status_timestamp + 2 <= evicted.timestamp
                     && !evicted.received_peers.contains(peer_id)
                     && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
@@ -360,7 +360,7 @@ impl FlashblocksP2PState {
             .collect()
     }
 
-    fn begin_requesting_peer(&mut self, _ctx: &FlashblocksP2PCtx, peer_id: PeerId) {
+    fn begin_requesting_peer(&mut self, peer_id: PeerId) {
         let Some(peer_state) = self.connection_state_mut(&peer_id) else {
             return;
         };
@@ -401,7 +401,7 @@ impl FlashblocksP2PState {
                 trusted_candidates
             };
             let rand = rand::rng().random_range(0..candidate_pool.len());
-            self.begin_requesting_peer(ctx, candidate_pool[rand]);
+            self.begin_requesting_peer(candidate_pool[rand]);
         }
     }
 
@@ -470,22 +470,22 @@ impl FlashblocksP2PState {
         }
         self.send_direct(evict, FlashblocksP2PMsg::CancelFlashblocks);
 
-        self.begin_requesting_peer(ctx, candidate);
+        self.begin_requesting_peer(candidate);
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    fn handle_request(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    fn handle_request(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
-            return true;
+            return Err(());
         }
 
         let Some(peer_state) = self.connection_state(&peer_id) else {
-            return false;
+            return Ok(());
         };
 
         if peer_state.send_enabled {
             // Already sending to this peer — repeated request is spam.
-            return true;
+            return Err(());
         }
         let peer_is_trusted = peer_state.trusted;
         let non_trusted_send_count = self
@@ -496,23 +496,23 @@ impl FlashblocksP2PState {
 
         if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_args.max_send_peers {
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
-            return false;
+            return Ok(());
         }
 
         let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
         peer_state.send_enabled = true;
         self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
-        false
+        Ok(())
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    fn handle_accept(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    fn handle_accept(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
-            return true;
+            return Err(());
         }
 
         let Some(peer_state) = self.connection_state_mut(&peer_id) else {
-            return false;
+            return Ok(());
         };
 
         match peer_state.receive_status {
@@ -520,51 +520,51 @@ impl FlashblocksP2PState {
                 peer_state.receive_status = ReceiveStatus::Receiving {
                     score: Score::new(ctx.fanout_args.score_samples),
                 };
-                false
+                Ok(())
             }
             // Unsolicited accept — we never asked this peer.
-            _ => true,
+            _ => Err(()),
         }
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    fn handle_reject(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    fn handle_reject(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
-            return true;
+            return Err(());
         }
 
         let Some(peer_state) = self.connection_state_mut(&peer_id) else {
-            return false;
+            return Ok(());
         };
 
         match peer_state.receive_status {
             ReceiveStatus::Requesting => {
                 Self::clear_receive_state(peer_state, Utc::now().timestamp() as u64);
                 self.maybe_request_receive_peers(ctx);
-                false
+                Ok(())
             }
             // Unsolicited reject — we never asked this peer.
-            _ => true,
+            _ => Err(()),
         }
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    fn handle_cancel(&mut self, _ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    fn handle_cancel(&mut self, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
-            return true;
+            return Err(());
         }
 
         let Some(peer_state) = self.connection_state_mut(&peer_id) else {
-            return false;
+            return Ok(());
         };
 
         if !peer_state.send_enabled {
             // Cancel is only valid from a receiver to its sender.
-            return true;
+            return Err(());
         }
 
         peer_state.send_enabled = false;
-        false
+        Ok(())
     }
 }
 
@@ -710,28 +710,28 @@ impl FlashblocksHandle {
         state.maybe_request_receive_peers(&self.ctx);
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    pub(crate) fn handle_request_message(&self, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    pub(crate) fn handle_request_message(&self, peer_id: PeerId) -> Result<(), ()> {
         let mut state = self.state.lock();
         state.handle_request(&self.ctx, peer_id)
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    pub(crate) fn handle_accept_message(&self, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    pub(crate) fn handle_accept_message(&self, peer_id: PeerId) -> Result<(), ()> {
         let mut state = self.state.lock();
         state.handle_accept(&self.ctx, peer_id)
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    pub(crate) fn handle_reject_message(&self, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    pub(crate) fn handle_reject_message(&self, peer_id: PeerId) -> Result<(), ()> {
         let mut state = self.state.lock();
         state.handle_reject(&self.ctx, peer_id)
     }
 
-    /// Returns `true` if the peer should receive a reputation penalty.
-    pub(crate) fn handle_cancel_message(&self, peer_id: PeerId) -> bool {
+    /// Returns `Err` if the peer should receive a reputation penalty.
+    pub(crate) fn handle_cancel_message(&self, peer_id: PeerId) -> Result<(), ()> {
         let mut state = self.state.lock();
-        state.handle_cancel(&self.ctx, peer_id)
+        state.handle_cancel(peer_id)
     }
 }
 
@@ -914,7 +914,7 @@ impl FlashblocksHandle {
                     }
                 }
                 PublishingStatus::NotPublishing { active_publishers } => {
-                    // Send an authorized `StartPublish` message to the network
+                    // Send an authorized `StartPublish` message to direct peers.
                     let authorized_msg = AuthorizedMsg::StartPublish(StartPublish);
                     let authorized_payload =
                         Authorized::new(builder_sk, new_authorization, authorized_msg);
@@ -1569,7 +1569,7 @@ mod tests {
             .connections
             .insert(trusted_requester, requester_state);
 
-        assert!(!fanout.handle_request(&ctx, trusted_requester));
+        assert!(fanout.handle_request(&ctx, trusted_requester).is_ok());
 
         assert!(peer_state(&fanout, victim).send_enabled);
         assert!(peer_state(&fanout, trusted_requester).send_enabled);
@@ -1619,7 +1619,7 @@ mod tests {
             FlashblocksP2PMsg::RequestFlashblocks
         );
 
-        assert!(!fanout.handle_accept(&ctx, candidate_peer));
+        assert!(fanout.handle_accept(&ctx, candidate_peer).is_ok());
 
         assert!(matches!(
             peer_state(&fanout, candidate_peer).receive_status,
@@ -1661,8 +1661,8 @@ mod tests {
             FlashblocksP2PMsg::RequestFlashblocks
         );
 
-        assert!(!fanout.handle_accept(&ctx, first_peer));
-        assert!(!fanout.handle_accept(&ctx, second_peer));
+        assert!(fanout.handle_accept(&ctx, first_peer).is_ok());
+        assert!(fanout.handle_accept(&ctx, second_peer).is_ok());
 
         assert!(matches!(
             peer_state(&fanout, first_peer).receive_status,
@@ -1691,7 +1691,7 @@ mod tests {
             FlashblocksP2PMsg::RequestFlashblocks
         );
 
-        assert!(!fanout.handle_reject(&ctx, peer));
+        assert!(fanout.handle_reject(&ctx, peer).is_ok());
 
         assert_eq!(
             peer_state(&fanout, peer).receive_status,
@@ -1837,10 +1837,13 @@ mod tests {
         fanout.connections.insert(steady_peer, steady_state);
         fanout.connections.insert(lagging_peer, lagging_state);
 
+        // Use timestamps starting well after receive_status_timestamp (0) so the grace
+        // check `receive_status_timestamp + 2 <= evicted.timestamp` is satisfied.
+        let ts_offset = 10_u64;
         for index in 0..=RECEIVE_FLASHBLOCK_GRACE_WINDOW {
             let authorization = Authorization::new(
                 PayloadId::default(),
-                index as u64,
+                ts_offset + index as u64,
                 &authorizer,
                 builder.verifying_key(),
             );
@@ -1909,14 +1912,17 @@ mod tests {
         fanout.maybe_start_rotation(&ctx);
 
         // Accept the candidate so it transitions to Receiving.
-        assert!(!fanout.handle_accept(&ctx, candidate_peer));
+        assert!(fanout.handle_accept(&ctx, candidate_peer).is_ok());
 
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let builder = SigningKey::from_bytes(&[9; 32]);
+        // Use timestamps well after the candidate's receive_status_timestamp so the
+        // grace check `receive_status_timestamp + 2 <= evicted.timestamp` is satisfied.
+        let ts_base = Utc::now().timestamp() as u64 + 10;
         for index in 0..=RECEIVE_FLASHBLOCK_GRACE_WINDOW {
             let authorization = Authorization::new(
                 PayloadId::default(),
-                index as u64,
+                ts_base + index as u64,
                 &authorizer,
                 builder.verifying_key(),
             );
@@ -1955,7 +1961,7 @@ mod tests {
         fanout.connections.insert(peer, state);
 
         // Accept without a prior request should be penalized.
-        assert!(fanout.handle_accept(&ctx, peer));
+        assert!(fanout.handle_accept(&ctx, peer).is_err());
     }
 
     #[test]
@@ -1968,12 +1974,11 @@ mod tests {
         fanout.connections.insert(peer, state);
 
         // Reject without a prior request should be penalized.
-        assert!(fanout.handle_reject(&ctx, peer));
+        assert!(fanout.handle_reject(&ctx, peer).is_err());
     }
 
     #[test]
     fn cancel_without_relationship_is_penalized() {
-        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -1981,12 +1986,11 @@ mod tests {
         fanout.connections.insert(peer, state);
 
         // Cancel with no send/receive relationship should be penalized.
-        assert!(fanout.handle_cancel(&ctx, peer));
+        assert!(fanout.handle_cancel(peer).is_err());
     }
 
     #[test]
     fn cancel_only_clears_send_direction() {
-        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -1997,7 +2001,7 @@ mod tests {
         };
         fanout.connections.insert(peer, state);
 
-        assert!(!fanout.handle_cancel(&ctx, peer));
+        assert!(fanout.handle_cancel(peer).is_ok());
         assert!(!peer_state(&fanout, peer).send_enabled);
         assert!(matches!(
             peer_state(&fanout, peer).receive_status,
@@ -2007,7 +2011,6 @@ mod tests {
 
     #[test]
     fn cancel_from_sender_is_penalized() {
-        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2017,7 +2020,7 @@ mod tests {
         };
         fanout.connections.insert(peer, state);
 
-        assert!(fanout.handle_cancel(&ctx, peer));
+        assert!(fanout.handle_cancel(peer).is_err());
     }
 
     #[test]
@@ -2030,7 +2033,7 @@ mod tests {
         state.send_enabled = true;
         fanout.connections.insert(peer, state);
 
-        assert!(fanout.handle_request(&ctx, peer));
+        assert!(fanout.handle_request(&ctx, peer).is_err());
     }
 
     #[test]
@@ -2043,7 +2046,7 @@ mod tests {
         state.receive_status_timestamp = Utc::now().timestamp() as u64;
         fanout.connections.insert(peer, state);
 
-        assert!(!fanout.handle_request(&ctx, peer));
+        assert!(fanout.handle_request(&ctx, peer).is_ok());
         assert!(peer_state(&fanout, peer).send_enabled);
         assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::AcceptFlashblocks);
     }
@@ -2060,10 +2063,10 @@ mod tests {
         fanout.connections.insert(peer, state);
 
         for _ in 0..MAX_CONTROL_MSGS_PER_WINDOW {
-            assert!(!fanout.handle_request(&ctx, peer));
+            assert!(fanout.handle_request(&ctx, peer).is_ok());
             assert_eq!(recv_direct(&mut rx), FlashblocksP2PMsg::RejectFlashblocks);
         }
-        assert!(fanout.handle_request(&ctx, peer));
+        assert!(fanout.handle_request(&ctx, peer).is_err());
     }
 
     #[test]
@@ -2078,11 +2081,11 @@ mod tests {
 
         // Spam requests to exceed the rate limit.
         for _ in 0..MAX_CONTROL_MSGS_PER_WINDOW {
-            // These return true because send_enabled is already set (duplicate request),
+            // These return Err because send_enabled is already set (duplicate request),
             // but the rate limit hasn't been hit yet.
-            assert!(fanout.handle_request(&ctx, peer));
+            assert!(fanout.handle_request(&ctx, peer).is_err());
         }
         // The next one should hit the rate limit.
-        assert!(fanout.handle_request(&ctx, peer));
+        assert!(fanout.handle_request(&ctx, peer).is_err());
     }
 }

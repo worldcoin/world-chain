@@ -215,28 +215,48 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RequestFlashblocks => {
-                    if this.protocol.handle.handle_request_message(this.peer_id) {
+                    if this
+                        .protocol
+                        .handle
+                        .handle_request_message(this.peer_id)
+                        .is_err()
+                    {
                         this.protocol
                             .network
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
                 FlashblocksP2PMsg::AcceptFlashblocks => {
-                    if this.protocol.handle.handle_accept_message(this.peer_id) {
+                    if this
+                        .protocol
+                        .handle
+                        .handle_accept_message(this.peer_id)
+                        .is_err()
+                    {
                         this.protocol
                             .network
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
                 FlashblocksP2PMsg::RejectFlashblocks => {
-                    if this.protocol.handle.handle_reject_message(this.peer_id) {
+                    if this
+                        .protocol
+                        .handle
+                        .handle_reject_message(this.peer_id)
+                        .is_err()
+                    {
                         this.protocol
                             .network
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
                 FlashblocksP2PMsg::CancelFlashblocks => {
-                    if this.protocol.handle.handle_cancel_message(this.peer_id) {
+                    if this
+                        .protocol
+                        .handle
+                        .handle_cancel_message(this.peer_id)
+                        .is_err()
+                    {
                         this.protocol
                             .network
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
