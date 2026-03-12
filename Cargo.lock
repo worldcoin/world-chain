@@ -3828,7 +3828,6 @@ dependencies = [
  "clap",
  "color-eyre",
  "ed25519-dalek",
- "flashblocks-builder",
  "hex",
 ]
 
@@ -3915,6 +3914,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "enr",
+ "flashblocks-cli",
  "flashblocks-primitives",
  "futures",
  "metrics",
@@ -14442,6 +14442,7 @@ dependencies = [
  "alloy-sol-types",
  "bon",
  "chrono",
+ "flashblocks-builder",
  "flashblocks-cli",
  "flashblocks-primitives",
  "futures",

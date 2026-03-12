@@ -5,6 +5,7 @@ use crate::protocol::{
 use alloy_rlp::BytesMut;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use flashblocks_cli::FanoutArgs;
 use flashblocks_primitives::{
     p2p::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
@@ -82,30 +83,6 @@ const PEER_INFO_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 pub trait FlashblocksP2PNetworkHandle: Clone + Unpin + Peers + std::fmt::Debug + 'static {}
 
 impl<N: Clone + Unpin + Peers + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle for N {}
-
-/// Runtime configuration for bounded flashblocks fanout.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FanoutConfig {
-    /// Maximum number of non-trusted peers to send flashblocks to.
-    pub max_send_peers: usize,
-    /// Maximum number of peers to receive flashblocks from.
-    pub max_receive_peers: usize,
-    /// How often to evaluate latency-based peer rotation.
-    pub rotation_interval: Duration,
-    /// Number of latency measurements to retain per receive peer.
-    pub latency_window: i64,
-}
-
-impl Default for FanoutConfig {
-    fn default() -> Self {
-        Self {
-            max_send_peers: 10,
-            max_receive_peers: 3,
-            rotation_interval: Duration::from_secs(30),
-            latency_window: 1000,
-        }
-    }
-}
 
 /// The current publishing status of this node in the flashblocks P2P network.
 ///
@@ -348,7 +325,9 @@ impl FlashblocksP2PState {
     }
 
     fn receive_retry_cooldown_secs(ctx: &FlashblocksP2PCtx) -> u64 {
-        ctx.fanout_config.rotation_interval.as_secs().max(1)
+        Duration::from_secs(ctx.fanout_args.rotation_interval)
+            .as_secs()
+            .max(1)
     }
 
     fn clear_receive_state(
@@ -398,13 +377,13 @@ impl FlashblocksP2PState {
         let timestamp = Utc::now().timestamp() as u64;
         peer_state.request_in_flight = true;
         peer_state.abandoned_request_in_flight = false;
-        peer_state.receive_enabled = Some(Score::new(ctx.fanout_config.latency_window));
+        peer_state.receive_enabled = Some(Score::new(ctx.fanout_args.score_samples));
         peer_state.receive_enabled_timestamp = timestamp;
         self.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
     pub fn maybe_request_receive_peers(&mut self, ctx: &FlashblocksP2PCtx) {
-        while self.num_receive_peers() < ctx.fanout_config.max_receive_peers {
+        while self.num_receive_peers() < ctx.fanout_args.max_receive_peers {
             let candidates = self.available_receive_candidates(ctx);
             if candidates.is_empty() {
                 return;
@@ -453,7 +432,7 @@ impl FlashblocksP2PState {
     }
 
     fn maybe_start_rotation(&mut self, ctx: &FlashblocksP2PCtx) {
-        if self.num_receive_peers() < ctx.fanout_config.max_receive_peers {
+        if self.num_receive_peers() < ctx.fanout_args.max_receive_peers {
             return;
         }
 
@@ -511,7 +490,7 @@ impl FlashblocksP2PState {
             .filter(|s| s.send_enabled && !s.trusted)
             .count();
 
-        if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_config.max_send_peers {
+        if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_args.max_send_peers {
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
             return false;
         }
@@ -601,10 +580,8 @@ impl FlashblocksP2PState {
 pub struct FlashblocksP2PCtx {
     /// Authorizer's verifying key used to verify authorization signatures from rollup-boost.
     pub authorizer_vk: VerifyingKey,
-    /// Builder's signing key used to sign outgoing authorized P2P messages.
-    pub builder_sk: Option<SigningKey>,
-    /// Fanout configuration for peer selection and rotation.
-    pub fanout_config: FanoutConfig,
+    /// Flashblocks configuration including signing keys and fanout args.
+    pub fanout_args: FanoutArgs,
     /// Broadcast sender for verified and strictly ordered flashblock payloads.
     /// Used by RPC overlays and other consumers of flashblock data.
     pub flashblock_tx: broadcast::Sender<FlashblocksPayloadV1>,
@@ -618,6 +595,8 @@ pub struct FlashblocksP2PCtx {
 pub struct FlashblocksHandle {
     /// Shared context containing network handle, keys, and communication channels.
     pub ctx: FlashblocksP2PCtx,
+    /// Builder signing key used to sign outgoing authorized P2P messages.
+    pub builder_sk: Option<SigningKey>,
     /// Thread-safe mutable state of the flashblocks protocol.
     /// Protected by a mutex to allow concurrent access from multiple connections.
     pub state: Arc<Mutex<FlashblocksP2PState>>,
@@ -625,28 +604,32 @@ pub struct FlashblocksHandle {
 
 impl FlashblocksHandle {
     pub fn new(authorizer_vk: VerifyingKey, builder_sk: Option<SigningKey>) -> Self {
-        Self::with_fanout_config(authorizer_vk, builder_sk, FanoutConfig::default())
+        Self::with_fanout_args(authorizer_vk, builder_sk, FanoutArgs::default())
     }
 
-    pub fn with_fanout_config(
+    pub fn with_fanout_args(
         authorizer_vk: VerifyingKey,
         builder_sk: Option<SigningKey>,
-        fanout_config: FanoutConfig,
+        fanout_args: FanoutArgs,
     ) -> Self {
         let flashblock_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
         let state = Arc::new(Mutex::new(FlashblocksP2PState::default()));
         let ctx = FlashblocksP2PCtx {
             authorizer_vk,
-            builder_sk,
-            fanout_config,
+            fanout_args,
             flashblock_tx,
         };
-        let handle = Self { ctx, state };
+        let handle = Self {
+            ctx,
+            builder_sk,
+            state,
+        };
         let moved_handle = handle.clone();
 
         tokio::spawn(async move {
-            let mut rotation_interval =
-                time::interval(moved_handle.ctx.fanout_config.rotation_interval);
+            let mut rotation_interval = time::interval(Duration::from_secs(
+                moved_handle.ctx.fanout_args.rotation_interval,
+            ));
             rotation_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
             rotation_interval.tick().await;
 
@@ -824,8 +807,7 @@ impl FlashblocksHandle {
 
     /// Returns the builder signing key if configured.
     pub fn builder_sk(&self) -> Result<&SigningKey, FlashblocksP2PError> {
-        self.ctx
-            .builder_sk
+        self.builder_sk
             .as_ref()
             .ok_or(FlashblocksP2PError::MissingBuilderSk)
     }
@@ -1420,13 +1402,16 @@ mod tests {
         }
     }
 
-    fn test_ctx(config: FanoutConfig) -> FlashblocksP2PCtx {
+    fn test_fanout_args() -> FanoutArgs {
+        FanoutArgs::default()
+    }
+
+    fn test_ctx(fanout_args: FanoutArgs) -> FlashblocksP2PCtx {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
 
         FlashblocksP2PCtx {
             authorizer_vk: authorizer.verifying_key(),
-            builder_sk: Some(SigningKey::from_bytes(&[8; 32])),
-            fanout_config: config,
+            fanout_args,
             flashblock_tx: broadcast::Sender::new(16),
         }
     }
@@ -1497,13 +1482,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn on_peer_connected_retries_until_peer_info_is_available() {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
-        let handle = FlashblocksHandle::with_fanout_config(
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        let handle = FlashblocksHandle::with_fanout_args(
             authorizer.verifying_key(),
             Some(SigningKey::from_bytes(&[8; 32])),
-            FanoutConfig {
-                max_receive_peers: 1,
-                ..Default::default()
-            },
+            fanout_args,
         );
         let peer_id = PeerId::random();
         let network = MockNetwork::with_peer_lookup_responses(vec![
@@ -1533,13 +1517,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn on_peer_connected_defaults_to_untrusted_when_peer_info_never_arrives() {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
-        let handle = FlashblocksHandle::with_fanout_config(
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        let handle = FlashblocksHandle::with_fanout_args(
             authorizer.verifying_key(),
             Some(SigningKey::from_bytes(&[8; 32])),
-            FanoutConfig {
-                max_receive_peers: 1,
-                ..Default::default()
-            },
+            fanout_args,
         );
         let peer_id = PeerId::random();
         let network = MockNetwork::default();
@@ -1565,7 +1548,7 @@ mod tests {
 
     #[test]
     fn publish_sends_flashblocks_only_to_send_enabled_peers() {
-        let ctx = test_ctx(FanoutConfig::default());
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let builder = SigningKey::from_bytes(&[9; 32]);
@@ -1604,11 +1587,9 @@ mod tests {
 
     #[test]
     fn trusted_peers_are_requested_first() {
-        let config = FanoutConfig {
-            max_receive_peers: 1,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let trusted_peer = PeerId::random();
@@ -1631,11 +1612,9 @@ mod tests {
 
     #[test]
     fn trusted_request_bypasses_non_trusted_limit() {
-        let config = FanoutConfig {
-            max_send_peers: 1,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_send_peers = 1;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let victim = PeerId::random();
@@ -1661,20 +1640,18 @@ mod tests {
 
     #[test]
     fn rotation_replaces_peer_before_requesting_candidate() {
-        let config = FanoutConfig {
-            max_receive_peers: 1,
-            latency_window: 4,
-            ..Default::default()
-        };
-        let latency_window = config.latency_window;
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        fanout_args.score_samples = 4;
+        let score_samples = fanout_args.score_samples;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let current_peer = PeerId::random();
         let candidate_peer = PeerId::random();
         let (mut current_state, mut current_rx) = test_peer_state_with_channel(false);
         let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false);
-        let mut score = Score::new(latency_window);
+        let mut score = Score::new(score_samples);
         score.record(42);
         current_state.receive_enabled = Some(score);
         fanout.connections.insert(current_peer, current_state);
@@ -1711,11 +1688,9 @@ mod tests {
 
     #[test]
     fn multiple_pending_requests_clear_independently() {
-        let config = FanoutConfig {
-            max_receive_peers: 2,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let first_peer = PeerId::random();
@@ -1750,11 +1725,9 @@ mod tests {
 
     #[test]
     fn rejected_peer_is_not_immediately_retried() {
-        let config = FanoutConfig {
-            max_receive_peers: 1,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -1780,7 +1753,7 @@ mod tests {
             .connection_state_mut(&peer)
             .expect("peer exists")
             .receive_enabled_timestamp =
-            Utc::now().timestamp() as u64 - ctx.fanout_config.rotation_interval.as_secs().max(1);
+            Utc::now().timestamp() as u64 - ctx.fanout_args.rotation_interval.max(1);
 
         fanout.maybe_request_receive_peers(&ctx);
         assert_eq!(
@@ -1791,12 +1764,10 @@ mod tests {
 
     #[test]
     fn stale_accept_after_abandoned_request_is_canceled_without_penalty() {
-        let config = FanoutConfig {
-            max_receive_peers: 1,
-            latency_window: 4,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        fanout_args.score_samples = 4;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let abandoned_peer = PeerId::random();
@@ -1837,11 +1808,9 @@ mod tests {
 
     #[test]
     fn silent_receive_peer_can_be_rotated_out_without_samples() {
-        let config = FanoutConfig {
-            max_receive_peers: 2,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let oldest_peer = PeerId::random();
@@ -1880,12 +1849,10 @@ mod tests {
 
     #[test]
     fn peer_score_penalizes_missed_flashblocks() {
-        let config = FanoutConfig {
-            max_receive_peers: 2,
-            latency_window: 4,
-            ..Default::default()
-        };
-        let latency_window = config.latency_window;
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        fanout_args.score_samples = 4;
+        let score_samples = fanout_args.score_samples;
         let mut fanout = FlashblocksP2PState::default();
 
         let steady_peer = PeerId::random();
@@ -1895,8 +1862,8 @@ mod tests {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let builder = SigningKey::from_bytes(&[9; 32]);
 
-        steady_state.receive_enabled = Some(Score::new(latency_window));
-        lagging_state.receive_enabled = Some(Score::new(latency_window));
+        steady_state.receive_enabled = Some(Score::new(score_samples));
+        lagging_state.receive_enabled = Some(Score::new(score_samples));
         steady_state
             .receive_enabled
             .as_mut()
@@ -1939,19 +1906,17 @@ mod tests {
                 .receive_enabled
                 .as_ref()
                 .and_then(Score::value),
-            Some((100 * (latency_window - 1) + MISSED_FLASHBLOCK_PENALTY_NS) / latency_window)
+            Some((100 * (score_samples - 1) + MISSED_FLASHBLOCK_PENALTY_NS) / score_samples)
         );
     }
 
     #[test]
     fn pending_candidate_is_rotated_out_after_missing_blocks() {
-        let config = FanoutConfig {
-            max_receive_peers: 2,
-            latency_window: 4,
-            ..Default::default()
-        };
-        let latency_window = config.latency_window;
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        fanout_args.score_samples = 4;
+        let score_samples = fanout_args.score_samples;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let steady_peer = PeerId::random();
@@ -1964,8 +1929,8 @@ mod tests {
         let candidate_state = test_peer_state(true);
         let replacement_state = test_peer_state(true);
 
-        steady_state.receive_enabled = Some(Score::new(latency_window));
-        rotating_state.receive_enabled = Some(Score::new(latency_window));
+        steady_state.receive_enabled = Some(Score::new(score_samples));
+        rotating_state.receive_enabled = Some(Score::new(score_samples));
         steady_state
             .receive_enabled
             .as_mut()
@@ -2017,8 +1982,7 @@ mod tests {
 
     #[test]
     fn unsolicited_accept_is_penalized() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2031,8 +1995,7 @@ mod tests {
 
     #[test]
     fn unsolicited_reject_is_penalized() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2045,8 +2008,7 @@ mod tests {
 
     #[test]
     fn cancel_without_relationship_is_penalized() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2059,8 +2021,7 @@ mod tests {
 
     #[test]
     fn cancel_only_clears_send_direction() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2077,8 +2038,7 @@ mod tests {
 
     #[test]
     fn cancel_from_sender_is_penalized() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2091,8 +2051,7 @@ mod tests {
 
     #[test]
     fn duplicate_request_when_already_sending_is_penalized() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2105,8 +2064,7 @@ mod tests {
 
     #[test]
     fn receive_retry_cooldown_does_not_penalize_inbound_request() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2121,11 +2079,9 @@ mod tests {
 
     #[test]
     fn repeated_rejected_requests_are_rate_limited() {
-        let config = FanoutConfig {
-            max_send_peers: 0,
-            ..Default::default()
-        };
-        let ctx = test_ctx(config);
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_send_peers = 0;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();
@@ -2141,8 +2097,7 @@ mod tests {
 
     #[test]
     fn control_message_rate_limit_triggers_penalty() {
-        let config = FanoutConfig::default();
-        let ctx = test_ctx(config);
+        let ctx = test_ctx(test_fanout_args());
         let mut fanout = FlashblocksP2PState::default();
 
         let peer = PeerId::random();

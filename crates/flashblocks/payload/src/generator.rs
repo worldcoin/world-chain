@@ -258,7 +258,7 @@ where
 
         let authorization = match (
             &self.override_authorizer_sk,
-            &self.p2p_handler.ctx.builder_sk,
+            self.p2p_handler.builder_sk().ok(),
             can_override,
         ) {
             (Some(override_authorizer_sk), Some(builder_sk), true) => Some(Authorization::new(
