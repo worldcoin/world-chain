@@ -25,28 +25,34 @@ use tracing::{info, trace};
 /// minor skew/races between peers.
 const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 
+/// Represents the current flashblocks receive status for a peer connection.
+#[derive(Clone, Debug, Default)]
+pub enum ReceiveStatus {
+    /// We are not currently receiving flashblocks from this peer.
+    #[default]
+    NotReceiving,
+    /// We are currently receiving flashblocks from this peer.
+    ///
+    /// Score used for adaptive timeouts and peer selection.
+    /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
+    /// counting as 10s.
+    Receiving { score: Score },
+    /// We have sent a request for flashblocks to this peer and are awaiting their response.
+    Reqesting,
+}
+
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
 pub struct FlashblocksConnectionState {
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
-    /// Whether we currently have an outstanding flashblocks request to this peer.
-    pub request_in_flight: bool,
-    /// Whether we intentionally abandoned an in-flight request and should treat a late
-    /// Accept/Reject as stale instead of malicious.
-    pub abandoned_request_in_flight: bool,
     /// Whether we are currently sending flashblocks to this peer.
     pub send_enabled: bool,
-    /// Whether we are currently requesting flashblocks from this peer.
-    ///
-    /// Optional score for this peer connection, used for adaptive timeouts and peer selection.
-    /// Lower is better. Corresponds the moving average of flashblock latency, with missed blocks
-    /// counting as 10s. While `request_in_flight` is true, the peer is only a provisional
-    /// candidate and must not deliver flashblocks yet.
-    pub receive_enabled: Option<Score>,
+    /// Current status of receiving flashblocks from this peer.
+    pub receive_status: ReceiveStatus,
     /// Timestamp of the last receive-side state transition for this peer.
     /// Used for late-message grace checks and receive retry cooldown.
-    pub receive_enabled_timestamp: u64,
+    pub receive_status_timestamp: u64,
     /// Per-peer channel for sending serialized protocol messages to this peer.
     pub outbound_tx: Option<mpsc::UnboundedSender<BytesMut>>,
     /// Number of control messages received in the current rate-limit window.
@@ -59,11 +65,9 @@ impl FlashblocksConnectionState {
     pub(crate) fn new() -> Self {
         Self {
             trusted: false,
-            request_in_flight: false,
-            abandoned_request_in_flight: false,
             send_enabled: false,
-            receive_enabled: None,
-            receive_enabled_timestamp: 0,
+            receive_status: ReceiveStatus::NotReceiving,
+            receive_status_timestamp: 0,
             outbound_tx: None,
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
@@ -325,7 +329,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         let Some(conn_state) = p2p_state.connection_state(&self.peer_id) else {
             return;
         };
-        if conn_state.request_in_flight {
+        if conn_state.request_flashblocks_in_flight.is_some() {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
