@@ -59,7 +59,7 @@ const BROADCAST_BUFFER_CAPACITY: usize = 100;
 const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 10_000_000_000;
 /// Grace window in number of flashblocks to receive late flashblocks from peers before scoring them for missing flashblocks.
 ///
-/// This must be at least long enough to cover the max authorization age to prevent a spam
+/// This must be at least long enough to cover AUTHORIZATION_TIMESTAMP_GRACE_SEC to prevent a spam
 /// attack.
 pub(crate) const RECEIVE_FLASHBLOCK_GRACE_WINDOW: usize = 50;
 
@@ -69,6 +69,8 @@ const MAX_CONTROL_MSGS_PER_WINDOW: u32 = 10;
 
 /// Duration of the per-peer control-message rate-limit window.
 const CONTROL_MSG_WINDOW: Duration = Duration::from_secs(30);
+/// Maximum time to wait for a peer to answer a `RequestFlashblocks` message.
+const RECEIVE_REQUEST_TIMEOUT_SECS: u64 = 2;
 
 /// Maximum time to wait for the network manager to expose the newly connected peer's trust info.
 const PEER_INFO_LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -126,8 +128,10 @@ pub struct ObservedPayload {
     payload_id: PayloadId,
     timestamp: u64,
     flashblock_index: u64,
-    /// Peers from which we've received this flashblock
+    /// Peers from which we've received this flashblock.
     received_peers: HashSet<PeerId>,
+    /// Peers who we have sent this flashblock to.
+    send_peers: HashSet<PeerId>,
 }
 
 /// Protocol state that stores the flashblocks P2P protocol events and coordination data.
@@ -209,6 +213,7 @@ impl FlashblocksP2PState {
             for (peer_id, connection) in &mut self.connections {
                 if connection.receive_status_timestamp < evicted.timestamp + 2
                     && !evicted.received_peers.contains(peer_id)
+                    && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
                 {
                     debug!(
@@ -228,6 +233,7 @@ impl FlashblocksP2PState {
             timestamp: authorization.timestamp,
             flashblock_index: flashblock.index,
             received_peers: HashSet::from([peer_id]),
+            send_peers: HashSet::new(),
         });
 
         true
@@ -249,15 +255,6 @@ impl FlashblocksP2PState {
             .is_some_and(|observed_payload| observed_payload.received_peers.contains(&peer_id))
     }
 
-    /// Sends an already serialized message to a specific peer.
-    fn send_to_peer(&self, peer_id: PeerId, bytes: &BytesMut) {
-        if let Some(conn) = self.connections.get(&peer_id)
-            && let Some(tx) = &conn.outbound_tx
-        {
-            tx.send(bytes.clone()).ok();
-        }
-    }
-
     /// Sends an already serialized message to all connected peers.
     pub(crate) fn send_to_all_peers(&self, bytes: &BytesMut) {
         for conn in self.connections.values() {
@@ -270,7 +267,7 @@ impl FlashblocksP2PState {
     /// Sends a serialized flashblock to peers in the current send set that have not
     /// already delivered that flashblock to us.
     fn send_flashblock_to_send_set(
-        &self,
+        &mut self,
         payload_id: PayloadId,
         flashblock_index: u64,
         bytes: &BytesMut,
@@ -281,6 +278,13 @@ impl FlashblocksP2PState {
             {
                 continue;
             }
+            self.observed_payloads
+                .iter_mut()
+                .find(|observed_payload| {
+                    observed_payload.payload_id == payload_id
+                        && observed_payload.flashblock_index == flashblock_index
+                })
+                .map(|observed_payload| observed_payload.send_peers.insert(*peer_id));
 
             if let Some(tx) = &conn.outbound_tx
                 && tx.send(bytes.clone()).is_ok()
@@ -292,7 +296,12 @@ impl FlashblocksP2PState {
 
     /// Sends a control message directly to a specific peer.
     fn send_direct(&self, peer_id: PeerId, msg: FlashblocksP2PMsg) {
-        self.send_to_peer(peer_id, &msg.encode());
+        let bytes: &BytesMut = &msg.encode();
+        if let Some(conn) = self.connections.get(&peer_id)
+            && let Some(tx) = &conn.outbound_tx
+        {
+            tx.send(bytes.clone()).ok();
+        }
     }
 
     /// Returns `true` if the peer has exceeded the control-message rate limit.
@@ -392,6 +401,24 @@ impl FlashblocksP2PState {
             };
             let rand = rand::rng().random_range(0..candidate_pool.len());
             self.begin_requesting_peer(ctx, candidate_pool[rand]);
+        }
+    }
+
+    fn expire_stale_receive_requests(&mut self, ctx: &FlashblocksP2PCtx) {
+        let now = Utc::now().timestamp() as u64;
+        let mut cleared_any = false;
+
+        for peer_state in self.connections.values_mut() {
+            if matches!(peer_state.receive_status, ReceiveStatus::Requesting)
+                && peer_state.receive_status_timestamp + RECEIVE_REQUEST_TIMEOUT_SECS <= now
+            {
+                Self::clear_receive_state(peer_state, now);
+                cleared_any = true;
+            }
+        }
+
+        if cleared_any {
+            self.maybe_request_receive_peers(ctx);
         }
     }
 
@@ -605,6 +632,7 @@ impl FlashblocksHandle {
             loop {
                 rotation_interval.tick().await;
                 let mut state = moved_handle.state.lock();
+                state.expire_stale_receive_requests(&moved_handle.ctx);
                 state.maybe_request_receive_peers(&moved_handle.ctx);
                 state.maybe_start_rotation(&moved_handle.ctx);
             }
@@ -1745,6 +1773,56 @@ mod tests {
             recv_direct(&mut peer_rx),
             FlashblocksP2PMsg::RequestFlashblocks
         );
+    }
+
+    #[test]
+    fn timed_out_request_is_cleared_and_replaced() {
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        let ctx = test_ctx(fanout_args);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let stale_peer = PeerId::random();
+        let replacement_peer = PeerId::random();
+        let (stale_state, mut stale_rx) = test_peer_state_with_channel(true);
+        let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(false);
+        fanout.connections.insert(stale_peer, stale_state);
+        fanout
+            .connections
+            .insert(replacement_peer, replacement_state);
+
+        fanout.maybe_request_receive_peers(&ctx);
+
+        assert_eq!(
+            peer_state(&fanout, stale_peer).receive_status,
+            ReceiveStatus::Requesting
+        );
+        assert_eq!(
+            recv_direct(&mut stale_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+
+        fanout
+            .connection_state_mut(&stale_peer)
+            .expect("peer exists")
+            .receive_status_timestamp =
+            Utc::now().timestamp() as u64 - RECEIVE_REQUEST_TIMEOUT_SECS;
+
+        fanout.expire_stale_receive_requests(&ctx);
+
+        assert_eq!(
+            peer_state(&fanout, stale_peer).receive_status,
+            ReceiveStatus::NotReceiving
+        );
+        assert_eq!(
+            peer_state(&fanout, replacement_peer).receive_status,
+            ReceiveStatus::Requesting
+        );
+        assert_eq!(
+            recv_direct(&mut replacement_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+        assert!(stale_rx.try_recv().is_err());
     }
 
     #[test]
