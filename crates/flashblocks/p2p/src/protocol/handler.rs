@@ -388,20 +388,8 @@ impl FlashblocksP2PState {
             if candidates.is_empty() {
                 return;
             }
-            let trusted_candidates: Vec<_> = candidates
-                .iter()
-                .filter_map(|(peer_id, trusted)| (*trusted).then_some(*peer_id))
-                .collect();
-            let candidate_pool = if trusted_candidates.is_empty() {
-                candidates
-                    .iter()
-                    .map(|(peer_id, _)| *peer_id)
-                    .collect::<Vec<_>>()
-            } else {
-                trusted_candidates
-            };
-            let rand = rand::rng().random_range(0..candidate_pool.len());
-            self.begin_requesting_peer(candidate_pool[rand]);
+            let rand = rand::rng().random_range(0..candidates.len());
+            self.begin_requesting_peer(candidates[rand].0);
         }
     }
 
@@ -452,17 +440,13 @@ impl FlashblocksP2PState {
             return;
         };
 
-        let mut candidates = self.available_receive_candidates(ctx);
+        let candidates = self.available_receive_candidates(ctx);
         if candidates.is_empty() {
             return;
         }
 
-        let mut rng = rand::rng();
-        candidates.shuffle(&mut rng);
-        let candidate = candidates
-            .iter()
-            .find_map(|(peer_id, trusted)| (*trusted).then_some(*peer_id))
-            .unwrap_or(candidates[0].0);
+        let rand = rand::rng().random_range(0..candidates.len());
+        let candidate = candidates[rand].0;
 
         let evict_timestamp = Utc::now().timestamp() as u64;
         if let Some(evict_state) = self.connection_state_mut(&evict) {
@@ -488,13 +472,9 @@ impl FlashblocksP2PState {
             return Err(());
         }
         let peer_is_trusted = peer_state.trusted;
-        let non_trusted_send_count = self
-            .connections
-            .values()
-            .filter(|s| s.send_enabled && !s.trusted)
-            .count();
+        let send_count = self.connections.values().filter(|s| s.send_enabled).count();
 
-        if !peer_is_trusted && non_trusted_send_count >= ctx.fanout_args.max_send_peers {
+        if !peer_is_trusted && send_count >= ctx.fanout_args.max_send_peers {
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
             return Ok(());
         }
