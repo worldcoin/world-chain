@@ -6,7 +6,10 @@ use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
-use flashblocks_p2p::{monitor, protocol::handler::FlashblocksHandle};
+use flashblocks_p2p::{
+    monitor,
+    protocol::handler::{FlashblocksHandle, PublishingStatus},
+};
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
     p2p::{
@@ -40,6 +43,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, Instant, sleep};
@@ -213,6 +217,56 @@ async fn wait_for_trusted_peers(
     }
 }
 
+async fn wait_for_flashblocks_topology(
+    node: &NodeContext,
+    expected_connections: usize,
+    expected_receive_peers: usize,
+) -> eyre::Result<(Vec<PeerId>, Vec<PeerId>)> {
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let state = node.p2p_handle.state.lock();
+        if state.connections.len() == expected_connections {
+            let receive_peers: Vec<_> = state
+                .connections
+                .iter()
+                .filter_map(|(peer_id, conn)| {
+                    (conn.receive_enabled.is_some() && !conn.request_in_flight).then_some(*peer_id)
+                })
+                .collect();
+            let candidate_peers: Vec<_> = state
+                .connections
+                .iter()
+                .filter_map(|(peer_id, conn)| {
+                    (conn.receive_enabled.is_none()
+                        && !conn.request_in_flight
+                        && !conn.abandoned_request_in_flight)
+                        .then_some(*peer_id)
+                })
+                .collect();
+            drop(state);
+
+            if receive_peers.len() == expected_receive_peers
+                && receive_peers.len() + candidate_peers.len() == expected_connections
+            {
+                return Ok((receive_peers, candidate_peers));
+            }
+        } else {
+            drop(state);
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(eyre!(
+                "timed out waiting for flashblocks topology: expected {expected_connections} connections with {expected_receive_peers} receive peers"
+            ));
+        }
+
+        sleep(poll_interval).await;
+    }
+}
+
 fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
     let sub = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -224,13 +278,18 @@ fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
     Dispatch::new(sub).set_default()
 }
 
-async fn setup_node(
-    exec: TaskExecutor,
-    authorizer_sk: SigningKey,
-    builder_sk: SigningKey,
-    peers: Vec<(PeerId, SocketAddr)>,
-) -> eyre::Result<NodeContext> {
-    setup_node_extended_cfg(exec, authorizer_sk, builder_sk, peers, None, None).await
+fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) -> FlashblocksArgs {
+    FlashblocksArgs {
+        enabled: true,
+        authorizer_vk: Some(authorizer_sk.verifying_key()),
+        builder_sk: Some(builder_sk.clone()),
+        force_publish: false,
+        override_authorizer_sk: None,
+        flashblocks_interval: 200,
+        recommit_interval: 200,
+        access_list: true,
+        fanout: Default::default(),
+    }
 }
 
 async fn setup_node_extended_cfg(
@@ -240,6 +299,7 @@ async fn setup_node_extended_cfg(
     peers: Vec<(PeerId, SocketAddr)>,
     port: Option<u16>,
     p2p_secret_key: Option<PathBuf>,
+    flashblocks_args: Option<FlashblocksArgs>,
 ) -> eyre::Result<NodeContext> {
     let genesis: Genesis = serde_json::from_str(include_str!("assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
@@ -307,16 +367,10 @@ async fn setup_node_extended_cfg(
             rollup: Default::default(),
             builder,
             pbh,
-            flashblocks: Some(FlashblocksArgs {
-                enabled: true,
-                authorizer_vk: Some(authorizer_sk.verifying_key()),
-                builder_sk: Some(builder_sk.clone()),
-                force_publish: false,
-                override_authorizer_sk: None,
-                flashblocks_interval: 200,
-                recommit_interval: 200,
-                access_list: true,
-            }),
+            flashblocks: Some(
+                flashblocks_args
+                    .unwrap_or_else(|| test_flashblocks_args(&authorizer_sk, &builder_sk)),
+            ),
             tx_peers: None,
             disable_bootnodes: true,
         },
@@ -440,7 +494,73 @@ async fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1
     }
 }
 
+async fn publish_flashblock_with_latency(
+    sender: &NodeContext,
+    authorizer: &SigningKey,
+    payload_id: PayloadId,
+    authorization_timestamp: u64,
+    simulated_latency: Duration,
+) -> eyre::Result<()> {
+    let latest_block = sender
+        .provider()
+        .await?
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    let mut payload = base_payload(
+        0,
+        payload_id,
+        0,
+        latest_block.hash(),
+        authorization_timestamp,
+    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos() as i64;
+    payload.metadata.flashblock_timestamp = Some(now - simulated_latency.as_nanos() as i64);
+    let authorization = Authorization::new(
+        payload.payload_id,
+        authorization_timestamp,
+        authorizer,
+        sender.p2p_handle.builder_sk()?.verifying_key(),
+    );
+    let authorized =
+        AuthorizedPayload::new(sender.p2p_handle.builder_sk()?, authorization, payload);
+
+    {
+        let state = sender.p2p_handle.state.lock();
+        state
+            .publishing_status
+            .send_replace(PublishingStatus::Publishing { authorization });
+    }
+    sender.p2p_handle.publish_new(authorized)?;
+    {
+        let state = sender.p2p_handle.state.lock();
+        state
+            .publishing_status
+            .send_replace(PublishingStatus::NotPublishing {
+                active_publishers: Vec::new(),
+            });
+    }
+
+    Ok(())
+}
+
 async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
+    setup_nodes_with_flashblocks_args(n, |_, authorizer, builder| {
+        test_flashblocks_args(authorizer, builder)
+    })
+    .await
+}
+
+async fn setup_nodes_with_flashblocks_args<F>(
+    n: u8,
+    mut make_flashblocks_args: F,
+) -> eyre::Result<NodeTestFixture>
+where
+    F: FnMut(u8, &SigningKey, &SigningKey) -> FlashblocksArgs,
+{
     let mut nodes = Vec::new();
     let mut peers = Vec::new();
     let tasks = TaskManager::new(tokio::runtime::Handle::current());
@@ -449,7 +569,17 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
 
     for i in 0..n {
         let builder = SigningKey::from_bytes(&[(i + 1) % n; 32]);
-        let node = setup_node(exec.clone(), authorizer.clone(), builder, peers.clone()).await?;
+        let flashblocks_args = make_flashblocks_args(i, &authorizer, &builder);
+        let node = setup_node_extended_cfg(
+            exec.clone(),
+            authorizer.clone(),
+            builder,
+            peers.clone(),
+            None,
+            None,
+            Some(flashblocks_args),
+        )
+        .await?;
         if !peers.is_empty() {
             wait_for_trusted_peers(&node, peers.len()).await?;
         }
@@ -673,6 +803,96 @@ async fn test_force_race_condition() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let fixture = setup_nodes_with_flashblocks_args(4, |_, authorizer, builder| {
+        let mut args = test_flashblocks_args(authorizer, builder);
+        args.fanout.max_receive_peers = 2;
+        args.fanout.rotation_interval = 1;
+        args.fanout.score_samples = 4;
+        args
+    })
+    .await?;
+    let nodes = fixture.nodes();
+    let authorizer = fixture.authorizer();
+
+    let (receive_peers, candidate_peers) = wait_for_flashblocks_topology(&nodes[0], 3, 2).await?;
+    assert_eq!(
+        candidate_peers.len(),
+        1,
+        "expected one spare candidate peer"
+    );
+
+    let slow_peer = receive_peers[0];
+    let fast_peer = receive_peers[1];
+    let replacement_peer = candidate_peers[0];
+
+    let peer_map: HashMap<_, _> = nodes
+        .iter()
+        .skip(1)
+        .map(|node| (node.local_node_record.id, node))
+        .collect();
+
+    let fast_node = peer_map
+        .get(&fast_peer)
+        .copied()
+        .expect("fast peer should map to a node");
+    let slow_node = peer_map
+        .get(&slow_peer)
+        .copied()
+        .expect("slow peer should map to a node");
+
+    for (payload_suffix, authorization_timestamp) in [(41, 41_u64), (42, 42), (43, 43), (44, 44)] {
+        publish_flashblock_with_latency(
+            fast_node,
+            authorizer,
+            test_payload_id(payload_suffix),
+            authorization_timestamp,
+            Duration::from_millis(10),
+        )
+        .await?;
+        sleep(Duration::from_millis(50)).await;
+
+        publish_flashblock_with_latency(
+            slow_node,
+            authorizer,
+            test_payload_id(payload_suffix + 10),
+            authorization_timestamp + 10,
+            Duration::from_millis(300),
+        )
+        .await?;
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    let timeout = Duration::from_secs(5);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let (current_receive_peers, _) = wait_for_flashblocks_topology(&nodes[0], 3, 2).await?;
+        if current_receive_peers.contains(&fast_peer)
+            && current_receive_peers.contains(&replacement_peer)
+            && !current_receive_peers.contains(&slow_peer)
+        {
+            break;
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(eyre!(
+                "timed out waiting for peer rotation: fast={fast_peer}, slow={slow_peer}, replacement={replacement_peer}, current_receive_peers={current_receive_peers:?}"
+            ));
+        }
+
+        sleep(poll_interval).await;
+    }
+
+    drop(fixture);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -847,6 +1067,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         vec![],                     // No peers initially
         None,                       // Use random port (we'll capture it)
         Some(p2p_key_path.clone()), // Use deterministic P2P key
+        None,
     )
     .await?;
 
@@ -868,6 +1089,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         vec![(peer1_id, peer1_addr)], // Node1 as trusted peer
         None,                         // Use random port
         None,                         // No deterministic P2P key needed
+        None,
     )
     .await?;
 
@@ -947,6 +1169,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         )], // Configure node2 as trusted peer
         Some(peer1_port),           // Reuse the same port
         Some(p2p_key_path.clone()), // Reuse the same P2P key
+        None,
     )
     .await?;
     let peer1_id_new = node1_restarted.local_node_record.id;
