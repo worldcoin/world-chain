@@ -336,8 +336,7 @@ impl FlashblocksP2PState {
         receive_enabled_timestamp: u64,
     ) {
         peer_state.receive_enabled = None;
-        peer_state.request_in_flight = false;
-        peer_state.abandoned_request_in_flight = false;
+        peer_state.request_flashblocks_in_flight = None;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
     }
 
@@ -346,8 +345,7 @@ impl FlashblocksP2PState {
         receive_enabled_timestamp: u64,
     ) {
         peer_state.receive_enabled = None;
-        peer_state.request_in_flight = false;
-        peer_state.abandoned_request_in_flight = true;
+        peer_state.request_flashblocks_in_flight = None;
         peer_state.receive_enabled_timestamp = receive_enabled_timestamp;
     }
 
@@ -358,8 +356,7 @@ impl FlashblocksP2PState {
             .iter()
             .filter_map(|(peer_id, peer_state)| {
                 if peer_state.receive_enabled.is_none()
-                    && !peer_state.request_in_flight
-                    && !peer_state.abandoned_request_in_flight
+                    && !peer_state.request_flashblocks_in_flight.is_some()
                     && (peer_state.receive_enabled_timestamp == 0
                         || peer_state.receive_enabled_timestamp + retry_cooldown <= now)
                 {
@@ -376,8 +373,7 @@ impl FlashblocksP2PState {
             return;
         };
         let timestamp = Utc::now().timestamp() as u64;
-        peer_state.request_in_flight = true;
-        peer_state.abandoned_request_in_flight = false;
+        peer_state.request_flashblocks_in_flight = Some(timestamp);
         peer_state.receive_enabled = Some(Score::new(ctx.fanout_args.score_samples));
         peer_state.receive_enabled_timestamp = timestamp;
         self.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
@@ -456,7 +452,7 @@ impl FlashblocksP2PState {
         let evict_timestamp = Utc::now().timestamp() as u64;
         let mut should_cancel = false;
         if let Some(evict_state) = self.connection_state_mut(&evict) {
-            if evict_state.request_in_flight {
+            if evict_state.request_flashblocks_in_flight {
                 Self::abandon_receive_request(evict_state, evict_timestamp);
             } else {
                 Self::clear_receive_state(evict_state, evict_timestamp);
@@ -512,8 +508,8 @@ impl FlashblocksP2PState {
             return false;
         };
 
-        if peer_state.request_in_flight {
-            peer_state.request_in_flight = false;
+        if peer_state.request_flashblocks_in_flight {
+            peer_state.request_flashblocks_in_flight = false;
             return false;
         }
 
@@ -537,7 +533,7 @@ impl FlashblocksP2PState {
             return false;
         };
 
-        if peer_state.request_in_flight {
+        if peer_state.request_flashblocks_in_flight {
             Self::clear_receive_state(peer_state, Utc::now().timestamp() as u64);
             self.maybe_request_receive_peers(ctx);
             return false;
@@ -1541,9 +1537,9 @@ mod tests {
 
         fanout.maybe_request_receive_peers(&ctx);
 
-        assert!(peer_state(&fanout, trusted_peer).request_in_flight);
+        assert!(peer_state(&fanout, trusted_peer).request_flashblocks_in_flight);
         assert!(peer_state(&fanout, trusted_peer).receive_enabled.is_some());
-        assert!(!peer_state(&fanout, untrusted_peer).request_in_flight);
+        assert!(!peer_state(&fanout, untrusted_peer).request_flashblocks_in_flight);
         assert_eq!(
             recv_direct(&mut trusted_rx),
             FlashblocksP2PMsg::RequestFlashblocks
@@ -1600,7 +1596,7 @@ mod tests {
         fanout.maybe_start_rotation(&ctx);
 
         assert!(peer_state(&fanout, current_peer).receive_enabled.is_none());
-        assert!(peer_state(&fanout, candidate_peer).request_in_flight);
+        assert!(peer_state(&fanout, candidate_peer).request_flashblocks_in_flight);
         assert!(
             peer_state(&fanout, candidate_peer)
                 .receive_enabled
@@ -1618,7 +1614,7 @@ mod tests {
 
         assert!(!fanout.handle_accept(&ctx, candidate_peer));
 
-        assert!(!peer_state(&fanout, candidate_peer).request_in_flight);
+        assert!(!peer_state(&fanout, candidate_peer).request_flashblocks_in_flight);
         assert!(
             peer_state(&fanout, candidate_peer)
                 .receive_enabled
@@ -1642,8 +1638,8 @@ mod tests {
 
         fanout.maybe_request_receive_peers(&ctx);
 
-        assert!(peer_state(&fanout, first_peer).request_in_flight);
-        assert!(peer_state(&fanout, second_peer).request_in_flight);
+        assert!(peer_state(&fanout, first_peer).request_flashblocks_in_flight);
+        assert!(peer_state(&fanout, second_peer).request_flashblocks_in_flight);
 
         assert_eq!(
             recv_direct(&mut first_rx),
@@ -1657,8 +1653,8 @@ mod tests {
         assert!(!fanout.handle_accept(&ctx, first_peer));
         assert!(!fanout.handle_accept(&ctx, second_peer));
 
-        assert!(!peer_state(&fanout, first_peer).request_in_flight);
-        assert!(!peer_state(&fanout, second_peer).request_in_flight);
+        assert!(!peer_state(&fanout, first_peer).request_flashblocks_in_flight);
+        assert!(!peer_state(&fanout, second_peer).request_flashblocks_in_flight);
         assert!(peer_state(&fanout, first_peer).receive_enabled.is_some());
         assert!(peer_state(&fanout, second_peer).receive_enabled.is_some());
     }
@@ -1682,7 +1678,7 @@ mod tests {
 
         assert!(!fanout.handle_reject(&ctx, peer));
 
-        assert!(!peer_state(&fanout, peer).request_in_flight);
+        assert!(!peer_state(&fanout, peer).request_flashblocks_in_flight);
         assert!(peer_state(&fanout, peer).receive_enabled.is_none());
         assert!(peer_rx.try_recv().is_err());
 
@@ -1716,7 +1712,7 @@ mod tests {
         let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(true);
 
         abandoned_state.receive_enabled = Some(Score::new(4));
-        abandoned_state.request_in_flight = true;
+        abandoned_state.request_flashblocks_in_flight = true;
         abandoned_state.receive_enabled_timestamp = 1;
 
         fanout.connections.insert(abandoned_peer, abandoned_state);
@@ -1775,7 +1771,7 @@ mod tests {
         fanout.maybe_start_rotation(&ctx);
 
         assert!(peer_state(&fanout, oldest_peer).receive_enabled.is_none());
-        assert!(peer_state(&fanout, replacement_peer).request_in_flight);
+        assert!(peer_state(&fanout, replacement_peer).request_flashblocks_in_flight);
 
         assert_eq!(
             recv_direct(&mut oldest_rx),
@@ -1917,7 +1913,7 @@ mod tests {
                 .receive_enabled
                 .is_none()
         );
-        assert!(peer_state(&fanout, replacement_peer).request_in_flight);
+        assert!(peer_state(&fanout, replacement_peer).request_flashblocks_in_flight);
     }
 
     #[test]
@@ -1973,7 +1969,7 @@ mod tests {
         assert!(!fanout.handle_cancel(&ctx, peer));
         assert!(!peer_state(&fanout, peer).send_enabled);
         assert!(peer_state(&fanout, peer).receive_enabled.is_some());
-        assert!(!peer_state(&fanout, peer).request_in_flight);
+        assert!(!peer_state(&fanout, peer).request_flashblocks_in_flight);
     }
 
     #[test]

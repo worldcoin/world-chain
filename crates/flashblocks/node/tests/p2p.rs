@@ -233,7 +233,8 @@ async fn wait_for_flashblocks_topology(
                 .connections
                 .iter()
                 .filter_map(|(peer_id, conn)| {
-                    (conn.receive_enabled.is_some() && !conn.request_in_flight).then_some(*peer_id)
+                    (conn.receive_enabled.is_some() && !conn.request_flashblocks_in_flight)
+                        .then_some(*peer_id)
                 })
                 .collect();
             let candidate_peers: Vec<_> = state
@@ -241,7 +242,7 @@ async fn wait_for_flashblocks_topology(
                 .iter()
                 .filter_map(|(peer_id, conn)| {
                     (conn.receive_enabled.is_none()
-                        && !conn.request_in_flight
+                        && !conn.request_flashblocks_in_flight
                         && !conn.abandoned_request_in_flight)
                         .then_some(*peer_id)
                 })
