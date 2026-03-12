@@ -26,7 +26,7 @@ use tracing::{info, trace};
 const AUTHORIZATION_TIMESTAMP_GRACE_SEC: u64 = 10;
 
 /// Represents the current flashblocks receive status for a peer connection.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ReceiveStatus {
     /// We are not currently receiving flashblocks from this peer.
     #[default]
@@ -38,7 +38,7 @@ pub enum ReceiveStatus {
     /// counting as 10s.
     Receiving { score: Score },
     /// We have sent a request for flashblocks to this peer and are awaiting their response.
-    Reqesting,
+    Requesting,
 }
 
 /// Shared connection metadata for a single peer connection.
@@ -329,33 +329,36 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         let Some(conn_state) = p2p_state.connection_state(&self.peer_id) else {
             return;
         };
-        if conn_state.request_flashblocks_in_flight.is_some() {
-            tracing::warn!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                payload_id = %msg.payload_id,
-                index = msg.index,
-                "received flashblock before request was accepted",
-            );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
-            return;
-        }
-        if conn_state.receive_enabled.is_none() {
-            if conn_state.receive_enabled_timestamp + 2 < authorization.timestamp {
+        match &conn_state.receive_status {
+            ReceiveStatus::Requesting => {
                 tracing::warn!(
                     target: "flashblocks::p2p",
                     peer_id = %self.peer_id,
                     payload_id = %msg.payload_id,
                     index = msg.index,
-                    "received flashblock from peer outside receive window",
+                    "received flashblock before request was accepted",
                 );
                 self.protocol
                     .network
                     .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+                return;
             }
-            return;
+            ReceiveStatus::NotReceiving => {
+                if conn_state.receive_status_timestamp + 2 < authorization.timestamp {
+                    tracing::warn!(
+                        target: "flashblocks::p2p",
+                        peer_id = %self.peer_id,
+                        payload_id = %msg.payload_id,
+                        index = msg.index,
+                        "received flashblock from peer outside receive window",
+                    );
+                    self.protocol
+                        .network
+                        .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+                }
+                return;
+            }
+            ReceiveStatus::Receiving { .. } => {}
         }
 
         // Check if this peer is spamming us with the same payload index.
@@ -405,9 +408,9 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 .expect("time went backwards");
             let latency = now - flashblock_timestamp;
             metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            if let Some(score) = p2p_state
+            if let Some(ReceiveStatus::Receiving { score }) = p2p_state
                 .connection_state_mut(&self.peer_id)
-                .and_then(|peer_state| peer_state.receive_enabled.as_mut())
+                .map(|peer_state| &mut peer_state.receive_status)
             {
                 score.record(latency);
             }
@@ -615,7 +618,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 }
 
 /// A lightweight moving average with a configurable smoothing window.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Score {
     value: Option<i64>,
     window: i64,
