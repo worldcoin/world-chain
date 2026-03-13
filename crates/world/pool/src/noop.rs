@@ -13,6 +13,7 @@ use reth::transaction_pool::{
 };
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::Recovered;
+use revm_primitives::map::FbBuildHasher;
 use tokio::sync::mpsc::{self, Receiver};
 
 #[derive(Debug, Clone, Default)]
@@ -318,16 +319,16 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         None
     }
 
-    fn add_transactions_with_origins(
+    async fn add_transactions_with_origins(
         &self,
-        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
-    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        _transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         vec![]
     }
 
     fn prune_transactions(
         &self,
-        hashes: Vec<TxHash>,
+        _hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }

@@ -169,14 +169,14 @@ alloy-rlp = { version = "0.3.10", default-features = false, features = [
     "derive",
 ] }
 alloy-eips = { version = "1.1.2", default-features = false }
-alloy-eip7928 = { version = "0.3.3", default-features = false, features = [
-    "serde",
-    "rlp",
-] }
-# alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "307eae2", default-features = false, features = [
+# alloy-eip7928 = { version = "0.3.3", default-features = false, features = [
 #     "serde",
 #     "rlp",
 # ] }
+alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "307eae2", default-features = false, features = [
+    "serde",
+    "rlp",
+] }
 alloy-genesis = { version = "1.1.2", default-features = false }
 alloy-rpc-types-debug = "1.1.2"
 alloy-signer = { version = "1.1.2", default-features = false }

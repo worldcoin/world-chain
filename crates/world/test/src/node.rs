@@ -618,6 +618,14 @@ impl StateProvider for WorldChainNoopProvider {
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Ok(None)
+    }
 }
 
 impl HashedPostStateProvider for WorldChainNoopProvider {
@@ -784,16 +792,17 @@ where
         }
     }
 
-    async fn validate_transactions(
+    fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+        + Send,
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         let futures = transactions
             .into_iter()
             .map(|(origin, tx)| self.validate_transaction(origin, tx))
             .collect::<Vec<_>>();
 
-        join_all(futures).await
+        join_all(futures)
     }
 
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}

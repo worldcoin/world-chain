@@ -266,6 +266,16 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/eips?rev=307eae2#307eae28f0d56cf7693fed662441c9d3f294a671"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "serde",
+]
+
+[[package]]
+name = "alloy-eip7928"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8222b1d88f9a6d03be84b0f5e76bb60cd83991b43ad8ab6477f0e4a7809b98d"
@@ -286,7 +296,7 @@ dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
  "alloy-eip7702",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.3",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde",
@@ -3755,7 +3765,7 @@ name = "flashblocks-builder"
 version = "1.11.3"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
+ "alloy-eip7928 0.1.0",
  "alloy-eips",
  "alloy-genesis",
  "alloy-op-evm",
@@ -3948,7 +3958,7 @@ name = "flashblocks-primitives"
 version = "1.11.3"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
+ "alloy-eip7928 0.1.0",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
@@ -8267,7 +8277,7 @@ version = "1.11.3"
 source = "git+https://github.com/worldcoin/reth?rev=4c1b4a1#4c1b4a1c5467fbe5e8108c4544202fa3e61262c7"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -9976,7 +9986,7 @@ source = "git+https://github.com/worldcoin/reth?rev=4c1b4a1#4c1b4a1c5467fbe5e810
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
@@ -10051,7 +10061,7 @@ name = "reth-rpc-api"
 version = "1.11.3"
 source = "git+https://github.com/worldcoin/reth?rev=4c1b4a1#4c1b4a1c5467fbe5e8108c4544202fa3e61262c7"
 dependencies = [
- "alloy-eip7928",
+ "alloy-eip7928 0.3.3",
  "alloy-eips",
  "alloy-genesis",
  "alloy-json-rpc",
@@ -10912,7 +10922,7 @@ version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "311720d4f0f239b041375e7ddafdbd20032a33b7bae718562ea188e188ed9fd3"
 dependencies = [
- "alloy-eip7928",
+ "alloy-eip7928 0.3.3",
  "bitflags 2.11.0",
  "revm-bytecode",
  "revm-primitives",

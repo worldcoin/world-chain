@@ -131,7 +131,7 @@ where
             flashblocks_state.register_payload_events(payload_events);
 
             ctx.task_executor()
-                .spawn_critical("payload builder service", Box::pin(payload_service));
+                .spawn_critical_task("payload builder service", Box::pin(payload_service));
 
             Ok(payload_service_handle)
         } else {
@@ -153,7 +153,7 @@ where
             );
 
             ctx.task_executor()
-                .spawn_critical("payload builder service", Box::pin(payload_service));
+                .spawn_critical_task("payload builder service", Box::pin(payload_service));
 
             Ok(payload_service_handle)
         }

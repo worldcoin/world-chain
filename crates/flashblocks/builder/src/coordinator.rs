@@ -103,7 +103,7 @@ impl FlashblocksExecutionCoordinator {
         let pending_block = self.pending_block.clone();
 
         ctx.task_executor()
-            .spawn_critical("flashblocks executor", async move {
+            .spawn_critical_task("flashblocks executor", async move {
                 while let Some(flashblock) = stream.next().await {
                     let provider = provider.clone();
                     if let Err(e) = process_flashblock(

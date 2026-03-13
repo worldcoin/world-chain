@@ -20,7 +20,7 @@ use reth::{
     builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
     chainspec::EthChainSpec,
     network::PeersHandleProvider,
-    tasks::TaskManager,
+    tasks::TaskExecutor,
 };
 use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
@@ -132,7 +132,7 @@ pub async fn setup<T>(
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
-    TaskManager,
+    TaskExecutor,
     Environment<OpEngineTypes>,
     TxSpammer,
 )>
@@ -159,7 +159,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
-    TaskManager,
+    TaskExecutor,
     Environment<OpEngineTypes>,
     TxSpammer,
 )>
@@ -188,7 +188,7 @@ pub async fn setup_with_tx_peers<T>(
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
-    TaskManager,
+    TaskExecutor,
     Environment<OpEngineTypes>,
     TxSpammer,
 )>
@@ -217,7 +217,7 @@ async fn setup_inner<T>(
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
-    TaskManager,
+    TaskExecutor,
     Environment<OpEngineTypes>,
     TxSpammer,
 )>
@@ -230,8 +230,7 @@ where
     }
     let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
+    let exec = TaskExecutor::default();
 
     let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(op_chain_spec.clone())
         .with_chain(op_chain_spec.clone())
@@ -379,7 +378,7 @@ where
         spammer.rpc.push(client);
     }
 
-    Ok((0..5, node_contexts, tasks, environment, spammer))
+    Ok((0..5, node_contexts, exec, environment, spammer))
 }
 
 pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
