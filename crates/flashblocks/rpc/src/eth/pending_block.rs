@@ -1,6 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
 use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{B256, BlockNumber};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
 use reth_provider::{BlockReader, BlockReaderIdExt, ReceiptProvider};
@@ -11,6 +12,15 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, PendingBlock, block::BlockAndReceipts};
 
 use crate::eth::FlashblocksEthApi;
+
+fn is_pending_block_fresh(
+    pending_number: BlockNumber,
+    pending_parent_hash: B256,
+    latest_number: BlockNumber,
+    latest_hash: B256,
+) -> bool {
+    pending_number > latest_number && pending_parent_hash == latest_hash
+}
 
 impl<N, Rpc> LoadPendingBlock for FlashblocksEthApi<N, Rpc>
 where
@@ -40,32 +50,40 @@ where
     async fn local_pending_block(
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
+        let latest = self
+            .provider()
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+
         // check the pending block from the executor
         if let Some(pending_block) = self.pending_block.as_ref() {
             let pending_block = pending_block.borrow().clone();
 
             if let Some(pending_block) = pending_block {
                 let block = pending_block.recovered_block;
-                let receipts = pending_block
-                    .execution_output
-                    .receipts
-                    .clone()
-                    .into_iter()
-                    .collect::<Vec<_>>(); // always a single block executed through the state executor
+                if is_pending_block_fresh(
+                    block.header().number,
+                    block.header().parent_hash,
+                    latest.number,
+                    latest.hash(),
+                ) {
+                    let receipts = pending_block
+                        .execution_output
+                        .receipts
+                        .clone()
+                        .into_iter()
+                        .collect::<Vec<_>>(); // always a single block executed through the state executor
 
-                let block_and_receipts = BlockAndReceipts {
-                    block,
-                    receipts: receipts.into(),
-                };
-                return Ok(Some(block_and_receipts));
+                    let block_and_receipts = BlockAndReceipts {
+                        block,
+                        receipts: receipts.into(),
+                    };
+                    return Ok(Some(block_and_receipts));
+                }
             }
         }
 
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
-        let latest = self
-            .provider()
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
         let block_id = latest.hash().into();
         let block = self
             .provider()
@@ -87,5 +105,25 @@ where
 
     fn pending_block_kind(&self) -> reth_rpc_eth_types::builder::config::PendingBlockKind {
         self.inner.pending_block_kind()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pending_block_fresh;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn fresh_pending_block_must_be_ahead_of_latest_and_build_on_latest_hash() {
+        let latest_hash = B256::from([1; 32]);
+
+        assert!(is_pending_block_fresh(11, latest_hash, 10, latest_hash));
+        assert!(!is_pending_block_fresh(10, latest_hash, 10, latest_hash));
+        assert!(!is_pending_block_fresh(
+            12,
+            B256::from([2; 32]),
+            10,
+            latest_hash
+        ));
     }
 }
