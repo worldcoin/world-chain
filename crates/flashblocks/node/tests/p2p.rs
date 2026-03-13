@@ -8,8 +8,10 @@ use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{
     monitor,
-    protocol::connection::ReceiveStatus,
-    protocol::handler::{FlashblocksHandle, PublishingStatus},
+    protocol::{
+        connection::ReceiveStatus,
+        handler::{FlashblocksHandle, PublishingStatus},
+    },
 };
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
@@ -228,8 +230,10 @@ async fn wait_for_flashblocks_topology(
     let start = Instant::now();
 
     loop {
-        let state = node.p2p_handle.state.lock();
-        if state.connections.len() == expected_connections {
+        // Scope the MutexGuard so it is provably dropped before the .await below.
+        let (connections_len, receive_peers, candidate_peers) = {
+            let state = node.p2p_handle.state.lock();
+            let connections_len = state.connections.len();
             let receive_peers: Vec<_> = state
                 .connections
                 .iter()
@@ -242,19 +246,17 @@ async fn wait_for_flashblocks_topology(
                 .connections
                 .iter()
                 .filter_map(|(peer_id, conn)| {
-                    (conn.receive_status == ReceiveStatus::NotReceiving)
-                        .then_some(*peer_id)
+                    (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
                 })
                 .collect();
-            drop(state);
+            (connections_len, receive_peers, candidate_peers)
+        };
 
-            if receive_peers.len() == expected_receive_peers
-                && receive_peers.len() + candidate_peers.len() == expected_connections
-            {
-                return Ok((receive_peers, candidate_peers));
-            }
-        } else {
-            drop(state);
+        if connections_len == expected_connections
+            && receive_peers.len() == expected_receive_peers
+            && receive_peers.len() + candidate_peers.len() == expected_connections
+        {
+            return Ok((receive_peers, candidate_peers));
         }
 
         if start.elapsed() >= timeout {
@@ -1015,10 +1017,8 @@ async fn test_peer_reputation() -> eyre::Result<()> {
             .send_serialized_to_all_peers(bytes.clone());
         sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
-        if let Some(rep) = rep_0 {
-            if rep < 0 {
-                reputation_was_negative = true;
-            }
+        if matches!(rep_0, Some(rep) if rep < 0) {
+            reputation_was_negative = true;
         }
         if nodes[1].network_handle.get_all_peers().await?.is_empty() {
             peer_banned = true;
