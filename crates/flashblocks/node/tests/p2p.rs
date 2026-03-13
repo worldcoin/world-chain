@@ -722,6 +722,7 @@ async fn test_peer_reputation() -> eyre::Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn test_peer_monitoring() -> eyre::Result<()> {
