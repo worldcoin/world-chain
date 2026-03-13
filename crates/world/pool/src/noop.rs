@@ -271,7 +271,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         vec![]
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> HashSet<alloy_primitives::Address, FbBuildHasher<20>> {
         Default::default()
     }
 
@@ -316,5 +316,19 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         _on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
+    }
+
+    fn add_transactions_with_origins(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        vec![]
+    }
+
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
     }
 }
