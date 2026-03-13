@@ -40,11 +40,6 @@ where
     async fn local_pending_block(
         &self,
     ) -> Result<Option<BlockAndReceipts<<N as RpcNodeCore>::Primitives>>, Self::Error> {
-        let latest = self
-            .provider()
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
-
         // check the pending block from the executor
         if let Some(pending_block) = self.pending_block.as_ref() {
             let pending_block = pending_block.borrow().clone();
@@ -67,6 +62,10 @@ where
         }
 
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
+        let latest = self
+            .provider()
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
         let block_id = latest.hash().into();
         let block = self
             .provider()

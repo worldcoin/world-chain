@@ -27,10 +27,10 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
+pin-project.workspace = true
 chrono.workspace = true
 reth-tasks = { workspace = true }
 rand.workspace = true
-pin-project = "1.0.1"
 
 [dev-dependencies]
 reth-network-api.workspace = true

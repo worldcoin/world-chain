@@ -8,10 +8,8 @@ use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{
     monitor,
-    protocol::{
-        connection::ReceiveStatus,
-        handler::{FlashblocksHandle, PublishingStatus},
-    },
+    protocol::connection::ReceiveStatus,
+    protocol::handler::{FlashblocksHandle, PublishingStatus},
 };
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
@@ -244,7 +242,8 @@ async fn wait_for_flashblocks_topology(
                 .connections
                 .iter()
                 .filter_map(|(peer_id, conn)| {
-                    (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
+                    (conn.receive_status == ReceiveStatus::NotReceiving)
+                        .then_some(*peer_id)
                 })
                 .collect();
             drop(state);
