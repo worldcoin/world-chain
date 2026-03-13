@@ -651,17 +651,17 @@ mod tests {
             changes: vec![AccountChanges {
                 address: Address::default(),
                 storage_changes: vec![SlotChanges {
-                    slot: FixedBytes::with_last_byte(0x2).into(),
+                    slot: FixedBytes::with_last_byte(0x2),
                     changes: vec![StorageChange {
                         block_access_index: 1,
-                        new_value: FixedBytes::with_last_byte(0x3).into(),
+                        new_value: FixedBytes::with_last_byte(0x3),
                     }],
                 }],
                 code_changes: vec![CodeChange {
                     block_access_index: 2,
                     new_code: Bytes::from_static(b"\xCA\xFE"),
                 }],
-                storage_reads: vec![FixedBytes::with_last_byte(0x4)].into(),
+                storage_reads: vec![FixedBytes::with_last_byte(0x4)],
                 balance_changes: vec![BalanceChange {
                     block_access_index: 3,
                     post_balance: U256::from(1_000_000u64),
