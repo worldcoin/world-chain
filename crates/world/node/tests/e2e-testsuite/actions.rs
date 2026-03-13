@@ -5,6 +5,7 @@ use alloy_eips::{BlockId, Decodable2718};
 use alloy_rpc_types::{Transaction, TransactionRequest};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use eyre::eyre::{Result, eyre};
+use flashblocks_p2p::protocol::event::{FlashblocksEvent, WorldChainEventsStream};
 use flashblocks_primitives::{
     flashblocks::{Flashblock, Flashblocks},
     p2p::Authorization,
@@ -24,8 +25,9 @@ use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
 use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::TransactionSigned;
+use reth_provider::CanonStateSubscriptions;
 use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch};
@@ -1789,6 +1791,7 @@ pub struct DynamicValidateFlashblocks {
     pub beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
     pub chain_spec: Arc<OpChainSpec>,
     pub state: BlockProductionState,
+    pub provider: Arc<dyn CanonStateSubscriptions<Primitives = OpPrimitives> + Send + Sync>,
 }
 
 impl DynamicValidateFlashblocks {
@@ -1797,12 +1800,14 @@ impl DynamicValidateFlashblocks {
         beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
         chain_spec: Arc<OpChainSpec>,
         state: BlockProductionState,
+        provider: impl CanonStateSubscriptions<Primitives = OpPrimitives> + Send + Sync + 'static,
     ) -> Self {
         Self {
             flashblocks_handle,
             beacon_handle,
             chain_spec,
             state,
+            provider: Arc::new(provider),
         }
     }
 }
@@ -1813,7 +1818,18 @@ impl Action<OpEngineTypes> for DynamicValidateFlashblocks {
         env: &'a mut Environment<OpEngineTypes>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let stream = Box::pin(self.flashblocks_handle.live_flashblock_stream());
+            let stream = Box::pin(
+                WorldChainEventsStream::new(
+                    self.flashblocks_handle.ctx.flashblock_tx.subscribe(),
+                    &*self.provider,
+                )
+                .filter_map(|event| async {
+                    match event {
+                        FlashblocksEvent::Pending(fb) => Some(fb),
+                        _ => None,
+                    }
+                }),
+            );
 
             let mut validate_action = ValidateFlashblocksWithState::new(
                 stream,
@@ -1834,7 +1850,18 @@ impl ReadOnlyAction for DynamicValidateFlashblocks {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let mut flashblocks = Flashblocks::default();
-            let mut stream = Box::pin(self.flashblocks_handle.live_flashblock_stream());
+            let mut stream = Box::pin(
+                WorldChainEventsStream::new(
+                    self.flashblocks_handle.ctx.flashblock_tx.subscribe(),
+                    &*self.provider,
+                )
+                .filter_map(|event| async {
+                    match event {
+                        FlashblocksEvent::Pending(fb) => Some(fb),
+                        _ => None,
+                    }
+                }),
+            );
 
             // Wait for payload to be available
             let target_hash = loop {

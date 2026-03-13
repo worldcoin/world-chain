@@ -10,13 +10,15 @@ use alloy_primitives::{Bytes, b64};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use eyre::eyre::eyre;
-use futures::future::Either;
+use flashblocks_p2p::protocol::event::{FlashblocksEvent, WorldChainEventsStream};
+use futures::{StreamExt, future::Either};
 use reth::{
     chainspec::EthChainSpec,
     network::{NetworkSyncUpdater, SyncState},
 };
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_optimism_node::utils::optimism_payload_attributes;
+use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{Address, B256, U256};
 use std::{
@@ -406,11 +408,22 @@ async fn test_flashblocks() -> eyre::Result<()> {
     .await;
 
     let cannon_flashblocks_stream = Box::pin(
-        builder_context
-            .as_ref()
-            .unwrap()
-            .flashblocks_handle
-            .live_flashblock_stream(),
+        WorldChainEventsStream::new(
+            builder_context
+                .as_ref()
+                .unwrap()
+                .flashblocks_handle
+                .ctx
+                .flashblock_tx
+                .subscribe(),
+            &builder_node.node.inner.provider,
+        )
+        .filter_map(|event| async {
+            match event {
+                FlashblocksEvent::Pending(fb) => Some(fb),
+                _ => None,
+            }
+        }),
     );
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
@@ -483,12 +496,17 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
     );
 
-    let cannon_flashblocks_stream = nodes[0]
-        .ext_context
-        .clone()
-        .unwrap()
-        .flashblocks_handle
-        .live_flashblock_stream();
+    let handle = &nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+    let cannon_flashblocks_stream = WorldChainEventsStream::new(
+        handle.ctx.flashblock_tx.subscribe(),
+        &nodes[0].node.inner.provider,
+    )
+    .filter_map(|event| async {
+        match event {
+            FlashblocksEvent::Pending(fb) => Some(fb),
+            _ => None,
+        }
+    });
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
@@ -647,12 +665,17 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
     spammer.spawn(20, nodes[0].node.rpc_url());
 
-    let cannon_flashblocks_stream = nodes[0]
-        .ext_context
-        .clone()
-        .unwrap()
-        .flashblocks_handle
-        .live_flashblock_stream();
+    let handle = &nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+    let cannon_flashblocks_stream = WorldChainEventsStream::new(
+        handle.ctx.flashblock_tx.subscribe(),
+        &nodes[0].node.inner.provider,
+    )
+    .filter_map(|event| async {
+        match event {
+            FlashblocksEvent::Pending(fb) => Some(fb),
+            _ => None,
+        }
+    });
 
     let (sender, mut rx) = tokio::sync::mpsc::channel(1);
     let timestamp = crate::setup::current_timestamp();
@@ -1089,6 +1112,7 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
                 basic_beacon_handle,
                 chain_spec.clone(),
                 state.clone(),
+                follower_0.node.inner.provider.clone(),
             ),
         )
         // 3. Query validated blocks and receipts in parallel (AFTER mining/validation)

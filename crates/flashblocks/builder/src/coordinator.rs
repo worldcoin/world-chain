@@ -1,7 +1,10 @@
 use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_p2p::protocol::{
+    event::{FlashblocksEvent, WorldChainEventsStream},
+    handler::FlashblocksHandle,
+};
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 use futures::StreamExt as _;
 use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
@@ -21,7 +24,9 @@ use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBu
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_payload_util::BestPayloadTransactions;
-use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    CanonStateSubscriptions, ChainSpecProvider, HeaderProvider, StateProviderFactory,
+};
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
 use std::{
     sync::Arc,
@@ -92,10 +97,16 @@ impl FlashblocksExecutionCoordinator {
     pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
     where
         Node: FullNodeTypes,
-        Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+        Node::Provider: StateProviderFactory
+            + HeaderProvider<Header = alloy_consensus::Header>
+            + CanonStateSubscriptions,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
-        let mut stream = self.p2p_handle.live_flashblock_stream();
+        let mut stream = WorldChainEventsStream::new(
+            self.p2p_handle.ctx.flashblock_tx.subscribe(),
+            ctx.provider(),
+        );
+
         let this = self.clone();
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
@@ -104,17 +115,34 @@ impl FlashblocksExecutionCoordinator {
 
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
-                while let Some(flashblock) = stream.next().await {
-                    let provider = provider.clone();
-                    if let Err(e) = process_flashblock(
-                        provider,
-                        &evm_config,
-                        &this,
-                        chain_spec.clone(),
-                        flashblock,
-                        pending_block.clone(),
-                    ) {
-                        error!("error processing flashblock: {e:#?}")
+                while let Some(event) = stream.next().await {
+                    match event {
+                        FlashblocksEvent::Pending(flashblock) => {
+                            if let Err(e) = process_flashblock(
+                                provider.clone(),
+                                &evm_config,
+                                &this,
+                                chain_spec.clone(),
+                                flashblock,
+                                pending_block.clone(),
+                            ) {
+                                error!("error processing flashblock: {e:#?}")
+                            }
+                        }
+                        FlashblocksEvent::Canon(tip) => {
+                            // Clear pending block if it was built on the now-canonical tip,
+                            // since the canonical chain has superseded it.
+                            pending_block.send_if_modified(|block| {
+                                let matches = block
+                                    .as_ref()
+                                    .is_some_and(|b| b.recovered_block().parent_num_hash() == tip);
+
+                                if matches {
+                                    *block = None;
+                                }
+                                matches
+                            });
+                        }
                     }
                 }
             });
@@ -233,34 +261,10 @@ where
         flashblocks.base()
     };
 
-    let f = || {
-        provider
-            .sealed_header_by_hash(base.parent_hash)?
-            .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))
-    };
-
-    let sealed_header = f
-        .retry(
-            backon::ExponentialBuilder::default()
-                .with_min_delay(FETCH_PARENT_HEADER_MIN_DELAY)
-                .with_max_delay(FETCH_PARENT_HEADER_MAX_DELAY)
-                .with_max_times(10),
-        )
-        .notify(|e, duration| {
-            warn!(
-                "waiting for parent header {}: {e:#?}. waited {:#?} so far",
-                base.parent_hash, duration
-            )
-        })
-        .call()
-        .inspect_err(|e| {
-            error!(
-                flashblock_index = index,
-                parent_hash = %base.parent_hash,
-                error = %e,
-                "failed to fetch parent header after multiple attempts"
-            )
-        })?;
+    let sealed_header = provider
+        .sealed_header_by_hash(base.parent_hash)
+        .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
+        .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
 
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
