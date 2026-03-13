@@ -1,6 +1,6 @@
 use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PeerMsg,
-    PublishingStatus,
+    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, PeerMsg, PublishingStatus,
+    MAX_FLASHBLOCK_INDEX,
 };
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
@@ -17,7 +17,7 @@ use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnectio
 use reth_network::{cache::LruMap, types::ReputationChangeKind};
 use std::{
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, trace};
@@ -233,6 +233,13 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             this.handle_stop_publish(authorized.into_unchecked());
                         }
                     }
+                }
+                _ => {
+                    tracing::trace!(
+                        target: "flashblocks::p2p",
+                        peer_id = %this.peer_id,
+                        "received unhandled p2p message variant",
+                    );
                 }
             }
         }

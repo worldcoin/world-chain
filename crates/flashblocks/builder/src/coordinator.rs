@@ -2,7 +2,7 @@ use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::{
-    event::{FlashblocksEvent, WorldChainEventsStream},
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
     handler::FlashblocksHandle,
 };
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
@@ -12,9 +12,11 @@ use parking_lot::RwLock;
 use reth::{
     payload::EthPayloadBuilderAttributes,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase},
+    rpc::types::BlockNumHash,
 };
 use reth_basic_payload_builder::PayloadConfig;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{DeferredTrieData, ExecutedBlock};
+use reth_engine_tree::tree::executor::WorkloadExecutor;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
 use reth_node_builder::BuilderContext;
@@ -32,8 +34,16 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::broadcast;
+use tokio::sync::{Semaphore, broadcast::{self, Sender}, oneshot};
 use tracing::{error, trace, warn};
+
+/// Maximum number of concurrent flashblock processing tasks on the thread pool.
+const MAX_THREAD_POOL_SIZE: usize = 4;
+
+/// Task handle for deferred trie computation. Intentionally empty for now —
+/// cancellation flows through `oneshot::Sender` drop, not explicit events.
+#[derive(Clone, Debug)]
+pub enum TrieTaskHandle {}
 
 use crate::{
     bal_executor::CommittedState,
@@ -69,7 +79,10 @@ pub struct FlashblocksExecutionCoordinatorInner {
     /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
     /// Broadcast channel for built payload events
-    payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
+    payload_events: Option<Sender<Events<OpEngineTypes>>>,
+    /// Deferred trie handles from prior flashblocks in the current epoch.
+    /// Used as ancestors for the next flashblock's [`DeferredTrieData`].
+    ancestor_handles: Vec<DeferredTrieData>,
 }
 
 impl FlashblocksExecutionCoordinator {
@@ -84,6 +97,7 @@ impl FlashblocksExecutionCoordinator {
             flashblocks: Default::default(),
             latest_payload: None,
             payload_events: None,
+            ancestor_handles: Vec::new(),
         }));
 
         Self {
@@ -102,50 +116,135 @@ impl FlashblocksExecutionCoordinator {
             + CanonStateSubscriptions,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
-        let mut stream = WorldChainEventsStream::new(
-            self.p2p_handle.ctx.flashblock_tx.subscribe(),
-            ctx.provider(),
-        );
+        let provider = ctx.provider().clone();
+        let mut stream: WorldChainEventsStream<TrieTaskHandle> =
+            self.p2p_handle.event_stream(provider.clone());
 
         let this = self.clone();
-        let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
 
         let pending_block = self.pending_block.clone();
 
+        let workload = WorkloadExecutor::default();
+        let semaphore = Arc::new(Semaphore::new(MAX_THREAD_POOL_SIZE));
+
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
+                let mut shutdown_tx: Option<oneshot::Sender<()>> = None;
+
                 while let Some(event) = stream.next().await {
                     match event {
-                        FlashblocksEvent::Pending(flashblock) => {
-                            if let Err(e) = process_flashblock(
-                                provider.clone(),
-                                &evm_config,
-                                &this,
-                                chain_spec.clone(),
+                        WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) => {
+                            this.on_flashblock(
                                 flashblock,
-                                pending_block.clone(),
-                            ) {
-                                error!("error processing flashblock: {e:#?}")
-                            }
+                                &mut shutdown_tx,
+                                &semaphore,
+                                &workload,
+                                &provider,
+                                &evm_config,
+                                &chain_spec,
+                                &pending_block,
+                            )
+                            .await;
                         }
-                        FlashblocksEvent::Canon(tip) => {
-                            // Clear pending block if it was built on the now-canonical tip,
-                            // since the canonical chain has superseded it.
-                            pending_block.send_if_modified(|block| {
-                                let matches = block
-                                    .as_ref()
-                                    .is_some_and(|b| b.recovered_block().parent_num_hash() == tip);
-
-                                if matches {
-                                    *block = None;
-                                }
-                                matches
-                            });
+                        WorldChainEvent::Chain(ChainEvent::Canon(tip)) => {
+                            this.on_canon(tip, &mut shutdown_tx, &pending_block);
                         }
+                        WorldChainEvent::Event(_) => {}
                     }
                 }
             });
+    }
+
+    /// Handles a new pending flashblock event. Cancels any previous in-flight
+    /// task, acquires a thread pool permit, and spawns processing on the
+    /// [`WorkloadExecutor`].
+    async fn on_flashblock<Provider>(
+        &self,
+        flashblock: FlashblocksPayloadV1,
+        shutdown_tx: &mut Option<oneshot::Sender<()>>,
+        semaphore: &Arc<Semaphore>,
+        workload: &WorkloadExecutor,
+        provider: &Provider,
+        evm_config: &OpEvmConfig,
+        chain_spec: &Arc<OpChainSpec>,
+        pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    ) where
+        Provider: StateProviderFactory
+            + HeaderProvider<Header = alloy_consensus::Header>
+            + ChainSpecProvider<ChainSpec = OpChainSpec>
+            + Clone
+            + 'static,
+    {
+        // Cancel any previous in-flight task
+        shutdown_tx.take();
+
+        let (tx, rx) = oneshot::channel::<()>();
+        *shutdown_tx = Some(tx);
+
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore closed");
+
+        let provider = provider.clone();
+        let evm_config = evm_config.clone();
+        let this = self.clone();
+        let chain_spec = chain_spec.clone();
+        let pending_block = pending_block.clone();
+
+        spawn_blocking_with_shutdown_signal(workload, rx, move || {
+            let result = process_flashblock(
+                provider,
+                &evm_config,
+                &this,
+                chain_spec,
+                flashblock,
+                pending_block,
+            );
+            drop(permit);
+            if let Err(e) = &result {
+                error!("error processing flashblock: {e:#?}");
+            }
+            result
+        });
+    }
+
+    /// Handles a canonical chain tip update. Cancels any in-flight task,
+    /// clears stale ancestor trie handles, and clears the pending block if
+    /// it was built on the now-canonical tip.
+    fn on_canon(
+        &self,
+        tip: BlockNumHash,
+        shutdown_tx: &mut Option<oneshot::Sender<()>>,
+        pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    ) {
+        // Drop the shutdown sender — cancels in-flight task
+        shutdown_tx.take();
+
+        // Clear ancestor handles if the epoch matches the canonical tip or is stale.
+        {
+            let mut inner = self.inner.write();
+            let should_clear = inner.latest_payload.as_ref().is_some_and(|(p, _)| {
+                p.block().hash() == tip.hash || p.block().header().number < tip.number
+            });
+            if should_clear {
+                inner.ancestor_handles.clear();
+            }
+        }
+
+        // Clear pending block if it was built on the now-canonical tip.
+        pending_block.send_if_modified(|block| {
+            let matches = block
+                .as_ref()
+                .is_some_and(|b| b.recovered_block().parent_num_hash() == tip);
+
+            if matches {
+                *block = None;
+            }
+            matches
+        });
     }
 
     pub fn publish_built_payload(
@@ -209,6 +308,33 @@ impl FlashblocksExecutionCoordinator {
     }
 }
 
+/// Spawns a blocking task on the [`WorkloadExecutor`] thread pool, racing it
+/// against a shutdown signal. If the shutdown receiver resolves first (sender
+/// dropped), the task result is discarded.
+fn spawn_blocking_with_shutdown_signal<F, R>(
+    executor: &WorkloadExecutor,
+    shutdown_rx: oneshot::Receiver<()>,
+    f: F,
+) where
+    F: FnOnce() -> R + Send + 'static,
+    R: std::fmt::Debug + Send + 'static,
+{
+    let task = executor.spawn_blocking(f);
+
+    tokio::spawn(async move {
+        match futures::future::select(task, shutdown_rx).await {
+            futures::future::Either::Left((result, _)) => {
+                if let Err(e) = result {
+                    error!("flashblock thread pool task panicked: {e:#?}");
+                }
+            }
+            futures::future::Either::Right(_) => {
+                trace!("flashblock processing cancelled by shutdown signal");
+            }
+        }
+    });
+}
+
 fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
@@ -228,6 +354,7 @@ where
         ref mut flashblocks,
         ref mut latest_payload,
         ref mut payload_events,
+        ..
     } = *coordinator.inner.write();
 
     let flashblock = Flashblock { flashblock };
@@ -237,14 +364,16 @@ where
         && latest_payload.1 >= flashblock.flashblock.index
     {
         // Already processed this flashblock. This happens when set directly
-        // from publish_build_payload. Since we already built the payload, no need
+        // from publish_built_payload. Since we already built the payload, no need
         // to do it again.
-        pending_block.send_replace(
-            latest_payload
-                .0
-                .executed_block()
-                .map(|p| p.into_executed_payload()),
-        );
+        if let Some(executed) = latest_payload.0.executed_block() {
+            let block = ExecutedBlock::with_deferred_trie_data(
+                executed.recovered_block.clone(),
+                executed.execution_output.clone(),
+                DeferredTrieData::ready(Default::default()),
+            );
+            pending_block.send_replace(Some(block));
+        }
         return Ok(());
     }
 
@@ -255,6 +384,7 @@ where
     // we will error and return here.
     let base = if flashblocks.is_new_payload(&flashblock)? {
         *latest_payload = None;
+        coordinator.inner.write().ancestor_handles.clear();
         // safe unwrap from check in is_new_payload
         flashblock.base().unwrap()
     } else {
@@ -265,6 +395,7 @@ where
         .sealed_header_by_hash(base.parent_hash)
         .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
         .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
+    let anchor_hash = sealed_header.hash();
 
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
@@ -401,7 +532,39 @@ where
 
     flashblocks.push(flashblock)?;
 
-    pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
+    // Build ExecutedBlock with deferred trie data — sorting happens in background
+    if let Some(executed) = payload.executed_block() {
+        let (hashed_state, trie_updates) = match (&executed.hashed_state, &executed.trie_updates) {
+            (either::Left(hs), either::Left(tu)) => (hs.clone(), tu.clone()),
+            _ => unreachable!("payload builder always produces unsorted (Left) variants"),
+        };
+
+        let ancestors = coordinator.inner.read().ancestor_handles.clone();
+
+        let deferred = DeferredTrieData::pending(
+            hashed_state,
+            trie_updates,
+            anchor_hash,
+            ancestors,
+        );
+
+        // Spawn background sort so wait_cloned() finds it ready
+        let deferred_clone = deferred.clone();
+        rayon::spawn(move || {
+            deferred_clone.wait_cloned();
+        });
+
+        let block = ExecutedBlock::with_deferred_trie_data(
+            executed.recovered_block.clone(),
+            executed.execution_output.clone(),
+            deferred.clone(),
+        );
+
+        pending_block.send_replace(Some(block));
+
+        // Track this handle for future ancestors
+        coordinator.inner.write().ancestor_handles.push(deferred);
+    }
 
     trace!(
         target: "flashblocks::state_executor",

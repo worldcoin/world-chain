@@ -8,7 +8,8 @@ use alloy_primitives::{
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
+use flashblocks_builder::FlashblocksPayloadBuilderConfig;
+use flashblocks_cli::{FanoutArgs, FlashblocksArgs};
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
@@ -104,6 +105,7 @@ pub fn test_config_with_peers_and_gossip(
             recommit_interval: 50,
             flashblocks_interval: 200,
             access_list: true,
+            fanout: FanoutArgs::default(),
         })
     } else {
         None

@@ -68,6 +68,7 @@ reth = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-cli-util = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-cli = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-engine-primitives = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
+reth-engine-tree = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f" }
 reth-evm = { git = "https://github.com/worldcoin/reth", rev = "15d0a8f", features = [
     "op",
 ] }
@@ -256,6 +257,7 @@ url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
 either = { version = "1.15.0", default-features = false }
+pin-project = "1.0.1"
 
 # Test
 testcontainers = "0.27"

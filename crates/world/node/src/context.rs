@@ -396,6 +396,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let authorizer_vk = flashblocks.authorizer_vk.unwrap_or_else(|| {
             flashblocks
                 .override_authorizer_sk
+                .as_ref()
                 .expect("flashblocks authorizer_vk or override_authorizer_sk required")
                 .verifying_key()
         });
@@ -405,8 +406,10 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             authorizer_vk.as_bytes().encode_hex::<String>()
         );
 
-        let builder_sk = flashblocks.builder_sk.clone();
-        let flashblocks_handle = FlashblocksHandle::new(authorizer_vk, builder_sk.clone());
+        let flashblocks_handle = FlashblocksHandle::new(
+            authorizer_vk,
+            flashblocks.builder_sk.clone(),
+        );
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
