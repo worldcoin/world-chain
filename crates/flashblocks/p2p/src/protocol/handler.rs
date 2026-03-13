@@ -16,7 +16,7 @@ use flashblocks_primitives::{
 use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
-use rand::{Rng, seq::SliceRandom};
+use rand::Rng;
 use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
@@ -387,20 +387,28 @@ impl FlashblocksP2PState {
             if candidates.is_empty() {
                 return;
             }
-            let trusted_candidates: Vec<_> = candidates
-                .iter()
-                .filter_map(|(peer_id, trusted)| (*trusted).then_some(*peer_id))
-                .collect();
-            let candidate_pool = if trusted_candidates.is_empty() {
+
+            // Prefer trusted candidates; fall back to all candidates when none are trusted.
+            let trusted_count = candidates.iter().filter(|(_, t)| *t).count();
+            let pool_len = if trusted_count > 0 {
+                trusted_count
+            } else {
+                candidates.len()
+            };
+            let pick = rand::rng().random_range(0..pool_len);
+
+            let candidate = if trusted_count > 0 {
                 candidates
                     .iter()
-                    .map(|(peer_id, _)| *peer_id)
-                    .collect::<Vec<_>>()
+                    .filter(|(_, t)| *t)
+                    .nth(pick)
+                    .map(|(p, _)| *p)
             } else {
-                trusted_candidates
-            };
-            let rand = rand::rng().random_range(0..candidate_pool.len());
-            self.begin_requesting_peer(candidate_pool[rand]);
+                candidates.get(pick).map(|(p, _)| *p)
+            }
+            .expect("pick index is within bounds");
+
+            self.begin_requesting_peer(candidate);
         }
     }
 
@@ -456,8 +464,12 @@ impl FlashblocksP2PState {
             return;
         }
 
+        // Shuffle candidates using Fisher-Yates (avoids needing SliceRandom trait import).
         let mut rng = rand::rng();
-        candidates.shuffle(&mut rng);
+        for i in (1..candidates.len()).rev() {
+            let j = rng.random_range(0..=i);
+            candidates.swap(i, j);
+        }
         let candidate = candidates
             .iter()
             .find_map(|(peer_id, trusted)| (*trusted).then_some(*peer_id))
