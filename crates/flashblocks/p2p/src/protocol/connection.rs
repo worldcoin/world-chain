@@ -215,6 +215,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RequestFlashblocks => {
+                    trace!(
+                        target: "flashblocks::p2p",
+                        peer_id = %this.peer_id,
+                        "received RequestFlashblocks from peer",
+                    );
                     if this
                         .protocol
                         .handle
@@ -227,6 +232,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::AcceptFlashblocks => {
+                    trace!(
+                        target: "flashblocks::p2p",
+                        peer_id = %this.peer_id,
+                        "received AcceptFlashblocks from peer",
+                    );
                     if this
                         .protocol
                         .handle
@@ -239,6 +249,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RejectFlashblocks => {
+                    trace!(
+                        target: "flashblocks::p2p",
+                        peer_id = %this.peer_id,
+                        "received RejectFlashblocks from peer",
+                    );
                     if this
                         .protocol
                         .handle
@@ -251,6 +266,11 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::CancelFlashblocks => {
+                    trace!(
+                        target: "flashblocks::p2p",
+                        peer_id = %this.peer_id,
+                        "received CancelFlashblocks from peer",
+                    );
                     if this
                         .protocol
                         .handle
