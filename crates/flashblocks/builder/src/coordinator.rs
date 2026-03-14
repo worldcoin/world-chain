@@ -118,16 +118,17 @@ impl FlashblocksExecutionCoordinator {
         let provider = ctx.provider().clone();
         let p2p_state = self.p2p_handle.state.clone();
         let mut stream: WorldChainEventsStream<TrieTaskHandle> =
-            self.p2p_handle.event_stream(provider.clone(), move |event| {
-                if let WorldChainEvent::Chain(ce) = event
-                    && let ChainEvent::Pending(fb) = ce.as_ref()
-                {
-                    let mut state = p2p_state.lock();
-                    state.flushed_payload_id = Some(fb.payload_id);
-                    state.flushed_index = fb.index;
-                }
-                None
-            });
+            self.p2p_handle
+                .event_stream(provider.clone(), move |event| {
+                    if let WorldChainEvent::Chain(ce) = event
+                        && let ChainEvent::Pending(fb) = ce.as_ref()
+                    {
+                        let mut state = p2p_state.lock();
+                        state.flushed_payload_id = Some(fb.payload_id);
+                        state.flushed_index = fb.index;
+                    }
+                    None
+                });
 
         let this = self.clone();
         let chain_spec = ctx.chain_spec().clone();

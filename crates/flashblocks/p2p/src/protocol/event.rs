@@ -7,9 +7,9 @@
 
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::{
+    Stream, StreamExt,
     future::{self},
     stream::{self, PollNext},
-    Stream, StreamExt,
 };
 use reth::{
     api::NodePrimitives, payload::PayloadId, providers::CanonStateSubscriptions,

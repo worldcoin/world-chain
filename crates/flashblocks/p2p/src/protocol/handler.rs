@@ -1,6 +1,7 @@
 use crate::protocol::{
     connection::{FlashblocksConnection, FlashblocksConnectionState, ReceiveStatus, Score},
-    error::FlashblocksP2PError, event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
+    error::FlashblocksP2PError,
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
 };
 use alloy_rlp::BytesMut;
 use chrono::Utc;
@@ -628,20 +629,12 @@ impl FlashblocksHandle {
     /// Canon events automatically update the P2P state's `canon_tip` so
     /// `publish()` rejects stale flashblocks. The caller's `hook` is applied
     /// after the canon_tip update.
-    pub fn event_stream<T, P, N, F>(
-        &self,
-        provider: P,
-        hook: F,
-    ) -> WorldChainEventsStream<T>
+    pub fn event_stream<T, P, N, F>(&self, provider: P, hook: F) -> WorldChainEventsStream<T>
     where
         T: Send + Clone + Unpin + 'static,
         P: reth::providers::CanonStateSubscriptions<Primitives = N> + Clone + Send + Sync + 'static,
         N: reth::api::NodePrimitives,
-        F: FnMut(
-                &WorldChainEvent<T>,
-            ) -> Option<WorldChainEvent<T>>
-            + Send
-            + 'static,
+        F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
     {
         let state = self.state.clone();
         let mut user_hook = hook;
