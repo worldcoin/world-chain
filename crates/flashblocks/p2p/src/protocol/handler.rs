@@ -18,6 +18,7 @@ use futures::{Stream, StreamExt as _};
 use parking_lot::Mutex;
 use rand::Rng;
 use reth::{payload::PayloadId, rpc::types::BlockNumHash};
+
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
 use reth_network::Peers;
@@ -368,6 +369,11 @@ impl FlashblocksP2PState {
         let timestamp = Utc::now().timestamp() as u64;
         peer_state.receive_status = ReceiveStatus::Requesting;
         peer_state.receive_status_timestamp = timestamp;
+        debug!(
+            target: "flashblocks::p2p",
+            %peer_id,
+            "sending RequestFlashblocks to peer",
+        );
         self.send_direct(peer_id, FlashblocksP2PMsg::RequestFlashblocks);
     }
 
@@ -398,10 +404,15 @@ impl FlashblocksP2PState {
         let now = Utc::now().timestamp() as u64;
         let mut cleared_any = false;
 
-        for peer_state in self.connections.values_mut() {
+        for (peer_id, peer_state) in &mut self.connections {
             if matches!(peer_state.receive_status, ReceiveStatus::Requesting)
                 && peer_state.receive_status_timestamp + RECEIVE_REQUEST_TIMEOUT_SECS <= now
             {
+                debug!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    "receive request timed out, clearing peer",
+                );
                 Self::clear_receive_state(peer_state, now);
                 cleared_any = true;
             }
@@ -449,6 +460,13 @@ impl FlashblocksP2PState {
         let rand = rand::rng().random_range(0..candidates.len());
         let candidate = candidates[rand].0;
 
+        debug!(
+            target: "flashblocks::p2p",
+            evicted_peer = %evict,
+            new_peer = %candidate,
+            "rotating receive peer",
+        );
+
         let evict_timestamp = Utc::now().timestamp() as u64;
         if let Some(evict_state) = self.connection_state_mut(&evict) {
             Self::clear_receive_state(evict_state, evict_timestamp);
@@ -461,6 +479,11 @@ impl FlashblocksP2PState {
     /// Returns `Err` if the peer should receive a reputation penalty.
     fn handle_request(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
+            warn!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                "rejecting RequestFlashblocks: rate limit exceeded",
+            );
             return Err(());
         }
 
@@ -469,17 +492,35 @@ impl FlashblocksP2PState {
         };
 
         if peer_state.send_enabled {
-            // Already sending to this peer — repeated request is spam.
+            warn!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                "rejecting RequestFlashblocks: already sending to peer",
+            );
             return Err(());
         }
         let peer_is_trusted = peer_state.trusted;
         let send_count = self.connections.values().filter(|s| s.send_enabled).count();
 
         if !peer_is_trusted && send_count >= ctx.fanout_args.max_send_peers {
+            debug!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                send_count,
+                max_send_peers = ctx.fanout_args.max_send_peers,
+                "rejecting RequestFlashblocks: send set full",
+            );
             self.send_direct(peer_id, FlashblocksP2PMsg::RejectFlashblocks);
             return Ok(());
         }
 
+        info!(
+            target: "flashblocks::p2p",
+            %peer_id,
+            trusted = peer_is_trusted,
+            send_count = send_count + 1,
+            "accepted RequestFlashblocks, adding peer to send set",
+        );
         let peer_state = self.connection_state_mut(&peer_id).expect("peer exists");
         peer_state.send_enabled = true;
         self.send_direct(peer_id, FlashblocksP2PMsg::AcceptFlashblocks);
@@ -498,13 +539,26 @@ impl FlashblocksP2PState {
 
         match peer_state.receive_status {
             ReceiveStatus::Requesting => {
+                info!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    "peer accepted our receive request, now receiving flashblocks",
+                );
                 peer_state.receive_status = ReceiveStatus::Receiving {
                     score: Score::new(ctx.fanout_args.score_samples),
                 };
                 Ok(())
             }
             // Unsolicited accept — we never asked this peer.
-            _ => Err(()),
+            _ => {
+                warn!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    status = ?peer_state.receive_status,
+                    "received unsolicited AcceptFlashblocks",
+                );
+                Err(())
+            }
         }
     }
 
@@ -520,12 +574,25 @@ impl FlashblocksP2PState {
 
         match peer_state.receive_status {
             ReceiveStatus::Requesting => {
+                info!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    "peer rejected our receive request, will try another peer",
+                );
                 Self::clear_receive_state(peer_state, Utc::now().timestamp() as u64);
                 self.maybe_request_receive_peers(ctx);
                 Ok(())
             }
             // Unsolicited reject — we never asked this peer.
-            _ => Err(()),
+            _ => {
+                warn!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    status = ?peer_state.receive_status,
+                    "received unsolicited RejectFlashblocks",
+                );
+                Err(())
+            }
         }
     }
 
@@ -540,10 +607,19 @@ impl FlashblocksP2PState {
         };
 
         if !peer_state.send_enabled {
-            // Cancel is only valid from a receiver to its sender.
+            warn!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                "received CancelFlashblocks from peer we are not sending to",
+            );
             return Err(());
         }
 
+        info!(
+            target: "flashblocks::p2p",
+            %peer_id,
+            "peer cancelled flashblocks, removing from send set",
+        );
         peer_state.send_enabled = false;
         Ok(())
     }
@@ -730,12 +806,33 @@ impl FlashblocksHandle {
         conn_state.outbound_tx = Some(outbound_tx);
         conn_state.trusted = trusted;
         state.connections.insert(peer_id, conn_state);
+
+        info!(
+            target: "flashblocks::p2p",
+            %peer_id,
+            trusted,
+            total_peers = state.connections.len(),
+            "flashblocks peer connected",
+        );
+
         state.maybe_request_receive_peers(&self.ctx);
     }
 
     pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        state.connections.remove(&peer_id);
+        let removed = state.connections.remove(&peer_id);
+
+        if let Some(conn_state) = &removed {
+            info!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                was_sending = conn_state.send_enabled,
+                receive_status = ?conn_state.receive_status,
+                remaining_peers = state.connections.len(),
+                "flashblocks peer disconnected",
+            );
+        }
+
         state.maybe_request_receive_peers(&self.ctx);
     }
 
