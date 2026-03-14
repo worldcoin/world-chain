@@ -3,7 +3,9 @@ use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
 use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
-use alloy_primitives::{Address, B256, Bytes, FixedBytes, TxKind, U256, bytes, hex, keccak256};
+use alloy_primitives::{
+    Address, B256, Bytes, FixedBytes, StorageKey, TxKind, U256, bytes, hex, keccak256,
+};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
@@ -32,13 +34,14 @@ use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuil
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BytecodeReader, StateProvider, StateProviderBox,
+    BlockIdReader, BlockNumReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
 use reth_trie_common::HashedPostState;
 use revm::{
     DatabaseRef,
     database::{BundleState, InMemoryDB},
+    primitives::StorageValue,
     state::AccountInfo,
 };
 use std::{
@@ -810,9 +813,17 @@ impl StateProvider for TestStateProvider {
     fn storage(
         &self,
         account: Address,
-        storage_key: alloy_primitives::StorageKey,
+        storage_key: StorageKey,
     ) -> reth_provider::ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.db.storage_ref(account, storage_key.into()).ok())
+    }
+
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        todo!()
     }
 }
 
