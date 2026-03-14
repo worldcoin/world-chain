@@ -152,6 +152,10 @@ pub struct FlashblocksP2PState {
     /// Most recent canonical tip. Updated by the stream hook.
     /// Used to reject stale flashblocks in `publish()`.
     pub canon_tip: Option<BlockNumHash>,
+    /// Last flashblock flushed through the stream to the coordinator.
+    /// Only flashblocks at or ahead of this cursor should be peered.
+    pub flushed_payload_id: Option<PayloadId>,
+    pub flushed_index: u64,
     /// Flashblocks observed from network peers, tracked until their receive grace windows expire.
     pub observed_payloads: VecDeque<ObservedPayload>,
     /// All currently connected peers and their connection state.
@@ -168,6 +172,8 @@ impl Default for FlashblocksP2PState {
             payload_timestamp: 0,
             flashblock_timestamp: 0,
             canon_tip: None,
+            flushed_payload_id: None,
+            flushed_index: 0,
             observed_payloads: VecDeque::new(),
             connections: HashMap::new(),
         }
@@ -641,10 +647,10 @@ impl FlashblocksHandle {
         let mut user_hook = hook;
 
         let combined_hook = move |event: &WorldChainEvent<T>| {
-            if let WorldChainEvent::Chain(ce) = event {
-                if let ChainEvent::Canon(tip) = ce.as_ref() {
-                    state.lock().canon_tip = Some(*tip);
-                }
+            if let WorldChainEvent::Chain(ce) = event
+                && let ChainEvent::Canon(tip) = ce.as_ref()
+            {
+                state.lock().canon_tip = Some(*tip);
             }
             user_hook(event)
         };
@@ -1089,12 +1095,11 @@ impl FlashblocksP2PCtx {
         }
 
         // Reject flashblocks for epochs that have already been canonicalized.
-        if let Some(canon_tip) = &state.canon_tip {
-            if let Some(base) = &payload.base {
-                if base.block_number.saturating_sub(1) <= canon_tip.number {
-                    return;
-                }
-            }
+        if let Some(canon_tip) = &state.canon_tip
+            && let Some(base) = &payload.base
+            && base.block_number.saturating_sub(1) <= canon_tip.number
+        {
+            return;
         }
 
         if authorization.timestamp > state.payload_timestamp {

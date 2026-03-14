@@ -7,9 +7,9 @@
 
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::{
-    Stream, StreamExt,
     future::{self},
     stream::{self, PollNext},
+    Stream, StreamExt,
 };
 use reth::{
     api::NodePrimitives, payload::PayloadId, providers::CanonStateSubscriptions,
@@ -99,7 +99,7 @@ pub struct WorldChainEventsStream<T> {
     st: WorldChainEventNotificationsStream<T>,
 }
 
-impl<T: Send + Clone + Unpin + 'static> WorldChainEventsStream<T> {
+impl<T: Send + Unpin + 'static> WorldChainEventsStream<T> {
     /// Creates a new [`WorldChainEventsStream`] by merging a flashblock
     /// receiver with canonical chain notifications from `provider`.
     pub fn new<P, N: NodePrimitives>(
@@ -168,7 +168,7 @@ impl<T: Send + Clone + Unpin + 'static> WorldChainEventsStream<T> {
     }
 }
 
-impl<T: Clone + Unpin + Send> Stream for WorldChainEventsStream<T> {
+impl<T: Unpin + Send> Stream for WorldChainEventsStream<T> {
     type Item = WorldChainEvent<T>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -277,10 +277,11 @@ impl BufferedFlashblocks {
         };
 
         // Stale check
-        if let Some(tip) = &self.canon_tip {
-            if base.timestamp <= tip.number {
-                return false;
-            }
+        if self
+            .canon_tip
+            .is_some_and(|tip| base.timestamp <= tip.number)
+        {
+            return false;
         }
 
         self.parent_num_hash = BlockNumHash {

@@ -30,13 +30,9 @@ use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
-use std::{
-    panic::AssertUnwindSafe,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{panic::AssertUnwindSafe, sync::Arc, time::Instant};
 use tokio::sync::{
-    OwnedSemaphorePermit, Semaphore,
+    Semaphore, SemaphorePermit,
     broadcast::{self, Sender},
     oneshot,
 };
@@ -45,8 +41,8 @@ use tracing::{error, trace};
 /// Maximum number of concurrent flashblock processing tasks on the thread pool.
 const MAX_THREAD_POOL_SIZE: usize = 4;
 
-/// Task handle for deferred trie computation. Intentionally empty for now —
-/// cancellation flows through `oneshot::Sender` drop, not explicit events.
+/// Placeholder for future task handle variants. Currently unused — the
+/// hook updates P2P state directly via the flushed cursor.
 #[derive(Clone, Debug)]
 pub enum TrieTaskHandle {}
 
@@ -58,15 +54,9 @@ use crate::{
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
-/// The maximum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MAX_DELAY: Duration = Duration::from_millis(2000);
-
-/// The minimum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(100);
-
 /// Semaphore locking the [`WorkloadExecutor`] thread pool for flashblock processing tasks.
 /// Ensures the Pending Block is always in sync when a concurrent task is spawned.
-const PENDING_BLOCK_WRITE_PERMIT: Semaphore = Semaphore::const_new(1);
+static PENDING_BLOCK_WRITE_PERMIT: Semaphore = Semaphore::const_new(1);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -126,8 +116,18 @@ impl FlashblocksExecutionCoordinator {
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
         let provider = ctx.provider().clone();
+        let p2p_state = self.p2p_handle.state.clone();
         let mut stream: WorldChainEventsStream<TrieTaskHandle> =
-            self.p2p_handle.event_stream(provider.clone(), |_| None);
+            self.p2p_handle.event_stream(provider.clone(), move |event| {
+                if let WorldChainEvent::Chain(ce) = event
+                    && let ChainEvent::Pending(fb) = ce.as_ref()
+                {
+                    let mut state = p2p_state.lock();
+                    state.flushed_payload_id = Some(fb.payload_id);
+                    state.flushed_index = fb.index;
+                }
+                None
+            });
 
         let this = self.clone();
         let chain_spec = ctx.chain_spec().clone();
@@ -137,7 +137,7 @@ impl FlashblocksExecutionCoordinator {
         let workload = WorkloadExecutor::default();
         let task_permit = Arc::new(Semaphore::new(MAX_THREAD_POOL_SIZE));
 
-        let database_permit = Arc::new(PENDING_BLOCK_WRITE_PERMIT);
+        let database_permit = &PENDING_BLOCK_WRITE_PERMIT;
 
         ctx.task_executor()
             .spawn_critical("flashblocks executor", async move {
@@ -159,7 +159,7 @@ impl FlashblocksExecutionCoordinator {
                                     flashblock,
                                     &mut inflight_shutdown,
                                     &task_permit,
-                                    database_permit.clone(),
+                                    database_permit,
                                     &workload,
                                     &provider,
                                     &evm_config,
@@ -191,7 +191,7 @@ impl FlashblocksExecutionCoordinator {
         flashblock: FlashblocksPayloadV1,
         shutdown_tx: &mut Option<oneshot::Sender<()>>,
         task_permit: &Arc<Semaphore>,
-        database_permit: Arc<Semaphore>,
+        database_permit: &'static Semaphore,
         workload: &WorkloadExecutor,
         provider: &Provider,
         evm_config: &OpEvmConfig,
@@ -341,10 +341,10 @@ impl FlashblocksExecutionCoordinator {
 fn spawn_blocking_io_with_shutdown_signal<F>(
     executor: &WorkloadExecutor,
     shutdown_rx: oneshot::Receiver<()>,
-    database_permit: Arc<Semaphore>,
+    database_permit: &'static Semaphore,
     f: F,
 ) where
-    F: FnOnce(OwnedSemaphorePermit) + Send + 'static,
+    F: FnOnce(SemaphorePermit<'static>) + Send + 'static,
 {
     let task = executor.spawn_blocking(move || {
         let f = AssertUnwindSafe(move || {
@@ -353,7 +353,7 @@ fn spawn_blocking_io_with_shutdown_signal<F>(
                 .expect("failed to build runtime for permit acquisition");
 
             let permit = rt
-                .block_on(database_permit.acquire_owned())
+                .block_on(database_permit.acquire())
                 .expect("database semaphore closed");
 
             f(permit);
@@ -380,7 +380,7 @@ fn spawn_blocking_io_with_shutdown_signal<F>(
 }
 
 fn process_flashblock<Provider>(
-    database_permit: OwnedSemaphorePermit,
+    database_permit: SemaphorePermit<'static>,
     provider: Provider,
     evm_config: &OpEvmConfig,
     coordinator: &FlashblocksExecutionCoordinator,
