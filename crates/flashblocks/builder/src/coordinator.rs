@@ -247,7 +247,6 @@ impl FlashblocksExecutionCoordinator {
                     index,
                     "error processing flashblock: {e:#?}"
                 );
-                EXECUTION.errors.increment(1);
             }
         });
     }
@@ -255,15 +254,6 @@ impl FlashblocksExecutionCoordinator {
     /// Handles a canonical chain tip update. Cancels any in-flight task,
     /// clears stale ancestor trie handles, and clears the pending block if
     /// it was built on the now-canonical tip.
-    #[tracing::instrument(
-        target = "flashblocks::coordinator",
-        skip_all,
-        fields(
-            tip_number = tip.number,
-            tip_hash = %tip.hash,
-            is_stale,
-        )
-    )]
     fn on_canon(
         &self,
         tip: BlockNumHash,
@@ -274,8 +264,7 @@ impl FlashblocksExecutionCoordinator {
         // Only cancel in-flight work and clear ancestor handles if the current
         // epoch is at or behind the canonical tip (stale). If the epoch is
         // ahead of the tip, the work is still valid.
-        let is_stale = epoch_block_number.is_none_or(|n| n <= tip.number);
-        tracing::Span::current().record("is_stale", is_stale);
+        let is_stale = epoch_block_number.is_some_and(|n| n <= tip.number);
 
         if is_stale {
             debug!(

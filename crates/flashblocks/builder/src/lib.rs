@@ -255,10 +255,6 @@ pub(crate) fn spawn_blocking_io_with_shutdown_signal<F>(
                 .block_on(database_permit.acquire())
                 .expect("database semaphore closed");
 
-            EXECUTION
-                .permit_wait
-                .record(permit_wait.elapsed().as_secs_f64());
-
             f(permit);
         });
 

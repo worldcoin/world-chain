@@ -9,26 +9,14 @@ use std::{sync::LazyLock, time::Instant};
 #[metrics(scope = "flashblocks.coordinator")]
 pub struct ExecutionMetrics {
     // -- Latency --
-    /// End-to-end flashblock processing duration (seconds).
-    pub process_duration: Histogram,
     /// Validation / build phase duration (seconds).
     pub validate_duration: Histogram,
-    /// Time waiting for the database write permit (seconds).
-    pub permit_wait: Histogram,
-    /// Duration holding the state write lock (seconds).
-    pub state_lock_duration: Histogram,
     /// Flashblocks processed in a single epoch (recorded at epoch boundary).
     pub flashblocks_per_epoch: Histogram,
 
     // -- Issues --
-    /// Flashblock skipped — already processed (duplicate from P2P).
-    pub skipped: Counter,
     /// Epoch invalidated by a newer canonical tip.
     pub stale_resets: Counter,
-    /// Processing error (validation, build, or state update failure).
-    pub errors: Counter,
-    /// Failed to fetch sealed header for parent hash.
-    pub header_fetch_failed: Counter,
     /// Invalid payload received from P2P (decode error, bad structure).
     pub invalid_payload: Counter,
     /// Broadcast of built payload to in-memory tree failed.
@@ -128,47 +116,6 @@ mod tests {
             }
             let _ = write!(self.0, "{}={:?}", field.name(), value);
         }
-    }
-
-    #[test]
-    fn metrics_span_records_duration_and_emits_histogram() {
-        // Install a real metrics recorder so histogram calls don't panic.
-        // metrics-util provides an in-memory recorder for testing.
-        // If unavailable, we just verify the span side.
-        let spans = Arc::new(Mutex::new(Vec::new()));
-        let layer = SpanCapture {
-            spans: spans.clone(),
-        };
-
-        let _guard = tracing_subscriber::registry().with(layer).set_default();
-
-        let histogram = EXECUTION.process_duration.clone();
-
-        {
-            let _span = MetricsSpan::new(
-                tracing::trace_span!(
-                    target: "flashblocks::coordinator",
-                    "test_span",
-                    id = "test_payload",
-                    index = 3u64,
-                    duration_ms = tracing::field::Empty,
-                ),
-                histogram,
-            );
-
-            // Simulate work
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        // MetricsSpan dropped — should have recorded duration_ms
-
-        let captured = spans.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].name, "test_span");
-        assert!(
-            captured[0].fields.contains("id="),
-            "span should contain id field: {}",
-            captured[0].fields
-        );
     }
 
     #[test]
