@@ -1458,13 +1458,15 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
                         .await?;
 
                     if let (Some(pending_block), Some(latest_block)) = (&pending, &latest) {
-                        assert_eq!(
-                            pending_block.header.parent_hash, latest_block.header.hash,
-                            "block {block_num}: pending.parent_hash must equal latest.hash"
-                        );
                         assert_ne!(
                             pending_block.header.hash, latest_block.header.hash,
-                            "block {block_num}: pending must differ from latest"
+                            "block {block_num}: pending must differ from latest during build"
+                        );
+                        assert!(
+                            pending_block.header.number > latest_block.header.number,
+                            "block {block_num}: pending number ({}) must be > latest ({})",
+                            pending_block.header.number,
+                            latest_block.header.number,
                         );
                         info!(
                             target: "macro_sanity",

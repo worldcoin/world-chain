@@ -245,7 +245,6 @@ pub(crate) fn spawn_blocking_io_with_shutdown_signal<F>(
         let _enter = parent_span.enter();
 
         let unwind = AssertUnwindSafe(move || {
-            let permit_wait = Instant::now();
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

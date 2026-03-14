@@ -278,11 +278,10 @@ impl FlashblocksExecutionCoordinator {
             *epoch_block_number = None;
         }
 
-        // Clear pending block if it was built on the now-canonical tip.
         pending_block.send_if_modified(|block| {
             let matches = block
-                .as_ref()
-                .is_some_and(|b| b.recovered_block().parent_num_hash() == tip);
+                .as_ref() // We want to remove the pending block immediately when the canonical tip matches
+                .is_some_and(|b| b.recovered_block().hash() == tip.hash);
 
             if matches {
                 *block = None;
@@ -399,7 +398,6 @@ where
 
         (base, is_new)
     };
-    // --- Read lock dropped ---
 
     // Clear ancestor handles on new epoch
     if is_new_epoch {
@@ -420,10 +418,12 @@ where
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
 
+    // this should never fail. if it does there's a bug in our streaming.
     let sealed_header = provider
         .sealed_header_by_hash(base.parent_hash)
         .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
         .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
+
     let anchor_hash = sealed_header.hash();
 
     let execution_context = OpBlockExecutionCtx {
@@ -556,7 +556,6 @@ where
         }
     };
 
-    // _validate_span dropped here — records duration_ms on span + histogram.
     drop(_validate_span);
 
     // Build ExecutedBlock with deferred trie data — sorting happens in background
