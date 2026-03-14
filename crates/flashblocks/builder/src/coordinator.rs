@@ -38,9 +38,6 @@ use tokio::sync::{
 };
 use tracing::{debug, error, trace};
 
-/// Maximum number of concurrent flashblock processing tasks on the thread pool.
-const MAX_THREAD_POOL_SIZE: usize = 4;
-
 /// Placeholder for future task handle variants. Currently unused — the
 /// hook updates P2P state directly via the flushed cursor.
 #[derive(Clone, Debug)]
@@ -136,7 +133,6 @@ impl FlashblocksExecutionCoordinator {
         let pending_block = self.pending_block.clone();
 
         let workload = WorkloadExecutor::default();
-        let task_permit = Arc::new(Semaphore::new(MAX_THREAD_POOL_SIZE));
 
         let database_permit = &PENDING_BLOCK_WRITE_PERMIT;
 
@@ -168,7 +164,6 @@ impl FlashblocksExecutionCoordinator {
                             this.on_flashblock(
                                 flashblock,
                                 &mut inflight_shutdown,
-                                &task_permit,
                                 database_permit,
                                 &workload,
                                 &provider,
@@ -206,7 +201,6 @@ impl FlashblocksExecutionCoordinator {
         &self,
         flashblock: FlashblocksPayloadV1,
         shutdown_tx: &mut Option<oneshot::Sender<()>>,
-        task_permit: &Arc<Semaphore>,
         database_permit: &'static Semaphore,
         workload: &WorkloadExecutor,
         provider: &Provider,
@@ -228,12 +222,6 @@ impl FlashblocksExecutionCoordinator {
         let (tx, rx) = oneshot::channel::<()>();
         *shutdown_tx = Some(tx);
 
-        let task_permit = task_permit
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("semaphore closed");
-
         let provider = provider.clone();
         let evm_config = evm_config.clone();
         let this = self.clone();
@@ -244,7 +232,6 @@ impl FlashblocksExecutionCoordinator {
         let index = flashblock.index;
 
         spawn_blocking_io_with_shutdown_signal(workload, rx, database_permit, move |permit| {
-            let _task_permit = task_permit; // held until closure completes
             if let Err(e) = process_flashblock(
                 permit,
                 provider,
