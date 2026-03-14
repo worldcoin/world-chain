@@ -1,0 +1,130 @@
+name: Benchmark Regression Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/flashblocks/**'
+  pull_request:
+    paths:
+      - 'crates/flashblocks/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-bench-
+
+      - name: Install critcmp
+        run: cargo install critcmp --locked
+
+      - name: Restore baseline
+        id: restore-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: criterion-baseline-main
+
+      # Run benchmarks on the current branch and save as "pr" baseline
+      - name: Run benchmarks
+        run: cargo bench --package flashblocks-builder --features bench --bench coordinator -- --save-baseline pr
+
+      # Compare against main baseline if available
+      - name: Check for regressions
+        if: steps.restore-baseline.outputs.cache-hit == 'true' && github.event_name == 'pull_request'
+        run: |
+          critcmp main pr --threshold 10 || {
+            echo "::error::Performance regression detected (>10% slower)"
+            critcmp main pr
+            exit 1
+          }
+
+      # Post results as PR comment
+      - name: Post benchmark comparison
+        if: always() && steps.restore-baseline.outputs.cache-hit == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            try {
+              const output = execSync('critcmp main pr --color never', { encoding: 'utf-8' });
+              const body = `## Benchmark Results\n\n\`\`\`\n${output}\n\`\`\`\n\n> Threshold: 10% regression triggers failure`;
+              // Check for existing comment to update
+              const { data: comments } = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+              const existing = comments.find(c => c.body.startsWith('## Benchmark Results'));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  comment_id: existing.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body,
+                });
+              }
+            } catch (e) {
+              console.log('Could not post benchmark comment:', e.message);
+            }
+
+  # Save baseline on main branch pushes
+  update-baseline:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-bench-
+
+      - name: Generate baseline
+        run: cargo bench --package flashblocks-builder --features bench --bench coordinator -- --save-baseline main
+
+      - name: Save baseline
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-baseline-main

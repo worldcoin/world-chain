@@ -181,7 +181,7 @@ impl FlashblocksExecutionCoordinator {
     }
 }
 
-fn process_flashblock<Provider>(
+pub fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
     coordinator: &FlashblocksExecutionCoordinator,
