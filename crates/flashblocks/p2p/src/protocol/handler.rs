@@ -1,7 +1,7 @@
 use crate::protocol::{
     connection::{FlashblocksConnection, FlashblocksConnectionState, ReceiveStatus, Score},
     error::FlashblocksP2PError,
-    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream, world_chain_events_stream},
 };
 use alloy_rlp::BytesMut;
 use chrono::Utc;
@@ -43,11 +43,6 @@ use tokio_stream::wrappers::BroadcastStream;
 
 /// Maximum frame size for rlpx messages.
 const MAX_FRAME: usize = 1 << 24; // 16 MiB
-
-/// Maximum index for flashblocks payloads.
-/// Not intended to ever be hit. Since we resize the flashblocks vector dynamically,
-/// this is just a sanity check to prevent excessive memory usage.
-pub(crate) const MAX_FLASHBLOCK_INDEX: usize = 100;
 
 /// The maximum number of seconds we will wait for a previous publisher to stop
 /// before continueing anyways.
@@ -716,16 +711,13 @@ impl FlashblocksHandle {
         let mut user_hook = hook;
 
         let combined_hook = move |event: &WorldChainEvent<T>| {
-            if let WorldChainEvent::Chain(ce) = event
-                && let ChainEvent::Canon(tip) = ce.as_ref()
-            {
+            if let WorldChainEvent::Chain(ChainEvent::Canon(tip)) = event {
                 state.lock().canon_tip = Some(*tip);
             }
             user_hook(event)
         };
 
-        WorldChainEventsStream::new_with_hook(
-            combined_hook,
+        world_chain_events_stream(
             BroadcastStream::new(self.ctx.flashblock_tx.subscribe())
                 .filter_map(|x| {
                     futures::future::ready(match x {
@@ -738,12 +730,13 @@ impl FlashblocksHandle {
                         }
                     })
                 })
-                .map(|fb| ChainEvent::Pending(Box::new(fb)))
+                .map(|fb| ChainEvent::Pending(Arc::new(fb)))
                 .boxed(),
             provider
                 .canonical_state_stream()
                 .map(|n| ChainEvent::Canon(n.tip().num_hash()))
                 .boxed(),
+            combined_hook,
         )
     }
 

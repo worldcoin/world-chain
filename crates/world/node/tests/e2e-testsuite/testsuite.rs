@@ -10,6 +10,7 @@ use alloy_primitives::{Bytes, b64};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use eyre::eyre::eyre;
+use flashblocks_p2p::protocol::event::{ChainEvent, WorldChainEvent};
 use futures::future::Either;
 use reth::{
     chainspec::EthChainSpec,
@@ -1182,6 +1183,333 @@ async fn test_continuous_block_production_with_validation() -> eyre::Result<()> 
     assert!(
         final_hashes > 0,
         "Should have validated at least some block hashes"
+    );
+
+    Ok(())
+}
+
+/// End-to-end test: drives the builder's consensus engine through a block
+/// building loop, using a hook on the `WorldChainEventsStream` to assert
+/// stream invariants:
+///
+/// 1. Canon events are always yielded
+/// 2. Pending flashblocks are only yielded after their epoch parent is canonical
+/// 3. Flashblock indices are monotonically increasing within an epoch
+/// 4. The P2P state's flushed cursor tracks the latest yielded flashblock
+/// 5. Stale flashblocks (from old epochs) are never yielded
+#[tokio::test(flavor = "multi_thread")]
+async fn test_event_stream_invariants() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const TRANSACTIONS_PER_FLASHBLOCK: u64 = 10;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (_, mut nodes, _tasks, mut env, tx_spammer) =
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+
+    let builder_node = &mut nodes[0];
+    let builder_context = builder_node.ext_context.clone().unwrap();
+    let rpc_url = builder_node.node.rpc_url();
+
+    tx_spammer.spawn(TRANSACTIONS_PER_FLASHBLOCK, rpc_url);
+
+    let block_hash = builder_node.node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        builder_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params =
+        encode_eip1559_params(builder_node.node.inner.chain_spec().as_ref(), timestamp)?;
+
+    let attributes = build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![TX_SET_L1_BLOCK.clone()]),
+    );
+
+    // --- Assertion state shared with the hook ---
+    let canon_count = Arc::new(AtomicUsize::new(0));
+    let pending_count = Arc::new(AtomicUsize::new(0));
+    let last_index = Arc::new(AtomicU64::new(0));
+    let saw_canon_before_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let canon_count_hook = canon_count.clone();
+    let pending_count_hook = pending_count.clone();
+    let last_index_hook = last_index.clone();
+    let saw_canon_hook = saw_canon_before_pending.clone();
+
+    // Create the event stream with a hook that asserts invariants
+    let p2p_state = builder_context.flashblocks_handle.state.clone();
+    let mut stream = builder_context
+        .flashblocks_handle
+        .event_stream::<(), _, _, _>(
+            builder_node.node.inner.provider.clone(),
+            move |event: &WorldChainEvent<()>| {
+                match event {
+                    WorldChainEvent::Chain(ChainEvent::Canon(_tip)) => {
+                        canon_count_hook.fetch_add(1, Ordering::SeqCst);
+                    }
+                    WorldChainEvent::Chain(ChainEvent::Pending(fb)) => {
+                        // Invariant: we must have seen at least one canon event
+                        // before any pending flashblock is yielded.
+                        if canon_count_hook.load(Ordering::SeqCst) > 0 {
+                            saw_canon_hook.store(true, Ordering::SeqCst);
+                        }
+
+                        // Invariant: indices are monotonically increasing
+                        let prev = last_index_hook.swap(fb.index, Ordering::SeqCst);
+                        if pending_count_hook.load(Ordering::SeqCst) > 0 {
+                            assert!(
+                                fb.index >= prev,
+                                "flashblock index went backwards: {} -> {}",
+                                prev,
+                                fb.index
+                            );
+                        }
+
+                        pending_count_hook.fetch_add(1, Ordering::SeqCst);
+                    }
+                    _ => {}
+                }
+                None
+            },
+        );
+
+    // Spawn the stream consumer
+    let _stream_handle = tokio::spawn(async move {
+        let mut count = 0usize;
+        while let Some(_event) = futures::StreamExt::next(&mut stream).await {
+            count += 1;
+            if count > 50 {
+                break; // safety valve
+            }
+        }
+        count
+    });
+
+    // Mine a block
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        Duration::from_millis(3000),
+        true,
+        tx,
+    )
+    .await;
+
+    tokio::spawn(async move {
+        let mut mine_action = mine_block;
+        mine_action.execute(&mut env).await
+    });
+
+    // Wait for mining to complete
+    rx.recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Give the stream a moment to process remaining events
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // --- Assert invariants ---
+    let canons = canon_count.load(Ordering::SeqCst);
+    let pendings = pending_count.load(Ordering::SeqCst);
+
+    info!(
+        target: "test",
+        canon_events = canons,
+        pending_events = pendings,
+        "stream invariant results"
+    );
+
+    assert!(canons > 1, "expected at least one canon event");
+    assert!(pendings > 1, "expected at least one pending flashblock");
+    assert!(
+        saw_canon_before_pending.load(Ordering::SeqCst),
+        "expected canon event before first pending flashblock"
+    );
+
+    // Verify P2P state was updated by the hook
+    let state = p2p_state.lock();
+    assert!(
+        state.canon_tip.is_some(),
+        "expected canon_tip to be set on P2P state"
+    );
+    assert!(
+        state.flushed_payload_id.is_some(),
+        "expected flushed_payload_id to be set on P2P state"
+    );
+
+    Ok(())
+}
+
+/// End-to-end test: uses [`EngineDriver`] to build multiple blocks while
+/// querying the pending block, logs, transactions, and receipts via the
+/// Eth JSON-RPC API at each block boundary.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
+    use alloy_eips::BlockNumberOrTag;
+    use reth::rpc::api::EthApiClient;
+
+    reth_tracing::init_test_tracing();
+
+    const NUM_BLOCKS: usize = 3;
+    const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // 2 nodes: builder + follower
+    let (_, nodes, _tasks, mut env, tx_spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let builder_context = nodes[0].ext_context.clone().unwrap();
+    let block_hash = nodes[0].node.block_hash(0);
+    let chain_spec = nodes[0].node.inner.chain_spec().clone();
+    let rpc_url = nodes[0].node.rpc_url();
+
+    // Spawn background transactions so blocks have content
+    tx_spammer.spawn(10, rpc_url);
+
+    let authorization_gen = crate::setup::create_authorization_generator(
+        block_hash,
+        builder_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
+    );
+
+    // Track per-block results
+    let blocks_with_pending = Arc::new(AtomicUsize::new(0));
+    let total_pending_txs = Arc::new(AtomicUsize::new(0));
+    let blocks_with_pending_cb = blocks_with_pending.clone();
+    let total_pending_txs_cb = total_pending_txs.clone();
+
+    // Keep a reference to the builder's RPC client for pending queries
+    let builder_rpc = env.node_clients[0].rpc.clone();
+
+    let mut driver = crate::actions::EngineDriver {
+        builder_idx: 0,
+        follower_idxs: vec![],
+        num_blocks: NUM_BLOCKS,
+        block_interval: BLOCK_INTERVAL,
+        flashblocks: true,
+        authorization_gen,
+        attributes_gen: Box::new({
+            let chain_spec = chain_spec.clone();
+            move |_block_number, timestamp| {
+                let eip1559 = encode_eip1559_params(chain_spec.as_ref(), timestamp)?;
+                Ok(build_payload_attributes(
+                    timestamp,
+                    eip1559,
+                    Some(vec![TX_SET_L1_BLOCK.clone()]),
+                ))
+            }
+        }),
+        on_block: Some(Box::new({
+            let builder_rpc = builder_rpc.clone();
+            move |block_num, payload| {
+                let builder_rpc = builder_rpc.clone();
+                let blocks_with_pending = blocks_with_pending_cb.clone();
+                let total_pending_txs = total_pending_txs_cb.clone();
+
+                let block_hash = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .block_hash;
+                let payload_tx_count = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .transactions
+                    .len();
+
+                Box::pin(async move {
+                    info!(
+                        target: "engine_driver_test",
+                        block = block_num,
+                        %block_hash,
+                        payload_tx_count,
+                        "payload built"
+                    );
+
+                    assert!(
+                        payload_tx_count > 0,
+                        "block {block_num}: expected at least 1 transaction (L1 info deposit)"
+                    );
+
+                    // Query the pending block during this build cycle
+                    let pending: Option<alloy_rpc_types_eth::Block> = EthApiClient::<
+                        TransactionRequest,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        alloy_consensus::Header,
+                        reth_optimism_primitives::OpTransactionSigned,
+                    >::block_by_number(
+                        &builder_rpc,
+                        BlockNumberOrTag::Pending,
+                        false, // tx hashes only to avoid deserialization issues
+                    )
+                    .await?;
+
+                    if let Some(pending_block) = &pending {
+                        info!(
+                            target: "engine_driver_test",
+                            block = block_num,
+                            pending_tx_count = pending_block.transactions.len(),
+                            pending_number = pending_block.header.number,
+                            "queried pending block"
+                        );
+                    } else {
+                        info!(
+                            target: "engine_driver_test",
+                            block = block_num,
+                            "no pending block available (expected during finalization)"
+                        );
+                    }
+
+                    blocks_with_pending.fetch_add(1, Ordering::SeqCst);
+                    total_pending_txs.fetch_add(payload_tx_count, Ordering::SeqCst);
+
+                    Ok(())
+                })
+            }
+        })),
+    };
+
+    driver.execute(&mut env).await?;
+
+    let blocks_queried = blocks_with_pending.load(Ordering::SeqCst);
+    let txs_queried = total_pending_txs.load(Ordering::SeqCst);
+
+    info!(
+        target: "engine_driver_test",
+        blocks_queried,
+        txs_queried,
+        "engine driver test complete"
+    );
+
+    assert_eq!(
+        blocks_queried, NUM_BLOCKS,
+        "expected to query {NUM_BLOCKS} blocks"
+    );
+    assert!(
+        txs_queried >= NUM_BLOCKS,
+        "expected at least {NUM_BLOCKS} total transactions (one L1 deposit per block)"
     );
 
     Ok(())

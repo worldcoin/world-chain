@@ -1978,3 +1978,304 @@ impl Action<OpEngineTypes> for Sleep {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// EngineDriver — drives the consensus engine through N block-building cycles
+// ---------------------------------------------------------------------------
+
+/// Callback invoked after each block is built and canonicalized.
+pub type BlockCallback = Box<
+    dyn Fn(
+            usize,
+            &OpExecutionPayloadEnvelopeV4,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Drives the consensus engine through `num_blocks` block-building cycles.
+///
+/// Each cycle:
+/// 1. Generates payload attributes for the next block
+/// 2. Sends `forkchoiceUpdatedV3` with attributes to start building
+/// 3. Waits for `block_interval` (the build deadline)
+/// 4. Calls `getPayloadV4` to retrieve the built payload
+/// 5. Sends `newPayloadV4` + `forkchoiceUpdated` on all follower nodes
+/// 6. Invokes the optional `on_block` callback
+/// 7. Advances to the next cycle with the new block as head
+pub struct EngineDriver<A> {
+    /// Index of the builder node in the environment's node_clients.
+    pub builder_idx: usize,
+    /// Indices of follower nodes that receive `newPayload` + FCU.
+    pub follower_idxs: Vec<usize>,
+    /// Number of blocks to build.
+    pub num_blocks: usize,
+    /// Time to wait between FCU (start building) and getPayload (retrieve).
+    pub block_interval: Duration,
+    /// Whether to use flashblocks FCU with authorization.
+    pub flashblocks: bool,
+    /// Generates `Authorization` from `OpPayloadAttributes`.
+    pub authorization_gen: A,
+    /// Generates attributes for the next block given (block_number, parent_timestamp).
+    pub attributes_gen: Box<dyn Fn(u64, u64) -> Result<OpPayloadAttributes> + Send + Sync>,
+    /// Optional callback after each block is built and canonicalized.
+    pub on_block: Option<BlockCallback>,
+}
+
+impl<A> EngineDriver<A>
+where
+    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let builder = &env.node_clients[self.builder_idx];
+            let engine = builder.engine.http_client();
+
+            // Get the initial head
+            let mut parent_hash = {
+                let latest: Option<alloy_rpc_types_eth::Block> =
+                    EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        Header,
+                        TransactionSigned,
+                    >::block_by_number(
+                        &builder.rpc, alloy_eips::BlockNumberOrTag::Latest, false
+                    )
+                    .await?;
+                latest
+                    .ok_or_else(|| eyre!("No latest block"))?
+                    .header
+                    .hash_slow()
+            };
+
+            let mut parent_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            for block_num in 0..self.num_blocks {
+                // 1. Generate attributes
+                let block_number = block_num as u64 + 1;
+                parent_timestamp += self.block_interval.as_secs().max(1);
+                let attributes = (self.attributes_gen)(block_number, parent_timestamp)?;
+
+                // 2. FCU with attributes → start building
+                let fcu_state = ForkchoiceState {
+                    head_block_hash: parent_hash,
+                    safe_block_hash: parent_hash,
+                    finalized_block_hash: parent_hash,
+                };
+
+                let fcu_result = if self.flashblocks {
+                    FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
+                        &engine,
+                        fcu_state,
+                        Some(attributes.clone()),
+                        Some((self.authorization_gen)(attributes.clone())),
+                    )
+                    .await?
+                } else {
+                    EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                        &engine,
+                        fcu_state,
+                        Some(attributes.clone()),
+                    )
+                    .await?
+                };
+
+                if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
+                    return Err(eyre!(
+                        "block {block_num}: FCU status not valid: {:?}",
+                        fcu_result.payload_status
+                    ));
+                }
+
+                let payload_id = fcu_result
+                    .payload_id
+                    .ok_or_else(|| eyre!("block {block_num}: No payload ID returned"))?;
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %payload_id,
+                    "building block"
+                );
+
+                // 3. Wait for build deadline
+                tokio::time::sleep(self.block_interval).await;
+
+                // 4. getPayloadV4
+                let payload =
+                    EngineApiClient::<OpEngineTypes>::get_payload_v4(&engine, payload_id).await?;
+
+                let block_hash = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .block_hash;
+
+                let tx_count = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .transactions
+                    .len();
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %block_hash,
+                    tx_count,
+                    "payload retrieved"
+                );
+
+                // 5. Canonicalize: FCU(parent) → newPayload → FCU(head)
+                //    on builder AND all follower nodes
+                use alloy_rpc_types_engine::CancunPayloadFields;
+                use op_alloy_rpc_types_engine::{
+                    OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar,
+                };
+
+                // Canonicalize on builder via FCU only (it already has the payload)
+                {
+                    let builder_engine = env.node_clients[self.builder_idx].engine.http_client();
+                    let head_fcu = ForkchoiceState {
+                        head_block_hash: block_hash,
+                        safe_block_hash: block_hash,
+                        finalized_block_hash: block_hash,
+                    };
+                    let fcu_result = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                        &builder_engine,
+                        head_fcu,
+                        None,
+                    )
+                    .await?;
+
+                    if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
+                        return Err(eyre!(
+                            "block {block_num}: builder FCU to head failed: {:?}",
+                            fcu_result.payload_status
+                        ));
+                    }
+                }
+
+                // Canonicalize on follower nodes: FCU(parent) → newPayload → FCU(head)
+                for follower_idx in self.follower_idxs.iter().copied() {
+                    if let Some(beacon_handle) =
+                        env.node_clients[follower_idx].beacon_engine_handle.as_ref()
+                    {
+                        // FCU to parent
+                        let parent_fcu = ForkchoiceState {
+                            head_block_hash: parent_hash,
+                            safe_block_hash: parent_hash,
+                            finalized_block_hash: parent_hash,
+                        };
+                        beacon_handle
+                            .fork_choice_updated(
+                                parent_fcu,
+                                None,
+                                EngineApiMessageVersion::V3,
+                            )
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: FCU to parent failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        // newPayload
+                        let execution_data = OpExecutionData {
+                            payload: OpExecutionPayload::V4(payload.execution_payload.clone()),
+                            sidecar: OpExecutionPayloadSidecar::v4(
+                                CancunPayloadFields::new(payload.parent_beacon_block_root, vec![]),
+                                alloy_rpc_types_engine::PraguePayloadFields {
+                                    requests: alloy_eips::eip7685::RequestsOrHash::Hash(
+                                        alloy_eips::eip7685::EMPTY_REQUESTS_HASH,
+                                    ),
+                                },
+                            ),
+                        };
+
+                        let status = beacon_handle
+                            .new_payload(execution_data)
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: newPayload failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        if !matches!(status.status, PayloadStatusEnum::Valid) {
+                            return Err(eyre!(
+                                "block {block_num}: newPayload invalid on follower {follower_idx}: {:?}",
+                                status
+                            ));
+                        }
+
+                        // FCU to head
+                        let head_fcu = ForkchoiceState {
+                            head_block_hash: block_hash,
+                            safe_block_hash: block_hash,
+                            finalized_block_hash: block_hash,
+                        };
+                        beacon_handle
+                            .fork_choice_updated(
+                                head_fcu,
+                                None,
+                                EngineApiMessageVersion::V3,
+                            )
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: FCU to head failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        info!(
+                            target: "engine_driver",
+                            block = block_num,
+                            follower = follower_idx,
+                            %block_hash,
+                            "canonicalized on follower via beacon handle"
+                        );
+                    } else {
+                        return Err(eyre!(
+                            "block {block_num}: follower {follower_idx} has no beacon_engine_handle"
+                        ));
+                    }
+                }
+
+                // 6. Invoke callback
+                if let Some(ref on_block) = self.on_block {
+                    on_block(block_num, &payload).await?;
+                }
+
+                // 7. Advance head
+                parent_hash = block_hash;
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %block_hash,
+                    "block complete"
+                );
+            }
+
+            Ok(())
+        })
+    }
+}
+
+impl<A> Action<OpEngineTypes> for EngineDriver<A>
+where
+    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        EngineDriver::execute(self, env)
+    }
+}

@@ -120,9 +120,7 @@ impl FlashblocksExecutionCoordinator {
         let mut stream: WorldChainEventsStream<TrieTaskHandle> =
             self.p2p_handle
                 .event_stream(provider.clone(), move |event| {
-                    if let WorldChainEvent::Chain(ce) = event
-                        && let ChainEvent::Pending(fb) = ce.as_ref()
-                    {
+                    if let WorldChainEvent::Chain(ChainEvent::Pending(fb)) = event {
                         let mut state = p2p_state.lock();
                         state.flushed_payload_id = Some(fb.payload_id);
                         state.flushed_index = fb.index;
@@ -148,36 +146,35 @@ impl FlashblocksExecutionCoordinator {
 
                 while let Some(event) = stream.next().await {
                     match event {
-                        WorldChainEvent::Chain(chain_event) => match *chain_event {
-                            ChainEvent::Pending(flashblock) => {
-                                let flashblock = *flashblock;
-                                // Track epoch block number from base flashblocks
-                                if let Some(base) = &flashblock.base {
-                                    epoch_block_number = Some(base.block_number);
-                                }
+                        WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) => {
+                            let flashblock =
+                                Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
+                            // Track epoch block number from base flashblocks
+                            if let Some(base) = &flashblock.base {
+                                epoch_block_number = Some(base.block_number);
+                            }
 
-                                this.on_flashblock(
-                                    flashblock,
-                                    &mut inflight_shutdown,
-                                    &task_permit,
-                                    database_permit,
-                                    &workload,
-                                    &provider,
-                                    &evm_config,
-                                    &chain_spec,
-                                    &pending_block,
-                                )
-                                .await;
-                            }
-                            ChainEvent::Canon(tip) => {
-                                this.on_canon(
-                                    tip,
-                                    &mut inflight_shutdown,
-                                    &mut epoch_block_number,
-                                    &pending_block,
-                                );
-                            }
-                        },
+                            this.on_flashblock(
+                                flashblock,
+                                &mut inflight_shutdown,
+                                &task_permit,
+                                database_permit,
+                                &workload,
+                                &provider,
+                                &evm_config,
+                                &chain_spec,
+                                &pending_block,
+                            )
+                            .await;
+                        }
+                        WorldChainEvent::Chain(ChainEvent::Canon(tip)) => {
+                            this.on_canon(
+                                tip,
+                                &mut inflight_shutdown,
+                                &mut epoch_block_number,
+                                &pending_block,
+                            );
+                        }
                         WorldChainEvent::Event(_) => {}
                     }
                 }
@@ -213,7 +210,7 @@ impl FlashblocksExecutionCoordinator {
         let (tx, rx) = oneshot::channel::<()>();
         *shutdown_tx = Some(tx);
 
-        let _permit = task_permit
+        let task_permit = task_permit
             .clone()
             .acquire_owned()
             .await
@@ -226,6 +223,7 @@ impl FlashblocksExecutionCoordinator {
         let pending_block = pending_block.clone();
 
         spawn_blocking_io_with_shutdown_signal(workload, rx, database_permit, move |permit| {
+            let _task_permit = task_permit; // held until closure completes
             if let Err(e) = process_flashblock(
                 permit,
                 provider,

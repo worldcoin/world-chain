@@ -220,6 +220,7 @@ async fn wait_for_trusted_peers(
     }
 }
 
+#[expect(clippy::await_holding_lock)] // lock is explicitly dropped before await
 async fn wait_for_flashblocks_topology(
     node: &NodeContext,
     expected_connections: usize,
