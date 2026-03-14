@@ -6,14 +6,13 @@ use flashblocks_p2p::protocol::{
     handler::FlashblocksHandle,
 };
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
-use futures::{FutureExt, StreamExt as _};
+use futures::StreamExt;
 use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
 use reth::{
     payload::EthPayloadBuilderAttributes,
     revm::{cancelled::CancelOnDrop, database::StateProviderDatabase},
     rpc::types::BlockNumHash,
-    tasks::TaskSpawner,
 };
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::{DeferredTrieData, ExecutedBlock};
@@ -41,7 +40,7 @@ use tokio::sync::{
     broadcast::{self, Sender},
     oneshot,
 };
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 
 /// Maximum number of concurrent flashblock processing tasks on the thread pool.
 const MAX_THREAD_POOL_SIZE: usize = 4;
@@ -57,7 +56,6 @@ use crate::{
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
-use backon::BlockingRetryable;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// The maximum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
@@ -129,7 +127,7 @@ impl FlashblocksExecutionCoordinator {
     {
         let provider = ctx.provider().clone();
         let mut stream: WorldChainEventsStream<TrieTaskHandle> =
-            self.p2p_handle.event_stream(provider.clone());
+            self.p2p_handle.event_stream(provider.clone(), |_| None);
 
         let this = self.clone();
         let chain_spec = ctx.chain_spec().clone();
@@ -149,33 +147,36 @@ impl FlashblocksExecutionCoordinator {
 
                 while let Some(event) = stream.next().await {
                     match event {
-                        WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) => {
-                            // Track epoch block number from base flashblocks
-                            if let Some(base) = &flashblock.base {
-                                epoch_block_number = Some(base.block_number);
-                            }
+                        WorldChainEvent::Chain(chain_event) => match *chain_event {
+                            ChainEvent::Pending(flashblock) => {
+                                let flashblock = *flashblock;
+                                // Track epoch block number from base flashblocks
+                                if let Some(base) = &flashblock.base {
+                                    epoch_block_number = Some(base.block_number);
+                                }
 
-                            this.on_flashblock(
-                                flashblock,
-                                &mut inflight_shutdown,
-                                &task_permit,
-                                database_permit.clone(),
-                                &workload,
-                                &provider,
-                                &evm_config,
-                                &chain_spec,
-                                &pending_block,
-                            )
-                            .await;
-                        }
-                        WorldChainEvent::Chain(ChainEvent::Canon(tip)) => {
-                            this.on_canon(
-                                tip,
-                                &mut inflight_shutdown,
-                                &mut epoch_block_number,
-                                &pending_block,
-                            );
-                        }
+                                this.on_flashblock(
+                                    flashblock,
+                                    &mut inflight_shutdown,
+                                    &task_permit,
+                                    database_permit.clone(),
+                                    &workload,
+                                    &provider,
+                                    &evm_config,
+                                    &chain_spec,
+                                    &pending_block,
+                                )
+                                .await;
+                            }
+                            ChainEvent::Canon(tip) => {
+                                this.on_canon(
+                                    tip,
+                                    &mut inflight_shutdown,
+                                    &mut epoch_block_number,
+                                    &pending_block,
+                                );
+                            }
+                        },
                         WorldChainEvent::Event(_) => {}
                     }
                 }
@@ -211,7 +212,7 @@ impl FlashblocksExecutionCoordinator {
         let (tx, rx) = oneshot::channel::<()>();
         *shutdown_tx = Some(tx);
 
-        let permit = task_permit
+        let _permit = task_permit
             .clone()
             .acquire_owned()
             .await
@@ -400,21 +401,20 @@ where
     let (base, is_new_epoch) = {
         let inner = coordinator.inner.read();
 
-        if let Some(latest_payload) = &inner.latest_payload {
-            if latest_payload.0.id() == flashblock.flashblock.payload_id
-                && latest_payload.1 >= flashblock.flashblock.index
-            {
-                // Already processed — send current pending block and return
-                if let Some(executed) = latest_payload.0.executed_block() {
-                    let block = ExecutedBlock::with_deferred_trie_data(
-                        executed.recovered_block.clone(),
-                        executed.execution_output.clone(),
-                        DeferredTrieData::ready(Default::default()),
-                    );
-                    pending_block.send_replace(Some(block));
-                }
-                return Ok(());
+        if let Some(latest_payload) = &inner.latest_payload
+            && latest_payload.0.id() == flashblock.flashblock.payload_id
+            && latest_payload.1 >= flashblock.flashblock.index
+        {
+            // Already processed — send current pending block and return
+            if let Some(executed) = latest_payload.0.executed_block() {
+                let block = ExecutedBlock::with_deferred_trie_data(
+                    executed.recovered_block.clone(),
+                    executed.execution_output.clone(),
+                    DeferredTrieData::ready(Default::default()),
+                );
+                pending_block.send_replace(Some(block));
             }
+            return Ok(());
         }
 
         let is_new = inner.flashblocks.is_new_payload(&flashblock)?;

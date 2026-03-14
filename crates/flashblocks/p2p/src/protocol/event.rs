@@ -7,17 +7,17 @@
 
 use flashblocks_primitives::primitives::FlashblocksPayloadV1;
 use futures::{
-    future::{self, Either},
-    stream::{self, PollNext},
     Stream, StreamExt,
+    future::{self},
+    stream::{self, PollNext},
 };
 use reth::{
     api::NodePrimitives, payload::PayloadId, providers::CanonStateSubscriptions,
     rpc::types::BlockNumHash,
 };
 use std::{
+    collections::VecDeque,
     fmt::Debug,
-    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -32,7 +32,7 @@ pub enum ChainEvent {
     /// A flashblock has been received whose epoch parent matches the current
     /// canonical tip. Consumers can treat this as a "pending" event and buffer
     /// it until the next Canon event confirms it's ready to be processed.
-    Pending(FlashblocksPayloadV1),
+    Pending(Box<FlashblocksPayloadV1>),
 }
 
 impl ChainEvent {
@@ -47,19 +47,19 @@ impl ChainEvent {
 
 impl From<ChainEvent> for WorldChainEvent<ChainEvent> {
     fn from(value: ChainEvent) -> Self {
-        WorldChainEvent::Chain(value)
+        WorldChainEvent::Chain(Box::new(value))
     }
 }
 
 impl<T> From<FlashblocksPayloadV1> for WorldChainEvent<T> {
     fn from(value: FlashblocksPayloadV1) -> Self {
-        WorldChainEvent::Chain(ChainEvent::Pending(value))
+        WorldChainEvent::Chain(Box::new(ChainEvent::Pending(Box::new(value))))
     }
 }
 
 impl<T> From<BlockNumHash> for WorldChainEvent<T> {
     fn from(value: BlockNumHash) -> Self {
-        WorldChainEvent::Chain(ChainEvent::Canon(value))
+        WorldChainEvent::Chain(Box::new(ChainEvent::Canon(value)))
     }
 }
 
@@ -67,7 +67,7 @@ impl<T> From<BlockNumHash> for WorldChainEvent<T> {
 #[derive(Clone, Debug)]
 pub enum WorldChainEvent<T> {
     /// An Event emitted when executable pending flashblocks are observed.
-    Chain(ChainEvent),
+    Chain(Box<ChainEvent>),
     /// A Event emitted by any source.
     Event(T),
 }
@@ -86,6 +86,13 @@ pub type WorldChainEventNotificationsStream<T> =
 /// matches the canonical tip. Stale flashblocks are silently discarded via
 /// [`PendingCursor::try_advance`]. A [`ChainEvent::Canon`] is emitted on every
 /// canonical tip change so consumers can clear pending state.
+/// A stream of [`WorldChainEvent`]s that merges flashblocks with canonical
+/// chain notifications, reducing them through a [`BufferedCursor`](sealed::BufferedCursor)
+/// state machine.
+///
+/// Implements [`Stream`] directly — polls the merged inner streams, feeds
+/// each [`ChainEvent`] through the cursor's `reduce`, and yields the output
+/// events one at a time.
 #[pin_project::pin_project]
 pub struct WorldChainEventsStream<T> {
     #[pin]
@@ -98,7 +105,7 @@ impl<T: Send + Clone + Unpin + 'static> WorldChainEventsStream<T> {
     pub fn new<P, N: NodePrimitives>(
         provider: P,
         rx: broadcast::Receiver<FlashblocksPayloadV1>,
-    ) -> WorldChainEventsStream<T>
+    ) -> Self
     where
         P: CanonStateSubscriptions<Primitives = N> + Clone + Send + Sync + 'static,
     {
@@ -112,11 +119,11 @@ impl<T: Send + Clone + Unpin + 'static> WorldChainEventsStream<T> {
                     }
                 })
             })
-            .map(Into::into);
+            .map(|fb| ChainEvent::Pending(Box::new(fb)));
 
         let canon = provider
             .canonical_state_stream()
-            .map(|n| WorldChainEvent::Chain(ChainEvent::Canon(n.tip().num_hash().into())));
+            .map(|n| ChainEvent::Canon(n.tip().num_hash()));
 
         Self::new_with_hook(
             move |_: &WorldChainEvent<T>| None,
@@ -125,24 +132,39 @@ impl<T: Send + Clone + Unpin + 'static> WorldChainEventsStream<T> {
         )
     }
 
-    /// Creates a new [`WorldChainEventsStream`] mapping all `ChainEvent`s through `hook` before yielding them.
-    pub fn new_with_hook<'a, F>(
+    /// Creates a new [`WorldChainEventsStream`] with a hook that can inject
+    /// additional events after each yielded event.
+    pub fn new_with_hook<F>(
         mut hook: F,
-        st_0: WorldChainEventNotificationsStream<T>,
-        st_1: WorldChainEventNotificationsStream<T>,
+        flashblocks: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,
+        canon: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,
     ) -> Self
     where
         F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
     {
-        let merged = merge_flashblocks_with_canon(st_0, st_1);
+        let merged =
+            futures::stream::select_with_strategy(flashblocks, canon, |_: &mut ()| -> PollNext {
+                PollNext::Left
+            });
+
+        // Fold through the BufferedFlashblocks reducer, then flat_map output.
         let st = merged
+            .scan(BufferedFlashblocks::default(), |cursor, event| {
+                cursor.step(event);
+                let events: Vec<WorldChainEvent<T>> = cursor
+                    .by_ref()
+                    .map(|ce| WorldChainEvent::Chain(Box::new(ce)))
+                    .collect();
+                future::ready(Some(events))
+            })
+            .flat_map(stream::iter)
             .flat_map(move |event| {
                 let extra = hook(&event);
                 stream::iter(std::iter::once(event).chain(extra))
             })
             .boxed();
 
-        Self { st: Box::pin(st) }
+        Self { st }
     }
 }
 
@@ -153,53 +175,31 @@ impl<T: Clone + Unpin + Send> Stream for WorldChainEventsStream<T> {
         self.st.as_mut().poll_next(cx)
     }
 }
-
-/// Merges a flashblock stream with a canonical state notification stream,
-/// using [`BufferState`] to buffer, order, and gate flashblocks by the
-/// canonical tip. Only yields flashblocks whose epoch parent is canonical.
-fn merge_flashblocks_with_canon<T: Clone + Send + 'static>(
-    st_0: WorldChainEventNotificationsStream<T>,
-    st_1: WorldChainEventNotificationsStream<T>,
-) -> WorldChainEventNotificationsStream<T> {
-    futures::stream::select_with_strategy(
-        st_0.map(Either::Left),
-        st_1.map(Either::Right),
-        |_: &mut ()| -> PollNext { PollNext::Left },
-    )
-    .scan(BufferState::default(), |state, event| {
-        futures::future::ready(Some(match event {
-            Either::Left(WorldChainEvent::Chain(ChainEvent::Pending(fb))) => state.advance(fb),
-            Either::Right(WorldChainEvent::Chain(ChainEvent::Canon(tip))) => state.process(tip),
-            _ => vec![],
-        }))
-    })
-    .flat_map(stream::iter)
-    .boxed()
-}
 // ---------------------------------------------------------------------------
-// Type-state markers
+// BufferedFlashblocks — stateful reducer with Extend + Iterator
 // ---------------------------------------------------------------------------
-
-/// No active epoch — waiting for a base flashblock.
-pub struct Idle;
-/// Have a payload_id but parent is not yet canonical — buffering only.
-pub struct Unanchored;
-/// Parent is canonical — can drain contiguous flashblocks.
-pub struct Anchored;
 
 const MAX_FLASHBLOCK_INDEX: usize = 100;
 
-// ---------------------------------------------------------------------------
-// BufferedFlashblocks
-// ---------------------------------------------------------------------------
+/// Internal phase of the buffer state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// No active epoch.
+    Uninitialized,
+    /// Epoch started but parent is not yet canonical.
+    Pending,
+    /// Parent is canonical — flashblocks can be drained.
+    Executable,
+}
 
-/// Tracks and buffers flashblocks for the current epoch with type-state
-/// transitions governing when flashblocks may be drained.
+/// Buffers flashblocks for the current epoch, gating output on canonical tip.
 ///
-/// - [`Idle`]: No active epoch. Accepts a base flashblock to start one.
-/// - [`Unanchored`]: Epoch started but parent not yet canonical. Buffers only.
-/// - [`Anchored`]: Parent is canonical. Can drain contiguous flashblocks.
-pub struct BufferedFlashblocks<S = Idle> {
+/// Implements [`Extend<ChainEvent>`] to accept input events and
+/// [`Iterator<Item = ChainEvent>`] to drain output events. The internal
+/// state machine transitions between `Uninitialized`, `Pending`, and
+/// `Executable` phases automatically.
+pub struct BufferedFlashblocks {
+    phase: Phase,
     /// The parent block this epoch builds on.
     parent_num_hash: BlockNumHash,
     /// Current epoch payload identifier.
@@ -212,21 +212,34 @@ pub struct BufferedFlashblocks<S = Idle> {
     buffer: Vec<Option<FlashblocksPayloadV1>>,
     /// Most recent canonical tip.
     canon_tip: Option<BlockNumHash>,
-    _state: PhantomData<S>,
+    /// Output events ready to be yielded by the iterator.
+    output: VecDeque<ChainEvent>,
 }
 
 /// A flashblock drained from the buffer, ready for the coordinator.
 pub struct PendingFlashblockEvent {
     /// Resolve when the flashblock is in the in-memory tree.
-    /// Dropping without sending signals cancellation.
     pub tx: oneshot::Sender<()>,
     /// The drained flashblock payload.
     pub flashblock: FlashblocksPayloadV1,
 }
 
-// -- Shared methods (all states) --
+impl Default for BufferedFlashblocks {
+    fn default() -> Self {
+        Self {
+            phase: Phase::Uninitialized,
+            parent_num_hash: BlockNumHash::default(),
+            payload_id: PayloadId::default(),
+            timestamp: 0,
+            cursor: 0,
+            buffer: Vec::new(),
+            canon_tip: None,
+            output: VecDeque::new(),
+        }
+    }
+}
 
-impl<S> BufferedFlashblocks<S> {
+impl BufferedFlashblocks {
     /// Insert a flashblock at its index. Returns `false` if the payload_id
     /// doesn't match, the index exceeds the maximum, or the slot is occupied.
     fn insert(&mut self, fb: &FlashblocksPayloadV1) -> bool {
@@ -246,52 +259,27 @@ impl<S> BufferedFlashblocks<S> {
         true
     }
 
-    fn set_canon_tip(&mut self, tip: BlockNumHash) {
-        self.canon_tip = Some(tip);
+    /// Reset to uninitialized, discarding all buffered flashblocks.
+    fn reset(&mut self) {
+        self.phase = Phase::Uninitialized;
+        self.parent_num_hash = BlockNumHash::default();
+        self.payload_id = PayloadId::default();
+        self.timestamp = 0;
+        self.cursor = 0;
+        self.buffer.clear();
+        // canon_tip is preserved
     }
 
-    /// Reset to [`Idle`], discarding all buffered flashblocks.
-    fn reset(self) -> BufferedFlashblocks<Idle> {
-        BufferedFlashblocks {
-            parent_num_hash: BlockNumHash::default(),
-            payload_id: PayloadId::default(),
-            timestamp: 0,
-            cursor: 0,
-            buffer: Vec::new(),
-            canon_tip: self.canon_tip,
-            _state: PhantomData,
-        }
-    }
-}
+    /// Try to start a new epoch from a base flashblock.
+    fn accept_base(&mut self, fb: FlashblocksPayloadV1) -> bool {
+        let Some(base) = fb.base.as_ref() else {
+            return false;
+        };
 
-// -- Idle --
-
-impl Default for BufferedFlashblocks<Idle> {
-    fn default() -> Self {
-        Self {
-            parent_num_hash: BlockNumHash::default(),
-            payload_id: PayloadId::default(),
-            timestamp: 0,
-            cursor: 0,
-            buffer: Vec::new(),
-            canon_tip: None,
-            _state: PhantomData,
-        }
-    }
-}
-
-impl BufferedFlashblocks<Idle> {
-    /// Accept a base flashblock and start a new epoch.
-    /// Returns `None` if the flashblock has no base or is stale.
-    fn accept_base(
-        mut self,
-        fb: FlashblocksPayloadV1,
-    ) -> Option<Either<BufferedFlashblocks<Unanchored>, BufferedFlashblocks<Anchored>>> {
-        let base = fb.base.as_ref()?;
-
+        // Stale check
         if let Some(tip) = &self.canon_tip {
             if base.timestamp <= tip.number {
-                return None;
+                return false;
             }
         }
 
@@ -305,177 +293,80 @@ impl BufferedFlashblocks<Idle> {
         self.buffer.clear();
         self.insert(&fb);
 
-        let anchored = self
-            .canon_tip
-            .is_some_and(|tip| tip == self.parent_num_hash);
-
-        if anchored {
-            Some(Either::Right(BufferedFlashblocks {
-                parent_num_hash: self.parent_num_hash,
-                payload_id: self.payload_id,
-                timestamp: self.timestamp,
-                cursor: self.cursor,
-                buffer: self.buffer,
-                canon_tip: self.canon_tip,
-                _state: PhantomData,
-            }))
-        } else {
-            Some(Either::Left(BufferedFlashblocks {
-                parent_num_hash: self.parent_num_hash,
-                payload_id: self.payload_id,
-                timestamp: self.timestamp,
-                cursor: self.cursor,
-                buffer: self.buffer,
-                canon_tip: self.canon_tip,
-                _state: PhantomData,
-            }))
-        }
-    }
-}
-
-// -- Unanchored --
-
-impl BufferedFlashblocks<Unanchored> {
-    /// If the canon tip matches our parent, transition to [`Anchored`].
-    fn try_anchor(self) -> Either<BufferedFlashblocks<Unanchored>, BufferedFlashblocks<Anchored>> {
-        if self
+        self.phase = if self
             .canon_tip
             .is_some_and(|tip| tip == self.parent_num_hash)
         {
-            Either::Right(BufferedFlashblocks {
-                parent_num_hash: self.parent_num_hash,
-                payload_id: self.payload_id,
-                timestamp: self.timestamp,
-                cursor: self.cursor,
-                buffer: self.buffer,
-                canon_tip: self.canon_tip,
-                _state: PhantomData,
-            })
+            Phase::Executable
         } else {
-            Either::Left(self)
+            Phase::Pending
+        };
+
+        true
+    }
+
+    /// If pending and canon tip matches parent, transition to executable.
+    fn try_anchor(&mut self) {
+        if self.phase == Phase::Pending
+            && self
+                .canon_tip
+                .is_some_and(|tip| tip == self.parent_num_hash)
+        {
+            self.phase = Phase::Executable;
         }
     }
-}
 
-// -- Anchored --
-
-impl BufferedFlashblocks<Anchored> {
-    /// Drain all contiguous flashblocks from the cursor, yielding a
-    /// [`PendingFlashblockEvent`] for each. Takes ownership via `.take()`.
-    fn drain_contiguous(&mut self) -> Vec<PendingFlashblockEvent> {
-        let mut events = Vec::new();
+    /// Drain all contiguous flashblocks from the cursor into the output queue.
+    fn drain_contiguous(&mut self) {
+        if self.phase != Phase::Executable {
+            return;
+        }
         while let Some(Some(_)) = self.buffer.get(self.cursor) {
             let fb = self.buffer[self.cursor].take().unwrap();
             self.cursor += 1;
-            let (tx, _rx) = oneshot::channel();
-            events.push(PendingFlashblockEvent { tx, flashblock: fb });
-        }
-        events
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Runtime state enum (for scan closures)
-// ---------------------------------------------------------------------------
-
-enum BufferState {
-    Idle(BufferedFlashblocks<Idle>),
-    Unanchored(BufferedFlashblocks<Unanchored>),
-    Anchored(BufferedFlashblocks<Anchored>),
-}
-
-impl Default for BufferState {
-    fn default() -> Self {
-        Self::Idle(BufferedFlashblocks::default())
-    }
-}
-
-impl BufferState {
-    /// Advance the buffer with a new flashblock. Handles epoch starts,
-    /// inserts, and state transitions. Returns events to yield downstream.
-    fn advance<T: Clone + Send>(&mut self, fb: FlashblocksPayloadV1) -> Vec<WorldChainEvent<T>> {
-        if fb.base.is_some() {
-            // Base flashblock → reset and start new epoch
-            let idle = match std::mem::take(self) {
-                Self::Idle(b) => b,
-                Self::Unanchored(b) => b.reset(),
-                Self::Anchored(b) => b.reset(),
-            };
-
-            match idle.accept_base(fb) {
-                Some(Either::Right(mut anchored)) => {
-                    let events = Self::drain_to_events(&mut anchored);
-                    *self = Self::Anchored(anchored);
-                    events
-                }
-                Some(Either::Left(unanchored)) => {
-                    *self = Self::Unanchored(unanchored);
-                    vec![]
-                }
-                None => vec![], // stale, discarded
-            }
-        } else {
-            // Non-base → insert into current buffer
-            match self {
-                Self::Idle(_) => {} // no epoch, ignore
-                Self::Unanchored(b) => {
-                    b.insert(&fb);
-                }
-                Self::Anchored(b) => {
-                    b.insert(&fb);
-                }
-            }
-
-            // If anchored, drain any newly contiguous flashblocks
-            if let Self::Anchored(anchored) = self {
-                Self::drain_to_events(anchored)
-            } else {
-                vec![]
-            }
+            self.output.push_back(ChainEvent::Pending(Box::new(fb)));
         }
     }
 
-    /// Process a new canonical tip. Updates state and potentially anchors
-    /// the buffer, draining any contiguous flashblocks.
-    fn process<T: Clone + Send>(&mut self, tip: BlockNumHash) -> Vec<WorldChainEvent<T>> {
-        // Always emit the canon event
-        let mut events: Vec<WorldChainEvent<T>> = vec![tip.into()];
-
-        match self {
-            Self::Idle(b) => b.set_canon_tip(tip),
-            Self::Unanchored(_) => {
-                // Try to anchor
-                let unanchored = match std::mem::take(self) {
-                    Self::Unanchored(mut b) => {
-                        b.set_canon_tip(tip);
-                        b
-                    }
-                    _ => unreachable!(),
-                };
-
-                match unanchored.try_anchor() {
-                    Either::Right(mut anchored) => {
-                        events.extend(Self::drain_to_events(&mut anchored));
-                        *self = Self::Anchored(anchored);
-                    }
-                    Either::Left(still_unanchored) => {
-                        *self = Self::Unanchored(still_unanchored);
+    /// Process a single input event, updating state and buffering output.
+    fn step(&mut self, event: ChainEvent) {
+        match event {
+            ChainEvent::Pending(fb) => {
+                if fb.base.is_some() {
+                    // New epoch — reset and try to accept
+                    self.reset();
+                    self.accept_base(*fb);
+                    self.drain_contiguous();
+                } else {
+                    // Non-base — insert into current buffer if we have an epoch
+                    if self.phase != Phase::Uninitialized {
+                        self.insert(&fb);
+                        self.drain_contiguous();
                     }
                 }
             }
-            Self::Anchored(b) => b.set_canon_tip(tip),
+            ChainEvent::Canon(tip) => {
+                self.canon_tip = Some(tip);
+                self.output.push_back(ChainEvent::Canon(tip));
+                self.try_anchor();
+                self.drain_contiguous();
+            }
         }
-
-        events
     }
+}
 
-    fn drain_to_events<T: Clone + Send>(
-        anchored: &mut BufferedFlashblocks<Anchored>,
-    ) -> Vec<WorldChainEvent<T>> {
-        anchored
-            .drain_contiguous()
-            .into_iter()
-            .map(|e| WorldChainEvent::<T>::from(e.flashblock))
-            .collect()
+impl Extend<ChainEvent> for BufferedFlashblocks {
+    fn extend<I: IntoIterator<Item = ChainEvent>>(&mut self, iter: I) {
+        for event in iter {
+            self.step(event);
+        }
+    }
+}
+
+impl Iterator for BufferedFlashblocks {
+    type Item = ChainEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.output.pop_front()
     }
 }

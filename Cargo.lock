@@ -3752,7 +3752,6 @@ dependencies = [
  "alloy-signer-local",
  "alloy-sol-types",
  "alloy-trie",
- "backon",
  "bon",
  "color-eyre",
  "crossbeam-channel",

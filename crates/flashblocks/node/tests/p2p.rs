@@ -8,8 +8,10 @@ use eyre::eyre::eyre;
 use flashblocks_cli::FlashblocksArgs;
 use flashblocks_p2p::{
     monitor,
-    protocol::connection::ReceiveStatus,
-    protocol::handler::{FlashblocksHandle, PublishingStatus},
+    protocol::{
+        connection::ReceiveStatus,
+        handler::{FlashblocksHandle, PublishingStatus},
+    },
 };
 use flashblocks_primitives::{
     flashblocks::FlashblockMetadata,
@@ -242,8 +244,7 @@ async fn wait_for_flashblocks_topology(
                 .connections
                 .iter()
                 .filter_map(|(peer_id, conn)| {
-                    (conn.receive_status == ReceiveStatus::NotReceiving)
-                        .then_some(*peer_id)
+                    (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
                 })
                 .collect();
             drop(state);
@@ -1015,10 +1016,10 @@ async fn test_peer_reputation() -> eyre::Result<()> {
             .send_serialized_to_all_peers(bytes.clone());
         sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
-        if let Some(rep) = rep_0 {
-            if rep < 0 {
-                reputation_was_negative = true;
-            }
+        if let Some(rep) = rep_0
+            && rep < 0
+        {
+            reputation_was_negative = true;
         }
         if nodes[1].network_handle.get_all_peers().await?.is_empty() {
             peer_banned = true;

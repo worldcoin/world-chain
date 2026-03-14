@@ -1,6 +1,6 @@
 use crate::protocol::{
     connection::{FlashblocksConnection, FlashblocksConnectionState, ReceiveStatus, Score},
-    error::FlashblocksP2PError,
+    error::FlashblocksP2PError, event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
 };
 use alloy_rlp::BytesMut;
 use chrono::Utc;
@@ -13,11 +13,10 @@ use flashblocks_primitives::{
     },
     primitives::FlashblocksPayloadV1,
 };
-use futures::{Stream, StreamExt, stream};
-use metrics::histogram;
+use futures::{Stream, StreamExt as _};
 use parking_lot::Mutex;
-use rand::{Rng, seq::SliceRandom};
-use reth::payload::PayloadId;
+use rand::Rng;
+use reth::{payload::PayloadId, rpc::types::BlockNumHash};
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
 use reth_network::Peers;
@@ -150,6 +149,9 @@ pub struct FlashblocksP2PState {
     pub payload_timestamp: u64,
     /// Timestamp at which the most recent flashblock was received in ns since the unix epoch.
     pub flashblock_timestamp: i64,
+    /// Most recent canonical tip. Updated by the stream hook.
+    /// Used to reject stale flashblocks in `publish()`.
+    pub canon_tip: Option<BlockNumHash>,
     /// Flashblocks observed from network peers, tracked until their receive grace windows expire.
     pub observed_payloads: VecDeque<ObservedPayload>,
     /// All currently connected peers and their connection state.
@@ -165,6 +167,7 @@ impl Default for FlashblocksP2PState {
             payload_id: PayloadId::default(),
             payload_timestamp: 0,
             flashblock_timestamp: 0,
+            canon_tip: None,
             observed_payloads: VecDeque::new(),
             connections: HashMap::new(),
         }
@@ -615,18 +618,57 @@ impl FlashblocksHandle {
 
     /// Returns a [`WorldChainEventsStream`] merging flashblocks from the P2P
     /// broadcast channel with canonical chain notifications from `provider`.
-    pub fn event_stream<T, P, N>(
+    ///
+    /// Canon events automatically update the P2P state's `canon_tip` so
+    /// `publish()` rejects stale flashblocks. The caller's `hook` is applied
+    /// after the canon_tip update.
+    pub fn event_stream<T, P, N, F>(
         &self,
         provider: P,
-    ) -> crate::protocol::event::WorldChainEventsStream<T>
+        hook: F,
+    ) -> WorldChainEventsStream<T>
     where
         T: Send + Clone + Unpin + 'static,
         P: reth::providers::CanonStateSubscriptions<Primitives = N> + Clone + Send + Sync + 'static,
         N: reth::api::NodePrimitives,
+        F: FnMut(
+                &WorldChainEvent<T>,
+            ) -> Option<WorldChainEvent<T>>
+            + Send
+            + 'static,
     {
-        crate::protocol::event::WorldChainEventsStream::new(
-            provider,
-            self.ctx.flashblock_tx.subscribe(),
+        let state = self.state.clone();
+        let mut user_hook = hook;
+
+        let combined_hook = move |event: &WorldChainEvent<T>| {
+            if let WorldChainEvent::Chain(ce) = event {
+                if let ChainEvent::Canon(tip) = ce.as_ref() {
+                    state.lock().canon_tip = Some(*tip);
+                }
+            }
+            user_hook(event)
+        };
+
+        WorldChainEventsStream::new_with_hook(
+            combined_hook,
+            BroadcastStream::new(self.ctx.flashblock_tx.subscribe())
+                .filter_map(|x| {
+                    futures::future::ready(match x {
+                        Ok(fb) => Some(fb),
+                        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(
+                            n,
+                        )) => {
+                            tracing::warn!(missed = n, "flashblocks broadcast receiver lagged");
+                            None
+                        }
+                    })
+                })
+                .map(|fb| ChainEvent::Pending(Box::new(fb)))
+                .boxed(),
+            provider
+                .canonical_state_stream()
+                .map(|n| ChainEvent::Canon(n.tip().num_hash()))
+                .boxed(),
         )
     }
 
@@ -1022,6 +1064,7 @@ impl FlashblocksP2PCtx {
     /// - Caches flashblocks and maintains ordering for sequential delivery
     /// - Forwards flashblocks to peers in the current send set and publishes ordered
     ///   flashblocks to the local stream
+    ///
     /// Publishes a verified flashblock payload to peers and the local broadcast channel.
     ///
     /// Ordering, buffering, and canon-gating are handled downstream by
@@ -1043,6 +1086,15 @@ impl FlashblocksP2PCtx {
                 "Authorization payload id does not match flashblocks payload id"
             );
             return;
+        }
+
+        // Reject flashblocks for epochs that have already been canonicalized.
+        if let Some(canon_tip) = &state.canon_tip {
+            if let Some(base) = &payload.base {
+                if base.block_number.saturating_sub(1) <= canon_tip.number {
+                    return;
+                }
+            }
         }
 
         if authorization.timestamp > state.payload_timestamp {
@@ -1074,8 +1126,7 @@ impl FlashblocksP2PCtx {
 
         metrics::histogram!("flashblocks.size").record(len as f64);
         metrics::histogram!("flashblocks.gas_used").record(payload.diff.gas_used as f64);
-        metrics::histogram!("flashblocks.tx_count")
-            .record(payload.diff.transactions.len() as f64);
+        metrics::histogram!("flashblocks.tx_count").record(payload.diff.transactions.len() as f64);
 
         state.send_flashblock_to_send_set(payload.payload_id, payload.index, &bytes);
 
