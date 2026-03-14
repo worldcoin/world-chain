@@ -17,8 +17,7 @@ use futures::{
     stream::{self, FuturesUnordered},
 };
 use op_alloy_rpc_types::OpTransactionReceipt;
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use parking_lot::RwLock;
+use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV4;
 use reth::rpc::api::{EngineApiClient, EthApiClient};
 use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
 use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion};
@@ -28,10 +27,129 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::TransactionSigned;
 use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::setup::execution_data_from_from_reduced_flashblock;
+
+// ---------------------------------------------------------------------------
+// Test helper macros for Eth API queries
+// ---------------------------------------------------------------------------
+
+/// Create an `alloy_provider::RootProvider` from a node's RPC URL.
+///
+/// ```ignore
+/// let provider = provider!(nodes[0]);
+/// ```
+#[macro_export]
+macro_rules! provider {
+    ($node:expr) => {{
+        let url = $node.node.rpc_url();
+        alloy_provider::ProviderBuilder::new().connect_http(url)
+    }};
+}
+
+/// Fetch a block by tag (`Pending`, `Latest`, etc.) from a node.
+///
+/// ```ignore
+/// let block = fetch_block!(nodes[0], Pending);
+/// let block = fetch_block!(nodes[0], Latest, true); // full txs
+/// ```
+#[macro_export]
+macro_rules! fetch_block {
+    ($node:expr, $tag:ident) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::get_block_by_number(
+            &provider,
+            alloy_eips::BlockNumberOrTag::$tag,
+            false,
+        )
+        .await
+    }};
+    ($node:expr, $tag:ident, $full_txs:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::get_block_by_number(
+            &provider,
+            alloy_eips::BlockNumberOrTag::$tag,
+            $full_txs,
+        )
+        .await
+    }};
+}
+
+/// Fetch a transaction receipt by hash.
+///
+/// ```ignore
+/// let receipt = fetch_receipt!(nodes[0], tx_hash);
+/// ```
+#[macro_export]
+macro_rules! fetch_receipt {
+    ($node:expr, $tx_hash:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::get_transaction_receipt(&provider, $tx_hash).await
+    }};
+}
+
+/// Fetch a transaction by hash.
+///
+/// ```ignore
+/// let tx = fetch_tx!(nodes[0], tx_hash);
+/// ```
+#[macro_export]
+macro_rules! fetch_tx {
+    ($node:expr, $tx_hash:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::get_transaction_by_hash(&provider, $tx_hash).await
+    }};
+}
+
+/// Perform an `eth_call` against a node.
+///
+/// ```ignore
+/// let result = eth_call!(nodes[0], tx_request);
+/// let result = eth_call!(nodes[0], tx_request, Pending);
+/// ```
+#[macro_export]
+macro_rules! eth_call {
+    ($node:expr, $tx:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::call(&provider, &$tx).await
+    }};
+    ($node:expr, $tx:expr, $tag:ident) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::call(&provider, &$tx)
+            .block(alloy_eips::BlockId::Number(
+                alloy_eips::BlockNumberOrTag::$tag,
+            ))
+            .await
+    }};
+}
+
+/// Fetch logs matching a filter.
+///
+/// ```ignore
+/// let logs = fetch_logs!(nodes[0], filter);
+/// ```
+#[macro_export]
+macro_rules! fetch_logs {
+    ($node:expr, $filter:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::get_logs(&provider, &$filter).await
+    }};
+}
+
+/// Subscribe to new block headers (uses polling via `watch_blocks`).
+///
+/// ```ignore
+/// let poller = stream_blocks!(nodes[0]);
+/// ```
+#[macro_export]
+macro_rules! stream_blocks {
+    ($node:expr) => {{
+        let provider = $crate::provider!($node);
+        alloy_provider::Provider::watch_blocks(&provider).await
+    }};
+}
 
 pub type Hook<T> = Arc<dyn Fn(T) -> Result<()> + Send + Sync>;
 
@@ -1030,928 +1148,6 @@ where
     }
 }
 
-// ============================================================================
-// Shared State and Advanced Composition Actions
-// ============================================================================
-
-/// Shared state for communication between parallel actions during block production
-#[derive(Clone)]
-pub struct BlockProductionState {
-    /// Current payload being produced
-    pub payload: Arc<RwLock<Option<OpExecutionPayloadEnvelopeV3>>>,
-    /// Block hashes from validated flashblocks (for GetBlockByHash)
-    pub validated_block_hashes: Arc<RwLock<Vec<B256>>>,
-    /// Transaction hashes submitted by spammer (for GetReceipts)
-    pub submitted_tx_hashes: Arc<RwLock<Vec<B256>>>,
-    /// Signal when final flashblock is validated
-    pub final_validated: watch::Sender<bool>,
-    pub final_validated_rx: watch::Receiver<bool>,
-}
-
-impl BlockProductionState {
-    pub fn new() -> Self {
-        let (final_validated, final_validated_rx) = watch::channel(false);
-        Self {
-            payload: Arc::new(RwLock::new(None)),
-            validated_block_hashes: Arc::new(RwLock::new(Vec::new())),
-            submitted_tx_hashes: Arc::new(RwLock::new(Vec::new())),
-            final_validated,
-            final_validated_rx,
-        }
-    }
-
-    pub fn set_payload(&self, payload: OpExecutionPayloadEnvelopeV3) {
-        *self.payload.write() = Some(payload);
-    }
-
-    pub fn get_payload(&self) -> Option<OpExecutionPayloadEnvelopeV3> {
-        self.payload.read().clone()
-    }
-
-    pub fn add_validated_hash(&self, hash: B256) {
-        self.validated_block_hashes.write().push(hash);
-    }
-
-    pub fn add_tx_hash(&self, hash: B256) {
-        self.submitted_tx_hashes.write().push(hash);
-    }
-
-    pub fn get_tx_hashes(&self) -> Vec<B256> {
-        self.submitted_tx_hashes.read().clone()
-    }
-
-    pub fn signal_final(&self) {
-        let _ = self.final_validated.send(true);
-    }
-
-    pub fn reset(&self) {
-        *self.payload.write() = None;
-        self.validated_block_hashes.write().clear();
-        self.submitted_tx_hashes.write().clear();
-        let _ = self.final_validated.send(false);
-    }
-}
-
-/// Canonicalize a block by sending new_payload + fork_choice_updated to follower nodes
-pub struct Canonicalize {
-    pub node_idxs: Vec<usize>,
-    pub state: BlockProductionState,
-}
-
-impl Canonicalize {
-    pub fn new(node_idxs: Vec<usize>, state: BlockProductionState) -> Self {
-        Self { node_idxs, state }
-    }
-}
-
-impl Action<OpEngineTypes> for Canonicalize {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            use alloy_rpc_types_engine::CancunPayloadFields;
-            use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayloadSidecar};
-
-            let payload = self
-                .state
-                .get_payload()
-                .ok_or_else(|| eyre!("No payload to canonicalize"))?;
-
-            let block_hash = payload
-                .execution_payload
-                .payload_inner
-                .payload_inner
-                .block_hash;
-
-            let parent_hash = payload
-                .execution_payload
-                .payload_inner
-                .payload_inner
-                .parent_hash;
-
-            info!(
-                target: "actions",
-                block_hash = ?block_hash,
-                "Canonicalizing block"
-            );
-
-            // Construct OpExecutionData from the envelope
-            use op_alloy_rpc_types_engine::OpExecutionPayload;
-            let execution_data = OpExecutionData {
-                payload: OpExecutionPayload::V3(payload.execution_payload.clone()),
-                sidecar: OpExecutionPayloadSidecar::v3(CancunPayloadFields::new(
-                    payload.parent_beacon_block_root,
-                    vec![],
-                )),
-            };
-
-            for &node_idx in &self.node_idxs {
-                // Use beacon engine handle which accepts OpExecutionData directly
-                if let Some(beacon_handle) =
-                    env.node_clients[node_idx].beacon_engine_handle.as_ref()
-                {
-                    // First: update forkchoice to parent so node can accept the new block
-                    let parent_fcu = ForkchoiceState {
-                        head_block_hash: parent_hash,
-                        safe_block_hash: parent_hash,
-                        finalized_block_hash: parent_hash,
-                    };
-                    beacon_handle
-                        .fork_choice_updated(parent_fcu, None, EngineApiMessageVersion::V3)
-                        .await
-                        .map_err(|e| eyre!("fork_choice_updated to parent failed: {:?}", e))?;
-
-                    // Second: send new_payload with the block
-                    let status = beacon_handle
-                        .new_payload(execution_data.clone())
-                        .await
-                        .map_err(|e| eyre!("new_payload failed: {:?}", e))?;
-
-                    if !matches!(status.status, PayloadStatusEnum::Valid) {
-                        return Err(eyre!(
-                            "new_payload failed for node {}: {:?}",
-                            node_idx,
-                            status
-                        ));
-                    }
-
-                    // Third: send fork_choice_updated to make it canonical
-                    let fcu_state = ForkchoiceState {
-                        head_block_hash: block_hash,
-                        safe_block_hash: block_hash,
-                        finalized_block_hash: block_hash,
-                    };
-
-                    beacon_handle
-                        .fork_choice_updated(fcu_state, None, EngineApiMessageVersion::V3)
-                        .await
-                        .map_err(|e| eyre!("fork_choice_updated failed: {:?}", e))?;
-
-                    info!(
-                        target: "actions",
-                        node_idx = node_idx,
-                        block_hash = ?block_hash,
-                        "Block canonicalized successfully via beacon handle"
-                    );
-                } else {
-                    // Fallback: use RPC engine client
-                    let engine = env.node_clients[node_idx].engine.http_client();
-
-                    // First: update forkchoice to parent so node can accept the new block
-                    let parent_fcu = ForkchoiceState {
-                        head_block_hash: parent_hash,
-                        safe_block_hash: parent_hash,
-                        finalized_block_hash: parent_hash,
-                    };
-                    let _ = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
-                        &engine, parent_fcu, None,
-                    )
-                    .await?;
-
-                    // Second: send new_payload with the block via RPC
-                    let np_result = EngineApiClient::<OpEngineTypes>::new_payload_v3(
-                        &engine,
-                        payload.execution_payload.clone(),
-                        vec![],
-                        payload.parent_beacon_block_root,
-                    )
-                    .await?;
-
-                    if !matches!(np_result.status, PayloadStatusEnum::Valid) {
-                        return Err(eyre!(
-                            "new_payload failed for node {}: {:?}",
-                            node_idx,
-                            np_result
-                        ));
-                    }
-
-                    // Third: send fork_choice_updated to make it canonical
-                    let fcu_state = ForkchoiceState {
-                        head_block_hash: block_hash,
-                        safe_block_hash: block_hash,
-                        finalized_block_hash: block_hash,
-                    };
-
-                    let fcu_result = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
-                        &engine, fcu_state, None,
-                    )
-                    .await?;
-
-                    if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
-                        return Err(eyre!(
-                            "fork_choice_updated failed for node {}: {:?}",
-                            node_idx,
-                            fcu_result.payload_status
-                        ));
-                    }
-
-                    info!(
-                        target: "actions",
-                        node_idx = node_idx,
-                        block_hash = ?block_hash,
-                        "Block canonicalized successfully via RPC"
-                    );
-                }
-            }
-
-            Ok(())
-        })
-    }
-}
-
-/// Mine a block and store the payload in shared state
-pub struct MineBlockWithState<A> {
-    pub node_idx: usize,
-    pub attributes: OpPayloadAttributes,
-    pub authorization_gen: A,
-    pub block_interval: Duration,
-    pub flashblocks: bool,
-    pub state: BlockProductionState,
-}
-
-impl<A> MineBlockWithState<A>
-where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync,
-{
-    pub fn new(
-        node_idx: usize,
-        attributes: OpPayloadAttributes,
-        authorization_gen: A,
-        state: BlockProductionState,
-    ) -> Self {
-        Self {
-            node_idx,
-            attributes,
-            authorization_gen,
-            block_interval: Duration::from_millis(2000),
-            flashblocks: true,
-            state,
-        }
-    }
-
-    pub fn with_interval(mut self, interval: Duration) -> Self {
-        self.block_interval = interval;
-        self
-    }
-}
-
-impl<A> ReadOnlyAction for MineBlockWithState<A>
-where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let client = &env.node_clients[self.node_idx];
-            let engine = client.engine.http_client();
-
-            let latest: Option<alloy_rpc_types_eth::Block> =
-                EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    alloy_rpc_types_eth::Block,
-                    alloy_consensus::Receipt,
-                    Header,
-                    TransactionSigned,
-                >::block_by_number(
-                    &client.rpc, alloy_eips::BlockNumberOrTag::Latest, false
-                )
-                .await?;
-
-            let parent_hash = latest
-                .ok_or_else(|| eyre!("No latest block"))?
-                .header
-                .hash_slow();
-
-            let fcu_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
-
-            let fcu_result = if self.flashblocks {
-                FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
-                    &engine,
-                    fcu_state,
-                    Some(self.attributes.clone()),
-                    Some((self.authorization_gen)(self.attributes.clone())),
-                )
-                .await?
-            } else {
-                EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
-                    &engine,
-                    fcu_state,
-                    Some(self.attributes.clone()),
-                )
-                .await?
-            };
-
-            if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
-                return Err(eyre!(
-                    "FCU status not valid: {:?}",
-                    fcu_result.payload_status
-                ));
-            }
-
-            let payload_id = fcu_result
-                .payload_id
-                .ok_or_else(|| eyre!("No payload ID returned"))?;
-
-            // Wait for block to be built
-            tokio::time::sleep(self.block_interval).await;
-
-            let payload =
-                EngineApiClient::<OpEngineTypes>::get_payload_v3(&engine, payload_id).await?;
-
-            let block_hash = payload
-                .execution_payload
-                .payload_inner
-                .payload_inner
-                .block_hash;
-
-            info!(
-                target: "actions",
-                block_hash = ?block_hash,
-                tx_count = payload.execution_payload.payload_inner.payload_inner.transactions.len(),
-                "Mined block, storing in shared state"
-            );
-
-            // Store payload in shared state
-            self.state.set_payload(payload);
-
-            Ok(())
-        })
-    }
-}
-
-/// Validate flashblocks and signal when complete, storing validated hashes in shared state
-pub struct ValidateFlashblocksWithState {
-    pub flashblock_stream: Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Send>>,
-    pub beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
-    pub chain_spec: Arc<OpChainSpec>,
-    pub state: BlockProductionState,
-}
-
-impl ValidateFlashblocksWithState {
-    pub fn new(
-        flashblock_stream: Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Send>>,
-        beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
-        chain_spec: Arc<OpChainSpec>,
-        state: BlockProductionState,
-    ) -> Self {
-        Self {
-            flashblock_stream,
-            beacon_handle,
-            chain_spec,
-            state,
-        }
-    }
-}
-
-impl Action<OpEngineTypes> for ValidateFlashblocksWithState {
-    fn execute<'a>(
-        &'a mut self,
-        _env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut flashblocks = Flashblocks::default();
-            let stream = &mut self.flashblock_stream;
-
-            // Wait for payload to be available
-            let target_hash = loop {
-                if let Some(payload) = self.state.get_payload() {
-                    break payload
-                        .execution_payload
-                        .payload_inner
-                        .payload_inner
-                        .block_hash;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            };
-
-            info!(
-                target: "actions",
-                target_hash = ?target_hash,
-                "Starting flashblock validation"
-            );
-
-            while let Some(fb_payload) = stream.next().await {
-                let index = fb_payload.index;
-
-                let is_new = flashblocks
-                    .push(Flashblock {
-                        flashblock: fb_payload,
-                    })
-                    .ok();
-
-                if is_new.is_some() {
-                    info!(
-                        target: "actions",
-                        index = %index,
-                        "New payload started, reset flashblock collection"
-                    );
-                }
-
-                // Reduce to get current state
-                let Some(reduced) = Flashblock::reduce(flashblocks.clone()).ok() else {
-                    continue;
-                };
-
-                let reduced_hash = reduced.diff().block_hash;
-
-                // Store validated hash for GetBlockByHash
-                self.state.add_validated_hash(reduced_hash);
-
-                // Construct execution data
-                let execution_data =
-                    execution_data_from_from_reduced_flashblock(reduced, self.chain_spec.clone());
-
-                // Validate
-                let parent = execution_data.parent_hash();
-                let forkchoice = ForkchoiceState {
-                    head_block_hash: parent,
-                    safe_block_hash: parent,
-                    finalized_block_hash: parent,
-                };
-
-                self.beacon_handle
-                    .fork_choice_updated(forkchoice, None, EngineApiMessageVersion::V3)
-                    .await
-                    .ok();
-
-                let status = self.beacon_handle.new_payload(execution_data.clone()).await;
-
-                match &status {
-                    Ok(s) => {
-                        info!(
-                            target: "actions",
-                            index = %index,
-                            ?reduced_hash,
-                            status = ?s.status,
-                            "Validated intermediate flashblock"
-                        );
-                    }
-                    Err(e) => {
-                        error!(
-                            target: "actions",
-                            index = %index,
-                            error = ?e,
-                            "Flashblock validation failed"
-                        );
-                    }
-                }
-
-                // Check if final
-                if reduced_hash == target_hash {
-                    info!(
-                        target: "actions",
-                        block_hash = ?reduced_hash,
-                        index = %index,
-                        "Final flashblock validated"
-                    );
-                    self.state.signal_final();
-                    break;
-                }
-            }
-
-            Ok(())
-        })
-    }
-}
-
-// ============================================================================
-// Block Production Loop - Composable N-block production as a single Action
-// ============================================================================
-
-/// Configuration for block production loop
-#[derive(Clone)]
-pub struct BlockProductionConfig<A, F> {
-    /// Builder node index
-    pub builder_node_idx: usize,
-    /// Follower node indexes for canonicalization
-    pub follower_node_idxs: Vec<usize>,
-    /// Authorization generator
-    pub authorization_gen: A,
-    /// Attributes builder function: (timestamp, eip1559_params) -> OpPayloadAttributes
-    pub attributes_builder: F,
-    /// Block interval
-    pub block_interval: Duration,
-    /// Number of blocks to produce
-    pub num_blocks: u64,
-    /// Starting timestamp
-    pub start_timestamp: u64,
-    /// Timestamp increment per block
-    pub timestamp_increment: u64,
-    /// Shared state for cross-action communication
-    pub state: BlockProductionState,
-    /// Chain spec for EIP-1559 params
-    pub chain_spec: Arc<OpChainSpec>,
-}
-
-/// A complete block production loop as a single composable Action.
-///
-/// This action produces N blocks in sequence, with each block going through:
-/// 1. Mine block (stores payload in shared state)
-/// 2. Validate flashblocks (runs parallel, signals when done)
-/// 3. Query blocks by hash (runs parallel, uses validated hashes)
-/// 4. Query receipts (runs parallel, uses tx hashes from spammer)
-/// 5. Canonicalize on follower nodes
-/// 6. Reset state and advance to next block
-pub struct BlockProductionLoop<A, F, H> {
-    pub config: BlockProductionConfig<A, F>,
-    /// Flashblocks handle for getting streams
-    pub flashblocks_handle: H,
-    /// Beacon handle for validation
-    pub beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
-    /// Hook called after each block with (block_num, block_hash, tx_count)
-    pub on_block_produced: Option<Hook<(u64, B256, usize)>>,
-    /// Hook for each validated flashblock hash
-    pub on_validated_hash: Option<Hook<B256>>,
-    /// Hook for each fetched receipt
-    pub on_receipt: Option<Hook<OpTransactionReceipt>>,
-}
-
-// ============================================================================
-// Simple Action Primitives for Composition
-// ============================================================================
-
-/// Reset the shared state - use at the start of each block cycle
-pub struct ResetState {
-    pub state: BlockProductionState,
-}
-
-impl ResetState {
-    pub fn new(state: BlockProductionState) -> Self {
-        Self { state }
-    }
-}
-
-impl Action<OpEngineTypes> for ResetState {
-    fn execute<'a>(
-        &'a mut self,
-        _env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            self.state.reset();
-            Ok(())
-        })
-    }
-}
-
-/// Query all validated block hashes from shared state
-pub struct QueryValidatedBlocks {
-    pub node_idxs: Vec<usize>,
-    pub state: BlockProductionState,
-    pub on_block: Option<Hook<alloy_rpc_types_eth::Block>>,
-}
-
-impl QueryValidatedBlocks {
-    pub fn new(node_idxs: Vec<usize>, state: BlockProductionState) -> Self {
-        Self {
-            node_idxs,
-            state,
-            on_block: None,
-        }
-    }
-
-    pub fn on_block<F>(mut self, f: F) -> Self
-    where
-        F: Fn(alloy_rpc_types_eth::Block) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_block = Some(hook(f));
-        self
-    }
-}
-
-impl ReadOnlyAction for QueryValidatedBlocks {
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let hashes = self.state.validated_block_hashes.read().clone();
-
-            for hash in &hashes {
-                for &node_idx in &self.node_idxs {
-                    let block: Option<alloy_rpc_types_eth::Block> =
-                        EthApiClient::<
-                            TransactionRequest,
-                            Transaction,
-                            alloy_rpc_types_eth::Block,
-                            alloy_consensus::Receipt,
-                            Header,
-                            TransactionSigned,
-                        >::block_by_hash(
-                            &env.node_clients[node_idx].rpc, *hash, false
-                        )
-                        .await?;
-
-                    if let Some(ref b) = block
-                        && let Some(ref hook) = self.on_block
-                    {
-                        hook(b.clone())?;
-                    }
-                }
-            }
-            Ok(())
-        })
-    }
-}
-
-/// Query receipts for all transaction hashes in shared state
-pub struct QueryTxReceipts {
-    pub node_idxs: Vec<usize>,
-    pub state: BlockProductionState,
-    pub on_receipt: Option<Hook<OpTransactionReceipt>>,
-}
-
-impl QueryTxReceipts {
-    pub fn new(node_idxs: Vec<usize>, state: BlockProductionState) -> Self {
-        Self {
-            node_idxs,
-            state,
-            on_receipt: None,
-        }
-    }
-
-    pub fn on_receipt<F>(mut self, f: F) -> Self
-    where
-        F: Fn(OpTransactionReceipt) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_receipt = Some(hook(f));
-        self
-    }
-}
-
-impl ReadOnlyAction for QueryTxReceipts {
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let hashes = self.state.get_tx_hashes();
-
-            for hash in &hashes {
-                for &node_idx in &self.node_idxs {
-                    let receipt: Option<OpTransactionReceipt> = EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        alloy_rpc_types_eth::Block,
-                        OpTransactionReceipt,
-                        Header,
-                        TransactionSigned,
-                    >::transaction_receipt(
-                        &env.node_clients[node_idx].rpc,
-                        *hash,
-                    )
-                    .await?;
-
-                    if let Some(ref r) = receipt
-                        && let Some(ref hook) = self.on_receipt
-                    {
-                        hook(r.clone())?;
-                    }
-                }
-            }
-            Ok(())
-        })
-    }
-}
-
-/// A dynamic mining action that gets attributes from shared state
-pub struct DynamicMineBlock<A> {
-    pub node_idx: usize,
-    pub authorization_gen: A,
-    pub block_interval: Duration,
-    pub state: BlockProductionState,
-    /// Function to get current attributes (called at execution time)
-    pub get_attributes: Arc<dyn Fn() -> OpPayloadAttributes + Send + Sync>,
-}
-
-impl<A> DynamicMineBlock<A>
-where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    pub fn new<F>(
-        node_idx: usize,
-        authorization_gen: A,
-        state: BlockProductionState,
-        get_attributes: F,
-    ) -> Self
-    where
-        F: Fn() -> OpPayloadAttributes + Send + Sync + 'static,
-    {
-        Self {
-            node_idx,
-            authorization_gen,
-            block_interval: Duration::from_millis(2000),
-            state,
-            get_attributes: Arc::new(get_attributes),
-        }
-    }
-
-    pub fn with_interval(mut self, interval: Duration) -> Self {
-        self.block_interval = interval;
-        self
-    }
-}
-
-impl<A> ReadOnlyAction for DynamicMineBlock<A>
-where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
-{
-    fn execute_readonly<'a>(
-        &'a self,
-        env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let attributes = (self.get_attributes)();
-
-            let mine_action = MineBlockWithState::new(
-                self.node_idx,
-                attributes,
-                self.authorization_gen.clone(),
-                self.state.clone(),
-            )
-            .with_interval(self.block_interval);
-
-            mine_action.execute_readonly(env).await
-        })
-    }
-}
-
-/// A dynamic flashblock validator that gets streams from a flashblocks handle
-pub struct DynamicValidateFlashblocks {
-    pub flashblocks_handle: flashblocks_p2p::protocol::handler::FlashblocksHandle,
-    pub beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
-    pub chain_spec: Arc<OpChainSpec>,
-    pub state: BlockProductionState,
-}
-
-impl DynamicValidateFlashblocks {
-    pub fn new(
-        flashblocks_handle: flashblocks_p2p::protocol::handler::FlashblocksHandle,
-        beacon_handle: Arc<ConsensusEngineHandle<OpEngineTypes>>,
-        chain_spec: Arc<OpChainSpec>,
-        state: BlockProductionState,
-    ) -> Self {
-        Self {
-            flashblocks_handle,
-            beacon_handle,
-            chain_spec,
-            state,
-        }
-    }
-}
-
-impl Action<OpEngineTypes> for DynamicValidateFlashblocks {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let stream = Box::pin(self.flashblocks_handle.flashblock_stream());
-
-            let mut validate_action = ValidateFlashblocksWithState::new(
-                stream,
-                self.beacon_handle.clone(),
-                self.chain_spec.clone(),
-                self.state.clone(),
-            );
-
-            validate_action.execute(env).await
-        })
-    }
-}
-
-impl ReadOnlyAction for DynamicValidateFlashblocks {
-    fn execute_readonly<'a>(
-        &'a self,
-        _env: &'a Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut flashblocks = Flashblocks::default();
-            let mut stream = Box::pin(self.flashblocks_handle.flashblock_stream());
-
-            // Wait for payload to be available
-            let target_hash = loop {
-                if let Some(payload) = self.state.get_payload() {
-                    break payload
-                        .execution_payload
-                        .payload_inner
-                        .payload_inner
-                        .block_hash;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            };
-
-            info!(
-                target: "actions",
-                target_hash = ?target_hash,
-                "Starting flashblock validation (parallel)"
-            );
-
-            while let Some(fb_payload) = stream.next().await {
-                let index = fb_payload.index;
-
-                let is_new = flashblocks
-                    .push(Flashblock {
-                        flashblock: fb_payload,
-                    })
-                    .ok();
-
-                if is_new.is_some() {
-                    info!(
-                        target: "actions",
-                        index = %index,
-                        "New flashblock received"
-                    );
-                }
-
-                // Check if this is the final flashblock matching our target
-                if let Ok(reduced) = Flashblock::reduce(flashblocks.clone()) {
-                    let block_hash = reduced.diff().block_hash;
-                    if block_hash == target_hash {
-                        info!(
-                            target: "actions",
-                            block_hash = ?block_hash,
-                            "Final flashblock validated"
-                        );
-                        self.state.add_validated_hash(block_hash);
-                        self.state.signal_final();
-                        break;
-                    }
-                }
-            }
-
-            Ok(())
-        })
-    }
-}
-
-/// Log current block production state
-pub struct LogBlockComplete {
-    pub state: BlockProductionState,
-    pub on_complete: Option<Hook<(B256, usize)>>,
-}
-
-impl LogBlockComplete {
-    pub fn new(state: BlockProductionState) -> Self {
-        Self {
-            state,
-            on_complete: None,
-        }
-    }
-
-    pub fn on_complete<F>(mut self, f: F) -> Self
-    where
-        F: Fn((B256, usize)) -> Result<()> + Send + Sync + 'static,
-    {
-        self.on_complete = Some(hook(f));
-        self
-    }
-}
-
-impl Action<OpEngineTypes> for LogBlockComplete {
-    fn execute<'a>(
-        &'a mut self,
-        _env: &'a mut Environment<OpEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            if let Some(payload) = self.state.get_payload() {
-                let hash = payload
-                    .execution_payload
-                    .payload_inner
-                    .payload_inner
-                    .block_hash;
-                let tx_count = payload
-                    .execution_payload
-                    .payload_inner
-                    .payload_inner
-                    .transactions
-                    .len();
-
-                info!(
-                    target: "block_production",
-                    ?hash,
-                    tx_count,
-                    validated_hashes = self.state.validated_block_hashes.read().len(),
-                    tx_receipts = self.state.get_tx_hashes().len(),
-                    "Block cycle complete"
-                );
-
-                if let Some(ref hook) = self.on_complete {
-                    hook((hash, tx_count))?;
-                }
-            }
-            Ok(())
-        })
-    }
-}
-
 /// Sleep for a duration - useful between block cycles
 pub struct Sleep {
     pub duration: Duration,
@@ -1976,5 +1172,325 @@ impl Action<OpEngineTypes> for Sleep {
             tokio::time::sleep(self.duration).await;
             Ok(())
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EngineDriver — drives the consensus engine through N block-building cycles
+// ---------------------------------------------------------------------------
+
+/// Callback invoked after each block is built and canonicalized.
+pub type BlockCallback = Box<
+    dyn Fn(
+            usize,
+            &OpExecutionPayloadEnvelopeV4,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Callback invoked during the build interval (no payload available yet).
+pub type MidBuildCallback = Box<
+    dyn Fn(usize) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Drives the consensus engine through `num_blocks` block-building cycles.
+///
+/// Each cycle:
+/// 1. Generates payload attributes for the next block
+/// 2. Sends `forkchoiceUpdatedV3` with attributes to start building
+/// 3. Waits for `block_interval` (the build deadline)
+/// 4. Calls `getPayloadV4` to retrieve the built payload
+/// 5. Sends `newPayloadV4` + `forkchoiceUpdated` on all follower nodes
+/// 6. Invokes the optional `on_block` callback
+/// 7. Advances to the next cycle with the new block as head
+pub struct EngineDriver<A> {
+    /// Index of the builder node in the environment's node_clients.
+    pub builder_idx: usize,
+    /// Indices of follower nodes that receive `newPayload` + FCU.
+    pub follower_idxs: Vec<usize>,
+    /// Initial parent hash (genesis). If None, fetched from latest block.
+    pub initial_parent_hash: Option<B256>,
+    /// Number of blocks to build.
+    pub num_blocks: usize,
+    /// Time to wait between FCU (start building) and getPayload (retrieve).
+    pub block_interval: Duration,
+    /// Whether to use flashblocks FCU with authorization.
+    pub flashblocks: bool,
+    /// Generates `Authorization` from `(parent_hash, OpPayloadAttributes)`.
+    pub authorization_gen: A,
+    /// Generates attributes for the next block given (block_number, parent_timestamp).
+    pub attributes_gen: Box<dyn Fn(u64, u64) -> Result<OpPayloadAttributes> + Send + Sync>,
+    /// Optional callback during the build interval (between FCU and getPayload).
+    /// Called while the payload builder is actively working.
+    pub during_build: Option<MidBuildCallback>,
+    /// Optional callback after each block is built and canonicalized.
+    pub on_block: Option<BlockCallback>,
+}
+
+impl<A> EngineDriver<A>
+where
+    A: Fn(B256, OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let builder = &env.node_clients[self.builder_idx];
+            let engine = builder.engine.http_client();
+
+            // Get the initial head
+            let mut parent_hash = if let Some(hash) = self.initial_parent_hash {
+                hash
+            } else {
+                let latest: Option<alloy_rpc_types_eth::Block> =
+                    EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        Header,
+                        TransactionSigned,
+                    >::block_by_number(
+                        &builder.rpc, alloy_eips::BlockNumberOrTag::Latest, false
+                    )
+                    .await?;
+                latest
+                    .ok_or_else(|| eyre!("No latest block"))?
+                    .header
+                    .hash_slow()
+            };
+
+            let mut parent_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            for block_num in 0..self.num_blocks {
+                // 1. Generate attributes
+                let block_number = block_num as u64 + 1;
+                parent_timestamp += self.block_interval.as_secs().max(1);
+                let attributes = (self.attributes_gen)(block_number, parent_timestamp)?;
+
+                // 2. FCU with attributes → start building
+                let fcu_state = ForkchoiceState {
+                    head_block_hash: parent_hash,
+                    safe_block_hash: parent_hash,
+                    finalized_block_hash: parent_hash,
+                };
+
+                let fcu_result = if self.flashblocks {
+                    FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
+                        &engine,
+                        fcu_state,
+                        Some(attributes.clone()),
+                        Some((self.authorization_gen)(parent_hash, attributes.clone())),
+                    )
+                    .await?
+                } else {
+                    EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                        &engine,
+                        fcu_state,
+                        Some(attributes.clone()),
+                    )
+                    .await?
+                };
+
+                if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
+                    return Err(eyre!(
+                        "block {block_num}: FCU status not valid: {:?}",
+                        fcu_result.payload_status
+                    ));
+                }
+
+                let payload_id = fcu_result
+                    .payload_id
+                    .ok_or_else(|| eyre!("block {block_num}: No payload ID returned"))?;
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %payload_id,
+                    "building block"
+                );
+
+                // 3. Wait for build deadline
+                tokio::time::sleep(self.block_interval).await;
+
+                // 3.5. Mid-build callback (payload builder is still working)
+                if let Some(ref during_build) = self.during_build {
+                    during_build(block_num).await?;
+                }
+
+                // 4. getPayloadV4
+                let payload =
+                    EngineApiClient::<OpEngineTypes>::get_payload_v4(&engine, payload_id).await?;
+
+                let block_hash = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .block_hash;
+
+                let tx_count = payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner
+                    .transactions
+                    .len();
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %block_hash,
+                    tx_count,
+                    "payload retrieved"
+                );
+
+                // 5. Canonicalize: FCU(parent) → newPayload → FCU(head)
+                //    on builder AND all follower nodes
+                use alloy_rpc_types_engine::CancunPayloadFields;
+                use op_alloy_rpc_types_engine::{
+                    OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar,
+                };
+
+                // Canonicalize on builder via FCU only (it already has the payload)
+                {
+                    let builder_engine = env.node_clients[self.builder_idx].engine.http_client();
+                    let head_fcu = ForkchoiceState {
+                        head_block_hash: block_hash,
+                        safe_block_hash: block_hash,
+                        finalized_block_hash: block_hash,
+                    };
+                    let fcu_result = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+                        &builder_engine,
+                        head_fcu,
+                        None,
+                    )
+                    .await?;
+
+                    if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
+                        return Err(eyre!(
+                            "block {block_num}: builder FCU to head failed: {:?}",
+                            fcu_result.payload_status
+                        ));
+                    }
+                }
+
+                // Canonicalize on follower nodes: FCU(parent) → newPayload → FCU(head)
+                for follower_idx in self.follower_idxs.iter().copied() {
+                    if let Some(beacon_handle) =
+                        env.node_clients[follower_idx].beacon_engine_handle.as_ref()
+                    {
+                        // FCU to parent
+                        let parent_fcu = ForkchoiceState {
+                            head_block_hash: parent_hash,
+                            safe_block_hash: parent_hash,
+                            finalized_block_hash: parent_hash,
+                        };
+                        beacon_handle
+                            .fork_choice_updated(
+                                parent_fcu,
+                                None,
+                                EngineApiMessageVersion::V3,
+                            )
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: FCU to parent failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        // newPayload
+                        let execution_data = OpExecutionData {
+                            payload: OpExecutionPayload::V4(payload.execution_payload.clone()),
+                            sidecar: OpExecutionPayloadSidecar::v4(
+                                CancunPayloadFields::new(payload.parent_beacon_block_root, vec![]),
+                                alloy_rpc_types_engine::PraguePayloadFields {
+                                    requests: alloy_eips::eip7685::RequestsOrHash::Hash(
+                                        alloy_eips::eip7685::EMPTY_REQUESTS_HASH,
+                                    ),
+                                },
+                            ),
+                        };
+
+                        let status = beacon_handle
+                            .new_payload(execution_data)
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: newPayload failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        if !matches!(status.status, PayloadStatusEnum::Valid) {
+                            return Err(eyre!(
+                                "block {block_num}: newPayload invalid on follower {follower_idx}: {:?}",
+                                status
+                            ));
+                        }
+
+                        // FCU to head
+                        let head_fcu = ForkchoiceState {
+                            head_block_hash: block_hash,
+                            safe_block_hash: block_hash,
+                            finalized_block_hash: block_hash,
+                        };
+                        beacon_handle
+                            .fork_choice_updated(
+                                head_fcu,
+                                None,
+                                EngineApiMessageVersion::V3,
+                            )
+                            .await
+                            .map_err(|e| {
+                                eyre!("block {block_num}: FCU to head failed on follower {follower_idx}: {e:?}")
+                            })?;
+
+                        info!(
+                            target: "engine_driver",
+                            block = block_num,
+                            follower = follower_idx,
+                            %block_hash,
+                            "canonicalized on follower via beacon handle"
+                        );
+                    } else {
+                        return Err(eyre!(
+                            "block {block_num}: follower {follower_idx} has no beacon_engine_handle"
+                        ));
+                    }
+                }
+
+                // 6. Invoke callback
+                if let Some(ref on_block) = self.on_block {
+                    on_block(block_num, &payload).await?;
+                }
+
+                // 7. Advance head
+                parent_hash = block_hash;
+
+                info!(
+                    target: "engine_driver",
+                    block = block_num,
+                    %block_hash,
+                    "block complete"
+                );
+            }
+
+            Ok(())
+        })
+    }
+}
+
+impl<A> Action<OpEngineTypes> for EngineDriver<A>
+where
+    A: Fn(B256, OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+{
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<OpEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        EngineDriver::execute(self, env)
     }
 }

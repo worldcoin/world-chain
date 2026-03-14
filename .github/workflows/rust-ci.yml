@@ -37,13 +37,21 @@ jobs:
   cargo-lint:
     runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 20
+    permissions:
+        contents: write
     name: lint
     steps:
       - uses: actions/checkout@v6
-      - uses: taiki-e/install-action@just
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - uses: taiki-e/install-action@just
       - name: Cache
         uses: actions/cache@v5
         continue-on-error: false
@@ -54,9 +62,17 @@ jobs:
             ~/.cargo/git/db/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
-      - name: fmt + lint
-        run: cargo +nightly fmt --all -- --check
+      - name: Run Formatter
+        run: just fmt
 
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "chore: auto-format"
+          git push
+  
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 20

@@ -1,5 +1,6 @@
-use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
+use crate::protocol::{
+    event::MAX_FLASHBLOCKS,
+    handler::{FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, PublishingStatus},
 };
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
@@ -334,35 +335,15 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         }
 
         // Check if the payload index is within the allowed range
-        if msg.index as usize > MAX_FLASHBLOCK_INDEX {
+        if msg.index as usize >= MAX_FLASHBLOCKS {
             tracing::error!(
                 target: "flashblocks::p2p",
                 peer_id = %self.peer_id,
                 index = msg.index,
                 payload_id = %msg.payload_id,
-                max_index = MAX_FLASHBLOCK_INDEX,
+                max = MAX_FLASHBLOCKS,
                 "Received flashblocks payload with index exceeding maximum"
             );
-            return;
-        }
-
-        if msg.payload_id == p2p_state.payload_id
-            && (msg.index as usize)
-                .saturating_add(crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW)
-                < p2p_state.flashblock_index
-        {
-            tracing::warn!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                payload_id = %msg.payload_id,
-                index = msg.index,
-                current_index = p2p_state.flashblock_index,
-                grace_window = crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW,
-                "received flashblock outside receive grace window",
-            );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
             return;
         }
 
