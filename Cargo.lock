@@ -3762,6 +3762,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "metrics",
+ "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-network",
  "parking_lot",
@@ -3795,6 +3796,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.22",
 ]
 
 [[package]]
@@ -6235,7 +6237,7 @@ source = "git+https://github.com/0xForerunner/optimism?rev=79c9153#79c91536e0713
 dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
- "op-alloy-provider",
+ "op-alloy-provider 0.23.1 (git+https://github.com/0xForerunner/optimism?rev=79c9153)",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
 ]
@@ -6278,6 +6280,21 @@ dependencies = [
  "alloy-signer",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
+]
+
+[[package]]
+name = "op-alloy-provider"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6753d90efbaa8ea8bcb89c1737408ca85fa60d7adb875049d3f382c063666f86"
+dependencies = [
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-engine",
+ "alloy-transport",
+ "async-trait",
+ "op-alloy-rpc-types-engine",
 ]
 
 [[package]]
@@ -14203,6 +14220,8 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "op-alloy-consensus",
+ "op-alloy-network",
+ "op-alloy-provider 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "parking_lot",

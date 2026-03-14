@@ -151,14 +151,24 @@ impl BlockEpochState {
         // Stale check: reject if the epoch's parent is behind the canon tip.
         let parent_number = base.block_number.saturating_sub(1);
         if canon_tip.is_some_and(|tip| parent_number < tip.number) {
+            tracing::trace!(
+                target: "flashblocks::event_stream",
+                payload_id = %fb.payload_id,
+                parent_number,
+                canon_tip_number = canon_tip.map(|t| t.number),
+                "stale epoch rejected"
+            );
+            metrics::counter!("flashblocks.event_stream.epochs_stale").increment(1);
             return None;
         }
 
+        let parent = BlockNumHash {
+            number: parent_number,
+            hash: base.parent_hash,
+        };
+
         let mut epoch = Self {
-            parent: BlockNumHash {
-                number: parent_number,
-                hash: base.parent_hash,
-            },
+            parent,
             payload_id: fb.payload_id,
             cursor: 0,
             buffer: Default::default(),
@@ -234,6 +244,7 @@ impl BufferedFlashblocks {
         if !canon_tip.is_some_and(|tip| tip == epoch.parent) {
             return;
         }
+
         while let Some(Some(_)) = epoch.buffer.get(epoch.cursor) {
             let fb = epoch.buffer[epoch.cursor].take().unwrap();
             epoch.cursor += 1;

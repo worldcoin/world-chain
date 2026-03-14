@@ -30,13 +30,13 @@ use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
-use std::{panic::AssertUnwindSafe, sync::Arc, time::Instant};
+use std::sync::Arc;
 use tokio::sync::{
     Semaphore, SemaphorePermit,
     broadcast::{self, Sender},
     oneshot,
 };
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 /// Maximum number of concurrent flashblock processing tasks on the thread pool.
 const MAX_THREAD_POOL_SIZE: usize = 4;
@@ -49,7 +49,9 @@ pub enum TrieTaskHandle {}
 use crate::{
     bal_executor::CommittedState,
     bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
+    metrics::EXECUTION,
     payload_builder::build,
+    spawn_blocking_io_with_shutdown_signal,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -149,6 +151,15 @@ impl FlashblocksExecutionCoordinator {
                         WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) => {
                             let flashblock =
                                 Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
+
+                            trace!(
+                                target: "flashblocks::coordinator",
+                                payload_id = %flashblock.payload_id,
+                                index = %flashblock.index,
+                                is_base = flashblock.base.is_some(),
+                                "received pending flashblock"
+                            );
+
                             // Track epoch block number from base flashblocks
                             if let Some(base) = &flashblock.base {
                                 epoch_block_number = Some(base.block_number);
@@ -168,6 +179,13 @@ impl FlashblocksExecutionCoordinator {
                             .await;
                         }
                         WorldChainEvent::Chain(ChainEvent::Canon(tip)) => {
+                            trace!(
+                                target: "flashblocks::coordinator",
+                                tip_number = tip.number,
+                                tip_hash = %tip.hash,
+                                "received canonical tip"
+                            );
+
                             this.on_canon(
                                 tip,
                                 &mut inflight_shutdown,
@@ -222,6 +240,9 @@ impl FlashblocksExecutionCoordinator {
         let chain_spec = chain_spec.clone();
         let pending_block = pending_block.clone();
 
+        let payload_id = flashblock.payload_id;
+        let index = flashblock.index;
+
         spawn_blocking_io_with_shutdown_signal(workload, rx, database_permit, move |permit| {
             let _task_permit = task_permit; // held until closure completes
             if let Err(e) = process_flashblock(
@@ -233,7 +254,13 @@ impl FlashblocksExecutionCoordinator {
                 flashblock,
                 pending_block,
             ) {
-                error!("error processing flashblock: {e:#?}");
+                error!(
+                    target: "flashblocks::coordinator",
+                    %payload_id,
+                    index,
+                    "error processing flashblock: {e:#?}"
+                );
+                EXECUTION.errors.increment(1);
             }
         });
     }
@@ -241,6 +268,15 @@ impl FlashblocksExecutionCoordinator {
     /// Handles a canonical chain tip update. Cancels any in-flight task,
     /// clears stale ancestor trie handles, and clears the pending block if
     /// it was built on the now-canonical tip.
+    #[tracing::instrument(
+        target = "flashblocks::coordinator",
+        skip_all,
+        fields(
+            tip_number = tip.number,
+            tip_hash = %tip.hash,
+            is_stale,
+        )
+    )]
     fn on_canon(
         &self,
         tip: BlockNumHash,
@@ -252,8 +288,15 @@ impl FlashblocksExecutionCoordinator {
         // epoch is at or behind the canonical tip (stale). If the epoch is
         // ahead of the tip, the work is still valid.
         let is_stale = epoch_block_number.is_none_or(|n| n <= tip.number);
+        tracing::Span::current().record("is_stale", is_stale);
 
         if is_stale {
+            debug!(
+                target: "flashblocks::coordinator",
+                epoch_block_number = *epoch_block_number,
+                "stale epoch — cancelling inflight and clearing ancestors"
+            );
+            EXECUTION.stale_resets.increment(1);
             inflight_shutdown.take();
             self.inner.write().ancestor_handles.clear();
             *epoch_block_number = None;
@@ -331,51 +374,6 @@ impl FlashblocksExecutionCoordinator {
         }
         Ok(())
     }
-}
-
-/// Spawns a blocking task on the [`WorkloadExecutor`] thread pool, racing it
-/// against a shutdown signal. If the shutdown receiver resolves first (sender
-/// dropped), the task result is discarded. Acquires the `database_permit`
-/// before running `f` to serialize pending block writes.
-fn spawn_blocking_io_with_shutdown_signal<F>(
-    executor: &WorkloadExecutor,
-    shutdown_rx: oneshot::Receiver<()>,
-    database_permit: &'static Semaphore,
-    f: F,
-) where
-    F: FnOnce(SemaphorePermit<'static>) + Send + 'static,
-{
-    let task = executor.spawn_blocking(move || {
-        let f = AssertUnwindSafe(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("failed to build runtime for permit acquisition");
-
-            let permit = rt
-                .block_on(database_permit.acquire())
-                .expect("database semaphore closed");
-
-            f(permit);
-        });
-
-        if let Err(e) = std::panic::catch_unwind(f) {
-            error!("flashblock processing panicked: {e:?}");
-        }
-    });
-
-    // Race the task against the shutdown signal
-    tokio::spawn(async move {
-        match futures::future::select(task, shutdown_rx).await {
-            futures::future::Either::Left((result, _)) => {
-                if let Err(e) = result {
-                    error!("flashblock thread pool task panicked: {e:#?}");
-                }
-            }
-            futures::future::Either::Right(_) => {
-                trace!("flashblock processing cancelled by shutdown signal");
-            }
-        }
-    });
 }
 
 fn process_flashblock<Provider>(
@@ -467,23 +465,24 @@ where
         extra_data: base.extra_data.clone(),
     };
 
-    trace!(
-        target: "flashblocks::coordinator",
-        id = %flashblock.flashblock().payload_id,
-        index = %flashblock.flashblock().index,
-        min_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.min_tx_index.to_string()),
-        max_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.max_tx_index.to_string()),
-        execution_context = ?execution_context,
-        next_block_context = ?next_block_context,
-        "processing flashblock"
+    let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
+    let transactions_offset = committed_state.transactions.len() + 1;
+    let has_bal = flashblock.diff().access_list_data.is_some();
+
+    let _validate_span = crate::metrics::MetricsSpan::new(
+        tracing::trace_span!(
+            target: "flashblocks::coordinator",
+            "validate",
+            id = %flashblock.flashblock().payload_id,
+            index,
+            path = if has_bal { "bal" } else { "legacy" },
+            tx_count = flashblock.diff().transactions.len(),
+            duration_ms = tracing::field::Empty,
+        ),
+        EXECUTION.validate_duration.clone(),
     );
 
-    let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
-
-    let transactions_offset = committed_state.transactions.len() + 1;
-    let start = Instant::now();
-
-    let payload = if flashblock.diff().access_list_data.is_some() {
+    let payload = if has_bal {
         let sealed_header = Arc::new(sealed_header);
 
         let executor_transactions = decode_transactions_with_indices(
@@ -581,9 +580,8 @@ where
         }
     };
 
-    let duration = Instant::now().duration_since(start);
-    metrics::histogram!("flashblocks.validate", "access_list" => flashblock.diff().access_list_data.is_some().to_string())
-        .record(duration.as_nanos() as f64 / 1_000_000_000.0);
+    // _validate_span dropped here — records duration_ms on span + histogram.
+    drop(_validate_span);
 
     // Build ExecutedBlock with deferred trie data — sorting happens in background
     let deferred = if let Some(executed) = payload.executed_block() {
@@ -623,9 +621,19 @@ where
     // Everything after this point (trie sort, broadcast) can run concurrently.
     drop(database_permit);
 
-    // Spawn background trie sort after releasing the permit
+    // Spawn background trie sort after releasing the permit.
+    // Link the rayon span back to the processing span for trace correlation.
     if let Some(deferred) = deferred {
+        let trie_span = tracing::trace_span!(
+            target: "flashblocks::coordinator",
+            "trie_sort",
+            id = %payload.id(),
+            index,
+        );
+        trie_span.follows_from(tracing::Span::current());
+
         rayon::spawn(move || {
+            let _enter = trie_span.enter();
             deferred.wait_cloned();
         });
     }

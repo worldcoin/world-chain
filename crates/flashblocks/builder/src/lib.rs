@@ -138,6 +138,9 @@
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
+use std::{panic::AssertUnwindSafe, time::Instant};
+
+use reth_engine_tree::tree::executor::WorkloadExecutor;
 use reth_evm::{
     block::BlockExecutionError,
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -145,6 +148,10 @@ use reth_evm::{
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_provider::StateProvider;
 use revm_database::BundleState;
+use tokio::sync::{Semaphore, SemaphorePermit, oneshot};
+use tracing::{error, trace};
+
+use crate::metrics::EXECUTION;
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
@@ -186,6 +193,9 @@ pub mod executor;
 /// Block building utilities
 pub mod utils;
 
+/// Metric name constants.
+pub mod metrics;
+
 /// Configuration for the flashblocks payload builder.
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {
@@ -211,4 +221,65 @@ pub trait BlockBuilderExt: BlockBuilder {
         self,
         state_provider: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
+}
+
+/// Spawns a blocking task on the [`WorkloadExecutor`] thread pool, racing it
+/// against a shutdown signal. If the shutdown receiver resolves first (sender
+/// dropped), the task result is discarded. Acquires the `database_permit`
+/// before running `f` to serialize pending block writes.
+///
+/// The current tracing span is captured and re-entered on the blocking thread
+/// so that all events inside `f` are nested under the caller's span.
+#[track_caller]
+pub(crate) fn spawn_blocking_io_with_shutdown_signal<F>(
+    executor: &WorkloadExecutor,
+    shutdown_rx: oneshot::Receiver<()>,
+    database_permit: &'static Semaphore,
+    f: F,
+) where
+    F: FnOnce(SemaphorePermit<'static>) + Send + 'static,
+{
+    let parent_span = tracing::Span::current();
+
+    let task = executor.spawn_blocking(move || {
+        let _enter = parent_span.enter();
+
+        let unwind = AssertUnwindSafe(move || {
+            let permit_wait = Instant::now();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build runtime for permit acquisition");
+
+            let permit = rt
+                .block_on(database_permit.acquire())
+                .expect("database semaphore closed");
+
+            EXECUTION
+                .permit_wait
+                .record(permit_wait.elapsed().as_secs_f64());
+
+            f(permit);
+        });
+
+        if let Err(e) = std::panic::catch_unwind(unwind) {
+            error!("flashblock processing panicked: {e:?}");
+        }
+    });
+
+    // Race the blocking task against the shutdown signal.
+    // If shutdown fires first (sender dropped by on_flashblock), the
+    // blocking result is discarded — the newer flashblock takes priority.
+    tokio::spawn(async move {
+        match futures::future::select(task, shutdown_rx).await {
+            futures::future::Either::Left((result, _)) => {
+                if let Err(e) = result {
+                    error!("flashblock thread pool task panicked: {e:#?}");
+                }
+            }
+            futures::future::Either::Right(_) => {
+                trace!("flashblock processing cancelled by shutdown signal");
+            }
+        }
+    });
 }
