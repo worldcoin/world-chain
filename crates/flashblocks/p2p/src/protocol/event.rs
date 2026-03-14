@@ -81,7 +81,6 @@ where
 /// Stream adapter that wraps a merged `ChainEvent` stream and map reduces it
 /// into a [`BufferedFlashblocks`].
 #[pin_project::pin_project]
-#[doc = ""]
 struct BufferedStream<S> {
     #[pin]
     inner: S,
