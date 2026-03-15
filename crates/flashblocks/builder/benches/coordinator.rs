@@ -8,6 +8,7 @@ use flashblocks_builder::{
 };
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::ed25519_dalek::SigningKey;
+use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
 
@@ -88,11 +89,12 @@ fn bench_launch_flashblock_sequence(c: &mut Criterion) {
                     state.flashblocks = sequence.iter().map(|fb| Some(fb.clone())).collect();
                 }
 
-                // Drive through the same function that `launch` calls.
-                // The stream is finite (buffer-only, no broadcast sender),
-                // so run_flashblock_processor returns once all are consumed.
-                let stream = handle.live_flashblock_stream();
+                // Bound the stream to exactly the number of pre-populated
+                // flashblocks. Without this, live_flashblock_stream blocks
+                // on the broadcast receiver after the buffer is drained.
+                let stream = handle.live_flashblock_stream().take(sequence.len());
 
+                // Drive through the same function that `launch` calls.
                 rt.block_on(run_flashblock_processor(
                     stream,
                     provider.clone(),
