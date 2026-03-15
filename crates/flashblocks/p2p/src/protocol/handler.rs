@@ -1,4 +1,9 @@
-use crate::protocol::{connection::FlashblocksConnection, error::FlashblocksP2PError};
+use crate::protocol::{
+    connection::FlashblocksConnection,
+    error::FlashblocksP2PError,
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream, world_chain_events_stream},
+};
+use alloy_consensus::BlockHeader;
 use alloy_rlp::BytesMut;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -12,10 +17,11 @@ use flashblocks_primitives::{
 use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
-use reth::payload::PayloadId;
+use reth::{api::NodePrimitives, payload::PayloadId};
 use reth_eth_wire::Capability;
 use reth_ethereum::network::{api::PeerId, protocol::ProtocolHandler};
 use reth_network::Peers;
+use reth_provider;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
@@ -190,6 +196,67 @@ impl FlashblocksHandle {
             .builder_sk
             .as_ref()
             .ok_or(FlashblocksP2PError::MissingBuilderSk)
+    }
+
+    /// Returns a [`WorldChainEventsStream`] merging flashblocks from the P2P
+    /// broadcast channel with canonical chain notifications from `provider`.
+    ///
+    /// The caller's `hook` is invoked on each yielded event before it is
+    /// delivered to the consumer.
+    pub fn event_stream<T, P, N, F>(&self, provider: P, hook: F) -> WorldChainEventsStream<T>
+    where
+        T: Send + Sync + 'static,
+        P: reth::providers::CanonStateSubscriptions<Primitives = N>
+            + reth_provider::HeaderProvider
+            + reth_provider::BlockNumReader
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        N: NodePrimitives,
+        F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
+    {
+        // Seed the canon stream with the provider's current best block so
+        // BufferedFlashblocks has a valid canon_tip from the first poll.
+        // Without this, flashblocks arriving before the first
+        // canonical_state_stream notification are buffered indefinitely.
+        let initial_tip = provider
+            .sealed_header(provider.best_block_number().unwrap_or(0))
+            .ok()
+            .flatten()
+            .map(|h| {
+                ChainEvent::Canon(reth::rpc::types::BlockNumHash {
+                    number: h.number(),
+                    hash: h.hash(),
+                })
+            });
+
+        let canon = futures::stream::iter(initial_tip)
+            .chain(
+                provider
+                    .canonical_state_stream()
+                    .map(|n| ChainEvent::Canon(n.tip().num_hash())),
+            )
+            .boxed();
+
+        world_chain_events_stream(
+            BroadcastStream::new(self.ctx.flashblock_tx.subscribe())
+                .filter_map(|x| {
+                    futures::future::ready(match x {
+                        Ok(fb) => Some(fb),
+                        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(
+                            n,
+                        )) => {
+                            tracing::warn!(missed = n, "flashblocks broadcast receiver lagged");
+                            None
+                        }
+                    })
+                })
+                .map(|fb| ChainEvent::Pending(Arc::new(fb)))
+                .boxed(),
+            canon,
+            hook,
+        )
     }
 }
 

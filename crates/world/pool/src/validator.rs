@@ -30,7 +30,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
-use tracing::{info, warn};
+use tracing::info;
 use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
@@ -94,7 +94,7 @@ where
             .to();
 
         if max_pbh_nonce == 0 && max_pbh_gas_limit == 0 {
-            warn!(
+            info!(
                 %pbh_entrypoint,
                 %pbh_signature_aggregator,
                 "WorldChainTransactionValidator Initialized with PBH Disabled - Failed to fetch PBH nonce and gas limit from PBHEntryPoint. Defaulting to 0."

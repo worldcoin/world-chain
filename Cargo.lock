@@ -1990,9 +1990,9 @@ dependencies = [
 
 [[package]]
 name = "bon"
-version = "3.9.0"
+version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d13a61f2963b88eef9c1be03df65d42f6996dfeac1054870d950fcf66686f83"
+checksum = "f47dbe92550676ee653353c310dfb9cf6ba17ee70396e1f7cf0a2020ad49b2fe"
 dependencies = [
  "bon-macros",
  "rustversion",
@@ -2000,9 +2000,9 @@ dependencies = [
 
 [[package]]
 name = "bon-macros"
-version = "3.9.0"
+version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d314cc62af2b6b0c65780555abb4d02a03dd3b799cd42419044f0c38d99738c0"
+checksum = "519bd3116aeeb42d5372c29d982d16d0170d3d4a5ed85fc7dd91642ffff3c67c"
 dependencies = [
  "darling 0.23.0",
  "ident_case",
@@ -2199,9 +2199,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -3774,7 +3774,6 @@ dependencies = [
  "alloy-signer-local",
  "alloy-sol-types",
  "alloy-trie",
- "backon",
  "bon",
  "color-eyre",
  "crossbeam-channel",
@@ -3785,6 +3784,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "metrics",
+ "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-network",
  "parking_lot",
@@ -3817,6 +3817,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]
@@ -3908,6 +3909,7 @@ dependencies = [
 name = "flashblocks-p2p"
 version = "1.11.3"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "chrono",
@@ -3916,10 +3918,12 @@ dependencies = [
  "futures",
  "metrics",
  "parking_lot",
+ "pin-project",
  "reth",
  "reth-eth-wire",
  "reth-ethereum",
  "reth-network",
+ "reth-provider",
  "reth-tasks",
  "thiserror 2.0.18",
  "tokio",
@@ -5723,9 +5727,9 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6473172471198271ff72e9379150e9dfd70d8e533e0752a27e515b48dd375e"
+checksum = "98c23545df7ecf1b16c303910a69b079e8e251d60f7dd2cc9b4177f2afaf1746"
 
 [[package]]
 name = "mach2"
@@ -6301,7 +6305,7 @@ source = "git+https://github.com/0xForerunner/optimism?rev=954e507#954e507895e57
 dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
- "op-alloy-provider",
+ "op-alloy-provider 0.23.1 (git+https://github.com/0xForerunner/optimism?rev=954e507)",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
 ]
@@ -6344,6 +6348,21 @@ dependencies = [
  "alloy-signer",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
+]
+
+[[package]]
+name = "op-alloy-provider"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6753d90efbaa8ea8bcb89c1737408ca85fa60d7adb875049d3f382c063666f86"
+dependencies = [
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-engine",
+ "alloy-transport",
+ "async-trait",
+ "op-alloy-rpc-types-engine",
 ]
 
 [[package]]
@@ -12565,9 +12584,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -14259,6 +14278,8 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "op-alloy-consensus",
+ "op-alloy-network",
+ "op-alloy-provider 0.23.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "parking_lot",
@@ -14436,6 +14457,7 @@ dependencies = [
  "alloy-sol-types",
  "bon",
  "chrono",
+ "flashblocks-builder",
  "flashblocks-cli",
  "flashblocks-primitives",
  "futures",

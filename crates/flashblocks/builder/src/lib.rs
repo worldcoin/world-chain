@@ -186,6 +186,9 @@ pub mod executor;
 /// Block building utilities
 pub mod utils;
 
+/// Metric name constants.
+pub mod metrics;
+
 /// Configuration for the flashblocks payload builder.
 #[derive(Default, Debug, Clone)]
 pub struct FlashblocksPayloadBuilderConfig {

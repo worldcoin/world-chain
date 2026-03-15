@@ -24,8 +24,10 @@ devnet-down:
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
+fmt: fmt-fix fmt-check contracts-fmt
+
 # Formats the whole workspace
-fmt: devnet-fmt contracts-fmt fmt-fix fmt-check
+fmt-all: devnet-fmt contracts-fmt fmt-fix fmt-check
 
 devnet-fmt:
     @just ./devnet/fmt

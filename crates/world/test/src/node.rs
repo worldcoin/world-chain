@@ -8,7 +8,8 @@ use alloy_primitives::{
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
+use flashblocks_builder::FlashblocksPayloadBuilderConfig;
+use flashblocks_cli::FlashblocksArgs;
 use futures::future::join_all;
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,

@@ -60,8 +60,8 @@ dashmap.workspace = true
 thiserror.workspace = true
 either.workspace = true
 metrics.workspace = true
+metrics-derive.workspace = true
 serde.workspace = true
-backon.workspace = true
 
 [dev-dependencies]
 serde.workspace = true
@@ -70,6 +70,7 @@ eyre.workspace = true
 lazy_static.workspace = true
 proptest.workspace = true
 reth-tracing.workspace = true
+tracing-subscriber.workspace = true
 alloy-genesis.workspace = true
 op-alloy-network.workspace = true
 alloy-signer-local.workspace = true
