@@ -10,6 +10,11 @@ Justfile
 book.toml
 .gitmodules
 CODEOWNERS
+.github/
+.claude/
+README.md
+LICENSE
+SECURITY.md
 
 # Added by SEC-1406 patch
 .git

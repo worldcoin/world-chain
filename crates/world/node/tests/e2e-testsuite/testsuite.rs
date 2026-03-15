@@ -6,7 +6,7 @@ use crate::{
     setup::{TX_SET_L1_BLOCK, build_payload_attributes},
 };
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
-use alloy_primitives::b64;
+use alloy_primitives::{Bytes, b64};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use eyre::eyre::eyre;
@@ -18,7 +18,7 @@ use reth::{
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{Address, U256};
+use revm_primitives::{Address, B256, U256};
 use std::{
     sync::{
         Arc,
@@ -34,8 +34,34 @@ use world_chain_test::{
 };
 
 use crate::setup::{
-    CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup, setup_with_tx_peers,
+    CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
+    setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
 };
+
+async fn create_priority_transaction(
+    signer_index: u32,
+    nonce: u64,
+    calldata_len: usize,
+    gas_limit: u64,
+    max_priority_fee_per_gas: u128,
+) -> eyre::Result<(Bytes, B256)> {
+    let mut tx_request = tx(
+        CHAIN_SPEC.chain.id(),
+        Some(Bytes::from(vec![0u8; calldata_len])),
+        nonce,
+        Address::default(),
+        gas_limit,
+    );
+    tx_request.value = Some(U256::ZERO);
+    tx_request.max_priority_fee_per_gas = Some(max_priority_fee_per_gas);
+    tx_request.max_fee_per_gas = Some(100_000_000_000u128 + max_priority_fee_per_gas);
+
+    let wallet = EthereumWallet::from(signer(signer_index));
+    let signed =
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &wallet).await?;
+
+    Ok((signed.encoded_2718().into(), *signed.tx_hash()))
+}
 
 #[tokio::test]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
@@ -109,6 +135,154 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
 
     let tip = pbh_tx_hashes[0];
     node.assert_new_block(tip, block_hash, block_number).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (tx1, tx1_hash) = create_priority_transaction(0, 0, 50_000, 600_000, 100).await?;
+    let (tx_small, tx_small_hash) = create_priority_transaction(1, 0, 30_000, 400_000, 95).await?;
+    let (tx2, tx2_hash) = create_priority_transaction(2, 0, 50_000, 600_000, 90).await?;
+    let (tx3, tx3_hash) = create_priority_transaction(3, 0, 50_000, 600_000, 80).await?;
+
+    let block_uncompressed_size_limit =
+        TX_SET_L1_BLOCK.len() as u64 + tx1.len() as u64 + tx_small.len() as u64;
+
+    let (_, mut nodes, _tasks, _, _) =
+        setup_with_block_uncompressed_size_limit::<FlashblocksContext>(
+            1,
+            optimism_payload_attributes,
+            false,
+            Some(block_uncompressed_size_limit),
+        )
+        .await?;
+    let node = &mut nodes[0].node;
+
+    assert_eq!(node.rpc.inject_tx(tx1.clone()).await?, tx1_hash);
+    assert_eq!(node.rpc.inject_tx(tx_small.clone()).await?, tx_small_hash);
+    assert_eq!(node.rpc.inject_tx(tx2.clone()).await?, tx2_hash);
+    assert_eq!(node.rpc.inject_tx(tx3.clone()).await?, tx3_hash);
+
+    let block1 = node.advance_block().await?;
+    assert!(
+        block1
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx1_hash),
+        "tx1 should be included in block 1"
+    );
+    assert!(
+        block1
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx_small_hash),
+        "tx_small should fit in block 1"
+    );
+    assert!(
+        !block1
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx2_hash),
+        "tx2 should go to a later block"
+    );
+    assert!(
+        !block1
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx3_hash),
+        "tx3 should go to a later block"
+    );
+
+    let block2 = node.advance_block().await?;
+    assert!(
+        block2
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx2_hash),
+        "tx2 should be included in block 2"
+    );
+    assert!(
+        !block2
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx3_hash),
+        "tx3 should still go after block 2"
+    );
+
+    let block3 = node.advance_block().await?;
+    assert!(
+        block3
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx3_hash),
+        "tx3 should be included in block 3"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_without_block_uncompressed_size_limit_includes_all_transactions() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let (_, mut nodes, _tasks, _, _) =
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+    let node = &mut nodes[0].node;
+
+    let (tx1, tx1_hash) = create_priority_transaction(0, 0, 50_000, 600_000, 100).await?;
+    let (tx2, tx2_hash) = create_priority_transaction(1, 0, 50_000, 600_000, 90).await?;
+    let (tx3, tx3_hash) = create_priority_transaction(2, 0, 50_000, 600_000, 80).await?;
+
+    assert_eq!(node.rpc.inject_tx(tx1).await?, tx1_hash);
+    assert_eq!(node.rpc.inject_tx(tx2).await?, tx2_hash);
+    assert_eq!(node.rpc.inject_tx(tx3).await?, tx3_hash);
+
+    let block = node.advance_block().await?;
+    assert!(
+        block
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx1_hash),
+        "tx1 should be included"
+    );
+    assert!(
+        block
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx2_hash),
+        "tx2 should be included"
+    );
+    assert!(
+        block
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| *tx.tx_hash() == tx3_hash),
+        "tx3 should be included"
+    );
 
     Ok(())
 }
@@ -236,7 +410,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
             .as_ref()
             .unwrap()
             .flashblocks_handle
-            .flashblock_stream(),
+            .live_flashblock_stream(),
     );
 
     let validation_stream = crate::actions::FlashblocksValidatonStream {
@@ -314,7 +488,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .clone()
         .unwrap()
         .flashblocks_handle
-        .flashblock_stream();
+        .live_flashblock_stream();
 
     let mine_block = crate::actions::AssertMineBlock::new(
         0,
@@ -478,7 +652,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         .clone()
         .unwrap()
         .flashblocks_handle
-        .flashblock_stream();
+        .live_flashblock_stream();
 
     let (sender, mut rx) = tokio::sync::mpsc::channel(1);
     let timestamp = crate::setup::current_timestamp();

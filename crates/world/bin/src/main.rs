@@ -38,9 +38,9 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|builder, args| async move {
+        Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|mut builder, args| async move {
             info!(target: "reth::cli", "Launching node");
-            let config: WorldChainNodeConfig = args.into_config(&builder.config().chain)?;
+            let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
             info!(target: "reth::cli", "Starting in Flashblocks mode");
             let node = WorldChainNode::<FlashblocksContext>::new(config.clone());

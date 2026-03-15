@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-        - v*
+      - v*
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,7 +13,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: taiki-e/install-action@just
@@ -31,14 +31,14 @@ jobs:
       - name: "Install shell dependencies"
         shell: bash
         run: |
-            if [ -z "$(which yq)" ]; then
-              sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && sudo chmod +x /usr/bin/yq
-            fi
-      
-            if [ -z "$(which envsubst)" ]; then
-              sudo apt-get update
-              sudo apt-get install gettext-base
-            fi
+          if [ -z "$(which yq)" ]; then
+            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && sudo chmod +x /usr/bin/yq
+          fi
+
+          if [ -z "$(which envsubst)" ]; then
+            sudo apt-get update
+            sudo apt-get install gettext-base
+          fi
 
       - name: Setup Kurtosis
         shell: bash
@@ -106,7 +106,7 @@ jobs:
       - name: Run E2E Tests
         run: |
           just e2e-test -n
- 
+
       - name: Devnet Down
         run: |
           just devnet-down

@@ -104,7 +104,19 @@ where
             flashblocks_p2p_handle,
         } = self;
 
-        let network_config = op_network_builder.network_config(ctx)?;
+        let mut network_config = op_network_builder.network_config(ctx)?;
+        let local_peer_id = network_config.hello_message.id;
+        network_config.peers_config.trusted_nodes.retain(|peer| {
+            peer.id != local_peer_id
+        });
+
+        let mut trusted_peer_ids: Vec<_> = network_config
+            .peers_config
+            .trusted_nodes
+            .iter()
+            .map(|peer| peer.id)
+            .collect();
+        trusted_peer_ids.dedup();
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
@@ -148,12 +160,8 @@ where
 
         // Set up peer monitor for flashblocks trusted peers
         if flashblocks_p2p_handle.is_some() {
-            let cli_peers = ctx.config().network.trusted_peers.iter();
-            let toml_peers = ctx.reth_config().peers.trusted_nodes.iter();
-            let all_trusted_peers = cli_peers.chain(toml_peers).map(|peer| peer.id);
-
             PeerMonitor::new(handle.clone())
-                .with_initial_peers(all_trusted_peers)
+                .with_initial_peers(trusted_peer_ids)
                 .run_on_task_executor(ctx.task_executor());
         }
 
@@ -254,6 +262,7 @@ where
             pbh_entry_point: pbh.entrypoint,
             pbh_signature_aggregator: pbh.signature_aggregator,
             builder_private_key: builder.private_key,
+            block_uncompressed_size_limit: builder.block_uncompressed_size_limit,
         };
 
         ComponentsBuilder::default()

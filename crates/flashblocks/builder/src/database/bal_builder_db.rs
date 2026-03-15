@@ -431,7 +431,7 @@ impl<DB: DatabaseRef> DatabaseCommit for NoOpCommitDB<DB> {
     }
 }
 
-impl<DB: DatabaseRef> StateDB for NoOpCommitDB<DB> {
+impl<DB: DatabaseRef + std::fmt::Debug> StateDB for NoOpCommitDB<DB> {
     fn bundle_state(&self) -> &BundleState {
         unimplemented!()
     }

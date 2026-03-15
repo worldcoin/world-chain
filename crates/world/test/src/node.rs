@@ -84,6 +84,7 @@ pub fn test_config_with_peers_and_gossip(
     let builder = BuilderArgs {
         enabled: true,
         private_key: signer(6),
+        block_uncompressed_size_limit: None,
     };
 
     let pbh = PbhArgs {
@@ -120,6 +121,7 @@ pub fn test_config_with_peers_and_gossip(
             pbh,
             flashblocks,
             tx_peers,
+            disable_bootnodes: true,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
@@ -616,6 +618,14 @@ impl StateProvider for WorldChainNoopProvider {
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        _address: Address,
+        _hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Ok(None)
+    }
 }
 
 impl HashedPostStateProvider for WorldChainNoopProvider {
@@ -782,16 +792,17 @@ where
         }
     }
 
-    async fn validate_transactions(
+    fn validate_transactions(
         &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+        + Send,
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         let futures = transactions
             .into_iter()
             .map(|(origin, tx)| self.validate_transaction(origin, tx))
             .collect::<Vec<_>>();
 
-        join_all(futures).await
+        join_all(futures)
     }
 
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}

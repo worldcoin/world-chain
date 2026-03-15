@@ -142,6 +142,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         builder: &mut Builder,
         best_txs: Txs,
         gas_limit: u64,
+        cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,
@@ -256,6 +257,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         builder: &mut Builder,
         best_txs: Txs,
         _gas_limit: u64,
+        _cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         Pool: TransactionPool,

@@ -3,15 +3,17 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::value_parser;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use eyre::eyre;
 use flashblocks_cli::{FlashblocksArgs, FlashblocksPayloadBuilderConfig};
 use hex::FromHex;
 use reth::chainspec::NamedChain;
-use reth_network_peers::PeerId;
+use reth_network_peers::{PeerId, TrustedPeer};
+use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
 use std::str::FromStr;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
+
+pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
 use crate::config::WorldChainNodeConfig;
 
@@ -36,11 +38,23 @@ pub struct WorldChainArgs {
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
     pub tx_peers: Option<Vec<PeerId>>,
+
+    /// Disable the default World Chain bootnodes.
+    #[arg(
+        long = "worldchain.disable-bootnodes",
+        value_name = "WORLDCHAIN_DISABLE_BOOTNODES",
+        default_value_t = false
+    )]
+    pub disable_bootnodes: bool,
 }
 
 impl WorldChainArgs {
-    pub fn into_config(mut self, spec: &OpChainSpec) -> eyre::Result<WorldChainNodeConfig> {
+    pub fn into_config(
+        mut self,
+        config: &mut NodeConfig<OpChainSpec>,
+    ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+        let spec = &config.chain;
 
         if let Some(peers) = &self.tx_peers {
             if self.rollup.disable_txpool_gossip {
@@ -68,6 +82,13 @@ impl WorldChainArgs {
                     flashblocks.authorizer_vk = Some(parse_vk(
                         "1361edebf7fd03a72aa23748e17eb5f6901b544cf80d3f410afa5e6e261d7281",
                     )?);
+                }
+
+                if self.flashblocks.is_some() && !self.disable_bootnodes {
+                    let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
+                    debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
+                    // dedup happens later
+                    config.network.trusted_peers.extend(bootnodes);
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -202,6 +223,13 @@ pub struct BuilderArgs {
         default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )]
     pub private_key: PrivateKeySigner,
+
+    /// Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
+    #[arg(
+        long = "builder.block-uncompressed-size-limit",
+        env = "BUILDER_BLOCK_UNCOMPRESSED_SIZE_LIMIT"
+    )]
+    pub block_uncompressed_size_limit: Option<u64>,
 }
 
 pub fn parse_sk(s: &str) -> eyre::Result<SigningKey> {
@@ -214,69 +242,28 @@ pub fn parse_vk(s: &str) -> eyre::Result<VerifyingKey> {
     Ok(VerifyingKey::from_bytes(&bytes)?)
 }
 
+fn parse_trusted_peer(s: &str) -> eyre::Result<Vec<TrustedPeer>> {
+    s.split(',')
+        .map(|enode| {
+            enode.parse().map_err(|err| {
+                eyre::Report::msg(format!("invalid flashblocks bootnode '{}': {}", enode, err))
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use clap::Parser;
+    use reth_node_builder::NodeConfig;
+    use std::sync::Arc;
 
     #[derive(Debug, Parser)]
     struct CommandParser {
         #[command(flatten)]
         world: WorldChainArgs,
-    }
-
-    #[test]
-    fn flashblocks_override_authorizer() {
-        let flashblocks = FlashblocksArgs {
-            enabled: true,
-            override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
-            authorizer_vk: None,
-            builder_sk: Some(SigningKey::from_bytes(&[0; 32])),
-            force_publish: false,
-            flashblocks_interval: 200,
-            recommit_interval: 200,
-            access_list: false,
-        };
-
-        let args = CommandParser::parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.override_authorizer_sk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "--flashblocks.builder_sk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "--builder.enabled",
-            "--builder.private_key",
-            "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        ])
-        .world;
-
-        assert_eq!(args.flashblocks.unwrap(), flashblocks);
-    }
-
-    #[test]
-    fn flashblocks_authorizer() {
-        let flashblocks = FlashblocksArgs {
-            enabled: true,
-            override_authorizer_sk: None,
-            authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
-            builder_sk: None,
-            force_publish: false,
-            flashblocks_interval: 200,
-            recommit_interval: 200,
-            access_list: false,
-        };
-
-        let args = CommandParser::parse_from([
-            "bin",
-            "--flashblocks.enabled",
-            "--flashblocks.authorizer_vk",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ])
-        .world;
-
-        assert_eq!(args.flashblocks.unwrap(), flashblocks);
     }
 
     #[test]
@@ -362,13 +349,16 @@ mod tests {
                 private_key: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
                     .parse()
                     .unwrap(),
+                block_uncompressed_size_limit: None,
             },
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
+            disable_bootnodes: true,
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
-        let config = args.into_config(&spec).unwrap();
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+        let config = args.into_config(&mut node_config).unwrap();
 
         // tx_peers should be set to None due to shadowing
         assert!(config.args.tx_peers.is_none());

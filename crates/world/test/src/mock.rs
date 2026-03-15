@@ -732,6 +732,18 @@ impl StateProvider for MockEthProvider {
             .and_then(|account| account.storage.get(&storage_key))
             .copied())
     }
+
+    fn storage_by_hashed_key(
+        &self,
+        address: Address,
+        hashed_storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let lock = self.accounts.lock();
+        Ok(lock
+            .get(&address)
+            .and_then(|account| account.storage.get(&hashed_storage_key))
+            .copied())
+    }
 }
 
 impl StateProviderFactory for MockEthProvider {

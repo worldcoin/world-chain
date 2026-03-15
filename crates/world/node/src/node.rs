@@ -357,7 +357,7 @@ where
                 );
 
             // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
+            ctx.task_executor().spawn_critical_task(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
@@ -402,6 +402,7 @@ pub struct WorldChainPayloadBuilderBuilder<Txs = ()> {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
+    pub block_uncompressed_size_limit: Option<u64>,
 
     /// Sets the private key of the builder
     pub builder_private_key: PrivateKeySigner,
@@ -416,6 +417,7 @@ impl WorldChainPayloadBuilderBuilder {
         pbh_entry_point: Address,
         pbh_signature_aggregator: Address,
         builder_private_key: PrivateKeySigner,
+        block_uncompressed_size_limit: Option<u64>,
     ) -> Self {
         Self {
             compute_pending_block,
@@ -425,6 +427,7 @@ impl WorldChainPayloadBuilderBuilder {
             best_transactions: (),
             builder_private_key,
             builder_config: OpBuilderConfig::default(),
+            block_uncompressed_size_limit,
         }
     }
 
@@ -446,6 +449,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
             pbh_entry_point,
             pbh_signature_aggregator,
             builder_private_key,
+            block_uncompressed_size_limit,
             ..
         } = self;
 
@@ -457,6 +461,7 @@ impl<Txs> WorldChainPayloadBuilderBuilder<Txs> {
             pbh_signature_aggregator,
             best_transactions,
             builder_private_key,
+            block_uncompressed_size_limit,
         }
     }
 }
@@ -498,6 +503,7 @@ where
             self.pbh_entry_point,
             self.pbh_signature_aggregator,
             self.builder_private_key.clone(),
+            self.block_uncompressed_size_limit,
         )
         .with_transactions(self.best_transactions.clone()))
     }

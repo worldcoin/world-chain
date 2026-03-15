@@ -15,7 +15,7 @@ use reth_rpc_eth_api::{
     },
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
-use reth_transaction_pool::PoolPooledTx;
+use reth_transaction_pool::{PoolPooledTx, TransactionOrigin};
 
 use std::{future::Future, time::Duration};
 
@@ -38,9 +38,10 @@ where
 
     fn send_transaction(
         &self,
+        origin: TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.inner.send_transaction(tx)
+        self.inner.send_transaction(origin, tx)
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

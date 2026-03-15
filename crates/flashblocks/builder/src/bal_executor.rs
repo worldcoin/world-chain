@@ -190,10 +190,14 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
-        // prepare the transaction index for the next transaction
-        self.prepare_database()?;
-        res
+        let res = self
+            .inner
+            .execute_transaction_with_commit_condition(tx, f)?;
+        // only prepare the database index for the next transaction if this one was committed
+        if res.is_some() {
+            self.prepare_database()?;
+        }
+        Ok(res)
     }
 
     fn finish(
