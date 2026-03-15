@@ -59,7 +59,7 @@ pub fn world_chain_events_stream<T, F>(
     mut hook: F,
 ) -> WorldChainEventsStream<T>
 where
-    T: Send + Unpin + 'static,
+    T: Send + Sync + 'static,
     F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
 {
     let merged =
@@ -100,22 +100,31 @@ impl<S: Stream<Item = ChainEvent>> Stream for BufferedStream<S> {
     type Item = ChainEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
 
         // Drain buffered output first.
         if let Some(event) = this.state.output.pop_front() {
             return Poll::Ready(Some(event));
         }
 
-        // Poll inner stream, reduce through state machine, yield first output.
-        match this.inner.poll_next(cx) {
-            Poll::Ready(Some(event)) => {
-                this.state.step(event);
-                Poll::Ready(this.state.output.pop_front())
+        // Loop until we produce output, the inner stream yields Pending, or
+        // the inner stream is exhausted. A single poll is insufficient because
+        // step() may buffer without producing output (e.g. base flashblock
+        // before its canon tip), and returning Ready(None) there would kill
+        // the consumer loop.
+        loop {
+            match this.inner.as_mut().poll_next(cx) {
+                Poll::Ready(Some(event)) => {
+                    this.state.step(event);
+                    if let Some(event) = this.state.output.pop_front() {
+                        return Poll::Ready(Some(event));
+                    }
+                    // step() produced no output — loop to poll again.
+                }
+                // Inner exhausted — drain any remaining buffered output before closing.
+                Poll::Ready(None) => return Poll::Ready(this.state.output.pop_front()),
+                Poll::Pending => return Poll::Pending,
             }
-            // Inner exhausted — drain any remaining buffered output before closing.
-            Poll::Ready(None) => Poll::Ready(this.state.output.pop_front()),
-            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -220,6 +229,18 @@ impl BufferedFlashblocks {
             ChainEvent::Canon(tip) => {
                 self.canon_tip = Some(tip);
                 self.output.push_back(ChainEvent::Canon(tip));
+
+                // Re-org / stale epoch detection: if the canon tip has moved
+                // past or diverged from the epoch's parent, the epoch can never
+                // drain. Clear it so delta flashblocks for a dead fork are not
+                // buffered indefinitely.
+                if let Some(ref epoch) = self.epoch {
+                    let parent_stale = tip.number > epoch.parent.number
+                        || (tip.number == epoch.parent.number && tip.hash != epoch.parent.hash);
+                    if parent_stale {
+                        self.epoch = None;
+                    }
+                }
             }
             ChainEvent::Pending(ref fb) if fb.base.is_some() => {
                 self.epoch = BlockEpochState::try_new(Arc::clone(fb), self.canon_tip);
@@ -548,6 +569,136 @@ mod tests {
 
         // Delta with wrong payload_id — ignored
         buf.step(delta_fb(pid(99), 1));
+        assert!(collect_pending(&mut buf).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // BufferedStream regression tests
+    // -----------------------------------------------------------------------
+
+    async fn collect_stream(events: Vec<ChainEvent>) -> Vec<ChainEvent> {
+        let inner = futures::stream::iter(events);
+        BufferedStream::new(inner).collect().await
+    }
+
+    /// Base flashblock before canon tip must not terminate the stream.
+    #[tokio::test]
+    async fn buffered_stream_does_not_terminate_on_no_output_step() {
+        let events = vec![
+            base_fb(pid(1), 0, hash(5), 6),
+            canon(5, hash(5)),
+            delta_fb(pid(1), 1),
+        ];
+        let output = collect_stream(events).await;
+        assert_eq!(output.len(), 3, "stream must not terminate early");
+        assert!(matches!(output[0], ChainEvent::Canon(_)));
+    }
+
+    /// Stale base discarded — stream continues to process fresh base.
+    #[tokio::test]
+    async fn buffered_stream_continues_after_stale_discard() {
+        let events = vec![
+            canon(10, hash(10)),
+            base_fb(pid(1), 0, hash(4), 5),
+            base_fb(pid(2), 0, hash(10), 11),
+        ];
+        let output = collect_stream(events).await;
+        assert_eq!(output.len(), 2);
+        assert!(matches!(output[0], ChainEvent::Canon(_)));
+        assert!(matches!(&output[1], ChainEvent::Pending(fb) if fb.index == 0));
+    }
+
+    /// Orphan delta ignored — stream continues.
+    #[tokio::test]
+    async fn buffered_stream_continues_after_orphan_delta() {
+        let events = vec![
+            delta_fb(pid(1), 3),
+            canon(0, hash(0)),
+            base_fb(pid(2), 0, hash(0), 1),
+        ];
+        let output = collect_stream(events).await;
+        assert_eq!(output.len(), 2);
+        assert!(matches!(output[0], ChainEvent::Canon(_)));
+        assert!(matches!(&output[1], ChainEvent::Pending(fb) if fb.index == 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Re-org tests
+    // -----------------------------------------------------------------------
+
+    /// Re-org at same height: canon tip changes hash at the epoch's parent
+    /// number. The epoch becomes invalid and must be cleared so that delta
+    /// flashblocks for the dead fork are not buffered.
+    #[test]
+    fn reorg_same_height_clears_epoch() {
+        let mut buf = BufferedFlashblocks::default();
+
+        buf.step(canon(5, hash(5)));
+        collect_all(&mut buf);
+
+        // Epoch building on parent (5, hash(5))
+        buf.step(base_fb(pid(1), 0, hash(5), 6));
+        assert_eq!(collect_pending(&mut buf), vec![0]);
+
+        buf.step(delta_fb(pid(1), 1));
+        assert_eq!(collect_pending(&mut buf), vec![1]);
+
+        // Re-org: canon tip at same number 5 but different hash
+        buf.step(canon(5, hash(55)));
+        collect_all(&mut buf); // drain canon event
+
+        // Delta for the dead epoch — should be silently dropped
+        buf.step(delta_fb(pid(1), 2));
+        assert!(
+            collect_pending(&mut buf).is_empty(),
+            "dead epoch delta should be dropped"
+        );
+
+        // New epoch on the re-orged chain works
+        buf.step(base_fb(pid(2), 0, hash(55), 6));
+        assert_eq!(collect_pending(&mut buf), vec![0]);
+    }
+
+    /// Re-org to a higher tip invalidates the epoch.
+    #[test]
+    fn reorg_higher_tip_clears_epoch() {
+        let mut buf = BufferedFlashblocks::default();
+
+        buf.step(canon(5, hash(5)));
+        collect_all(&mut buf);
+
+        // Epoch building on parent (5, hash(5)), block 6
+        buf.step(base_fb(pid(1), 0, hash(5), 6));
+        assert_eq!(collect_pending(&mut buf), vec![0]);
+
+        // Canon jumps to block 7 (skipping block 6 — the epoch's block)
+        buf.step(canon(7, hash(7)));
+        collect_all(&mut buf);
+
+        // Delta for the dead epoch — should be dropped
+        buf.step(delta_fb(pid(1), 1));
+        assert!(collect_pending(&mut buf).is_empty());
+    }
+
+    /// Buffered (not yet drained) epoch cleared on re-org.
+    #[test]
+    fn reorg_clears_buffered_undrained_epoch() {
+        let mut buf = BufferedFlashblocks::default();
+
+        // Base arrives before any canon tip — buffered
+        buf.step(base_fb(pid(1), 0, hash(5), 6));
+        buf.step(delta_fb(pid(1), 1));
+        assert!(collect_pending(&mut buf).is_empty(), "no canon tip yet");
+
+        // Re-org canon tip at height 6 — epoch parent is at 5, so 6 > 5 → stale
+        buf.step(canon(6, hash(6)));
+        let events = collect_all(&mut buf);
+        // Only the canon event, no pending — epoch was cleared
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ChainEvent::Canon(_)));
+
+        // Delta for dead epoch dropped
+        buf.step(delta_fb(pid(1), 2));
         assert!(collect_pending(&mut buf).is_empty());
     }
 }

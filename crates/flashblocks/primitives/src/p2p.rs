@@ -42,20 +42,11 @@ pub struct StopPublish;
 /// This enum represents the top-level message types that can be transmitted
 /// over the P2P network. Currently all messages are wrapped in authorization to ensure
 /// only authorized builders can create new messages.
-#[allow(clippy::large_enum_variant)]
 #[repr(u8)]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
 pub enum FlashblocksP2PMsg {
     /// An authorized message containing a signed and authorized payload
     Authorized(Authorized) = 0x00,
-    /// Requests that the remote peer begin forwarding flashblocks to us.
-    RequestFlashblocks = 0x01,
-    /// Accepts a previously sent [`Self::RequestFlashblocks`] request.
-    AcceptFlashblocks = 0x02,
-    /// Rejects a previously sent [`Self::RequestFlashblocks`] request.
-    RejectFlashblocks = 0x03,
-    /// Sent by a receiver to terminate an active flashblocks feed from a sender.
-    CancelFlashblocks = 0x04,
 }
 
 /// The different types of authorized messages that can be sent over the Flashblocks P2P network.
@@ -452,10 +443,6 @@ impl FlashblocksP2PMsg {
                 buf.put_u8(0x00);
                 payload.encode(&mut buf);
             }
-            FlashblocksP2PMsg::RequestFlashblocks => buf.put_u8(0x01),
-            FlashblocksP2PMsg::AcceptFlashblocks => buf.put_u8(0x02),
-            FlashblocksP2PMsg::RejectFlashblocks => buf.put_u8(0x03),
-            FlashblocksP2PMsg::CancelFlashblocks => buf.put_u8(0x04),
         }
         buf
     }
@@ -471,10 +458,6 @@ impl FlashblocksP2PMsg {
                 let payload = Authorized::decode(buf)?;
                 Ok(FlashblocksP2PMsg::Authorized(payload))
             }
-            0x01 => Ok(FlashblocksP2PMsg::RequestFlashblocks),
-            0x02 => Ok(FlashblocksP2PMsg::AcceptFlashblocks),
-            0x03 => Ok(FlashblocksP2PMsg::RejectFlashblocks),
-            0x04 => Ok(FlashblocksP2PMsg::CancelFlashblocks),
             _ => Err(FlashblocksError::UnknownMessageType),
         }
     }
@@ -832,25 +815,6 @@ mod tests {
 
         match decoded {
             FlashblocksP2PMsg::Authorized(inner) => assert_eq!(inner, authorized),
-            _ => panic!("decoded wrong message variant"),
-        }
-    }
-
-    #[test]
-    fn p2p_control_msg_roundtrip() {
-        let variants = [
-            FlashblocksP2PMsg::RequestFlashblocks,
-            FlashblocksP2PMsg::AcceptFlashblocks,
-            FlashblocksP2PMsg::RejectFlashblocks,
-            FlashblocksP2PMsg::CancelFlashblocks,
-        ];
-
-        for msg in variants {
-            let encoded = msg.encode();
-            let mut view: &[u8] = &encoded;
-            let decoded = FlashblocksP2PMsg::decode(&mut view).expect("decoding succeeds");
-            assert!(view.is_empty(), "all bytes consumed");
-            assert_eq!(decoded, msg);
         }
     }
 

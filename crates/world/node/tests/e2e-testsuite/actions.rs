@@ -1494,3 +1494,145 @@ where
         EngineDriver::execute(self, env)
     }
 }
+
+// ---------------------------------------------------------------------------
+// StreamAssertion — assertion-driven event stream validation
+// ---------------------------------------------------------------------------
+
+use flashblocks_p2p::protocol::event::{ChainEvent, WorldChainEvent};
+
+/// Pre-computed assertion on a [`WorldChainEvent`] from the event stream.
+#[derive(Debug, Clone)]
+pub enum StreamAssertion {
+    /// Expect a Canon event. Optionally assert the block number.
+    Canon { number: Option<u64> },
+    /// Expect a Pending flashblock with the given index.
+    /// `is_base` asserts whether it should have a `base` field.
+    Pending { index: u64, is_base: bool },
+    /// Expect the pending block watch channel to contain a block at this number.
+    PendingBlockAt { number: u64 },
+    /// Expect the pending block watch channel to be None.
+    PendingBlockCleared,
+}
+
+/// Result of running assertions against the event stream.
+#[derive(Debug)]
+pub struct StreamAssertionResult {
+    /// Number of assertions that passed.
+    pub passed: usize,
+    /// Number of assertions that were expected but not seen (stream ended or timed out).
+    pub missed: usize,
+    /// Failures with details.
+    pub failures: Vec<String>,
+}
+
+impl StreamAssertionResult {
+    pub fn assert_all_passed(&self) {
+        assert!(
+            self.failures.is_empty() && self.missed == 0,
+            "Stream assertion failures: {:?}, missed: {}",
+            self.failures,
+            self.missed,
+        );
+    }
+}
+
+/// Consume events from the stream, checking each against the next expected
+/// assertion. Returns when all assertions are satisfied or the timeout fires.
+pub async fn assert_stream<S>(
+    mut stream: S,
+    assertions: Vec<StreamAssertion>,
+    timeout: Duration,
+) -> StreamAssertionResult
+where
+    S: futures::Stream<Item = WorldChainEvent<()>> + Unpin + Send,
+{
+    let mut passed = 0usize;
+    let mut failures = Vec::new();
+    let mut assertion_iter = assertions.iter().enumerate().peekable();
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        // All assertions consumed — done.
+        if assertion_iter.peek().is_none() {
+            break;
+        }
+
+        let event = tokio::select! {
+            event = futures::StreamExt::next(&mut stream) => {
+                match event {
+                    Some(e) => e,
+                    None => break, // stream ended
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                break; // timeout
+            }
+        };
+
+        let Some(&(idx, assertion)) = assertion_iter.peek() else {
+            break;
+        };
+
+        match (&event, assertion) {
+            (WorldChainEvent::Chain(ChainEvent::Canon(tip)), StreamAssertion::Canon { number }) => {
+                if let Some(expected) = number
+                    && tip.number != *expected
+                {
+                    failures.push(format!(
+                        "assertion[{idx}]: expected Canon(number={}), got Canon(number={})",
+                        expected, tip.number,
+                    ));
+                }
+                passed += 1;
+                assertion_iter.next();
+            }
+            (
+                WorldChainEvent::Chain(ChainEvent::Pending(fb)),
+                StreamAssertion::Pending { index, is_base },
+            ) => {
+                if fb.index != *index {
+                    failures.push(format!(
+                        "assertion[{idx}]: expected Pending(index={}), got Pending(index={})",
+                        index, fb.index,
+                    ));
+                }
+                if fb.base.is_some() != *is_base {
+                    failures.push(format!(
+                        "assertion[{idx}]: expected is_base={}, got is_base={}",
+                        is_base,
+                        fb.base.is_some(),
+                    ));
+                }
+                passed += 1;
+                assertion_iter.next();
+            }
+            // Canon event arrived but we expected Pending — skip the canon
+            // (canon events can appear between pending events)
+            (WorldChainEvent::Chain(ChainEvent::Canon(_)), StreamAssertion::Pending { .. }) => {
+                // Don't advance the assertion iterator — canon events are
+                // interleaved and not always explicitly asserted.
+                continue;
+            }
+            // Pending arrived but we expected Canon — this is a failure
+            (WorldChainEvent::Chain(ChainEvent::Pending(fb)), StreamAssertion::Canon { .. }) => {
+                failures.push(format!(
+                    "assertion[{idx}]: expected Canon, got Pending(index={})",
+                    fb.index,
+                ));
+                assertion_iter.next();
+            }
+            // PendingBlockAt / PendingBlockCleared can't be checked from the
+            // event stream — they need external state. Skip for now.
+            _ => continue,
+        }
+    }
+
+    let missed = assertion_iter.count();
+
+    StreamAssertionResult {
+        passed,
+        missed,
+        failures,
+    }
+}

@@ -3772,7 +3772,6 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
- "reth-engine-tree",
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
@@ -3806,6 +3805,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "ed25519-dalek",
+ "flashblocks-builder",
  "hex",
 ]
 
@@ -3887,24 +3887,21 @@ dependencies = [
 name = "flashblocks-p2p"
 version = "1.10.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "chrono",
  "ed25519-dalek",
- "enr",
- "flashblocks-cli",
  "flashblocks-primitives",
  "futures",
  "metrics",
  "parking_lot",
  "pin-project",
- "rand 0.9.2",
  "reth",
  "reth-eth-wire",
  "reth-ethereum",
  "reth-network",
- "reth-network-api",
- "reth-network-peers",
+ "reth-provider",
  "reth-tasks",
  "thiserror 2.0.18",
  "tokio",
