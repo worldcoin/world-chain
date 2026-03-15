@@ -95,28 +95,24 @@ impl FlashblocksExecutionCoordinator {
         Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
-        let mut stream = self.p2p_handle.live_flashblock_stream();
-        let this = self.clone();
+        let stream = self.p2p_handle.live_flashblock_stream();
         let provider = ctx.provider().clone();
         let chain_spec = ctx.chain_spec().clone();
 
+        let this = self.clone();
         let pending_block = self.pending_block.clone();
 
         ctx.task_executor()
             .spawn_critical_task("flashblocks executor", async move {
-                while let Some(flashblock) = stream.next().await {
-                    let provider = provider.clone();
-                    if let Err(e) = process_flashblock(
-                        provider,
-                        &evm_config,
-                        &this,
-                        chain_spec.clone(),
-                        flashblock,
-                        pending_block.clone(),
-                    ) {
-                        error!("error processing flashblock: {e:#?}")
-                    }
-                }
+                run_flashblock_processor(
+                    stream,
+                    provider,
+                    evm_config,
+                    &this,
+                    chain_spec,
+                    pending_block,
+                )
+                .await;
             });
     }
 
@@ -178,6 +174,42 @@ impl FlashblocksExecutionCoordinator {
             error!("error broadcasting payload: {e:#?}");
         }
         Ok(())
+    }
+}
+
+/// Core flashblock processing loop extracted from [`FlashblocksExecutionCoordinator::launch`].
+///
+/// Consumes flashblocks from `stream` and processes each one through
+/// [`process_flashblock`]. This is the same loop that `launch` spawns as a
+/// critical task — exposed here so benchmarks and tests can drive it
+/// directly without needing a full [`BuilderContext`].
+pub async fn run_flashblock_processor<S, Provider>(
+    stream: S,
+    provider: Provider,
+    evm_config: OpEvmConfig,
+    coordinator: &FlashblocksExecutionCoordinator,
+    chain_spec: Arc<OpChainSpec>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+) where
+    S: futures::Stream<Item = FlashblocksPayloadV1> + Unpin,
+    Provider: StateProviderFactory
+        + HeaderProvider<Header = alloy_consensus::Header>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone
+        + 'static,
+{
+    futures::pin_mut!(stream);
+    while let Some(flashblock) = stream.next().await {
+        if let Err(e) = process_flashblock(
+            provider.clone(),
+            &evm_config,
+            coordinator,
+            chain_spec.clone(),
+            flashblock,
+            pending_block.clone(),
+        ) {
+            error!("error processing flashblock: {e:#?}");
+        }
     }
 }
 

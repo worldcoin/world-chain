@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flashblocks_builder::{
-    coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
+    coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
     test_utils::{
         BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture,
         build_flashblock_sequence_fixture,
@@ -8,12 +8,10 @@ use flashblocks_builder::{
 };
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::ed25519_dalek::SigningKey;
-use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
 
-/// Helper: creates a fresh coordinator + watch channel for each benchmark
-/// iteration so the cache-hit early return is never triggered.
+/// Helper: creates a fresh coordinator + handle + watch channel.
 fn fresh_coordinator() -> (
     FlashblocksExecutionCoordinator,
     FlashblocksHandle,
@@ -27,6 +25,10 @@ fn fresh_coordinator() -> (
     let coordinator = FlashblocksExecutionCoordinator::new(handle.clone(), pending_tx.clone());
     (coordinator, handle, pending_tx)
 }
+
+// ---------------------------------------------------------------------------
+// Single flashblock benchmark
+// ---------------------------------------------------------------------------
 
 fn bench_process_flashblock(c: &mut Criterion) {
     let mut group = c.benchmark_group("process_flashblock");
@@ -54,7 +56,11 @@ fn bench_process_flashblock(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_process_flashblock_sequence(c: &mut Criterion) {
+// ---------------------------------------------------------------------------
+// Multi-flashblock via launch path (stream-driven through run_flashblock_processor)
+// ---------------------------------------------------------------------------
+
+fn bench_launch_flashblock_sequence(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let mut group = c.benchmark_group("launch_flashblock_sequence");
     group.sample_size(20);
@@ -69,7 +75,6 @@ fn bench_process_flashblock_sequence(c: &mut Criterion) {
         let sequence = build_flashblock_sequence_fixture(num_fb, txs_per_fb);
         let provider = BenchProvider::new();
         let label = format!("{}fb_x_{}tx", num_fb, txs_per_fb);
-        let expected = sequence.len();
 
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
             b.iter(|| {
@@ -83,31 +88,19 @@ fn bench_process_flashblock_sequence(c: &mut Criterion) {
                     state.flashblocks = sequence.iter().map(|fb| Some(fb.clone())).collect();
                 }
 
-                // Obtain the stream — this is the same stream `launch` uses.
-                let mut stream = handle.live_flashblock_stream();
-                let evm_config = EVM_CONFIG.clone();
-                let chain_spec = CHAIN_SPEC.clone();
+                // Drive through the same function that `launch` calls.
+                // The stream is finite (buffer-only, no broadcast sender),
+                // so run_flashblock_processor returns once all are consumed.
+                let stream = handle.live_flashblock_stream();
 
-                // Drive the launch loop: stream → process_flashblock,
-                // replicating the exact async path from `launch`.
-                rt.block_on(async {
-                    for _ in 0..expected {
-                        let flashblock = stream
-                            .next()
-                            .await
-                            .expect("stream ended before all flashblocks processed");
-
-                        process_flashblock(
-                            provider.clone(),
-                            &evm_config,
-                            &coordinator,
-                            chain_spec.clone(),
-                            flashblock,
-                            pending_tx.clone(),
-                        )
-                        .expect("process_flashblock failed");
-                    }
-                });
+                rt.block_on(run_flashblock_processor(
+                    stream,
+                    provider.clone(),
+                    EVM_CONFIG.clone(),
+                    &coordinator,
+                    CHAIN_SPEC.clone(),
+                    pending_tx,
+                ));
             });
         });
     }
@@ -117,6 +110,6 @@ fn bench_process_flashblock_sequence(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_process_flashblock,
-    bench_process_flashblock_sequence,
+    bench_launch_flashblock_sequence
 );
 criterion_main!(benches);

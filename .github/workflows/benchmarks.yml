@@ -42,12 +42,16 @@ jobs:
       - name: Install critcmp
         run: cargo install critcmp --locked
 
+      # Restore the most recent baseline using prefix matching.
+      # The save key includes run_id so each push to main creates a new
+      # entry; restore-keys ensures the latest one is always found.
       - name: Restore baseline
         id: restore-baseline
         uses: actions/cache/restore@v4
         with:
           path: target/criterion
-          key: criterion-baseline-main
+          key: criterion-baseline-main-${{ github.run_id }}
+          restore-keys: criterion-baseline-main-
 
       # Run benchmarks on the current branch and save as "pr" baseline
       - name: Run benchmarks
@@ -123,8 +127,9 @@ jobs:
       - name: Generate baseline
         run: cargo bench --package flashblocks-builder --features bench --bench coordinator -- --save-baseline main
 
+      # Dynamic key ensures each push to main overwrites the baseline.
       - name: Save baseline
         uses: actions/cache/save@v4
         with:
           path: target/criterion
-          key: criterion-baseline-main
+          key: criterion-baseline-main-${{ github.run_id }}
