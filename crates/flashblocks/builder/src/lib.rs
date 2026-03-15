@@ -138,7 +138,6 @@
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
-
 use reth_evm::{
     block::BlockExecutionError,
     execute::{BlockBuilder, BlockBuilderOutcome},

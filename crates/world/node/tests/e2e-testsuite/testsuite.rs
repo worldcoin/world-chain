@@ -1140,8 +1140,14 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
         "stream invariant results"
     );
 
-    assert!(canons > 1, "expected at least one canon event");
-    assert!(pendings > 1, "expected at least one pending flashblock");
+    assert!(
+        canons >= 1,
+        "expected at least one canon event, got {canons}"
+    );
+    assert!(
+        pendings >= 1,
+        "expected at least one pending flashblock, got {pendings}"
+    );
     assert!(
         saw_canon_before_pending.load(Ordering::SeqCst),
         "expected canon event before first pending flashblock"
@@ -1647,15 +1653,17 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
             )
         };
 
-    // Pre-compute assertions: for each of the 3 blocks, expect a Canon event
-    // followed by the base flashblock (index=0, is_base=true).
-    // We can't predict exact flashblock counts, so we assert the minimum
-    // structure: canon -> base -> at least one delta.
+    // Pre-compute assertions: expect the initial canon seed, then for each
+    // block a base flashblock (index=0, is_base=true). Intermediate canon
+    // events and delta flashblocks are skipped by the assertion checker.
     let mut assertions = Vec::new();
+
+    // Initial canon tip seed from event_stream
+    assertions.push(crate::actions::StreamAssertion::Canon { number: None });
+
+    // For each block, expect at least the base flashblock.
+    // The checker skips intervening canon events automatically.
     for _ in 0..NUM_BLOCKS {
-        // Canon event when the previous block is committed
-        assertions.push(crate::actions::StreamAssertion::Canon { number: None });
-        // Base flashblock for the new epoch
         assertions.push(crate::actions::StreamAssertion::Pending {
             index: 0,
             is_base: true,

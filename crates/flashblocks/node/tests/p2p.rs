@@ -33,7 +33,7 @@ use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
-use reth_tasks::{TaskExecutor, TaskManager};
+use reth_tasks::TaskExecutor;
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -94,7 +94,7 @@ pub struct NodeContext {
 struct NodeTestFixture {
     nodes: Vec<NodeContext>,
     authorizer: SigningKey,
-    _tasks: TaskManager,
+    _exec: TaskExecutor,
 }
 
 impl NodeTestFixture {
@@ -388,8 +388,7 @@ async fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1
 async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
     let mut nodes = Vec::new();
     let mut peers = Vec::new();
-    let tasks = TaskManager::new(tokio::runtime::Handle::current());
-    let exec = tasks.executor();
+    let exec = TaskExecutor::default();
     let authorizer = SigningKey::from_bytes(&[0; 32]);
 
     for i in 0..n {
@@ -431,7 +430,7 @@ async fn setup_nodes(n: u8) -> eyre::Result<NodeTestFixture> {
     Ok(NodeTestFixture {
         nodes,
         authorizer,
-        _tasks: tasks,
+        _exec: exec,
     })
 }
 
@@ -779,14 +778,13 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     p2p_key_file.flush()?;
     let p2p_key_path = p2p_key_file.path().to_path_buf();
 
-    let tasks1 = TaskManager::new(tokio::runtime::Handle::current());
-    let exec1 = tasks1.executor();
+    let exec1 = TaskExecutor::default();
 
-    // Setup node 1 with its own TaskManager (for isolated task cancellation)
+    // Setup node 1 with its own executor (for isolated task cancellation)
     // Node1 needs static port and P2P key so it can be restarted with same identity
     let builder1 = SigningKey::from_bytes(&[1; 32]);
     let node1 = setup_node_extended_cfg(
-        exec1,
+        exec1.clone(),
         authorizer.clone(),
         builder1,
         vec![],                     // No peers initially
@@ -795,8 +793,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     )
     .await?;
 
-    let tasks2 = TaskManager::new(tokio::runtime::Handle::current());
-    let exec2 = tasks2.executor();
+    let exec2 = TaskExecutor::default();
 
     // Capture node1's identity for node2 to use as trusted peer
     let peer1_id = node1.local_node_record.id;
@@ -843,7 +840,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     // Dropping the TaskManager cancels all tasks spawned on it
     info!("Simulating node 1 crash (dropping node and TaskManager)");
     drop(node1);
-    drop(tasks1);
 
     // Wait for the event listener to process the SessionClosed event
     sleep(Duration::from_millis(500)).await;

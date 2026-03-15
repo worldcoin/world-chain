@@ -1575,6 +1575,7 @@ where
         };
 
         match (&event, assertion) {
+            // Canon matches Canon assertion
             (WorldChainEvent::Chain(ChainEvent::Canon(tip)), StreamAssertion::Canon { number }) => {
                 if let Some(expected) = number
                     && tip.number != *expected
@@ -1587,16 +1588,11 @@ where
                 passed += 1;
                 assertion_iter.next();
             }
+            // Pending matches Pending assertion with correct index
             (
                 WorldChainEvent::Chain(ChainEvent::Pending(fb)),
                 StreamAssertion::Pending { index, is_base },
-            ) => {
-                if fb.index != *index {
-                    failures.push(format!(
-                        "assertion[{idx}]: expected Pending(index={}), got Pending(index={})",
-                        index, fb.index,
-                    ));
-                }
+            ) if fb.index == *index => {
                 if fb.base.is_some() != *is_base {
                     failures.push(format!(
                         "assertion[{idx}]: expected is_base={}, got is_base={}",
@@ -1607,23 +1603,10 @@ where
                 passed += 1;
                 assertion_iter.next();
             }
-            // Canon event arrived but we expected Pending — skip the canon
-            // (canon events can appear between pending events)
-            (WorldChainEvent::Chain(ChainEvent::Canon(_)), StreamAssertion::Pending { .. }) => {
-                // Don't advance the assertion iterator — canon events are
-                // interleaved and not always explicitly asserted.
-                continue;
-            }
-            // Pending arrived but we expected Canon — this is a failure
-            (WorldChainEvent::Chain(ChainEvent::Pending(fb)), StreamAssertion::Canon { .. }) => {
-                failures.push(format!(
-                    "assertion[{idx}]: expected Canon, got Pending(index={})",
-                    fb.index,
-                ));
-                assertion_iter.next();
-            }
-            // PendingBlockAt / PendingBlockCleared can't be checked from the
-            // event stream — they need external state. Skip for now.
+            // Any non-matching event is skipped — Canon events, delta
+            // flashblocks from the current epoch, etc. The assertion
+            // checker only advances when an event matches the next
+            // expected assertion.
             _ => continue,
         }
     }

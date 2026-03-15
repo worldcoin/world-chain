@@ -130,11 +130,8 @@ impl FlashblocksExecutionCoordinator {
         let semaphore = Arc::new(Semaphore::new(1));
 
         ctx.task_executor()
-            .spawn_critical("flashblocks executor", async move {
-                // Liveness witness — each new flashblock mints a fresh Arc,
-                // invalidating the previous task's Weak and causing its
-                // commit to no-op.
-                let mut witness: Arc<()>;
+            .spawn_critical_task("flashblocks executor", async move {
+                let mut witness;
 
                 while let Some(event) = stream.next().await {
                     if let WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) = event {
@@ -465,7 +462,6 @@ where
     }
 
     // Drop the witness guard before sending — we no longer need atomicity
-    // with the coordinator's event loop after the write lock is released.
     drop(_guard);
 
     pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
