@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
@@ -5,7 +7,7 @@ use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_tracing::tracing::info;
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, args::WorldChainArgs, config::WorldChainNodeConfig,
-    context::FlashblocksContext, node::WorldChainNode,
+    context::FlashblocksContext, health::HealthConfig, node::WorldChainNode,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
@@ -43,12 +45,12 @@ fn main() {
             let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
             info!(target: "reth::cli", "Starting in Flashblocks mode");
-            let node = WorldChainNode::<FlashblocksContext>::new(config.clone());
+            let worldchain_node = WorldChainNode::<FlashblocksContext>::new(config.clone());
             let NodeHandle {
                 node_exit_future,
-                node: _node,
+                node,
             } = builder
-                .node(node)
+                .node(worldchain_node)
                 .extend_rpc_modules(move |ctx| {
                     let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
@@ -61,6 +63,18 @@ fn main() {
                 })
                 .launch()
                 .await?;
+
+            if config.args.health.enabled {
+                let health_addr = SocketAddr::new(config.args.health.addr, config.args.health.port);
+                let health_config = match &config.args.health.config {
+                    Some(path) => HealthConfig::from_file(path)?,
+                    None => HealthConfig::default(),
+                };
+                let health_server =
+                    health_config.build(health_addr, node.provider.clone(), node.network.clone());
+                node.task_executor.spawn(health_server.serve());
+            }
+
             node_exit_future.await?;
 
             Ok(())

@@ -220,6 +220,7 @@ async fn setup_node_extended_cfg(
             }),
             tx_peers: None,
             disable_bootnodes: true,
+            health: Default::default(),
         },
         builder_config: Default::default(),
     };
