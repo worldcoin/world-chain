@@ -22,6 +22,7 @@ pub struct ExecutionMetrics {
     /// Broadcast of built payload to in-memory tree failed.
     pub broadcast_failed: Counter,
     /// newPayloadV3/V4 cache hit — payload already built for this id+index.
+    // TODO: FIXME: Figure out how to track this
     pub payload_cache_hits: Counter,
 }
 
