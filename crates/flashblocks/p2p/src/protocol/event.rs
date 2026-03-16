@@ -63,7 +63,7 @@ where
     F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
 {
     let merged =
-        futures::stream::select_with_strategy(flashblocks, canon, |_: &mut ()| PollNext::Left);
+        futures::stream::select_with_strategy(canon, flashblocks, |_: &mut ()| PollNext::Left);
 
     BufferedStream::new(merged)
         .map(WorldChainEvent::Chain)
