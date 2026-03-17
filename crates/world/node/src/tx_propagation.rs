@@ -34,15 +34,6 @@ impl<N: NetworkPrimitives> TransactionPropagationPolicy<N>
         let peer_id = &peer.request_tx().peer_id;
         let allowed = self.allowed_peers.contains(peer_id);
 
-        // FIXME: Remove
-        tracing::debug!(
-            target: "world_chain::tx_propagation",
-            ?peer_id,
-            allowed,
-            allowed_peer_count = self.allowed_peers.len(),
-            "Checking if transactions can be propagated to peer"
-        );
-
         allowed
     }
 
