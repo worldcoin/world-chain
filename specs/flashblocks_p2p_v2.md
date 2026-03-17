@@ -6,6 +6,8 @@
 
 The current flashblocks P2P protocol broadcasts every `FlashblocksPayloadV1` to **all** connected peers (`handler.rs:585`, `connection.rs:97-129`). A node with N peers sends N copies of every flashblock. For a node connected to 50 peers, that is 50x outgoing bandwidth per flashblock. As the network grows, this becomes unsustainable.
 
+Additionally, `StartPublish` and `StopPublish` messages are currently **not relayed** beyond direct peers (see `connection.rs:343,436` TODOs). This must be addressed for multi-hop propagation to work correctly.
+
 ## Design Goals
 
 1. **Reduce bandwidth** — Each node sends flashblocks to a bounded number of peers instead of all peers.
@@ -18,10 +20,10 @@ The current flashblocks P2P protocol broadcasts every `FlashblocksPayloadV1` to 
 
 Each node maintains two bounded peer sets:
 
-- **Send Set** (max `max_send_peers`, default 10): Peers this node actively forwards flashblocks to. These are peers that have sent a `RequestFlashblocks` and been accepted. Trusted peers bypass the limit.
-- **Receive Set** (max `max_receive_peers`, default 3): Peers this node actively receives flashblocks from. These are peers this node has selected as active feed sources.
+- **Send Set** (max `max_send_peers`, default 6): Peers this node actively forwards flashblocks to. These are peers that have sent a `RequestFlashblocks` and been accepted. Trusted peers bypass the limit.
+- **Receive Set** (max `max_receive_peers`, default 6): Peers this node actively receives flashblocks from. These are peers to which this node has sent `RequestFlashblocks` and received `AcceptFlashblocks`.
 
-Flashblocks propagate through the network as a directed acyclic graph: the builder sends to its send set, those nodes relay to their send sets, and so on. With a fanout of 10, a network of N nodes requires approximately log₁₀(N) hops from builder to the most distant node.
+Flashblocks propagate through the network as a directed acyclic graph: the builder sends to its send set, those nodes relay to their send sets, and so on. With a fanout of 6, a network of N nodes requires approximately log₆(N) hops from builder to the most distant node.
 
 Periodically, each node evaluates the latency of its receive peers and may rotate out the highest-latency peer in favor of a randomly-selected alternative, one peer at a time.
 
@@ -31,14 +33,15 @@ This change adds new message types to the `flblk` protocol. The protocol version
 
 ## New Message Types
 
-Four unsigned control messages are added to `FlashblocksP2PMsg`:
+Five unsigned control messages are added to `FlashblocksP2PMsg`:
 
 | Discriminator | Message | Direction | Description |
 |---|---|---|---|
 | `0x01` | `RequestFlashblocks` | Receiver → Sender | "I want to receive flashblocks from you" |
 | `0x02` | `AcceptFlashblocks` | Sender → Receiver | "Accepted. I will send you flashblocks" |
 | `0x03` | `RejectFlashblocks` | Sender → Receiver | "Rejected. I am at capacity" |
-| `0x04` | `CancelFlashblocks` | Receiver → Sender | "Stop sending me flashblocks" |
+| `0x04` | `CancelFlashblocks` | Either → Either | "I am ending our flashblock feed" |
+| `0x05` | `CancelFlashblocksAck` | Either → Either | "Acknowledged. Feed terminated" |
 
 These messages carry no payload. The connection context (peer ID) provides all necessary information.
 
@@ -51,6 +54,7 @@ pub enum FlashblocksP2PMsg {
     AcceptFlashblocks = 0x02,
     RejectFlashblocks = 0x03,
     CancelFlashblocks = 0x04,
+    CancelFlashblocksAck = 0x05,
 }
 ```
 
@@ -59,16 +63,22 @@ pub enum FlashblocksP2PMsg {
 **`RequestFlashblocks`** — Sent by a node that wants to receive flashblocks from the connected peer. The recipient evaluates:
 
 1. Is the requester a trusted peer? → Always accept (trusted peers bypass `max_send_peers`).
-2. Is the number of non-trusted peers in the send set below `max_send_peers`? → Accept.
-3. Otherwise → Reject.
+2. Is the send set below `max_send_peers`? → Accept.
+3. Is the send set full but contains non-trusted peers, AND the requester is trusted? → Evict a non-trusted peer (send it `CancelFlashblocks`), then accept.
+4. Otherwise → Reject.
 
 **`AcceptFlashblocks`** — Response to `RequestFlashblocks`. After this, the sender begins forwarding all `Authorized` messages to the receiver and adds the receiver to its send set.
 
 **`RejectFlashblocks`** — Response to `RequestFlashblocks` when the sender cannot accommodate more peers. The requester should try another peer.
 
-**`CancelFlashblocks`** — Sent only by a receiver to the sender it no longer wants to receive flashblocks from (e.g., during peer rotation).
+**`CancelFlashblocks`** — Either side may send this to terminate the flashblock feed:
 
-After receiving `CancelFlashblocks`, the sender immediately stops forwarding flashblocks to that peer and removes it from its send set.
+- **Receiver-initiated**: "Stop sending me flashblocks." (e.g., during peer rotation)
+- **Sender-initiated**: "I am going to stop sending you flashblocks." (e.g., evicting a non-trusted peer to make room for a trusted one)
+
+The other party MUST respond with `CancelFlashblocksAck`.
+
+**`CancelFlashblocksAck`** — Confirms the feed termination. After this exchange, both sides update their sets (sender removes from send set, receiver removes from receive set).
 
 ## Peer Management
 
@@ -93,8 +103,8 @@ struct FanoutState {
 
 When a node starts and connects to peers via devp2p:
 
-1. As peers connect and complete the `flblk/2` handshake, discover whether they are trusted or untrusted.
-2. Only request peers whose trust classification is known, so trusted peers are always considered first.
+1. As peers connect and complete the `flblk/2` handshake, send `RequestFlashblocks` to them.
+2. Prioritize trusted peers first.
 3. Continue sending requests as new peers connect until `receive_set.len() >= max_receive_peers`.
 4. Once the receive set is full, stop sending unsolicited requests (further changes happen via rotation).
 
@@ -104,10 +114,12 @@ When a node starts and connects to peers via devp2p:
 receive RequestFlashblocks from peer P:
 
 if P is trusted:
+    if send_set has non-trusted peers AND send_set.len() >= max_send_peers:
+        evict lowest-priority non-trusted peer (send CancelFlashblocks, await ack)
     add P to send_set
     send AcceptFlashblocks to P
 
-else if non_trusted_send_count < max_send_peers:
+else if send_set.len() < max_send_peers:
     add P to send_set
     send AcceptFlashblocks to P
 
@@ -128,10 +140,10 @@ When a peer disconnects unexpectedly (connection drops):
 When a node receives an `Authorized` message from a peer in its receive set:
 
 - **`FlashblocksPayloadV1`**: Verify signatures, process the flashblock (update state, emit to flashblock stream). Then forward the serialized bytes to all peers in the **send set** except the peer that sent it.
-- **`StartPublish`**: Verify signatures and process locally. Do not relay it beyond the direct neighbor that sent it.
-- **`StopPublish`**: Same as `StartPublish` — process locally, do not relay.
+- **`StartPublish`**: Verify signatures, process (update publishing state machine). Forward to **all connected `flblk/2` peers** (not just send set). These are rare, small control messages needed by every node for multi-builder coordination.
+- **`StopPublish`**: Same as `StartPublish` — forward to all connected peers.
 
-If a node receives an `Authorized(FlashblocksPayloadV1)` from a peer **not** in its receive set, or from a peer whose `RequestFlashblocks` is still pending, the message should be ignored and the peer should be penalized. This prevents unsolicited data delivery.
+If a node receives an `Authorized(FlashblocksPayloadV1)` from a peer **not** in its receive set, the message should be ignored. This prevents unsolicited data delivery.
 
 ### Duplicate Handling
 
@@ -153,31 +165,33 @@ Each `FlashblocksPayloadV1` includes a `flashblock_timestamp` in its metadata, s
 one_way_latency = now() - flashblock_timestamp
 ```
 
-This measurement is attributed to the specific peer that delivered the flashblock. Nodes maintain a sliding window of the last `latency_window` (default 1000) measurements per receive peer and compute a moving average.
+This measurement is attributed to the specific peer that delivered the flashblock. Nodes maintain a sliding window of the last `latency_window` (default 50) measurements per receive peer and compute a moving average.
 
 Since all receive peers deliver the same flashblock (with the same `flashblock_timestamp`), the **relative ordering** of peers by latency is accurate even with clock skew between the builder and receiver.
 
 ### Rotation Algorithm
 
-The receive set must never exceed `max_receive_peers`.
+**One-at-a-time rule**: Only one rotation may be in progress at any time. This ensures the receive set never drops below `max_receive_peers - 1` and allows the node to evaluate one change before making another.
 
-When rotating:
+During rotation, the node temporarily has `max_receive_peers + 1` receive peers (both the old and new peer are sending). This is intentional and provides a brief window to compare the two peers before committing to the switch.
 
-1. Select the worst-scoring peer in the current receive set.
-2. Remove that peer from the receive set immediately and send `CancelFlashblocks`.
-3. Pick a replacement candidate, prioritizing trusted peers.
-4. Add the replacement peer to the receive set in a provisional state and send `RequestFlashblocks`.
+### Rotation Timeout
 
-The provisional peer occupies a receive slot immediately, so the node still never exceeds `max_receive_peers`. While provisional, the peer is scored for missed flashblocks the same as any other receive peer. If it fails to respond or fails to deliver flashblocks, its score will deteriorate and it can be rotated out on a later interval.
+If a rotation is in progress and no response (`AcceptFlashblocks`/`RejectFlashblocks`) is received within a reasonable timeout (e.g., 10 seconds), abort the rotation:
+
+```
+rotation_in_progress = false
+remove R from pending_requests
+```
 
 ## Configuration Parameters
 
 | Parameter | Default | Description |
 |---|---|---|
-| `max_send_peers` | 10 | Maximum non-trusted peers to send flashblocks to |
-| `max_receive_peers` | 3 | Maximum peers to receive flashblocks from |
+| `max_send_peers` | 6 | Maximum non-trusted peers to send flashblocks to |
+| `max_receive_peers` | 6 | Maximum peers to receive flashblocks from |
 | `rotation_interval` | 30s | How often to evaluate and potentially rotate receive peers |
-| `latency_window` | 1000 | Number of flashblocks to track for per-peer latency averaging |
+| `latency_window` | 50 | Number of flashblocks to track for per-peer latency averaging |
 
 Trusted peers are always served on request and **do not count** toward `max_send_peers`.
 
@@ -185,14 +199,15 @@ Trusted peers are always served on request and **do not count** toward `max_send
 
 ### Unchanged Components
 
-The existing `Authorized` message types (`FlashblocksPayloadV1`, `StartPublish`, `StopPublish`) remain unchanged. They continue to use the `Authorized` wrapper with sequencer + builder signatures. The multi-builder coordination state machine (Publishing, WaitingToPublish, NotPublishing) is unaffected. `StartPublish` and `StopPublish` remain direct-neighbor messages and are not relayed.
+The existing `Authorized` message types (`FlashblocksPayloadV1`, `StartPublish`, `StopPublish`) remain unchanged. They continue to use the `Authorized` wrapper with sequencer + builder signatures. The multi-builder coordination state machine (Publishing, WaitingToPublish, NotPublishing) is unaffected.
 
 ### Required Changes to Existing Code
 
-1. **Duplicate handling must change** — The current per-peer duplicate check at `connection.rs:278-291` penalizes any duplicate flashblock with `ReputationChangeKind::AlreadySeenTransaction`. In the new protocol, receiving the same flashblock from different receive peers is expected. Only same-peer duplicates (same flashblock index from the same peer twice) should trigger a penalty.
+1. **`StartPublish`/`StopPublish` must be forwarded** — The current code has TODOs at `connection.rs:343,436` noting these are not propagated. With multi-hop fanout, nodes more than 1 hop from the builder will never see these messages unless they are relayed. These must be forwarded to **all** connected `flblk/2` peers (not just send set) to ensure the multi-builder coordination works network-wide.
 
-2. **Flashblock forwarding must be scoped to send set** — The current broadcast channel (`peer_tx`) sends to all connections. This must be replaced with targeted sends to only peers in the send set. The `PeerMsg::FlashblocksPayloadV1` variant currently uses a broadcast channel subscribed by all connections; this must be changed so each connection checks whether the destination peer is in the send set before forwarding.
+2. **Duplicate handling must change** — The current per-peer duplicate check at `connection.rs:278-291` penalizes any duplicate flashblock with `ReputationChangeKind::AlreadySeenTransaction`. In the new protocol, receiving the same flashblock from different receive peers is expected. Only same-peer duplicates (same flashblock index from the same peer twice) should trigger a penalty.
 
-3. **Receive-peer selection must respect trust discovery** — Nodes should not request unknown peers before their trust classification is available, otherwise untrusted peers can fill the bounded receive set before trusted peers are considered.
+3. **Flashblock forwarding must be scoped to send set** — The current broadcast channel (`peer_tx`) sends to all connections. This must be replaced with targeted sends to only peers in the send set. The `PeerMsg::FlashblocksPayloadV1` variant currently uses a broadcast channel subscribed by all connections; this must be changed so each connection checks whether the destination peer is in the send set before forwarding.
 
 4. **Protocol version bump** — `Capability::new_static("flblk", 1)` at `handler.rs:239` must be updated to version `2`.
+
