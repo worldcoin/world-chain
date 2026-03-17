@@ -32,9 +32,7 @@ impl<N: NetworkPrimitives> TransactionPropagationPolicy<N>
     fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool {
         // Access peer_id via request_tx().peer_id
         let peer_id = &peer.request_tx().peer_id;
-        let allowed = self.allowed_peers.contains(peer_id);
-
-        allowed
+        self.allowed_peers.contains(peer_id)
     }
 
     fn on_session_established(&mut self, _peer: &mut PeerMetadata<N>) {
