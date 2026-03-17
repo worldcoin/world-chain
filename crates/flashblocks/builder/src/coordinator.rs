@@ -2,7 +2,7 @@ use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::{
-    event::{ChainEvent, WorldChainEvent},
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
     handler::FlashblocksHandle,
 };
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
@@ -16,7 +16,7 @@ use reth::{
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
@@ -25,11 +25,12 @@ use reth_optimism_primitives::OpPrimitives;
 
 use reth_payload_util::BestPayloadTransactions;
 use reth_provider::{
-    CanonStateSubscriptions, ChainSpecProvider, HeaderProvider, StateProviderFactory,
+    BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
+    StateProviderFactory,
 };
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
 use std::{
-    sync::{Arc, Weak},
+    sync::{Arc, LazyLock},
     time::Instant,
 };
 use tokio::sync::{
@@ -46,6 +47,10 @@ use crate::{
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
+
+/// Task-level permit to ensure only one flashblock is processed at a time.
+static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -91,11 +96,52 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
+    /// Maps a closure over the [`WorldChainEventStream<T>`] from the P2P handle.
+    pub fn map_worldchain_event_stream<N, P, T, F>(
+        &self,
+        provider: P,
+        mut f: F,
+    ) -> WorldChainEventsStream<T>
+    where
+        P: CanonStateSubscriptions<Primitives = N>
+            + HeaderProvider
+            + BlockNumReader
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
+        T: Send + Sync + 'static,
+        N: NodePrimitives + 'static,
+    {
+        self.p2p_handle
+            .event_stream(provider, move |event| f(event))
+    }
+
+    pub fn event_hook(
+        event: &WorldChainEvent<()>,
+        pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    ) -> Option<WorldChainEvent<()>> {
+        if let WorldChainEvent::Chain(ChainEvent::Canon(tip)) = event {
+            pending_block.send_if_modified(|block| {
+                let should_clear = block.as_ref().is_some_and(|b| {
+                    let pending = b.recovered_block();
+                    pending.hash() == tip.hash || pending.number <= tip.number
+                });
+                if should_clear {
+                    *block = None;
+                }
+                should_clear
+            });
+        }
+        None
+    }
+
     /// Launches the executor to listen for new flashblocks and build payloads.
     ///
     /// Uses a canon-aware event stream that gates flashblock delivery on canonical
     /// tip matching, preventing stale flashblocks from being processed.
-    pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
+    pub fn launch<Node>(self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
     where
         Node: FullNodeTypes,
         Node::Provider: StateProviderFactory
@@ -107,78 +153,25 @@ impl FlashblocksExecutionCoordinator {
         let pending_block = self.pending_block.clone();
         let pending_block_clone = pending_block.clone();
 
-        let mut stream =
-            self.p2p_handle
-                .event_stream(provider.clone(), move |event: &WorldChainEvent<()>| {
-                    if let WorldChainEvent::Chain(ChainEvent::Canon(tip)) = event {
-                        pending_block.send_if_modified(|block| {
-                            let should_clear = block.as_ref().is_some_and(|b| {
-                                let pending = b.recovered_block();
-                                pending.hash() == tip.hash || pending.number <= tip.number
-                            });
-                            if should_clear {
-                                *block = None;
-                            }
-                            should_clear
-                        });
-                    }
-                    None
-                });
+        let stream = self.map_worldchain_event_stream(provider.clone(), move |event| {
+            Self::event_hook(event, &pending_block)
+        });
 
-        let this = self.clone();
         let chain_spec = ctx.chain_spec().clone();
-        let semaphore = Arc::new(Semaphore::new(1));
+
+        let this = Arc::new(self);
 
         ctx.task_executor()
             .spawn_critical_task("flashblocks executor", async move {
-                let mut witness;
-
-                while let Some(event) = stream.next().await {
-                    if let WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) = event {
-                        let flashblock =
-                            Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
-
-                        trace!(
-                            target: "flashblocks::coordinator",
-                            payload_id = %flashblock.payload_id,
-                            index = %flashblock.index,
-                            is_base = flashblock.base.is_some(),
-                            "received pending flashblock"
-                        );
-
-                        witness = Arc::new(());
-                        let task_witness = Arc::downgrade(&witness);
-
-                        let permit = semaphore
-                            .clone()
-                            .acquire_owned()
-                            .await
-                            .expect("semaphore is never closed");
-
-                        let provider = provider.clone();
-                        let evm_config = evm_config.clone();
-                        let coordinator = this.clone();
-                        let chain_spec = chain_spec.clone();
-                        let pending_block = pending_block_clone.clone();
-
-                        tokio::task::spawn_blocking(move || {
-                            let _permit = permit;
-
-                            if let Err(e) = process_flashblock(
-                                provider,
-                                &evm_config,
-                                &coordinator,
-                                chain_spec,
-                                flashblock,
-                                pending_block,
-                                &task_witness,
-                            ) && task_witness.strong_count() > 0
-                            {
-                                error!("error processing flashblock: {e:#?}");
-                            }
-                        });
-                    }
-                }
+                run_flashblock_processor(
+                    this,
+                    stream,
+                    provider,
+                    evm_config,
+                    chain_spec,
+                    pending_block_clone,
+                )
+                .await;
             });
     }
 
@@ -239,14 +232,78 @@ impl FlashblocksExecutionCoordinator {
     }
 }
 
-fn process_flashblock<Provider>(
+/// Core flashblock processing loop extracted from [`FlashblocksExecutionCoordinator::launch`].
+///
+/// Consumes flashblocks from `stream` and processes each one through
+/// [`process_flashblock`]. This is the same loop that `launch` spawns as a
+/// critical task — exposed here so benchmarks and tests can drive it
+/// directly without needing a full [`BuilderContext`].
+pub async fn run_flashblock_processor<T, S, Provider>(
+    coordinator: Arc<FlashblocksExecutionCoordinator>,
+    stream: S,
+    provider: Provider,
+    evm_config: OpEvmConfig,
+    chain_spec: Arc<OpChainSpec>,
+    pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+) where
+    S: futures::Stream<Item = WorldChainEvent<T>> + Unpin,
+    Provider: StateProviderFactory
+        + HeaderProvider<Header = alloy_consensus::Header>
+        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + Clone
+        + 'static,
+{
+    futures::pin_mut!(stream);
+
+    while let Some(event) = stream.next().await {
+        if let WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) = event {
+            let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
+
+            trace!(
+                target: "flashblocks::coordinator",
+                payload_id = %flashblock.payload_id,
+                index = %flashblock.index,
+                is_base = flashblock.base.is_some(),
+                "received pending flashblock"
+            );
+
+            let permit = SEMAPHORE_TASK_PERMIT
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore is never closed");
+
+            let provider = provider.clone();
+            let evm_config = evm_config.clone();
+            let coordinator = coordinator.clone();
+            let chain_spec = chain_spec.clone();
+            let pending_block = pending_block.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+
+                if let Err(e) = process_flashblock(
+                    provider,
+                    &evm_config,
+                    &coordinator,
+                    chain_spec,
+                    flashblock,
+                    pending_block,
+                ) {
+                    error!("error processing flashblock: {e:#?}");
+                }
+            });
+        }
+    }
+}
+
+pub fn process_flashblock<Provider>(
     provider: Provider,
     evm_config: &OpEvmConfig,
     coordinator: &FlashblocksExecutionCoordinator,
     chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
-    witness: &Weak<()>,
 ) -> eyre::Result<()>
 where
     Provider: StateProviderFactory
@@ -328,7 +385,7 @@ where
     let has_bal = flashblock.diff().access_list_data.is_some();
     let start = Instant::now();
 
-    let _validate_span = crate::metrics::MetricsSpan::new(
+    let validate_span = crate::metrics::MetricsSpan::new(
         tracing::trace_span!(
             target: "flashblocks::coordinator",
             "validate",
@@ -439,30 +496,17 @@ where
         }
     };
 
-    drop(_validate_span);
+    drop(validate_span);
 
     let duration = Instant::now().duration_since(start);
     metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string())
         .record(duration.as_nanos() as f64 / 1_000_000_000.0);
-
-    let Some(_guard) = witness.upgrade() else {
-        trace!(
-            target: "flashblocks::coordinator",
-            id = %payload.id(),
-            index,
-            "task invalidated — discarding result"
-        );
-        return Ok(());
-    };
 
     {
         let mut inner = coordinator.inner.write();
         inner.latest_payload = Some((payload.clone(), index));
         inner.flashblocks.push(flashblock)?;
     }
-
-    // Drop the witness guard before sending — we no longer need atomicity
-    drop(_guard);
 
     pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
 

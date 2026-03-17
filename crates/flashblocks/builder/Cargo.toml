@@ -5,6 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+test-utils = [
+    "alloy-genesis",
+    "alloy-signer-local",
+    "alloy-sol-types",
+    "alloy-trie",
+    "op-alloy-network",
+    "lazy_static",
+]
+bench = ["test-utils"]
 
 [dependencies]
 # reth
@@ -63,7 +73,17 @@ metrics.workspace = true
 metrics-derive.workspace = true
 serde.workspace = true
 
+# Optional deps for test_utils (activated by `test-utils` / `bench` features,
+# or implicitly by dev-dependencies when running `cargo test`).
+alloy-genesis = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+alloy-sol-types = { workspace = true, optional = true }
+alloy-trie = { workspace = true, optional = true }
+op-alloy-network = { workspace = true, optional = true }
+lazy_static = { workspace = true, optional = true }
+
 [dev-dependencies]
+flashblocks-builder = { path = ".", features = ["test-utils"] }
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
@@ -77,3 +97,9 @@ alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 alloy-trie.workspace = true
 bon.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "coordinator"
+harness = false
+required-features = ["bench"]
