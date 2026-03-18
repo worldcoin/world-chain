@@ -1,0 +1,61 @@
+[package]
+name = "world-chain-kona"
+description = "Kona OP Stack consensus node integration for World Chain — in-process engine transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Kona crates (pinned to specific revision for reproducibility)
+kona-engine.workspace = true
+kona-node-service.workspace = true
+kona-genesis.workspace = true
+kona-protocol.workspace = true
+
+# Reth - execution engine internals
+reth-engine-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-provider.workspace = true
+reth-storage-api.workspace = true
+
+# Reth OP
+reth-optimism-node.workspace = true
+
+# Alloy - shared Ethereum types
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-transport.workspace = true
+alloy-transport-http.workspace = true
+alloy-provider.workspace = true
+alloy-network.workspace = true
+
+# OP Alloy
+# NOTE: kona (rev 2586fc56) depends on op-alloy 0.22.x while world-chain uses 0.23.x.
+# The op-alloy-provider crate is needed for the OpEngineApi trait that EngineClient extends.
+# This version mismatch will need to be resolved by either:
+#   (a) Upgrading kona to op-alloy 0.23.x, or
+#   (b) Aligning world-chain on the same op-alloy version as kona.
+op-alloy-rpc-types.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+op-alloy-network.workspace = true
+op-alloy-provider = { version = "0.22", features = ["engine-api"] }
+
+# General
+async-trait.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+eyre.workspace = true
+url.workspace = true
+
+[features]
+default = []

@@ -20,6 +20,12 @@ members = [
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
 ]
+exclude = [
+    # Exclude kona integration crate from default workspace builds until dependency
+    # compatibility is resolved. It can be built explicitly with:
+    #   cargo check -p world-chain-kona
+    "crates/world/kona",
+]
 default-members = [
     "crates/flashblocks/p2p",
     "crates/flashblocks/primitives",
@@ -57,6 +63,7 @@ flashblocks-cli = { path = "crates/flashblocks/cli" }
 
 # Internal
 world-chain-node = { path = "crates/world/node" }
+world-chain-kona = { path = "crates/world/kona" }
 world-chain-pbh = { path = "crates/world/pbh" }
 world-chain-payload = { path = "crates/world/payload" }
 world-chain-rpc = { path = "crates/world/rpc" }
@@ -199,6 +206,14 @@ revm-inspectors = "0.34"
 
 alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
+
+# Kona (OP Stack consensus/derivation node)
+kona-engine = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
+kona-node-service = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
+kona-genesis = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
+kona-protocol = { git = "https://github.com/anton-rs/kona", rev = "2586fc56", features = ["serde", "std"] }
+kona-derive = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
+kona-providers-alloy = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
