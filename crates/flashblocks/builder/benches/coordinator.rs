@@ -13,11 +13,14 @@ use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
 
 /// Helper: creates a fresh coordinator + handle + watch channel.
-fn fresh_coordinator() -> (
+fn fresh_coordinator(
+    rt: &tokio::runtime::Runtime,
+) -> (
     FlashblocksExecutionCoordinator,
     FlashblocksHandle,
     tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) {
+    let _guard = rt.enter();
     let sk = SigningKey::from_bytes(&[1u8; 32]);
     let vk = sk.verifying_key();
     let handle = FlashblocksHandle::new(vk, Some(sk));
@@ -32,6 +35,7 @@ fn fresh_coordinator() -> (
 // ---------------------------------------------------------------------------
 
 fn bench_process_flashblock(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let mut group = c.benchmark_group("process_flashblock");
     group.sample_size(20);
 
@@ -41,7 +45,7 @@ fn bench_process_flashblock(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("txs", tx_count), &tx_count, |b, &_n| {
             b.iter(|| {
-                let (coordinator, _handle, pending_tx) = fresh_coordinator();
+                let (coordinator, _handle, pending_tx) = fresh_coordinator(&rt);
                 process_flashblock(
                     provider.clone(),
                     &EVM_CONFIG,
@@ -79,7 +83,7 @@ fn bench_launch_flashblock_sequence(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
             b.iter(|| {
-                let (coordinator, handle, pending_tx) = fresh_coordinator();
+                let (coordinator, handle, pending_tx) = fresh_coordinator(&rt);
 
                 // Pre-populate the P2P state with the flashblock sequence,
                 // exactly as if they arrived over the network.
