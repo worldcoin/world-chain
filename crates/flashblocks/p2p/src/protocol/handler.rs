@@ -253,7 +253,7 @@ impl FlashblocksP2PState {
     pub(crate) fn send_to_all_peers(&self, bytes: &BytesMut) {
         for conn in self.connections.values() {
             if let Some(tx) = &conn.outbound_tx {
-                tx.send(bytes.clone()).ok();
+                tx.try_send(bytes.clone()).ok();
             }
         }
     }
@@ -281,7 +281,7 @@ impl FlashblocksP2PState {
                 .map(|observed_payload| observed_payload.send_peers.insert(*peer_id));
 
             if let Some(tx) = &conn.outbound_tx
-                && tx.send(bytes.clone()).is_ok()
+                && tx.try_send(bytes.clone()).is_ok()
             {
                 metrics::counter!("flashblocks.bandwidth_outbound").increment(bytes.len() as u64);
             }
@@ -294,7 +294,7 @@ impl FlashblocksP2PState {
         if let Some(conn) = self.connections.get(&peer_id)
             && let Some(tx) = &conn.outbound_tx
         {
-            tx.send(bytes.clone()).ok();
+            tx.try_send(bytes.clone()).ok();
         }
     }
 
@@ -708,7 +708,7 @@ impl FlashblocksHandle {
         &self,
         network: N,
         peer_id: PeerId,
-        outbound_tx: mpsc::UnboundedSender<BytesMut>,
+        outbound_tx: mpsc::Sender<BytesMut>,
     ) {
         {
             let mut state = self.state.lock();
@@ -1495,9 +1495,9 @@ mod tests {
         trusted: bool,
     ) -> (
         FlashblocksConnectionState,
-        mpsc::UnboundedReceiver<BytesMut>,
+        mpsc::Receiver<BytesMut>,
     ) {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(100);
         let mut state = FlashblocksConnectionState::new();
         state.trusted = trusted;
         state.outbound_tx = Some(tx);
@@ -1505,7 +1505,7 @@ mod tests {
     }
 
     /// Receives and decodes a direct control message from a per-peer channel.
-    fn recv_direct(rx: &mut mpsc::UnboundedReceiver<BytesMut>) -> FlashblocksP2PMsg {
+    fn recv_direct(rx: &mut mpsc::Receiver<BytesMut>) -> FlashblocksP2PMsg {
         let bytes = rx.try_recv().expect("expected a direct message");
         FlashblocksP2PMsg::decode(&mut &bytes[..]).expect("valid message")
     }
@@ -1560,7 +1560,7 @@ mod tests {
         let peer_id = PeerId::random();
         let network =
             MockNetwork::with_peer_lookup_responses(vec![Some(test_peer_info(peer_id, true))]);
-        let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(100);
 
         handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 
@@ -1604,7 +1604,7 @@ mod tests {
         );
         let peer_id = PeerId::random();
         let network = MockNetwork::default(); // returns None
-        let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(100);
 
         handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 

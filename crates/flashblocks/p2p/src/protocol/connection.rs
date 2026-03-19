@@ -13,6 +13,10 @@ use futures::{Stream, StreamExt};
 use metrics::gauge;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
 use reth_network::types::ReputationChangeKind;
+
+/// Maximum number of outbound messages buffered per peer before dropping.
+const OUTBOUND_CHANNEL_CAPACITY: usize = 100;
+
 use std::{
     pin::Pin,
     task::{Context, Poll, ready},
@@ -54,7 +58,7 @@ pub struct FlashblocksConnectionState {
     /// Used for late-message grace checks and receive retry cooldown.
     pub receive_status_timestamp: u64,
     /// Per-peer channel for sending serialized protocol messages to this peer.
-    pub outbound_tx: Option<mpsc::UnboundedSender<BytesMut>>,
+    pub outbound_tx: Option<mpsc::Sender<BytesMut>>,
     /// Number of control messages received in the current rate-limit window.
     pub control_msg_count: u32,
     /// Start of the current rate-limit window.
@@ -91,7 +95,7 @@ pub struct FlashblocksConnection<N> {
     /// The unique identifier of the connected peer.
     peer_id: PeerId,
     /// Receiver for already serialized protocol messages targeted at this specific peer.
-    outbound_rx: mpsc::UnboundedReceiver<BytesMut>,
+    outbound_rx: mpsc::Receiver<BytesMut>,
 }
 
 impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
@@ -106,7 +110,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         conn: ProtocolConnection,
         peer_id: PeerId,
     ) -> Self {
-        let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CHANNEL_CAPACITY);
 
         protocol
             .handle
