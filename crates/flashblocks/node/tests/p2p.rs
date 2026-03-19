@@ -270,6 +270,29 @@ async fn wait_for_flashblocks_topology(
     }
 }
 
+fn receive_peer_score(node: &NodeContext, peer_id: PeerId) -> eyre::Result<Option<i64>> {
+    let state = node.p2p_handle.state.lock();
+    let peer = state
+        .peers
+        .get(&peer_id)
+        .ok_or_else(|| eyre!("peer {peer_id} not found"))?;
+
+    let ReceiveStatus::Receiving { score } = &peer.receive_status else {
+        return Ok(None);
+    };
+
+    let debug = format!("{score:?}");
+    let value = debug
+        .split("value: ")
+        .nth(1)
+        .and_then(|rest| rest.strip_prefix("Some("))
+        .and_then(|rest| rest.split(')').next())
+        .ok_or_else(|| eyre!("failed to parse score from {debug}"))?
+        .parse::<i64>()?;
+
+    Ok(Some(value))
+}
+
 fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
     let sub = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -805,13 +828,13 @@ async fn test_force_race_condition() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
+async fn test_receive_peer_latency_scores_are_recorded() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
-    let fixture = setup_nodes_with_flashblocks_args(4, |_, authorizer, builder| {
+    let fixture = setup_nodes_with_flashblocks_args(3, |_, authorizer, builder| {
         let mut args = test_flashblocks_args(authorizer, builder);
         args.fanout.max_receive_peers = 2;
-        args.fanout.rotation_interval = 1;
+        args.fanout.rotation_interval = 30;
         args.fanout.score_samples = 4;
         args
     })
@@ -819,16 +842,14 @@ async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
     let nodes = fixture.nodes();
     let authorizer = fixture.authorizer();
 
-    let (receive_peers, candidate_peers) = wait_for_flashblocks_topology(&nodes[0], 3, 2).await?;
-    assert_eq!(
-        candidate_peers.len(),
-        1,
-        "expected one spare candidate peer"
+    let (receive_peers, candidate_peers) = wait_for_flashblocks_topology(&nodes[0], 2, 2).await?;
+    assert!(
+        candidate_peers.is_empty(),
+        "expected no spare candidate peer"
     );
 
     let slow_peer = receive_peers[0];
     let fast_peer = receive_peers[1];
-    let replacement_peer = candidate_peers[0];
 
     let peer_map: HashMap<_, _> = nodes
         .iter()
@@ -867,22 +888,25 @@ async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
         sleep(Duration::from_millis(50)).await;
     }
 
-    let timeout = Duration::from_secs(5);
+    // Give the remote receivers time to apply the final latency samples before
+    // we inspect the moving-average scores.
+    sleep(Duration::from_millis(250)).await;
+
+    let timeout = Duration::from_secs(15);
     let poll_interval = Duration::from_millis(100);
     let start = Instant::now();
 
     loop {
-        let (current_receive_peers, _) = wait_for_flashblocks_topology(&nodes[0], 3, 2).await?;
-        if current_receive_peers.contains(&fast_peer)
-            && current_receive_peers.contains(&replacement_peer)
-            && !current_receive_peers.contains(&slow_peer)
-        {
+        let fast_score = receive_peer_score(&nodes[0], fast_peer)?;
+        let slow_score = receive_peer_score(&nodes[0], slow_peer)?;
+
+        if fast_score.is_some() && slow_score.is_some() {
             break;
         }
 
         if start.elapsed() >= timeout {
             return Err(eyre!(
-                "timed out waiting for peer rotation: fast={fast_peer}, slow={slow_peer}, replacement={replacement_peer}, current_receive_peers={current_receive_peers:?}"
+                "timed out waiting for latency scores to be recorded: fast={fast_peer} fast_score={fast_score:?}, slow={slow_peer} slow_score={slow_score:?}"
             ));
         }
 

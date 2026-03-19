@@ -1805,6 +1805,61 @@ mod tests {
     }
 
     #[test]
+    fn rotation_evicts_highest_latency_peer() {
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        fanout_args.score_samples = 4;
+        let score_samples = fanout_args.score_samples;
+        let ctx = test_ctx(fanout_args);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let fast_peer = PeerId::random();
+        let slow_peer = PeerId::random();
+        let candidate_peer = PeerId::random();
+
+        let (mut fast_state, mut fast_rx) = test_peer_state_with_channel(false);
+        let (mut slow_state, mut slow_rx) = test_peer_state_with_channel(false);
+        let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false);
+
+        let mut fast_score = Score::new(score_samples);
+        fast_score.record(10);
+        fast_state.receive_status = ReceiveStatus::Receiving { score: fast_score };
+
+        let mut slow_score = Score::new(score_samples);
+        slow_score.record(100);
+        slow_state.receive_status = ReceiveStatus::Receiving { score: slow_score };
+
+        fanout.peers.insert(fast_peer, fast_state);
+        fanout.peers.insert(slow_peer, slow_state);
+        fanout.peers.insert(candidate_peer, candidate_state);
+
+        fanout.maybe_start_rotation(&ctx);
+
+        assert!(matches!(
+            peer_state(&fanout, fast_peer).receive_status,
+            ReceiveStatus::Receiving { .. }
+        ));
+        assert_eq!(
+            peer_state(&fanout, slow_peer).receive_status,
+            ReceiveStatus::NotReceiving
+        );
+        assert_eq!(
+            peer_state(&fanout, candidate_peer).receive_status,
+            ReceiveStatus::Requesting
+        );
+
+        assert!(fast_rx.try_recv().is_err());
+        assert_eq!(
+            recv_direct(&mut slow_rx),
+            FlashblocksP2PMsg::CancelFlashblocks
+        );
+        assert_eq!(
+            recv_direct(&mut candidate_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+    }
+
+    #[test]
     fn multiple_pending_requests_clear_independently() {
         let mut fanout_args = test_fanout_args();
         fanout_args.max_receive_peers = 2;
