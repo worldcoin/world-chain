@@ -735,26 +735,54 @@ impl FlashblocksHandle {
 
         let handle = self.clone();
         tokio::spawn(async move {
-            let trusted = match network.get_peer_by_id(peer_id).await {
-                Ok(Some(peer_info)) => peer_info.kind.is_trusted(),
-                Ok(None) => {
-                    warn!(
-                        target: "flashblocks::p2p",
-                        %peer_id,
-                        "peer info not found; defaulting to untrusted",
-                    );
-                    return;
+            const MAX_RETRIES: u32 = 5;
+            const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+            let mut trusted = false;
+            for attempt in 1..=MAX_RETRIES {
+                match network.get_peer_by_id(peer_id).await {
+                    Ok(Some(peer_info)) => {
+                        trusted = peer_info.kind.is_trusted();
+                        break;
+                    }
+                    Ok(None) if attempt < MAX_RETRIES => {
+                        debug!(
+                            target: "flashblocks::p2p",
+                            %peer_id,
+                            attempt,
+                            "peer info not found; retrying",
+                        );
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
+                    Ok(None) => {
+                        warn!(
+                            target: "flashblocks::p2p",
+                            %peer_id,
+                            "peer info not found after {MAX_RETRIES} attempts; defaulting to untrusted",
+                        );
+                        return;
+                    }
+                    Err(error) if attempt < MAX_RETRIES => {
+                        warn!(
+                            target: "flashblocks::p2p",
+                            %peer_id,
+                            %error,
+                            attempt,
+                            "failed to load peer info; retrying",
+                        );
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
+                    Err(error) => {
+                        error!(
+                            target: "flashblocks::p2p",
+                            %peer_id,
+                            %error,
+                            "failed to load peer info after {MAX_RETRIES} attempts; defaulting to untrusted",
+                        );
+                        return;
+                    }
                 }
-                Err(error) => {
-                    error!(
-                        target: "flashblocks::p2p",
-                        %peer_id,
-                        %error,
-                        "failed to load peer info; defaulting to untrusted",
-                    );
-                    return;
-                }
-            };
+            }
 
             let mut state = handle.state.lock();
             if let Some(conn) = state.connection_state_mut(&peer_id) {

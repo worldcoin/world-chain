@@ -230,38 +230,40 @@ async fn wait_for_flashblocks_topology(
     let start = Instant::now();
 
     loop {
-        let state = node.p2p_handle.state.lock();
-        if state.peers.len() == expected_connections {
-            let receive_peers: Vec<_> = state
-                .peers
-                .iter()
-                .filter_map(|(peer_id, conn)| {
-                    matches!(conn.receive_status, ReceiveStatus::Receiving { .. })
-                        .then_some(*peer_id)
-                })
-                .collect();
-            let candidate_peers: Vec<_> = state
-                .peers
-                .iter()
-                .filter_map(|(peer_id, conn)| {
-                    (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
-                })
-                .collect();
-            drop(state);
+        {
+            let state = node.p2p_handle.state.lock();
+            if state.peers.len() == expected_connections {
+                let receive_peers: Vec<_> = state
+                    .peers
+                    .iter()
+                    .filter_map(|(peer_id, conn)| {
+                        matches!(conn.receive_status, ReceiveStatus::Receiving { .. })
+                            .then_some(*peer_id)
+                    })
+                    .collect();
+                let candidate_peers: Vec<_> = state
+                    .peers
+                    .iter()
+                    .filter_map(|(peer_id, conn)| {
+                        (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
+                    })
+                    .collect();
+                drop(state);
 
-            if receive_peers.len() == expected_receive_peers
-                && receive_peers.len() + candidate_peers.len() == expected_connections
-            {
-                return Ok((receive_peers, candidate_peers));
+                if receive_peers.len() == expected_receive_peers
+                    && receive_peers.len() + candidate_peers.len() == expected_connections
+                {
+                    return Ok((receive_peers, candidate_peers));
+                }
+            } else {
+                drop(state);
             }
-        } else {
-            drop(state);
-        }
 
-        if start.elapsed() >= timeout {
-            return Err(eyre!(
-                "timed out waiting for flashblocks topology: expected {expected_connections} connections with {expected_receive_peers} receive peers"
-            ));
+            if start.elapsed() >= timeout {
+                return Err(eyre!(
+                    "timed out waiting for flashblocks topology: expected {expected_connections} connections with {expected_receive_peers} receive peers"
+                ));
+            }
         }
 
         sleep(poll_interval).await;
@@ -1015,11 +1017,12 @@ async fn test_peer_reputation() -> eyre::Result<()> {
             .send_serialized_to_all_peers(bytes.clone());
         sleep(Duration::from_millis(10)).await;
         let rep_0 = nodes[1].network_handle.reputation_by_id(*peer_0).await?;
-        if let Some(rep) = rep_0 {
-            if rep < 0 {
-                reputation_was_negative = true;
-            }
+        if let Some(rep) = rep_0
+            && rep < 0
+        {
+            reputation_was_negative = true;
         }
+
         if nodes[1].network_handle.get_all_peers().await?.is_empty() {
             peer_banned = true;
             break;
