@@ -56,7 +56,7 @@ pub struct FanoutArgs {
         env = "FLASHBLOCKS_FORCE_RECEIVE_PEERS",
         value_delimiter = ',',
         value_name = "PEER_ID",
-        required = false,
+        required = false
     )]
     pub force_receive_peers: Vec<PeerId>,
 }
