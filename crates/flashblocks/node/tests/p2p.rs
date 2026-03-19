@@ -594,7 +594,7 @@ where
     })
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -685,7 +685,7 @@ async fn test_double_failover() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_force_race_condition() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -801,7 +801,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -891,7 +891,7 @@ async fn test_receive_peer_rotation_uses_latency_scores() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -970,7 +970,7 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_peer_reputation() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -1038,7 +1038,7 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 }
 
 #[ignore]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_peer_monitoring() -> eyre::Result<()> {
     use tracing_subscriber::layer::SubscriberExt;
 

@@ -32,7 +32,7 @@ use tokio::{
     time,
 };
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use reth_ethereum::network::{
     api::Direction,
@@ -71,12 +71,6 @@ const MAX_CONTROL_MSGS_PER_WINDOW: u32 = 10;
 const CONTROL_MSG_WINDOW: Duration = Duration::from_secs(30);
 /// Maximum time to wait for a peer to answer a `RequestFlashblocks` message.
 const RECEIVE_REQUEST_TIMEOUT_SECS: u64 = 2;
-
-/// Maximum time to wait for the network manager to expose the newly connected peer's trust info.
-const PEER_INFO_LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// Poll interval while waiting for connected peer metadata to become available.
-const PEER_INFO_LOOKUP_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Trait bound for network handles that can be used with the flashblocks P2P protocol.
 ///
@@ -716,69 +710,56 @@ impl FlashblocksHandle {
         peer_id: PeerId,
         outbound_tx: mpsc::UnboundedSender<BytesMut>,
     ) {
-        let trusted = tokio::task::block_in_place(|| {
-            let network = network.clone();
-            tokio::runtime::Handle::current().block_on(async move {
-                let deadline = Instant::now() + PEER_INFO_LOOKUP_TIMEOUT;
+        {
+            let mut state = self.state.lock();
+            let mut conn_state = FlashblocksConnectionState::new();
+            conn_state.outbound_tx = Some(outbound_tx);
+            state.connections.insert(peer_id, conn_state);
 
-                loop {
-                    match network.get_peer_by_id(peer_id).await {
-                        Ok(Some(peer_info)) => return Ok(peer_info.kind.is_trusted()),
-                        Ok(None) if Instant::now() < deadline => {
-                            time::sleep(PEER_INFO_LOOKUP_RETRY_INTERVAL).await;
-                        }
-                        Ok(None) => {
-                            return Err(
-                                "timed out waiting for peer info after connection".to_owned()
-                            );
-                        }
-                        Err(error) if Instant::now() < deadline => {
-                            time::sleep(PEER_INFO_LOOKUP_RETRY_INTERVAL).await;
-                            tracing::debug!(
-                                target: "flashblocks::p2p",
-                                %peer_id,
-                                %error,
-                                "retrying peer info lookup for flashblocks fanout"
-                            );
-                        }
-                        Err(error) => {
-                            return Err(format!(
-                                "failed to load peer info for flashblocks fanout: {error}"
-                            ));
-                        }
-                    }
+            info!(
+                target: "flashblocks::p2p",
+                %peer_id,
+                total_peers = state.connections.len(),
+                "flashblocks peer connected",
+            );
+
+            state.maybe_request_receive_peers(&self.ctx);
+        }
+
+        let handle = self.clone();
+        tokio::spawn(async move {
+            let trusted = match network.get_peer_by_id(peer_id).await {
+                Ok(Some(peer_info)) => peer_info.kind.is_trusted(),
+                Ok(None) => {
+                    warn!(
+                        target: "flashblocks::p2p",
+                        %peer_id,
+                        "peer info not found; defaulting to untrusted",
+                    );
+                    return;
                 }
-            })
-        });
+                Err(error) => {
+                    error!(
+                        target: "flashblocks::p2p",
+                        %peer_id,
+                        %error,
+                        "failed to load peer info; defaulting to untrusted",
+                    );
+                    return;
+                }
+            };
 
-        let trusted = match trusted {
-            Ok(trusted) => trusted,
-            Err(error) => {
-                warn!(
+            let mut state = handle.state.lock();
+            if let Some(conn) = state.connection_state_mut(&peer_id) {
+                conn.trusted = trusted;
+                info!(
                     target: "flashblocks::p2p",
                     %peer_id,
-                    %error,
-                    "failed to classify peer for flashblocks fanout; defaulting to untrusted"
+                    trusted,
+                    "peer trust classification resolved",
                 );
-                false
             }
-        };
-
-        let mut state = self.state.lock();
-        let mut conn_state = FlashblocksConnectionState::new();
-        conn_state.outbound_tx = Some(outbound_tx);
-        conn_state.trusted = trusted;
-        state.connections.insert(peer_id, conn_state);
-
-        info!(
-            target: "flashblocks::p2p",
-            %peer_id,
-            trusted,
-            total_peers = state.connections.len(),
-            "flashblocks peer connected",
-        );
-
-        state.maybe_request_receive_peers(&self.ctx);
+        });
     }
 
     pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId) {
@@ -1567,7 +1548,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn on_peer_connected_retries_until_peer_info_is_available() {
+    async fn on_peer_connected_resolves_trusted() {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let mut fanout_args = test_fanout_args();
         fanout_args.max_receive_peers = 1;
@@ -1577,32 +1558,42 @@ mod tests {
             fanout_args,
         );
         let peer_id = PeerId::random();
-        let network = MockNetwork::with_peer_lookup_responses(vec![
-            None,
-            Some(test_peer_info(peer_id, true)),
-        ]);
+        let network =
+            MockNetwork::with_peer_lookup_responses(vec![Some(test_peer_info(peer_id, true))]);
         let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
 
         handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 
-        assert!(network.lookup_calls() >= 2);
-        assert!(network.disconnected_peers().is_empty());
-        let state = handle.state.lock();
-        assert!(
-            state
-                .connection_state(&peer_id)
-                .expect("peer exists")
-                .trusted
-        );
-        drop(state);
+        // Peer is immediately inserted as untrusted and requested.
         assert_eq!(
             recv_direct(&mut outbound_rx),
             FlashblocksP2PMsg::RequestFlashblocks
         );
+
+        // Wait for the background trust lookup to complete.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if handle
+                .state
+                .lock()
+                .connection_state(&peer_id)
+                .expect("peer exists")
+                .trusted
+            {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!("timed out waiting for peer trust to resolve");
+            }
+        }
+
+        assert_eq!(network.lookup_calls(), 1);
+        assert!(network.disconnected_peers().is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn on_peer_connected_defaults_to_untrusted_when_peer_info_never_arrives() {
+    async fn on_peer_connected_defaults_to_untrusted_when_peer_not_found() {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
         let mut fanout_args = test_fanout_args();
         fanout_args.max_receive_peers = 1;
@@ -1612,24 +1603,29 @@ mod tests {
             fanout_args,
         );
         let peer_id = PeerId::random();
-        let network = MockNetwork::default();
+        let network = MockNetwork::default(); // returns None
         let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
 
         handle.on_peer_connected(network.clone(), peer_id, outbound_tx);
 
-        assert!(network.lookup_calls() > 1);
-        assert!(network.disconnected_peers().is_empty());
-        let state = handle.state.lock();
-        assert!(
-            !state
-                .connection_state(&peer_id)
-                .expect("peer exists")
-                .trusted
-        );
-        drop(state);
+        // Peer is immediately inserted and requested.
         assert_eq!(
             recv_direct(&mut outbound_rx),
             FlashblocksP2PMsg::RequestFlashblocks
+        );
+
+        // Wait for the spawned task to complete.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(network.lookup_calls(), 1);
+        assert!(network.disconnected_peers().is_empty());
+        assert!(
+            !handle
+                .state
+                .lock()
+                .connection_state(&peer_id)
+                .expect("peer exists")
+                .trusted
         );
     }
 
