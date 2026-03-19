@@ -387,6 +387,17 @@ impl FlashblocksP2PState {
     }
 
     pub fn maybe_request_receive_peers(&mut self, ctx: &FlashblocksP2PCtx) {
+        // First, request any force-receive peers that are connected but not yet
+        // receiving/requesting, regardless of the max_receive_peers limit.
+        for force_peer in &ctx.fanout_args.force_receive_peers {
+            if let Some(peer_state) = self.connections.get(force_peer)
+                && peer_state.receive_status == ReceiveStatus::NotReceiving
+            {
+                self.begin_requesting_peer(*force_peer);
+            }
+        }
+
+        // Then fill remaining slots with regular candidates.
         while self.num_receive_or_requesting_peers() < ctx.fanout_args.max_receive_peers {
             let candidates = self.available_receive_candidates(ctx);
             if candidates.is_empty() {
@@ -420,10 +431,13 @@ impl FlashblocksP2PState {
         }
     }
 
-    fn worst_receive_peer(&self) -> Option<PeerId> {
+    fn worst_receive_peer(&self, ctx: &FlashblocksP2PCtx) -> Option<PeerId> {
         self.connections
             .iter()
             .filter_map(|(peer_id, peer_state)| {
+                if ctx.fanout_args.force_receive_peers.contains(peer_id) {
+                    return None;
+                }
                 let ReceiveStatus::Receiving { score } = &peer_state.receive_status else {
                     return None;
                 };
@@ -445,7 +459,7 @@ impl FlashblocksP2PState {
             return;
         }
 
-        let Some(evict) = self.worst_receive_peer() else {
+        let Some(evict) = self.worst_receive_peer(ctx) else {
             return;
         };
 
@@ -1659,31 +1673,32 @@ mod tests {
     }
 
     #[test]
-    fn trusted_peers_are_requested_first() {
+    fn force_receive_peers_are_requested_first() {
+        let force_peer = PeerId::random();
+        let regular_peer = PeerId::random();
         let mut fanout_args = test_fanout_args();
         fanout_args.max_receive_peers = 1;
+        fanout_args.force_receive_peers = vec![force_peer];
         let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
-        let trusted_peer = PeerId::random();
-        let untrusted_peer = PeerId::random();
-        let (trusted_state, mut trusted_rx) = test_peer_state_with_channel(true);
-        let untrusted_state = test_peer_state(false);
-        fanout.connections.insert(trusted_peer, trusted_state);
-        fanout.connections.insert(untrusted_peer, untrusted_state);
+        let (force_state, mut force_rx) = test_peer_state_with_channel(true);
+        let regular_state = test_peer_state(false);
+        fanout.connections.insert(force_peer, force_state);
+        fanout.connections.insert(regular_peer, regular_state);
 
         fanout.maybe_request_receive_peers(&ctx);
 
         assert_eq!(
-            peer_state(&fanout, trusted_peer).receive_status,
+            peer_state(&fanout, force_peer).receive_status,
             ReceiveStatus::Requesting
         );
         assert_eq!(
-            peer_state(&fanout, untrusted_peer).receive_status,
+            peer_state(&fanout, regular_peer).receive_status,
             ReceiveStatus::NotReceiving
         );
         assert_eq!(
-            recv_direct(&mut trusted_rx),
+            recv_direct(&mut force_rx),
             FlashblocksP2PMsg::RequestFlashblocks
         );
     }
@@ -1853,36 +1868,23 @@ mod tests {
 
     #[test]
     fn timed_out_request_is_cleared_and_replaced() {
+        let stale_peer = PeerId::random();
+        let replacement_peer = PeerId::random();
         let mut fanout_args = test_fanout_args();
         fanout_args.max_receive_peers = 1;
         let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
-        let stale_peer = PeerId::random();
-        let replacement_peer = PeerId::random();
-        let (stale_state, mut stale_rx) = test_peer_state_with_channel(true);
+        // Manually put stale_peer in Requesting state (simulating a prior request).
+        let (mut stale_state, mut stale_rx) = test_peer_state_with_channel(false);
+        stale_state.receive_status = ReceiveStatus::Requesting;
+        stale_state.receive_status_timestamp =
+            Utc::now().timestamp() as u64 - RECEIVE_REQUEST_TIMEOUT_SECS;
         let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(false);
         fanout.connections.insert(stale_peer, stale_state);
         fanout
             .connections
             .insert(replacement_peer, replacement_state);
-
-        fanout.maybe_request_receive_peers(&ctx);
-
-        assert_eq!(
-            peer_state(&fanout, stale_peer).receive_status,
-            ReceiveStatus::Requesting
-        );
-        assert_eq!(
-            recv_direct(&mut stale_rx),
-            FlashblocksP2PMsg::RequestFlashblocks
-        );
-
-        fanout
-            .connection_state_mut(&stale_peer)
-            .expect("peer exists")
-            .receive_status_timestamp =
-            Utc::now().timestamp() as u64 - RECEIVE_REQUEST_TIMEOUT_SECS;
 
         fanout.expire_stale_receive_requests(&ctx);
 
@@ -1950,6 +1952,7 @@ mod tests {
         fanout_args.max_receive_peers = 2;
         fanout_args.score_samples = 4;
         let score_samples = fanout_args.score_samples;
+        let ctx = test_ctx(fanout_args);
         let mut fanout = FlashblocksP2PState::default();
 
         let steady_peer = PeerId::random();
@@ -1991,7 +1994,7 @@ mod tests {
             apply_observation(&mut fanout, &authorization, &flashblock, steady_peer);
         }
 
-        assert_eq!(fanout.worst_receive_peer(), Some(lagging_peer));
+        assert_eq!(fanout.worst_receive_peer(&ctx), Some(lagging_peer));
         let ReceiveStatus::Receiving {
             score: steady_score,
         } = &peer_state(&fanout, steady_peer).receive_status
@@ -2070,7 +2073,7 @@ mod tests {
             apply_observation(&mut fanout, &authorization, &flashblock, steady_peer);
         }
 
-        assert_eq!(fanout.worst_receive_peer(), Some(candidate_peer));
+        assert_eq!(fanout.worst_receive_peer(&ctx), Some(candidate_peer));
 
         fanout
             .connections
@@ -2223,5 +2226,94 @@ mod tests {
         }
         // The next one should hit the rate limit.
         assert!(fanout.handle_request(&ctx, peer).is_err());
+    }
+
+    #[test]
+    fn force_receive_peers_not_evicted_by_rotation() {
+        let force_peer = PeerId::random();
+        let regular_peer = PeerId::random();
+        let candidate_peer = PeerId::random();
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 2;
+        fanout_args.score_samples = 4;
+        fanout_args.force_receive_peers = vec![force_peer];
+        let ctx = test_ctx(fanout_args);
+        let mut fanout = FlashblocksP2PState::default();
+
+        // Give force_peer a worse score than regular_peer
+        let mut force_score = Score::new(4);
+        force_score.record(1000);
+        let mut force_state = test_peer_state(false);
+        force_state.receive_status = ReceiveStatus::Receiving { score: force_score };
+
+        let mut regular_score = Score::new(4);
+        regular_score.record(10);
+        let mut regular_state = test_peer_state(false);
+        regular_state.receive_status = ReceiveStatus::Receiving {
+            score: regular_score,
+        };
+
+        let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false);
+
+        fanout.connections.insert(force_peer, force_state);
+        fanout.connections.insert(regular_peer, regular_state);
+        fanout.connections.insert(candidate_peer, candidate_state);
+
+        fanout.maybe_start_rotation(&ctx);
+
+        // Force peer should NOT be evicted despite having the worst score.
+        // Regular peer should be evicted instead.
+        assert!(matches!(
+            peer_state(&fanout, force_peer).receive_status,
+            ReceiveStatus::Receiving { .. }
+        ));
+        assert_eq!(
+            peer_state(&fanout, regular_peer).receive_status,
+            ReceiveStatus::NotReceiving
+        );
+        assert_eq!(
+            peer_state(&fanout, candidate_peer).receive_status,
+            ReceiveStatus::Requesting
+        );
+        assert_eq!(
+            recv_direct(&mut candidate_rx),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+    }
+
+    #[test]
+    fn force_receive_peers_requested_beyond_max_receive_peers() {
+        let force_peer_1 = PeerId::random();
+        let force_peer_2 = PeerId::random();
+        let mut fanout_args = test_fanout_args();
+        fanout_args.max_receive_peers = 1;
+        fanout_args.force_receive_peers = vec![force_peer_1, force_peer_2];
+        let ctx = test_ctx(fanout_args);
+        let mut fanout = FlashblocksP2PState::default();
+
+        let (state_1, mut rx_1) = test_peer_state_with_channel(false);
+        let (state_2, mut rx_2) = test_peer_state_with_channel(false);
+        fanout.connections.insert(force_peer_1, state_1);
+        fanout.connections.insert(force_peer_2, state_2);
+
+        fanout.maybe_request_receive_peers(&ctx);
+
+        // Both force peers should be requested even though max_receive_peers is 1
+        assert_eq!(
+            peer_state(&fanout, force_peer_1).receive_status,
+            ReceiveStatus::Requesting
+        );
+        assert_eq!(
+            peer_state(&fanout, force_peer_2).receive_status,
+            ReceiveStatus::Requesting
+        );
+        assert_eq!(
+            recv_direct(&mut rx_1),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
+        assert_eq!(
+            recv_direct(&mut rx_2),
+            FlashblocksP2PMsg::RequestFlashblocks
+        );
     }
 }

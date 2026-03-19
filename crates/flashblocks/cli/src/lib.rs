@@ -1,6 +1,7 @@
 use clap::ArgGroup;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use hex::FromHex;
+use reth_network_peers::PeerId;
 
 pub const DEFAULT_MAX_SEND_PEERS: usize = 10;
 pub const DEFAULT_MAX_RECEIVE_PEERS: usize = 3;
@@ -45,6 +46,19 @@ pub struct FanoutArgs {
         default_value_t = DEFAULT_SCORE_SAMPLES
     )]
     pub score_samples: i64,
+
+    /// Peers to always receive flashblocks from regardless of their score.
+    ///
+    /// These peers will be requested as soon as they connect and will never
+    /// be evicted by rotation. They count toward `max_receive_peers`.
+    #[arg(
+        long = "flashblocks.force_receive_peers",
+        env = "FLASHBLOCKS_FORCE_RECEIVE_PEERS",
+        value_delimiter = ',',
+        value_name = "PEER_ID",
+        required = false,
+    )]
+    pub force_receive_peers: Vec<PeerId>,
 }
 
 impl Default for FanoutArgs {
@@ -54,6 +68,7 @@ impl Default for FanoutArgs {
             max_receive_peers: DEFAULT_MAX_RECEIVE_PEERS,
             rotation_interval: DEFAULT_ROTATION_INTERVAL,
             score_samples: DEFAULT_SCORE_SAMPLES,
+            force_receive_peers: Vec::new(),
         }
     }
 }

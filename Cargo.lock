@@ -3829,6 +3829,7 @@ dependencies = [
  "color-eyre",
  "ed25519-dalek",
  "hex",
+ "reth-network-peers",
 ]
 
 [[package]]
