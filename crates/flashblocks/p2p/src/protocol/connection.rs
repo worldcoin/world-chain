@@ -47,7 +47,7 @@ pub enum ReceiveStatus {
 
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
-pub struct FlashblocksConnectionState {
+pub struct FlashblocksPeerState {
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
     /// Whether we are currently sending flashblocks to this peer.
@@ -65,7 +65,7 @@ pub struct FlashblocksConnectionState {
     pub control_msg_window_start: Instant,
 }
 
-impl FlashblocksConnectionState {
+impl FlashblocksPeerState {
     pub(crate) fn new() -> Self {
         Self {
             trusted: false,
@@ -75,6 +75,14 @@ impl FlashblocksConnectionState {
             outbound_tx: None,
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
+        }
+    }
+
+    pub(crate) fn peer_id_labels(&self, peer_id: PeerId) -> Vec<(&'static str, String)> {
+        if self.trusted {
+            vec![("peer_id", format!("{:#x}", peer_id))]
+        } else {
+            vec![("peer_id", "untrusted".to_string())]
         }
     }
 }
@@ -206,9 +214,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
-                            metrics::counter!("flashblocks.bandwidth_inbound")
-                                .increment(buf.len() as u64);
-                            this.handle_flashblocks_payload_v1(authorized.into_unchecked());
+                            this.handle_flashblocks_payload_v1(
+                                authorized.into_unchecked(),
+                                buf.len(),
+                            );
                         }
                         AuthorizedMsg::StartPublish(_) => {
                             this.handle_start_publish(authorized.into_unchecked());
@@ -310,6 +319,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     fn handle_flashblocks_payload_v1(
         &mut self,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        buf_len: usize,
     ) {
         let authorization = &authorized_payload.authorized.authorization;
         let msg = authorized_payload.msg();
@@ -370,10 +380,16 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        let Some(conn_state) = p2p_state.connection_state(&self.peer_id) else {
+        let Some(peer_state) = p2p_state.connection_state_mut(&self.peer_id) else {
             return;
         };
-        match &conn_state.receive_status {
+
+        let peer_id_labels = peer_state.peer_id_labels(self.peer_id);
+
+        metrics::counter!("flashblocks.bandwidth_inbound", &peer_id_labels)
+            .increment(buf_len as u64);
+
+        match &peer_state.receive_status {
             ReceiveStatus::Requesting => {
                 tracing::warn!(
                     target: "flashblocks::p2p",
@@ -388,7 +404,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 return;
             }
             ReceiveStatus::NotReceiving => {
-                if conn_state.receive_status_timestamp + 2 < authorization.timestamp {
+                if peer_state.receive_status_timestamp + 2 < authorization.timestamp {
                     tracing::warn!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,
@@ -451,12 +467,17 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 .timestamp_nanos_opt()
                 .expect("time went backwards");
             let latency = now - flashblock_timestamp;
-            metrics::histogram!("flashblocks.latency").record(latency as f64 / 1_000_000_000.0);
-            if let Some(ReceiveStatus::Receiving { score }) = p2p_state
-                .connection_state_mut(&self.peer_id)
-                .map(|peer_state| &mut peer_state.receive_status)
+            let latency_secs = latency as f64 / 1_000_000_000.0;
+            metrics::histogram!("flashblocks.latency", &peer_id_labels).record(latency_secs);
+            if let Some(peer_state) = p2p_state.connection_state_mut(&self.peer_id)
+                && let ReceiveStatus::Receiving { score } = &mut peer_state.receive_status
             {
                 score.record(latency);
+                if let Some(value) = score.value()
+                    && peer_state.trusted
+                {
+                    metrics::gauge!("flashblocks.peer_score", &peer_id_labels).set(value as f64);
+                }
             }
         }
 

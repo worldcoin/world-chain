@@ -1,5 +1,5 @@
 use crate::protocol::{
-    connection::{FlashblocksConnection, FlashblocksConnectionState, ReceiveStatus, Score},
+    connection::{FlashblocksConnection, FlashblocksPeerState, ReceiveStatus, Score},
     error::FlashblocksP2PError,
 };
 use alloy_rlp::BytesMut;
@@ -153,7 +153,7 @@ pub struct FlashblocksP2PState {
     /// Flashblocks observed from network peers, tracked until their receive grace windows expire.
     pub observed_payloads: VecDeque<ObservedPayload>,
     /// All currently connected peers and their connection state.
-    pub connections: HashMap<PeerId, FlashblocksConnectionState>,
+    pub peers: HashMap<PeerId, FlashblocksPeerState>,
 }
 
 impl Default for FlashblocksP2PState {
@@ -168,22 +168,22 @@ impl Default for FlashblocksP2PState {
             flashblock_index: 0,
             flashblocks: Vec::new(),
             observed_payloads: VecDeque::new(),
-            connections: HashMap::new(),
+            peers: HashMap::new(),
         }
     }
 }
 
 impl FlashblocksP2PState {
     /// Returns the connection state of a peer.
-    pub(crate) fn connection_state(&self, peer_id: &PeerId) -> Option<&FlashblocksConnectionState> {
-        self.connections.get(peer_id)
+    pub(crate) fn connection_state(&self, peer_id: &PeerId) -> Option<&FlashblocksPeerState> {
+        self.peers.get(peer_id)
     }
 
     pub(crate) fn connection_state_mut(
         &mut self,
         peer_id: &PeerId,
-    ) -> Option<&mut FlashblocksConnectionState> {
-        self.connections.get_mut(peer_id)
+    ) -> Option<&mut FlashblocksPeerState> {
+        self.peers.get_mut(peer_id)
     }
 
     /// Marks receiving a flashblock from a peer and returns whether this is the first time we've observed this peer receive this flashblock.
@@ -204,13 +204,13 @@ impl FlashblocksP2PState {
 
         if self.observed_payloads.len() >= RECEIVE_FLASHBLOCK_GRACE_WINDOW {
             let evicted = self.observed_payloads.pop_front().unwrap();
-            for (peer_id, connection) in &mut self.connections {
+            for (peer_id, connection) in &mut self.peers {
                 if connection.receive_status_timestamp + 2 <= evicted.timestamp
                     && !evicted.received_peers.contains(peer_id)
                     && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
                 {
-                    debug!(
+                    warn!(
                         target: "flashblocks::p2p",
                         %peer_id,
                         payload_id = %evicted.payload_id,
@@ -218,6 +218,12 @@ impl FlashblocksP2PState {
                         "scoring peer for missed flashblock",
                     );
                     score.record(MISSED_FLASHBLOCK_PENALTY_NS);
+
+                    metrics::counter!(
+                        "flashblocks.missed_flashblocks",
+                        &connection.peer_id_labels(*peer_id)
+                    )
+                    .increment(1);
                 }
             }
         }
@@ -251,7 +257,7 @@ impl FlashblocksP2PState {
 
     /// Sends an already serialized message to all connected peers.
     pub(crate) fn send_to_all_peers(&self, bytes: &BytesMut) {
-        for conn in self.connections.values() {
+        for conn in self.peers.values() {
             if let Some(tx) = &conn.outbound_tx {
                 tx.try_send(bytes.clone()).ok();
             }
@@ -266,7 +272,7 @@ impl FlashblocksP2PState {
         flashblock_index: u64,
         bytes: &BytesMut,
     ) {
-        for (peer_id, conn) in &self.connections {
+        for (peer_id, conn) in &self.peers {
             if !conn.send_enabled
                 || self.peer_received_flashblock(*peer_id, payload_id, flashblock_index)
             {
@@ -283,7 +289,11 @@ impl FlashblocksP2PState {
             if let Some(tx) = &conn.outbound_tx
                 && tx.try_send(bytes.clone()).is_ok()
             {
-                metrics::counter!("flashblocks.bandwidth_outbound").increment(bytes.len() as u64);
+                metrics::counter!(
+                    "flashblocks.bandwidth_outbound",
+                    &conn.peer_id_labels(*peer_id)
+                )
+                .increment(bytes.len() as u64);
             }
         }
     }
@@ -291,7 +301,7 @@ impl FlashblocksP2PState {
     /// Sends a control message directly to a specific peer.
     fn send_direct(&self, peer_id: PeerId, msg: FlashblocksP2PMsg) {
         let bytes: &BytesMut = &msg.encode();
-        if let Some(conn) = self.connections.get(&peer_id)
+        if let Some(conn) = self.peers.get(&peer_id)
             && let Some(tx) = &conn.outbound_tx
         {
             tx.try_send(bytes.clone()).ok();
@@ -300,7 +310,7 @@ impl FlashblocksP2PState {
 
     /// Returns `true` if the peer has exceeded the control-message rate limit.
     fn check_control_rate_limit(&mut self, peer_id: &PeerId) -> bool {
-        let Some(peer_state) = self.connections.get_mut(peer_id) else {
+        let Some(peer_state) = self.peers.get_mut(peer_id) else {
             return true;
         };
         let now = Instant::now();
@@ -313,7 +323,7 @@ impl FlashblocksP2PState {
     }
 
     fn num_receive_peers(&self) -> usize {
-        self.connections
+        self.peers
             .values()
             .filter(|peer_state| {
                 matches!(peer_state.receive_status, ReceiveStatus::Receiving { .. })
@@ -327,10 +337,7 @@ impl FlashblocksP2PState {
             .max(1)
     }
 
-    fn clear_receive_state(
-        peer_state: &mut FlashblocksConnectionState,
-        receive_status_timestamp: u64,
-    ) {
+    fn clear_receive_state(peer_state: &mut FlashblocksPeerState, receive_status_timestamp: u64) {
         peer_state.receive_status = ReceiveStatus::NotReceiving;
         peer_state.receive_status_timestamp = receive_status_timestamp;
     }
@@ -338,7 +345,7 @@ impl FlashblocksP2PState {
     fn available_receive_candidates(&self, ctx: &FlashblocksP2PCtx) -> Vec<(PeerId, bool)> {
         let now = Utc::now().timestamp() as u64;
         let retry_cooldown = Self::receive_retry_cooldown_secs(ctx);
-        self.connections
+        self.peers
             .iter()
             .filter_map(|(peer_id, peer_state)| {
                 if peer_state.receive_status == ReceiveStatus::NotReceiving
@@ -369,7 +376,7 @@ impl FlashblocksP2PState {
     }
 
     fn num_receive_or_requesting_peers(&self) -> usize {
-        self.connections
+        self.peers
             .values()
             .filter(|peer_state| {
                 matches!(
@@ -384,7 +391,7 @@ impl FlashblocksP2PState {
         // First, request any force-receive peers that are connected but not yet
         // receiving/requesting, regardless of the max_receive_peers limit.
         for force_peer in &ctx.fanout_args.force_receive_peers {
-            if let Some(peer_state) = self.connections.get(force_peer)
+            if let Some(peer_state) = self.peers.get(force_peer)
                 && peer_state.receive_status == ReceiveStatus::NotReceiving
             {
                 self.begin_requesting_peer(*force_peer);
@@ -406,7 +413,7 @@ impl FlashblocksP2PState {
         let now = Utc::now().timestamp() as u64;
         let mut cleared_any = false;
 
-        for (peer_id, peer_state) in &mut self.connections {
+        for (peer_id, peer_state) in &mut self.peers {
             if matches!(peer_state.receive_status, ReceiveStatus::Requesting)
                 && peer_state.receive_status_timestamp + RECEIVE_REQUEST_TIMEOUT_SECS <= now
             {
@@ -426,7 +433,7 @@ impl FlashblocksP2PState {
     }
 
     fn worst_receive_peer(&self, ctx: &FlashblocksP2PCtx) -> Option<PeerId> {
-        self.connections
+        self.peers
             .iter()
             .filter_map(|(peer_id, peer_state)| {
                 if ctx.fanout_args.force_receive_peers.contains(peer_id) {
@@ -505,7 +512,7 @@ impl FlashblocksP2PState {
             return Err(());
         }
         let peer_is_trusted = peer_state.trusted;
-        let send_count = self.connections.values().filter(|s| s.send_enabled).count();
+        let send_count = self.peers.values().filter(|s| s.send_enabled).count();
 
         if !peer_is_trusted && send_count >= ctx.fanout_args.max_send_peers {
             debug!(
@@ -712,14 +719,14 @@ impl FlashblocksHandle {
     ) {
         {
             let mut state = self.state.lock();
-            let mut conn_state = FlashblocksConnectionState::new();
+            let mut conn_state = FlashblocksPeerState::new();
             conn_state.outbound_tx = Some(outbound_tx);
-            state.connections.insert(peer_id, conn_state);
+            state.peers.insert(peer_id, conn_state);
 
             info!(
                 target: "flashblocks::p2p",
                 %peer_id,
-                total_peers = state.connections.len(),
+                total_peers = state.peers.len(),
                 "flashblocks peer connected",
             );
 
@@ -764,7 +771,7 @@ impl FlashblocksHandle {
 
     pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId) {
         let mut state = self.state.lock();
-        let removed = state.connections.remove(&peer_id);
+        let removed = state.peers.remove(&peer_id);
 
         if let Some(conn_state) = &removed {
             info!(
@@ -772,7 +779,7 @@ impl FlashblocksHandle {
                 %peer_id,
                 was_sending = conn_state.send_enabled,
                 receive_status = ?conn_state.receive_status,
-                remaining_peers = state.connections.len(),
+                remaining_peers = state.peers.len(),
                 "flashblocks peer disconnected",
             );
         }
@@ -1484,8 +1491,8 @@ mod tests {
         }
     }
 
-    fn test_peer_state(trusted: bool) -> FlashblocksConnectionState {
-        let mut state = FlashblocksConnectionState::new();
+    fn test_peer_state(trusted: bool) -> FlashblocksPeerState {
+        let mut state = FlashblocksPeerState::new();
         state.trusted = trusted;
         state
     }
@@ -1493,12 +1500,9 @@ mod tests {
     /// Creates a peer state with a per-peer outbound channel for message assertions.
     fn test_peer_state_with_channel(
         trusted: bool,
-    ) -> (
-        FlashblocksConnectionState,
-        mpsc::Receiver<BytesMut>,
-    ) {
+    ) -> (FlashblocksPeerState, mpsc::Receiver<BytesMut>) {
         let (tx, rx) = mpsc::channel(100);
-        let mut state = FlashblocksConnectionState::new();
+        let mut state = FlashblocksPeerState::new();
         state.trusted = trusted;
         state.outbound_tx = Some(tx);
         (state, rx)
@@ -1510,7 +1514,7 @@ mod tests {
         FlashblocksP2PMsg::decode(&mut &bytes[..]).expect("valid message")
     }
 
-    fn peer_state(fanout: &FlashblocksP2PState, peer_id: PeerId) -> &FlashblocksConnectionState {
+    fn peer_state(fanout: &FlashblocksP2PState, peer_id: PeerId) -> &FlashblocksPeerState {
         fanout.connection_state(&peer_id).expect("peer exists")
     }
 
@@ -1656,9 +1660,9 @@ mod tests {
         send_state.send_enabled = true;
         let (non_send_state, mut non_send_rx) = test_peer_state_with_channel(false);
 
-        fanout.connections.insert(source_peer, source_state);
-        fanout.connections.insert(send_peer, send_state);
-        fanout.connections.insert(non_send_peer, non_send_state);
+        fanout.peers.insert(source_peer, source_state);
+        fanout.peers.insert(send_peer, send_state);
+        fanout.peers.insert(non_send_peer, non_send_state);
         apply_observation(&mut fanout, &authorization, &flashblock, source_peer);
 
         ctx.publish(&mut fanout, authorized_payload);
@@ -1680,8 +1684,8 @@ mod tests {
 
         let (force_state, mut force_rx) = test_peer_state_with_channel(true);
         let regular_state = test_peer_state(false);
-        fanout.connections.insert(force_peer, force_state);
-        fanout.connections.insert(regular_peer, regular_state);
+        fanout.peers.insert(force_peer, force_state);
+        fanout.peers.insert(regular_peer, regular_state);
 
         fanout.maybe_request_receive_peers(&ctx);
 
@@ -1711,10 +1715,8 @@ mod tests {
         let (mut victim_state, mut victim_rx) = test_peer_state_with_channel(false);
         let (requester_state, mut requester_rx) = test_peer_state_with_channel(true);
         victim_state.send_enabled = true;
-        fanout.connections.insert(victim, victim_state);
-        fanout
-            .connections
-            .insert(trusted_requester, requester_state);
+        fanout.peers.insert(victim, victim_state);
+        fanout.peers.insert(trusted_requester, requester_state);
 
         assert!(fanout.handle_request(&ctx, trusted_requester).is_ok());
 
@@ -1743,8 +1745,8 @@ mod tests {
         let mut score = Score::new(score_samples);
         score.record(42);
         current_state.receive_status = ReceiveStatus::Receiving { score };
-        fanout.connections.insert(current_peer, current_state);
-        fanout.connections.insert(candidate_peer, candidate_state);
+        fanout.peers.insert(current_peer, current_state);
+        fanout.peers.insert(candidate_peer, candidate_state);
 
         fanout.maybe_start_rotation(&ctx);
 
@@ -1785,8 +1787,8 @@ mod tests {
         let second_peer = PeerId::random();
         let (first_state, mut first_rx) = test_peer_state_with_channel(false);
         let (second_state, mut second_rx) = test_peer_state_with_channel(false);
-        fanout.connections.insert(first_peer, first_state);
-        fanout.connections.insert(second_peer, second_state);
+        fanout.peers.insert(first_peer, first_state);
+        fanout.peers.insert(second_peer, second_state);
 
         fanout.maybe_request_receive_peers(&ctx);
 
@@ -1830,7 +1832,7 @@ mod tests {
 
         let peer = PeerId::random();
         let (candidate_state, mut peer_rx) = test_peer_state_with_channel(false);
-        fanout.connections.insert(peer, candidate_state);
+        fanout.peers.insert(peer, candidate_state);
 
         fanout.maybe_request_receive_peers(&ctx);
         assert_eq!(
@@ -1877,10 +1879,8 @@ mod tests {
         stale_state.receive_status_timestamp =
             Utc::now().timestamp() as u64 - RECEIVE_REQUEST_TIMEOUT_SECS;
         let (replacement_state, mut replacement_rx) = test_peer_state_with_channel(false);
-        fanout.connections.insert(stale_peer, stale_state);
-        fanout
-            .connections
-            .insert(replacement_peer, replacement_state);
+        fanout.peers.insert(stale_peer, stale_state);
+        fanout.peers.insert(replacement_peer, replacement_state);
 
         fanout.expire_stale_receive_requests(&ctx);
 
@@ -1916,10 +1916,8 @@ mod tests {
             score: Score::new(4),
         };
 
-        fanout.connections.insert(silent_peer, silent_state);
-        fanout
-            .connections
-            .insert(replacement_peer, replacement_state);
+        fanout.peers.insert(silent_peer, silent_state);
+        fanout.peers.insert(replacement_peer, replacement_state);
 
         fanout.maybe_start_rotation(&ctx);
 
@@ -1969,8 +1967,8 @@ mod tests {
             score: lagging_score,
         };
 
-        fanout.connections.insert(steady_peer, steady_state);
-        fanout.connections.insert(lagging_peer, lagging_state);
+        fanout.peers.insert(steady_peer, steady_state);
+        fanout.peers.insert(lagging_peer, lagging_state);
 
         // Use timestamps starting well after receive_status_timestamp (0) so the grace
         // check `receive_status_timestamp + 2 <= evicted.timestamp` is satisfied.
@@ -2040,9 +2038,9 @@ mod tests {
             score: rotating_score,
         };
 
-        fanout.connections.insert(steady_peer, steady_state);
-        fanout.connections.insert(rotating_peer, rotating_state);
-        fanout.connections.insert(candidate_peer, candidate_state);
+        fanout.peers.insert(steady_peer, steady_state);
+        fanout.peers.insert(rotating_peer, rotating_state);
+        fanout.peers.insert(candidate_peer, candidate_state);
 
         fanout.maybe_start_rotation(&ctx);
 
@@ -2071,9 +2069,7 @@ mod tests {
 
         assert_eq!(fanout.worst_receive_peer(&ctx), Some(candidate_peer));
 
-        fanout
-            .connections
-            .insert(replacement_peer, replacement_state);
+        fanout.peers.insert(replacement_peer, replacement_state);
         fanout.maybe_start_rotation(&ctx);
 
         assert_eq!(
@@ -2093,7 +2089,7 @@ mod tests {
 
         let peer = PeerId::random();
         let state = test_peer_state(false);
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         // Accept without a prior request should be penalized.
         assert!(fanout.handle_accept(&ctx, peer).is_err());
@@ -2106,7 +2102,7 @@ mod tests {
 
         let peer = PeerId::random();
         let state = test_peer_state(false);
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         // Reject without a prior request should be penalized.
         assert!(fanout.handle_reject(&ctx, peer).is_err());
@@ -2118,7 +2114,7 @@ mod tests {
 
         let peer = PeerId::random();
         let state = test_peer_state(false);
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         // Cancel with no send/receive relationship should be penalized.
         assert!(fanout.handle_cancel(peer).is_err());
@@ -2134,7 +2130,7 @@ mod tests {
         state.receive_status = ReceiveStatus::Receiving {
             score: Score::new(4),
         };
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         assert!(fanout.handle_cancel(peer).is_ok());
         assert!(!peer_state(&fanout, peer).send_enabled);
@@ -2153,7 +2149,7 @@ mod tests {
         state.receive_status = ReceiveStatus::Receiving {
             score: Score::new(4),
         };
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         assert!(fanout.handle_cancel(peer).is_err());
     }
@@ -2166,7 +2162,7 @@ mod tests {
         let peer = PeerId::random();
         let mut state = test_peer_state(false);
         state.send_enabled = true;
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         assert!(fanout.handle_request(&ctx, peer).is_err());
     }
@@ -2179,7 +2175,7 @@ mod tests {
         let peer = PeerId::random();
         let (mut state, mut rx) = test_peer_state_with_channel(false);
         state.receive_status_timestamp = Utc::now().timestamp() as u64;
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         assert!(fanout.handle_request(&ctx, peer).is_ok());
         assert!(peer_state(&fanout, peer).send_enabled);
@@ -2195,7 +2191,7 @@ mod tests {
 
         let peer = PeerId::random();
         let (state, mut rx) = test_peer_state_with_channel(false);
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         for _ in 0..MAX_CONTROL_MSGS_PER_WINDOW {
             assert!(fanout.handle_request(&ctx, peer).is_ok());
@@ -2212,7 +2208,7 @@ mod tests {
         let peer = PeerId::random();
         let mut state = test_peer_state(false);
         state.send_enabled = true;
-        fanout.connections.insert(peer, state);
+        fanout.peers.insert(peer, state);
 
         // Spam requests to exceed the rate limit.
         for _ in 0..MAX_CONTROL_MSGS_PER_WINDOW {
@@ -2251,9 +2247,9 @@ mod tests {
 
         let (candidate_state, mut candidate_rx) = test_peer_state_with_channel(false);
 
-        fanout.connections.insert(force_peer, force_state);
-        fanout.connections.insert(regular_peer, regular_state);
-        fanout.connections.insert(candidate_peer, candidate_state);
+        fanout.peers.insert(force_peer, force_state);
+        fanout.peers.insert(regular_peer, regular_state);
+        fanout.peers.insert(candidate_peer, candidate_state);
 
         fanout.maybe_start_rotation(&ctx);
 
@@ -2289,8 +2285,8 @@ mod tests {
 
         let (state_1, mut rx_1) = test_peer_state_with_channel(false);
         let (state_2, mut rx_2) = test_peer_state_with_channel(false);
-        fanout.connections.insert(force_peer_1, state_1);
-        fanout.connections.insert(force_peer_2, state_2);
+        fanout.peers.insert(force_peer_1, state_1);
+        fanout.peers.insert(force_peer_2, state_2);
 
         fanout.maybe_request_receive_peers(&ctx);
 
