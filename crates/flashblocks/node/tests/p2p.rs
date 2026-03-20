@@ -33,6 +33,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
 };
 use reth_optimism_chainspec::OpChainSpecBuilder;
+use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskExecutor;
@@ -132,6 +133,8 @@ pub struct NodeContext {
     _node_exit_future: NodeExitFuture,
     _node: Box<dyn Any + Sync + Send>,
     network_handle: Network,
+    #[allow(dead_code)]
+    beacon_handle: reth_node_api::ConsensusEngineHandle<OpEngineTypes>,
 }
 
 struct NodeTestFixture {
@@ -156,6 +159,46 @@ impl NodeContext {
         let client = RpcClient::builder().http(url.parse()?);
 
         Ok(RootProvider::new(client))
+    }
+
+    /// Poll the pending block until it matches the expected number and tx count,
+    /// or time out. process_flashblock runs on spawn_blocking so results are
+    /// not immediately visible after publish.
+    pub async fn wait_for_pending_block(
+        &self,
+        expected_number: u64,
+        expected_txs: usize,
+    ) -> eyre::Result<()> {
+        let provider = self.provider().await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let mut last = String::new();
+
+        loop {
+            let pending = provider
+                .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+                .await?;
+
+            if let Some(ref block) = pending {
+                if block.number() == expected_number
+                    && block.transactions.hashes().len() == expected_txs
+                {
+                    return Ok(());
+                }
+                last = format!(
+                    "number={}, txs={}",
+                    block.number(),
+                    block.transactions.hashes().len()
+                );
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Err(eyre!(
+                    "timed out waiting for pending block: expected number={expected_number} txs={expected_txs}, last observed: {last}"
+                ));
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
     }
 }
 
@@ -439,6 +482,7 @@ async fn setup_node_extended_cfg(
 
     let network_handle = node.network.clone();
     let local_node_record = network_handle.local_node_record();
+    let beacon_handle = node.add_ons_handle.beacon_engine_handle.clone();
 
     Ok(NodeContext {
         p2p_handle,
@@ -447,6 +491,7 @@ async fn setup_node_extended_cfg(
         _node_exit_future: node_exit_future,
         _node: Box::new(node),
         network_handle,
+        beacon_handle,
     })
 }
 
@@ -956,16 +1001,10 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     );
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    sleep(Duration::from_millis(100)).await;
 
-    // Query pending block after sending the base payload with an empty delta
-    let pending_block = provider
-        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
-        .await?
-        .expect("pending block expected");
-
-    assert_eq!(pending_block.number(), expected_pending_number);
-    assert_eq!(pending_block.transactions.hashes().len(), 0);
+    nodes[0]
+        .wait_for_pending_block(expected_pending_number, 0)
+        .await?;
 
     let next_payload = next_payload(payload_id, 1).await;
     let authorization = Authorization::new(
@@ -981,16 +1020,10 @@ async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     );
     nodes[0].p2p_handle.start_publishing(authorization)?;
     nodes[0].p2p_handle.publish_new(authorized).unwrap();
-    sleep(Duration::from_millis(100)).await;
 
-    // Query pending block after sending the second payload with two transactions
-    let block = provider
-        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
-        .await?
-        .expect("pending block expected");
-
-    assert_eq!(block.number(), expected_pending_number);
-    assert_eq!(block.transactions.hashes().len(), 0);
+    nodes[0]
+        .wait_for_pending_block(expected_pending_number, 0)
+        .await?;
 
     drop(fixture);
 
@@ -1084,11 +1117,11 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
     let exec1 = TaskExecutor::default();
 
-    // Setup node 1 with its own TaskManager (for isolated task cancellation)
+    // Setup node 1 with its own executor (for isolated task cancellation)
     // Node1 needs static port and P2P key so it can be restarted with same identity
     let builder1 = SigningKey::from_bytes(&[1; 32]);
     let node1 = setup_node_extended_cfg(
-        exec1,
+        exec1.clone(),
         authorizer.clone(),
         builder1,
         vec![],                     // No peers initially

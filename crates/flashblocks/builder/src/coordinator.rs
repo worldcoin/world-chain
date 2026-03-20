@@ -1,9 +1,12 @@
 use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
-use flashblocks_p2p::protocol::handler::FlashblocksHandle;
+use flashblocks_p2p::protocol::{
+    event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
+    handler::FlashblocksHandle,
+};
 use flashblocks_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
-use futures::StreamExt as _;
+use futures::StreamExt;
 use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
 use reth::{
@@ -13,7 +16,7 @@ use reth::{
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodeTypes};
+use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
@@ -21,14 +24,17 @@ use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBu
 use reth_optimism_primitives::OpPrimitives;
 
 use reth_payload_util::BestPayloadTransactions;
-use reth_provider::{ChainSpecProvider, HeaderProvider, StateProviderFactory};
-use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
+use reth_provider::{
+    BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
+    StateProviderFactory,
 };
-use tokio::sync::broadcast;
-use tracing::{error, trace, warn};
+use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
+use std::sync::{Arc, LazyLock};
+use tokio::sync::{
+    Semaphore,
+    broadcast::{self, Sender},
+};
+use tracing::{error, trace};
 
 use crate::{
     bal_executor::CommittedState,
@@ -36,14 +42,12 @@ use crate::{
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
-use backon::BlockingRetryable;
 use flashblocks_primitives::flashblocks::{Flashblock, Flashblocks};
 
-/// The maximum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MAX_DELAY: Duration = Duration::from_millis(2000);
+/// Task-level permit to ensure only one flashblock is processed at a time.
+static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
 
-/// The minimum backoff duration when waiting for the parent header to be available in the database when processing a flashblock.
-const FETCH_PARENT_HEADER_MIN_DELAY: Duration = Duration::from_millis(100);
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -64,7 +68,7 @@ pub struct FlashblocksExecutionCoordinatorInner {
     /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
     /// Broadcast channel for built payload events
-    payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
+    payload_events: Option<Sender<Events<OpEngineTypes>>>,
 }
 
 impl FlashblocksExecutionCoordinator {
@@ -88,29 +92,80 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
+    /// Maps a closure over the [`WorldChainEventStream<T>`] from the P2P handle.
+    pub fn map_worldchain_event_stream<N, P, T, F>(
+        &self,
+        provider: P,
+        mut f: F,
+    ) -> WorldChainEventsStream<T>
+    where
+        P: CanonStateSubscriptions<Primitives = N>
+            + HeaderProvider
+            + BlockNumReader
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        F: FnMut(&WorldChainEvent<T>) -> Option<WorldChainEvent<T>> + Send + 'static,
+        T: Send + Sync + 'static,
+        N: NodePrimitives + 'static,
+    {
+        self.p2p_handle
+            .event_stream(provider, move |event| f(event))
+    }
+
+    pub fn event_hook(
+        event: &WorldChainEvent<()>,
+        pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    ) -> Option<WorldChainEvent<()>> {
+        if let WorldChainEvent::Chain(ChainEvent::Canon(tip)) = event {
+            pending_block.send_if_modified(|block| {
+                let should_clear = block.as_ref().is_some_and(|b| {
+                    let pending = b.recovered_block();
+                    pending.hash() == tip.hash || pending.number <= tip.number
+                });
+                if should_clear {
+                    *block = None;
+                }
+                should_clear
+            });
+        }
+        None
+    }
+
     /// Launches the executor to listen for new flashblocks and build payloads.
-    pub fn launch<Node>(&self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
+    ///
+    /// Uses a canon-aware event stream that gates flashblock delivery on canonical
+    /// tip matching, preventing stale flashblocks from being processed.
+    pub fn launch<Node>(self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
     where
         Node: FullNodeTypes,
-        Node::Provider: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+        Node::Provider: StateProviderFactory
+            + HeaderProvider<Header = alloy_consensus::Header>
+            + CanonStateSubscriptions,
         Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
     {
-        let stream = self.p2p_handle.live_flashblock_stream();
         let provider = ctx.provider().clone();
+        let pending_block = self.pending_block.clone();
+        let pending_block_clone = pending_block.clone();
+
+        let stream = self.map_worldchain_event_stream(provider.clone(), move |event| {
+            Self::event_hook(event, &pending_block)
+        });
+
         let chain_spec = ctx.chain_spec().clone();
 
-        let this = self.clone();
-        let pending_block = self.pending_block.clone();
+        let this = Arc::new(self);
 
         ctx.task_executor()
             .spawn_critical_task("flashblocks executor", async move {
                 run_flashblock_processor(
+                    this,
                     stream,
                     provider,
                     evm_config,
-                    &this,
                     chain_spec,
-                    pending_block,
+                    pending_block_clone,
                 )
                 .await;
             });
@@ -123,17 +178,13 @@ impl FlashblocksExecutionCoordinator {
     ) -> eyre::Result<()> {
         let flashblock = authorized_payload.msg().clone();
 
-        let FlashblocksExecutionCoordinatorInner {
-            ref mut flashblocks,
-            ref mut latest_payload,
-            ..
-        } = *self.inner.write();
-
         let index = flashblock.index;
         let flashblock = Flashblock { flashblock };
-        flashblocks.push(flashblock.clone())?;
 
-        *latest_payload = Some((built_payload, index));
+        let mut lock = self.inner.write();
+        lock.flashblocks.push(flashblock.clone())?;
+        lock.latest_payload = Some((built_payload, index));
+        drop(lock);
 
         self.p2p_handle.publish_new(authorized_payload.clone())?;
 
@@ -183,15 +234,15 @@ impl FlashblocksExecutionCoordinator {
 /// [`process_flashblock`]. This is the same loop that `launch` spawns as a
 /// critical task — exposed here so benchmarks and tests can drive it
 /// directly without needing a full [`BuilderContext`].
-pub async fn run_flashblock_processor<S, Provider>(
+pub async fn run_flashblock_processor<T, S, Provider>(
+    coordinator: Arc<FlashblocksExecutionCoordinator>,
     stream: S,
     provider: Provider,
     evm_config: OpEvmConfig,
-    coordinator: &FlashblocksExecutionCoordinator,
     chain_spec: Arc<OpChainSpec>,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) where
-    S: futures::Stream<Item = FlashblocksPayloadV1> + Unpin,
+    S: futures::Stream<Item = WorldChainEvent<T>> + Unpin,
     Provider: StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
@@ -199,16 +250,45 @@ pub async fn run_flashblock_processor<S, Provider>(
         + 'static,
 {
     futures::pin_mut!(stream);
-    while let Some(flashblock) = stream.next().await {
-        if let Err(e) = process_flashblock(
-            provider.clone(),
-            &evm_config,
-            coordinator,
-            chain_spec.clone(),
-            flashblock,
-            pending_block.clone(),
-        ) {
-            error!("error processing flashblock: {e:#?}");
+
+    while let Some(event) = stream.next().await {
+        if let WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) = event {
+            let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
+
+            trace!(
+                target: "flashblocks::coordinator",
+                payload_id = %flashblock.payload_id,
+                index = %flashblock.index,
+                is_base = flashblock.base.is_some(),
+                "received pending flashblock"
+            );
+
+            let permit = SEMAPHORE_TASK_PERMIT
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore is never closed");
+
+            let provider = provider.clone();
+            let evm_config = evm_config.clone();
+            let coordinator = coordinator.clone();
+            let chain_spec = chain_spec.clone();
+            let pending_block = pending_block.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+
+                if let Err(e) = process_flashblock(
+                    provider,
+                    &evm_config,
+                    &coordinator,
+                    chain_spec,
+                    flashblock,
+                    pending_block,
+                ) {
+                    error!("error processing flashblock: {e:#?}");
+                }
+            });
         }
     }
 }
@@ -228,71 +308,58 @@ where
         + Clone
         + 'static,
 {
-    let FlashblocksExecutionCoordinatorInner {
-        ref mut flashblocks,
-        ref mut latest_payload,
-        ref mut payload_events,
-    } = *coordinator.inner.write();
-
     let flashblock = Flashblock { flashblock };
 
-    if let Some(latest_payload) = latest_payload
-        && latest_payload.0.id() == flashblock.flashblock.payload_id
-        && latest_payload.1 >= flashblock.flashblock.index
-    {
-        // Already processed this flashblock. This happens when set directly
-        // from publish_build_payload. Since we already built the payload, no need
-        // to do it again.
-        pending_block.send_replace(
-            latest_payload
-                .0
-                .executed_block()
-                .map(|p| p.into_executed_payload()),
-        );
-        return Ok(());
+    // --- Short read: check if already processed, extract base info ---
+    let (base, is_new_epoch) = {
+        let inner = coordinator.inner.read();
+
+        if let Some(latest_payload) = &inner.latest_payload
+            && latest_payload.0.id() == flashblock.flashblock.payload_id
+            && latest_payload.1 >= flashblock.flashblock.index
+        {
+            pending_block.send_replace(
+                latest_payload
+                    .0
+                    .executed_block()
+                    .map(|p| p.into_executed_payload()),
+            );
+            return Ok(());
+        }
+
+        let is_new = inner.flashblocks.is_new_payload(&flashblock)?;
+        let base = if is_new {
+            flashblock.base().unwrap().clone()
+        } else {
+            inner.flashblocks.base().clone()
+        };
+
+        (base, is_new)
+    };
+
+    // Clear latest_payload on new epoch (brief write lock)
+    if is_new_epoch {
+        coordinator.inner.write().latest_payload = None;
     }
+
+    let latest_payload = {
+        let inner = coordinator.inner.read();
+        inner.latest_payload.as_ref().map(|(p, _)| p.clone())
+    };
+
+    // Accumulate committed state from latest payload (brief read lock)
+    let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref())
+        .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
 
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
 
-    // If for whatever reason we are not processing flashblocks in order
-    // we will error and return here.
-    let base = if flashblocks.is_new_payload(&flashblock)? {
-        *latest_payload = None;
-        // safe unwrap from check in is_new_payload
-        flashblock.base().unwrap()
-    } else {
-        flashblocks.base()
-    };
-
-    let f = || {
-        provider
-            .sealed_header_by_hash(base.parent_hash)?
-            .ok_or(eyre!("failed to fetch sealed header {}", base.parent_hash))
-    };
-
-    let sealed_header = f
-        .retry(
-            backon::ExponentialBuilder::default()
-                .with_min_delay(FETCH_PARENT_HEADER_MIN_DELAY)
-                .with_max_delay(FETCH_PARENT_HEADER_MAX_DELAY)
-                .with_max_times(10),
-        )
-        .notify(|e, duration| {
-            warn!(
-                "waiting for parent header {}: {e:#?}. waited {:#?} so far",
-                base.parent_hash, duration
-            )
-        })
-        .call()
-        .inspect_err(|e| {
-            error!(
-                flashblock_index = index,
-                parent_hash = %base.parent_hash,
-                error = %e,
-                "failed to fetch parent header after multiple attempts"
-            )
-        })?;
+    // This should never fail — the canon-aware event stream guarantees the
+    // parent header is available by the time we process a flashblock.
+    let sealed_header = provider
+        .sealed_header_by_hash(base.parent_hash)
+        .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
+        .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
 
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
@@ -309,27 +376,24 @@ where
         extra_data: base.extra_data.clone(),
     };
 
-    trace!(
-        target: "flashblocks::coordinator",
-        id = %flashblock.flashblock().payload_id,
-        index = %flashblock.flashblock().index,
-        min_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.min_tx_index.to_string()),
-        max_tx_index = %flashblock.flashblock().diff.access_list_data.as_ref().map_or("None".to_string(), |d| d.access_list.max_tx_index.to_string()),
-        execution_context = ?execution_context,
-        next_block_context = ?next_block_context,
-        "processing flashblock"
+    let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
+    let transactions_offset = committed_state.transactions.len() + 1;
+    let has_bal = flashblock.diff().access_list_data.is_some();
+
+    let validate_span = crate::metrics::MetricsSpan::new(
+        tracing::trace_span!(
+            target: "flashblocks::coordinator",
+            "validate",
+            id = %flashblock.flashblock().payload_id,
+            index,
+            path = if has_bal { "bal" } else { "legacy" },
+            tx_count = flashblock.diff().transactions.len(),
+            duration_ms = tracing::field::Empty,
+        ),
+        metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
     );
 
-    let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
-
-    let committed_state =
-        CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref().map(|(p, _)| p))
-            .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
-
-    let transactions_offset = committed_state.transactions.len() + 1;
-    let start = Instant::now();
-
-    let payload = if flashblock.diff().access_list_data.is_some() {
+    let payload = if has_bal {
         let sealed_header = Arc::new(sealed_header);
 
         let executor_transactions = decode_transactions_with_indices(
@@ -397,7 +461,7 @@ where
             Default::default(),
             config,
             &cancel,
-            latest_payload.as_ref().map(|p| p.0.clone()),
+            latest_payload.clone(),
         );
 
         let best = |_| BestPayloadTransactions::new(vec![].into_iter());
@@ -409,7 +473,7 @@ where
             Option::<NoopTransactionPool<EthPooledTransaction>>::None,
             db,
             &builder_ctx,
-            latest_payload.as_ref().map(|p| &p.0),
+            latest_payload.as_ref(),
             false,
         )?;
 
@@ -420,14 +484,13 @@ where
         }
     };
 
-    let duration = Instant::now().duration_since(start);
-    metrics::histogram!("flashblocks.validate", "access_list" => flashblock.diff().access_list_data.is_some().to_string())
-        .record(duration.as_nanos() as f64 / 1_000_000_000.0);
+    drop(validate_span);
 
-    // construct the full payload
-    *latest_payload = Some((payload.clone(), index));
-
-    flashblocks.push(flashblock)?;
+    {
+        let mut inner = coordinator.inner.write();
+        inner.latest_payload = Some((payload.clone(), index));
+        inner.flashblocks.push(flashblock)?;
+    }
 
     pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
 
@@ -439,7 +502,8 @@ where
         "built payload from flashblock"
     );
 
-    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events.clone())?;
+    let payload_events = coordinator.inner.read().payload_events.clone();
+    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events)?;
 
     Ok(())
 }

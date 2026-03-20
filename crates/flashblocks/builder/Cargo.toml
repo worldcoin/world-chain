@@ -13,6 +13,7 @@ test-utils = [
     "alloy-trie",
     "op-alloy-network",
     "lazy_static",
+    "flashblocks-p2p/test-utils",
 ]
 bench = ["test-utils"]
 
@@ -70,8 +71,8 @@ dashmap.workspace = true
 thiserror.workspace = true
 either.workspace = true
 metrics.workspace = true
+metrics-derive.workspace = true
 serde.workspace = true
-backon.workspace = true
 
 # Optional deps for test_utils (activated by `test-utils` / `bench` features,
 # or implicitly by dev-dependencies when running `cargo test`).
@@ -90,6 +91,7 @@ eyre.workspace = true
 lazy_static.workspace = true
 proptest.workspace = true
 reth-tracing.workspace = true
+tracing-subscriber.workspace = true
 alloy-genesis.workspace = true
 op-alloy-network.workspace = true
 alloy-signer-local.workspace = true

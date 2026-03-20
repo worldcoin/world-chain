@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flashblocks_builder::{
     coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
@@ -84,26 +86,28 @@ fn bench_launch_flashblock_sequence(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
             b.iter(|| {
                 let (coordinator, handle, pending_tx) = fresh_coordinator(&rt);
+                let pending_tx_clone = pending_tx.clone();
 
-                // Pre-populate the P2P state with the flashblock sequence,
-                // exactly as if they arrived over the network.
-                {
-                    let mut state = handle.state.lock();
-                    state.payload_id = sequence[0].payload_id;
-                    state.flashblocks = sequence.iter().map(|fb| Some(fb.clone())).collect();
+                // Create the stream first — this subscribes to the broadcast channel.
+                // Bound to N+1 items: 1 initial Canon(genesis) + N Pending flashblocks.
+                let stream = handle
+                    .event_stream(provider.clone(), move |event| {
+                        FlashblocksExecutionCoordinator::event_hook(event, &pending_tx_clone)
+                    })
+                    .take(sequence.len() + 1);
+
+                // Send flashblocks on the broadcast channel. The subscription
+                // was created above, so these are buffered until the stream is polled.
+                for fb in &sequence {
+                    handle.flashblocks_tx().send(fb.clone()).ok();
                 }
-
-                // Bound the stream to exactly the number of pre-populated
-                // flashblocks. Without this, live_flashblock_stream blocks
-                // on the broadcast receiver after the buffer is drained.
-                let stream = handle.live_flashblock_stream().take(sequence.len());
 
                 // Drive through the same function that `launch` calls.
                 rt.block_on(run_flashblock_processor(
+                    Arc::new(coordinator),
                     stream,
                     provider.clone(),
                     EVM_CONFIG.clone(),
-                    &coordinator,
                     CHAIN_SPEC.clone(),
                     pending_tx,
                 ));

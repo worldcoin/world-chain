@@ -144,6 +144,7 @@ op-alloy-rpc-types = { version = "0.23.1", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
 op-alloy-network = { version = "0.23.1", default-features = false }
 alloy-op-hardforks = { version = "0.4.4", default-features = false }
+op-alloy-provider = { version = "0.23.1", default-features = false }
 
 # alloy
 alloy = { version = "1.1.2" }
@@ -199,7 +200,6 @@ revm-inspectors = "0.34"
 
 alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
-
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
 jsonrpsee-core = { version = "0.26.0" }
@@ -256,6 +256,7 @@ url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
 either = { version = "1.15.0", default-features = false }
+pin-project = "1.0.1"
 
 # Test
 testcontainers = "0.27"

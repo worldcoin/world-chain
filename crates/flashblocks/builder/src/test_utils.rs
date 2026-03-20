@@ -34,8 +34,9 @@ use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuil
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BytecodeReader, ChainSpecProvider, HeaderProvider,
-    ProviderResult, StateProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BytecodeReader, CanonStateSubscriptions, ChainSpecProvider,
+    HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_trie_common::HashedPostState;
 use revm::{
@@ -1361,6 +1362,20 @@ impl ChainSpecProvider for BenchProvider {
 
     fn chain_spec(&self) -> Arc<OpChainSpec> {
         self.chain_spec.clone()
+    }
+}
+
+// NodePrimitivesProvider — required supertrait for CanonStateSubscriptions
+impl NodePrimitivesProvider for BenchProvider {
+    type Primitives = OpPrimitives;
+}
+
+// CanonStateSubscriptions — noop: benchmarks never receive canon state notifications
+impl CanonStateSubscriptions for BenchProvider {
+    fn subscribe_to_canonical_state(
+        &self,
+    ) -> reth_chain_state::CanonStateNotifications<Self::Primitives> {
+        tokio::sync::broadcast::channel(1).1
     }
 }
 

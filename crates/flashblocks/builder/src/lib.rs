@@ -186,6 +186,8 @@ pub mod executor;
 /// Block building utilities
 pub mod utils;
 
+/// Metric name constants.
+pub mod metrics;
 /// Test utilities shared between integration tests and benchmarks.
 ///
 /// Available when:

@@ -43,6 +43,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-signer-local.workspace = true
 
+
 op-alloy-consensus.workspace = true
 
 tokio.workspace = true
@@ -59,6 +60,9 @@ world-chain-pool.workspace = true
 world-chain-test.workspace = true
 world-chain-node.workspace = true
 
+op-alloy-network.workspace = true
+op-alloy-provider.workspace = true
+
 reth-db.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-engine-primitives.workspace = true
@@ -71,7 +75,7 @@ reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-network-api.workspace = true
 reth-eth-wire.workspace = true
-alloy-rpc-types.workspace = true
+alloy-rpc-types = { workspace = true }
 
 alloy-genesis.workspace = true
 alloy-network.workspace = true
