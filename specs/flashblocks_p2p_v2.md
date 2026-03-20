@@ -1,4 +1,4 @@
-# Flashblocks Fanout Protocol v2
+# Flashblocks P2P Protocol v2
 
 *This document specifies changes to the flashblocks P2P protocol (`flblk`) to replace full-broadcast fanout with bounded, latency-optimized peer selection. It is an amendment to the existing [Flashblocks P2P Extension](./specs/flashblocks_p2p.md).*
 
