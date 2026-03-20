@@ -29,10 +29,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
-use std::{
-    sync::{Arc, LazyLock},
-    time::Instant,
-};
+use std::sync::{Arc, LazyLock};
 use tokio::sync::{
     Semaphore,
     broadcast::{self, Sender},
@@ -42,7 +39,6 @@ use tracing::{error, trace};
 use crate::{
     bal_executor::CommittedState,
     bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
-    metrics::EXECUTION,
     payload_builder::build,
     traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
 };
@@ -346,14 +342,14 @@ where
         coordinator.inner.write().latest_payload = None;
     }
 
-    // Accumulate committed state from latest payload (brief read lock)
-    let committed_state = {
+    let latest_payload = {
         let inner = coordinator.inner.read();
-        CommittedState::<OpRethReceiptBuilder>::try_from(
-            inner.latest_payload.as_ref().map(|(p, _)| p),
-        )
-        .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?
+        inner.latest_payload.as_ref().map(|(p, _)| p.clone())
     };
+
+    // Accumulate committed state from latest payload (brief read lock)
+    let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref())
+        .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
 
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
@@ -383,7 +379,6 @@ where
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
     let transactions_offset = committed_state.transactions.len() + 1;
     let has_bal = flashblock.diff().access_list_data.is_some();
-    let start = Instant::now();
 
     let validate_span = crate::metrics::MetricsSpan::new(
         tracing::trace_span!(
@@ -395,7 +390,7 @@ where
             tx_count = flashblock.diff().transactions.len(),
             duration_ms = tracing::field::Empty,
         ),
-        EXECUTION.validate_duration.clone(),
+        metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
     );
 
     let payload = if has_bal {
@@ -456,13 +451,6 @@ where
             min_base_fee: None,
         };
 
-        let prev_payload = coordinator
-            .inner
-            .read()
-            .latest_payload
-            .as_ref()
-            .map(|(p, _)| p.clone());
-
         let state_provider = provider.state_by_block_hash(sealed_header.hash())?;
         let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
         let cancel = CancelOnDrop::default();
@@ -473,7 +461,7 @@ where
             Default::default(),
             config,
             &cancel,
-            prev_payload.clone(),
+            latest_payload.clone(),
         );
 
         let best = |_| BestPayloadTransactions::new(vec![].into_iter());
@@ -485,7 +473,7 @@ where
             Option::<NoopTransactionPool<EthPooledTransaction>>::None,
             db,
             &builder_ctx,
-            prev_payload.as_ref(),
+            latest_payload.as_ref(),
             false,
         )?;
 
@@ -497,10 +485,6 @@ where
     };
 
     drop(validate_span);
-
-    let duration = Instant::now().duration_since(start);
-    metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string())
-        .record(duration.as_nanos() as f64 / 1_000_000_000.0);
 
     {
         let mut inner = coordinator.inner.write();

@@ -31,7 +31,7 @@ pub static EXECUTION: LazyLock<ExecutionMetrics> = LazyLock::new(ExecutionMetric
 
 /// RAII guard that enters a [`tracing::Span`] on creation. On drop it:
 /// 1. Records `duration_ms` on the tracing span
-/// 2. Records elapsed seconds to the provided [`Histogram`]
+/// 2. Records elapsed milliseconds to the provided [`Histogram`]
 pub struct MetricsSpan {
     inner: tracing::span::EnteredSpan,
     start: Instant,
@@ -39,7 +39,11 @@ pub struct MetricsSpan {
 }
 
 impl MetricsSpan {
-    /// Enter `span` and start the timer. `histogram` receives elapsed seconds on drop.
+    /// Enter `span` and start the timer. `histogram` receives elapsed
+    /// milliseconds on drop.
+    ///
+    /// The histogram can carry labels — pass one created with
+    /// `metrics::histogram!("name", "label" => "value")` to attribute labels.
     pub fn new(span: tracing::Span, histogram: Histogram) -> Self {
         Self {
             inner: span.entered(),
@@ -58,7 +62,7 @@ impl Drop for MetricsSpan {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
         self.inner.record("duration_ms", elapsed.as_millis() as u64);
-        self.histogram.record(elapsed.as_secs_f64());
+        self.histogram.record(elapsed.as_millis() as f64);
     }
 }
 

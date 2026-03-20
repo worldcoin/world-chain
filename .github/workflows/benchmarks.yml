@@ -19,8 +19,9 @@ env:
 
 jobs:
   benchmark:
+    if: github.event_name != 'push'
     runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,7 +48,7 @@ jobs:
       # entry; restore-keys ensures the latest one is always found.
       - name: Restore baseline
         id: restore-baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/criterion
           key: criterion-baseline-main-${{ github.run_id }}
@@ -59,17 +60,35 @@ jobs:
 
       # Compare against main baseline if available
       - name: Check for regressions
-        if: steps.restore-baseline.outputs.cache-hit == 'true' && github.event_name == 'pull_request'
+        if: steps.restore-baseline.outputs.cache-matched-key && github.event_name == 'pull_request'
         run: |
-          critcmp main pr --threshold 10 || {
-            echo "::error::Performance regression detected (>10% slower)"
-            critcmp main pr
+          echo "=== Full Benchmark Comparison ==="
+          critcmp main pr
+
+          echo ""
+          echo "=== Checking for >10% regressions ==="
+          filtered=$(critcmp main pr --threshold 10 2>&1)
+
+          # critcmp always exits 0 - we must parse output to detect regressions.
+          # In the output, the FASTER baseline gets ratio 1.00.
+          # If 'main' shows 1.00 in a data row, 'pr' is slower (regression).
+          # Data rows start after the header (line 1) and separator (line 2).
+          regressions=$(echo "$filtered" | awk 'NR > 2 && NF > 0' | grep -E '^\S+\s+1\.00\s' || true)
+
+          if [ -n "$regressions" ]; then
+            echo ""
+            echo "Regressions detected (>10% slower than main):"
+            echo "$filtered"
+            echo ""
+            echo "::error::Performance regression detected — pr is >10% slower than main baseline"
             exit 1
-          }
+          fi
+
+          echo "No significant regressions detected."
 
       # Post results as PR comment
       - name: Post benchmark comparison
-        if: always() && steps.restore-baseline.outputs.cache-hit == 'true' && github.event_name == 'pull_request'
+        if: always() && steps.restore-baseline.outputs.cache-matched-key && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -107,7 +126,7 @@ jobs:
   update-baseline:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -129,7 +148,7 @@ jobs:
 
       # Dynamic key ensures each push to main overwrites the baseline.
       - name: Save baseline
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/criterion
           key: criterion-baseline-main-${{ github.run_id }}
