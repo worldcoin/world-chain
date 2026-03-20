@@ -1308,14 +1308,6 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
                             "comparing pending block vs event stream flashblock"
                         );
 
-                        // The pending block from the Eth API should be for the
-                        // same payload as the stream flashblock.
-                        assert_eq!(
-                            stream_fb.payload_id,
-                            stream_fb.payload_id, // sanity
-                            "block {block_num}: stream flashblock should have a valid payload_id"
-                        );
-
                         // The pending block tx count should be >= the stream
                         // flashblock's cumulative tx count (pending block
                         // includes all transactions, stream fb has the diff).
