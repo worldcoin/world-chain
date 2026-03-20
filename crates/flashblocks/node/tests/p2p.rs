@@ -26,7 +26,7 @@ use reth_e2e_test_utils::TmpDB;
 use reth_eth_wire::BasicNetworkPrimitives;
 use reth_network::{NetworkHandle, Peers, PeersInfo};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
-use reth_node_api::{ FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},

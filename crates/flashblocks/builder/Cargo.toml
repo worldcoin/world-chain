@@ -13,6 +13,7 @@ test-utils = [
     "alloy-trie",
     "op-alloy-network",
     "lazy_static",
+    "flashblocks-p2p/test-utils",
 ]
 bench = ["test-utils"]
 

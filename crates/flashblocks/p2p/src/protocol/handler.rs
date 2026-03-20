@@ -25,6 +25,7 @@ use reth_ethereum::{
     primitives::{AlloyBlockHeader, NodePrimitives},
 };
 use reth_network::Peers;
+use reth_provider::{BlockNumReader, CanonStateSubscriptions, HeaderProvider};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
@@ -848,9 +849,9 @@ impl FlashblocksHandle {
     pub fn event_stream<T, P, N, F>(&self, provider: P, hook: F) -> WorldChainEventsStream<T>
     where
         T: Send + Sync + 'static,
-        P: reth::providers::CanonStateSubscriptions<Primitives = N>
-            + reth_provider::HeaderProvider
-            + reth_provider::BlockNumReader
+        P: CanonStateSubscriptions<Primitives = N>
+            + HeaderProvider
+            + BlockNumReader
             + Clone
             + Send
             + Sync
@@ -899,6 +900,11 @@ impl FlashblocksHandle {
             canon,
             hook,
         )
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn flashblocks_tx(&self) -> broadcast::Sender<FlashblocksPayloadV1> {
+        self.ctx.flashblock_tx.clone()
     }
 }
 
