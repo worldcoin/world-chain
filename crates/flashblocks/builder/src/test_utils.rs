@@ -1381,21 +1381,19 @@ impl CanonStateSubscriptions for BenchProvider {
 }
 
 pub fn build_flashblock_fixture_eth_transfers(num_txs: usize, bal: bool) -> FlashblocksPayloadV1 {
-    let tx_op = TxOp::Transfer {
+    build_flashblock_fixture(num_txs, bal, || TxOp::Transfer {
         from: ALICE.clone(),
         to: Address::random(),
         value: U256::from(100),
-    };
-    build_flashblock_fixture(num_txs, tx_op, bal)
+    })
 }
 
 pub fn build_flashblock_fixture_fib(num_txs: usize, bal: bool) -> FlashblocksPayloadV1 {
-    let tx_op = TxOp::Fib {
+    build_flashblock_fixture(num_txs, bal, || TxOp::Fib {
         from: ALICE.clone(),
         n: 300,
         target: ChaosTarget::Proxy,
-    };
-    build_flashblock_fixture(num_txs, tx_op, bal)
+    })
 }
 
 /// Builds a [`FlashblocksPayloadV1`] fixture with the given number of transactions.
@@ -1403,9 +1401,16 @@ pub fn build_flashblock_fixture_fib(num_txs: usize, bal: bool) -> FlashblocksPay
 /// Returns the payload ready to be passed to `process_flashblock`.
 /// The base references `CHAIN_SPEC.genesis_hash()` as `parent_hash` so
 /// `BenchProvider` can serve the sealed header from `sealed_header_by_hash`.
-pub fn build_flashblock_fixture(num_txs: usize, tx_op: TxOp, bal: bool) -> FlashblocksPayloadV1 {
-    // Build a simple sequence of transfer transactions from ALICE
-    let sequence: Vec<(TxOp, u64)> = (0..num_txs).map(|i| (tx_op.clone(), i as u64)).collect();
+pub fn build_flashblock_fixture<F>(
+    num_txs: usize,
+    bal: bool,
+    mut build_tx_op: F,
+) -> FlashblocksPayloadV1
+where
+    F: FnMut() -> TxOp,
+{
+    // Build a simple sequence of transactions from ALICE.
+    let sequence: Vec<(TxOp, u64)> = (0..num_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
     let payloads =
         build_chained_payloads(sequence, 1, bal).expect("failed to build chained payloads");
@@ -1437,12 +1442,13 @@ pub fn build_flashblock_sequence_fixture_eth_transfers(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
-    let tx_op = TxOp::Transfer {
-        from: ALICE.clone(),
-        to: Address::random(),
-        value: U256::from(100),
-    };
-    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, tx_op)
+    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, || {
+        TxOp::Transfer {
+            from: ALICE.clone(),
+            to: Address::random(),
+            value: U256::from(100),
+        }
+    })
 }
 
 pub fn build_flashblock_sequence_fixture_fib(
@@ -1450,12 +1456,11 @@ pub fn build_flashblock_sequence_fixture_fib(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
-    let tx_op = TxOp::Fib {
+    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, || TxOp::Fib {
         from: ALICE.clone(),
         n: 300,
         target: ChaosTarget::Proxy,
-    };
-    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, tx_op)
+    })
 }
 
 /// Builds a sequence of [`FlashblocksPayloadV1`] fixtures representing a
@@ -1468,18 +1473,21 @@ pub fn build_flashblock_sequence_fixture_fib(
 /// Each flashblock contains `txs_per_flashblock` transfer transactions.
 /// The diffs are produced by `build_chained_payloads` so they represent
 /// a valid incremental execution chain.
-pub fn build_flashblock_sequence_fixture(
+pub fn build_flashblock_sequence_fixture<F>(
     num_flashblocks: usize,
     txs_per_flashblock: usize,
     bal: bool,
-    tx_op: TxOp,
-) -> Vec<FlashblocksPayloadV1> {
+    mut build_tx_op: F,
+) -> Vec<FlashblocksPayloadV1>
+where
+    F: FnMut() -> TxOp,
+{
     assert!(num_flashblocks > 0, "need at least 1 flashblock");
 
     let total_txs = num_flashblocks * txs_per_flashblock;
 
-    // Build a sequence of transfer transactions with correct per-sender nonces.
-    let sequence: Vec<(TxOp, u64)> = (0..total_txs).map(|i| (tx_op.clone(), i as u64)).collect();
+    // Build a sequence of transactions with correct per-sender nonces.
+    let sequence: Vec<(TxOp, u64)> = (0..total_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
     let payloads = build_chained_payloads(sequence, num_flashblocks, bal)
         .expect("failed to build chained payloads");
