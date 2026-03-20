@@ -30,13 +30,6 @@ fn main() {
         }
     }
 
-    // Set default log level
-    if std::env::var_os("RUST_LOG").is_none() {
-        unsafe {
-            std::env::set_var("RUST_LOG", "info,reth=info");
-        }
-    }
-
     if let Err(err) =
         Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|mut builder, args| async move {
             info!(target: "reth::cli", "Launching node");
