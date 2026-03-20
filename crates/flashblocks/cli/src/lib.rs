@@ -79,11 +79,12 @@ impl Default for FanoutArgs {
     next_help_heading = "Flashblocks",
     group = ArgGroup::new("authorizer").multiple(false)
 )]
-#[group(requires = "flashblocks.enabled")]
+#[group(id = "flashblocks_presence", requires = "flashblocks.enabled")]
 pub struct FlashblocksArgs {
     #[arg(
         long = "flashblocks.enabled",
         id = "flashblocks.enabled",
+        group = "flashblocks_presence",
         required = false
     )]
     pub enabled: bool,
