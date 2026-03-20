@@ -94,6 +94,7 @@ pub fn test_config_with_peers_and_gossip(
         signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
         world_id: DEV_WORLD_ID,
     };
+    let fanout = FanoutArgs::default();
 
     let flashblocks = if flashblocks_enabled {
         Some(FlashblocksArgs {
@@ -105,7 +106,11 @@ pub fn test_config_with_peers_and_gossip(
             recommit_interval: 50,
             flashblocks_interval: 200,
             access_list: true,
-            fanout: FanoutArgs::default(),
+            max_send_peers: fanout.max_send_peers,
+            max_receive_peers: fanout.max_receive_peers,
+            rotation_interval: fanout.rotation_interval,
+            score_samples: fanout.score_samples,
+            force_receive_peers: fanout.force_receive_peers,
         })
     } else {
         None

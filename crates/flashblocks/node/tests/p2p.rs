@@ -5,7 +5,7 @@ use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use eyre::eyre::eyre;
-use flashblocks_cli::FlashblocksArgs;
+use flashblocks_cli::{FanoutArgs, FlashblocksArgs};
 use flashblocks_p2p::{
     monitor,
     protocol::{
@@ -305,6 +305,7 @@ fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
 }
 
 fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) -> FlashblocksArgs {
+    let fanout = FanoutArgs::default();
     FlashblocksArgs {
         enabled: true,
         authorizer_vk: Some(authorizer_sk.verifying_key()),
@@ -314,7 +315,11 @@ fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) ->
         flashblocks_interval: 200,
         recommit_interval: 200,
         access_list: true,
-        fanout: Default::default(),
+        max_send_peers: fanout.max_send_peers,
+        max_receive_peers: fanout.max_receive_peers,
+        rotation_interval: fanout.rotation_interval,
+        score_samples: fanout.score_samples,
+        force_receive_peers: fanout.force_receive_peers,
     }
 }
 
@@ -833,9 +838,9 @@ async fn test_receive_peer_latency_scores_are_recorded() -> eyre::Result<()> {
 
     let fixture = setup_nodes_with_flashblocks_args(3, |_, authorizer, builder| {
         let mut args = test_flashblocks_args(authorizer, builder);
-        args.fanout.max_receive_peers = 2;
-        args.fanout.rotation_interval = 30;
-        args.fanout.score_samples = 4;
+        args.max_receive_peers = 2;
+        args.rotation_interval = 30;
+        args.score_samples = 4;
         args
     })
     .await?;

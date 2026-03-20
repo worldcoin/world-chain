@@ -409,7 +409,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let flashblocks_handle = FlashblocksHandle::with_fanout_args(
             authorizer_vk,
             flashblocks.builder_sk.clone(),
-            flashblocks.fanout.clone(),
+            flashblocks.fanout_args(),
         );
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
