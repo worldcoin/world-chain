@@ -67,7 +67,7 @@ jobs:
 
           echo ""
           echo "=== Checking for >10% regressions ==="
-          filtered=$(critcmp main pr --threshold 10 2>&1)
+          filtered=$(critcmp main pr --threshold 10 2>&1 || true)
 
           # critcmp always exits 0 - we must parse output to detect regressions.
           # In the output, the FASTER baseline gets ratio 1.00.
