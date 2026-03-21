@@ -14,6 +14,7 @@ workspace = true
 world-chain-payload.workspace = true
 world-chain-pool.workspace = true
 
+flashblocks-engine.workspace = true
 flashblocks-p2p.workspace = true
 flashblocks-primitives.workspace = true
 flashblocks-rpc.workspace = true

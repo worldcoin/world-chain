@@ -120,20 +120,10 @@
 //! with a view of state as it existed at that point in execution, allowing parallel
 //! re-execution without sequential dependency resolution.
 //!
-//! ## Coordinator
-//!
-//! The [`FlashblocksExecutionCoordinator`] manages the lifecycle of flashblocks:
-//!
-//! 1. Receives flashblock messages from the P2P network
-//! 2. Validates and executes incoming flashblocks
-//! 3. Publishes locally-built flashblocks to the network
-//! 4. Maintains the current pending block state for RPC queries
-//!
 //! [`PayloadBuilder`]: reth_basic_payload_builder::PayloadBuilder
 //! [`FlashblocksPayloadBuilder`]: payload_builder::FlashblocksPayloadBuilder
 //! [`FlashblockPayloadBuilder::try_build_with_precommit`]: traits::payload_builder::FlashblockPayloadBuilder::try_build_with_precommit
-//! [`FlashblocksBlockValidator`]: validator::FlashblocksBlockValidator
-//! [`FlashblocksExecutionCoordinator`]: coordinator::FlashblocksExecutionCoordinator
+//! [`FlashblocksBlockValidator`]: bal_validator::FlashblocksBlockValidator
 //! [`BalBlockExecutor`]: executor::BalBlockExecutor
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
@@ -155,16 +145,8 @@ pub mod bal_executor;
 /// Flashblock validation with parallel execution support.
 pub mod bal_validator;
 
-/// Flashblocks execution coordinator.
-///
-/// The [`FlashblocksExecutionCoordinator`] orchestrates flashblock execution:
-/// - Listens for flashblocks from the P2P network
-/// - Validates and executes incoming flashblocks
-/// - Publishes locally-built flashblocks
-/// - Maintains pending block state for RPC queries
-///
-/// [`FlashblocksExecutionCoordinator`]: coordinator::FlashblocksExecutionCoordinator
-pub mod coordinator;
+// NOTE: The coordinator module has been replaced by `flashblocks_engine::processor::WorldChainPayloadProcessor`.
+// Validation logic is now behind the `PendingPayloadValidator` trait in `flashblocks_engine::validator`.
 
 /// Main payload builder implementation.
 pub mod payload_builder;

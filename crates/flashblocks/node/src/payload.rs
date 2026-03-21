@@ -1,6 +1,7 @@
 use flashblocks_builder::{
     FlashblocksPayloadBuilderConfig,
-    coordinator::FlashblocksExecutionCoordinator,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // coordinator::FlashblocksExecutionCoordinator,
     payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
@@ -18,7 +19,8 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // pub flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     pub builder_config: FlashblocksPayloadBuilderConfig,
 }
 
@@ -28,13 +30,14 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         builder_config: FlashblocksPayloadBuilderConfig,
     ) -> Self {
         Self {
             ctx_builder,
             builder_config,
-            flashblocks_state,
+            // flashblocks_state,
         }
     }
 }
@@ -75,9 +78,10 @@ where
         pool: Pool,
         evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        if let Some(flashblocks_state) = self.flashblocks_state {
-            flashblocks_state.launch(ctx, evm_config.clone());
-        }
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // if let Some(flashblocks_state) = self.flashblocks_state {
+        //     flashblocks_state.launch(ctx, evm_config.clone());
+        // }
 
         let payload_builder = FlashblocksPayloadBuilder {
             evm_config,

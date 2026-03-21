@@ -1,34 +1,42 @@
-//! Metrics and instrumentation for the flashblocks builder.
+//! Metrics and instrumentation for the flashblocks engine.
 
 use metrics::{Counter, Histogram};
 use metrics_derive::Metrics;
 use std::{sync::LazyLock, time::Instant};
 
-/// Execution coordinator metrics, auto-registered under `flashblocks.coordinator.*`.
+/// Processor-level metrics, auto-registered under `flashblocks.engine.*`.
 #[derive(Clone, Metrics)]
-#[metrics(scope = "flashblocks.coordinator")]
-pub struct ExecutionMetrics {
-    // -- Latency --
-    /// Validation / build phase duration (seconds).
-    pub validate_duration: Histogram,
+#[metrics(scope = "flashblocks.engine")]
+pub struct ProcessorMetrics {
+    // -- Epoch lifecycle --
     /// Flashblocks processed in a single epoch (recorded at epoch boundary).
     pub flashblocks_per_epoch: Histogram,
-
-    // -- Issues --
     /// Epoch invalidated by a newer canonical tip.
     pub stale_resets: Counter,
-    /// Invalid payload received from P2P (decode error, bad structure).
-    pub invalid_payload: Counter,
+
+    // -- Cache --
+    /// payload_id+index already processed — short-circuit hit.
+    pub payload_cache_hits: Counter,
+
+    // -- Broadcast --
     /// Broadcast of built payload to in-memory tree failed.
     pub broadcast_failed: Counter,
-    /// newPayloadV3/V4 cache hit — payload already built for this id+index.
-    /// Now tracked via `flashblocks.engine_validator.pre_executed_inserts` minus
-    /// `flashblocks.engine_validator.pre_executed_cache_miss` in [`WorldChainEngineValidator`].
-    pub payload_cache_hits: Counter,
+    /// Invalid payload received from P2P (decode error, bad structure).
+    pub invalid_payload: Counter,
+
+    // -- Skip-to-tip --
+    /// Flashblocks skipped by greedy stream drain (superseded by a later tip).
+    pub skipped_flashblocks: Counter,
+
+    // -- Latency --
+    /// End-to-end `process_flashblock` duration (seconds).
+    pub process_flashblock_duration: Histogram,
+    /// Duration of just the `validate_diff` call (seconds).
+    pub validate_diff_duration: Histogram,
 }
 
 /// Global singleton — zero lookup cost per call site.
-pub static EXECUTION: LazyLock<ExecutionMetrics> = LazyLock::new(ExecutionMetrics::default);
+pub static PROCESSOR_METRICS: LazyLock<ProcessorMetrics> = LazyLock::new(ProcessorMetrics::default);
 
 /// RAII guard that enters a [`tracing::Span`] on creation. On drop it:
 /// 1. Records `duration_ms` on the tracing span

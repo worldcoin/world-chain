@@ -1,0 +1,60 @@
+[package]
+name = "flashblocks-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# internal
+flashblocks-builder.workspace = true
+flashblocks-primitives.workspace = true
+flashblocks-p2p.workspace = true
+
+# reth
+reth.workspace = true
+reth-chain-state.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-tree.workspace = true
+reth-evm.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-util.workspace = true
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-transaction-pool.workspace = true
+reth-tasks.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-op-evm.workspace = true
+op-alloy-consensus.workspace = true
+
+# revm
+revm.workspace = true
+
+# misc
+parking_lot.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+eyre.workspace = true
+metrics.workspace = true
+metrics-derive.workspace = true
+thiserror.workspace = true
+either.workspace = true
+dashmap.workspace = true
+pin-project.workspace = true

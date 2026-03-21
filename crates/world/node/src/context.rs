@@ -11,7 +11,9 @@ use crate::{
     },
 };
 use ed25519_dalek::VerifyingKey;
-use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
+// TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+// use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
+use flashblocks_engine::engine_validator::WorldChainEngineValidatorBuilder;
 use flashblocks_node::{
     engine::FlashblocksEngineApiBuilder, payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -199,7 +201,7 @@ where
         FlashblocksEthApiBuilder,
         OpEngineValidatorBuilder,
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
-        BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
+        WorldChainEngineValidatorBuilder<BasicEngineValidatorBuilder<OpEngineValidatorBuilder>>,
     >;
 
     type ExtContext = Option<FlashblocksComponentsContext>;
@@ -276,11 +278,12 @@ where
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,
-                    components_context
-                        .as_ref()
-                        .map(|flashblocks_component_ctx| {
-                            flashblocks_component_ctx.flashblocks_state.clone()
-                        }),
+                    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+                    // components_context
+                    //     .as_ref()
+                    //     .map(|flashblocks_component_ctx| {
+                    //         flashblocks_component_ctx.flashblocks_state.clone()
+                    //     }),
                     builder_config,
                 ),
                 components_context
@@ -288,11 +291,12 @@ where
                     .map(|flashblocks_components_ctx| {
                         flashblocks_components_ctx.flashblocks_handle.clone()
                     }),
-                components_context
-                    .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx.flashblocks_state.clone()
-                    }),
+                // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+                // components_context
+                //     .as_ref()
+                //     .map(|flashblocks_components_ctx| {
+                //         flashblocks_components_ctx.flashblocks_state.clone()
+                //     }),
                 components_context
                     .as_ref()
                     .map(|flashblocks_components_ctx| {
@@ -330,20 +334,29 @@ where
         let op_eth_api_builder =
             OpEthApiBuilder::default().with_sequencer(self.config.args.rollup.sequencer.clone());
 
-        let maybe_pending_block =
-            self.components_context
-                .as_ref()
-                .map(|flashblocks_components_ctx| {
-                    flashblocks_components_ctx.flashblocks_state.pending_block()
-                });
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // Pending block state is now managed by reth's CanonicalInMemoryState via
+        // the InsertExecutedBlock path. No separate watch channel needed.
+        // let maybe_pending_block =
+        //     self.components_context
+        //         .as_ref()
+        //         .map(|flashblocks_components_ctx| {
+        //             flashblocks_components_ctx.flashblocks_state.pending_block()
+        //         });
+        let maybe_pending_block = None;
         let flashblocks_eth_api_builder =
             FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
+
+        let engine_validator_builder =
+            WorldChainEngineValidatorBuilder::new(BasicEngineValidatorBuilder::<
+                OpEngineValidatorBuilder,
+            >::default());
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
             Default::default(),
             engine_api_builder,
-            Default::default(),
+            engine_validator_builder,
             Default::default(),
         );
 
@@ -367,7 +380,8 @@ where
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: FlashblocksExecutionCoordinator,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -412,15 +426,15 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks.fanout.clone(),
         );
 
-        let (pending_block, _) = tokio::sync::watch::channel(None);
-
-        let flashblocks_state =
-            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // let (pending_block, _) = tokio::sync::watch::channel(None);
+        // let flashblocks_state =
+        //     FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
         Self {
-            flashblocks_state,
+            // flashblocks_state,
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
