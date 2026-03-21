@@ -37,5 +37,9 @@ stress *args='':
 prove *args='':
     cargo run -p xtask -- prove $@
 
+# Generate CLI reference docs for the mdbook
+docs:
+    cargo xtask docs
+
 install *args='':
     cargo install --path crates/bin/world-chain --locked $@

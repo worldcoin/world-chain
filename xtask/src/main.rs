@@ -1,14 +1,20 @@
 use clap::Parser;
 
-mod playground;
+mod docs;
+mod hooks;
 mod stress;
+mod swarm;
 mod toolkit;
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "World Chain development tasks")]
 enum Command {
-    /// Launch a local node playground
-    Playground(playground::Args),
+    /// Generate CLI reference documentation for the mdbook
+    Docs(docs::Args),
+    /// Install git hooks (pre-commit, etc.)
+    InstallHooks(hooks::Args),
+    /// Launch a local node swarm
+    LaunchNode(swarm::Args),
     /// Run stress tests against a live network
     Stress(stress::Args),
     /// Prove a PBH transaction
@@ -22,12 +28,20 @@ async fn main() -> eyre::Result<()> {
     let cmd = Command::parse();
 
     match cmd {
-        Command::Playground(args) => {
+        Command::Docs(args) => {
+            tracing_subscriber::fmt::init();
+            docs::run(args)
+        }
+        Command::InstallHooks(args) => {
+            tracing_subscriber::fmt::init();
+            hooks::run(args)
+        }
+        Command::LaunchNode(args) => {
             tracing_subscriber::fmt()
                 .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
                 .init();
 
-            playground::run(args).await
+            swarm::run(args).await
         }
         Command::Stress(args) => {
             tracing_subscriber::fmt::init();

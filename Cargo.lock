@@ -14589,6 +14589,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
+ "world-chain-cli",
  "world-chain-node",
  "world-chain-pbh",
  "world-chain-pool",
