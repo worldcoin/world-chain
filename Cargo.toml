@@ -13,7 +13,6 @@ members = [
     "crates/world-chain-node",
     "crates/world-chain-rpc",
     "crates/world-chain-test-utils",
-    "it",
     "crates/world-chain-primitives",
     "crates/world-chain-cli",
     "crates/world-chain-p2p",
@@ -22,6 +21,7 @@ members = [
     "crates/world-chain-pool",
     "crates/world-chain-pbh",
     "crates/world-chain-engine",
+    "e2e-tests",
     "xtask",
 ]
 default-members = [

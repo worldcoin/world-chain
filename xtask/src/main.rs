@@ -1,7 +1,6 @@
 use clap::Parser;
 
 mod docs;
-mod hooks;
 mod preflight;
 mod stress;
 mod swarm;
@@ -12,8 +11,6 @@ mod toolkit;
 enum Command {
     /// Generate CLI reference documentation for the mdbook
     Docs(docs::Args),
-    /// Install git hooks (pre-commit, etc.)
-    InstallHooks(hooks::Args),
     /// Run preflight checks (auto-fix + verify)
     Preflight(preflight::Args),
     /// Launch a local node swarm
@@ -34,10 +31,6 @@ async fn main() -> eyre::Result<()> {
         Command::Docs(args) => {
             tracing_subscriber::fmt::init();
             docs::run(args)
-        }
-        Command::InstallHooks(args) => {
-            tracing_subscriber::fmt::init();
-            hooks::run(args)
         }
         Command::Preflight(args) => preflight::run(args),
         Command::LaunchNode(args) => {

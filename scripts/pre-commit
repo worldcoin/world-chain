@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-# World Chain pre-commit hook
-# Install: cargo xtask install-hooks
-exec cargo xtask preflight
