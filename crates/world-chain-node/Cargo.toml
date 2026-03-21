@@ -1,0 +1,122 @@
+[package]
+name = "world-chain-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+world-chain-pool.workspace = true
+
+world-chain-p2p.workspace = true
+world-chain-primitives.workspace = true
+world-chain-rpc.workspace = true
+world-chain-builder.workspace = true
+world-chain-cli.workspace = true
+world-chain-payload.workspace = true
+world-chain-engine.workspace = true
+
+reth.workspace = true
+reth-node-builder.workspace = true
+reth-evm.workspace = true
+reth-engine-local.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-rpc.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-forks.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-node-api.workspace = true
+reth-network.workspace = true
+reth-network-peers.workspace = true
+reth-eth-wire-types.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-chain-state.workspace = true
+reth-engine-tree.workspace = true
+reth-trie-db.workspace = true
+reth-payload-primitives.workspace = true
+reth-engine-primitives.workspace = true
+
+dashmap.workspace = true
+metrics.workspace = true
+metrics-derive.workspace = true
+
+alloy-primitives.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-signer-local.workspace = true
+alloy-consensus.workspace = true
+
+op-alloy-consensus.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+
+tokio.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+world-chain-pbh.workspace = true
+world-chain-rpc.workspace = true
+world-chain-pool.workspace = true
+world-chain-test-utils.workspace = true
+world-chain-node.workspace = true
+world-chain-p2p = { workspace = true, features = ["test-utils"] }
+
+op-alloy-network.workspace = true
+op-alloy-provider.workspace = true
+op-alloy-rpc-types.workspace = true
+
+reth-db.workspace = true
+reth-e2e-test-utils.workspace = true
+reth-engine-primitives.workspace = true
+reth-node-core.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+revm-primitives.workspace = true
+reth-tracing.workspace = true
+reth-network-api.workspace = true
+reth-eth-wire.workspace = true
+reth-tasks.workspace = true
+
+alloy-genesis.workspace = true
+alloy-network.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
+alloy-sol-types.workspace = true
+alloy-contract.workspace = true
+
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+tempfile.workspace = true
+tracing-test.workspace = true
+
+futures.workspace = true
+criterion.workspace = true
+semaphore-rs.workspace = true
+chrono.workspace = true
+jsonrpsee.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+rand.workspace = true
+bytes.workspace = true
+reqwest.workspace = true
+backon.workspace = true

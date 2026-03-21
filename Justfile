@@ -4,12 +4,6 @@ set positional-arguments := true
 default:
     @just --list
 
-# Spawns the devnet
-devnet-up: deploy-devnet deploy-contracts
-
-deploy-devnet: build
-    just ./devnet/devnet-up
-
 build:
     docker buildx build \
         -t world-chain:latest .
@@ -17,20 +11,10 @@ build:
 deploy-contracts:
     @just ./contracts/deploy-contracts
 
-# Stops the devnet **This will prune all docker containers**
-devnet-down:
-    @just ./devnet/devnet-down
-
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
 fmt: fmt-fix fmt-check contracts-fmt
-
-# Formats the whole workspace
-fmt-all: devnet-fmt contracts-fmt fmt-fix fmt-check
-
-devnet-fmt:
-    @just ./devnet/fmt
 
 contracts-fmt:
     @just ./contracts/fmt
@@ -41,11 +25,17 @@ fmt-fix:
 fmt-check:
     cargo +nightly fmt --all -- --check
 
-e2e-test *args='':
-    RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
+# Launch a local playground (in-process node swarm)
+playground *args='':
+    RUST_LOG="info" cargo run -p xtask --release -- playground $@
+
+# Run stress tests against a live network
+stress *args='':
+    RUST_LOG="info" cargo run -p xtask --release -- stress $@
+
+# Prove a PBH transaction
+prove *args='':
+    cargo run -p xtask -- prove $@
 
 install *args='':
-    cargo install --path crates/world/bin --locked $@
-
-stress-test *args='':
-    @just ./devnet/stress-test $@
+    cargo install --path crates/bin/world-chain --locked $@

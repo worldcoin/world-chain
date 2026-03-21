@@ -1,0 +1,3 @@
+[alias]
+xtask = "run --package xtask --"
+docs = "doc --workspace --all-features --no-deps"

@@ -56,7 +56,7 @@ jobs:
 
       # Run benchmarks on the current branch and save as "pr" baseline
       - name: Run benchmarks
-        run: cargo bench --package flashblocks-builder --features bench --bench coordinator -- --save-baseline pr
+        run: cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline pr
 
       # Compare against main baseline if available
       - name: Check for regressions
@@ -144,7 +144,7 @@ jobs:
           restore-keys: cargo-bench-
 
       - name: Generate baseline
-        run: cargo bench --package flashblocks-builder --features bench --bench coordinator -- --save-baseline main
+        run: cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline main
 
       # Dynamic key ensures each push to main overwrites the baseline.
       - name: Save baseline
