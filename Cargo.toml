@@ -16,6 +16,7 @@ members = [
     "crates/flashblocks/primitives",
     "crates/flashblocks/rpc",
     "crates/flashblocks/builder",
+    "crates/flashblocks/engine",
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
@@ -25,6 +26,7 @@ default-members = [
     "crates/flashblocks/primitives",
     "crates/flashblocks/rpc",
     "crates/flashblocks/builder",
+    "crates/flashblocks/engine",
     "crates/flashblocks/payload",
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
@@ -52,6 +54,7 @@ flashblocks-p2p = { path = "crates/flashblocks/p2p" }
 flashblocks-primitives = { path = "crates/flashblocks/primitives" }
 flashblocks-rpc = { path = "crates/flashblocks/rpc" }
 flashblocks-builder = { path = "crates/flashblocks/builder" }
+flashblocks-engine = { path = "crates/flashblocks/engine" }
 flashblocks-payload = { path = "crates/flashblocks/payload" }
 flashblocks-cli = { path = "crates/flashblocks/cli" }
 
@@ -85,6 +88,7 @@ reth-rpc-eth-types = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1
 reth-prune-types = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-trie = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-chain-state = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
+reth-engine-tree = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-ethereum = { git = "https://github.com/worldcoin/reth", features = [
     "network",
 ], rev = "4c1b4a1" }

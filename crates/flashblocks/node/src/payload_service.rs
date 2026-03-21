@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
-use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
-};
+use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
+// TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+// use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_payload::{
     generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
@@ -30,7 +30,8 @@ use reth_transaction_pool::TransactionPool;
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: Option<FlashblocksHandle>,
-    flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
     override_authorizer_sk: Option<SigningKey>,
     force_publish: bool,
@@ -43,7 +44,8 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     pub const fn new(
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
-        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
         override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,
@@ -53,7 +55,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
         Self {
             pb,
             p2p_handler,
-            flashblocks_state,
+            // flashblocks_state,
             authorizations_rx,
             override_authorizer_sk,
             force_publish,
@@ -103,11 +105,13 @@ where
             .max_payload_tasks(conf.max_payload_tasks);
 
         let metrics = PayloadBuilderMetrics::default();
-        if let (Some(p2p_handler), Some(authorizations_rx), Some(flashblocks_state)) = (
-            self.p2p_handler,
-            self.authorizations_rx,
-            self.flashblocks_state,
-        ) {
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // The flashblocks_state (FlashblocksExecutionCoordinator) has been removed.
+        // The flashblocks-enabled path is commented out until the full migration to
+        // WorldChainPayloadProcessor is complete.
+        if let (Some(p2p_handler), Some(authorizations_rx)) =
+            (self.p2p_handler, self.authorizations_rx)
+        {
             // flashblocks enabled
             let payload_generator = FlashblocksPayloadJobGenerator::with_builder(
                 ctx.provider().clone(),
@@ -118,7 +122,8 @@ where
                 authorizations_rx.clone(),
                 self.override_authorizer_sk,
                 self.force_publish,
-                flashblocks_state.clone(),
+                // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+                // flashblocks_state.clone(),
                 metrics,
             );
 
@@ -127,8 +132,9 @@ where
                 ctx.provider().canonical_state_stream(),
             );
 
-            let payload_events = payload_service.payload_events_handle();
-            flashblocks_state.register_payload_events(payload_events);
+            // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+            // let payload_events = payload_service.payload_events_handle();
+            // flashblocks_state.register_payload_events(payload_events);
 
             ctx.task_executor()
                 .spawn_critical_task("payload builder service", Box::pin(payload_service));

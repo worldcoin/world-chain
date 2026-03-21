@@ -4,11 +4,9 @@ use std::{
 };
 
 use alloy_primitives::B256;
-use eyre::eyre::eyre;
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
 use flashblocks_primitives::{
-    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
+    access_list::FlashblockAccessList, ed25519_dalek::SigningKey, p2p::Authorization,
 };
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
@@ -24,7 +22,7 @@ use reth_basic_payload_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
 };
@@ -35,10 +33,9 @@ use crate::{
     job::{CommittedPayloadState, FlashblocksPayloadJob},
     metrics::PayloadBuilderMetrics,
 };
-use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
-};
-use flashblocks_primitives::flashblocks::Flashblock;
+use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
+// TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+// use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
@@ -62,8 +59,9 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     force_publish: bool,
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
-    /// The current flashblocks state
-    flashblocks_state: FlashblocksExecutionCoordinator,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // /// The current flashblocks state
+    // flashblocks_state: FlashblocksExecutionCoordinator,
     /// Metrics for tracking job generator operations and errors
     metrics: PayloadBuilderMetrics,
 }
@@ -81,7 +79,8 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,
-        flashblocks_state: FlashblocksExecutionCoordinator,
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {
@@ -89,7 +88,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
             executor,
             config,
             builder,
-            flashblocks_state,
+            // flashblocks_state,
             pre_cached: None,
             p2p_handler,
             authorizations: auth_rx,
@@ -316,7 +315,8 @@ where
             builder: self.builder.clone(),
             authorization,
             p2p_handler: self.p2p_handler.clone(),
-            flashblocks_state: self.flashblocks_state.clone(),
+            // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+            // flashblocks_state: self.flashblocks_state.clone(),
             block_index: index,
         };
 
@@ -361,49 +361,16 @@ where
     /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
-        chain_spec: Arc<OpChainSpec>,
-        attributes: &<Builder as PayloadBuilder>::Attributes,
+        _chain_spec: Arc<OpChainSpec>,
+        _attributes: &<Builder as PayloadBuilder>::Attributes,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
         PayloadBuilderError,
     > {
-        // check for any pending pre state received over p2p
-        let flashblocks = self.flashblocks_state.flashblocks();
-
-        let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
-            PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
-        })?;
-
-        if *flashblock.payload_id() == attributes.payload_id() {
-            // If we have a pre-confirmed state, we can use it to build the payload
-            debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
-
-            let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                recovered_block_from_flashblocks(chain_spec, flashblock.clone()).map_err(|e| {
-                    PayloadBuilderError::Other(
-                        eyre!("Failed to recover block from flashblocks: {}", e).into(),
-                    )
-                })?;
-            let sealed = block.into_sealed_block();
-
-            let payload = OpBuiltPayload::new(
-                attributes.payload_id(),
-                Arc::new(sealed),
-                flashblock.flashblock().metadata.fees,
-                None,
-            );
-
-            return Ok(Some((
-                payload,
-                flashblock.flashblock().index + 1,
-                flashblock
-                    .diff()
-                    .access_list_data
-                    .as_ref()
-                    .map(|d| d.access_list.clone()),
-            )));
-        }
-
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // The FlashblocksExecutionCoordinator has been removed. Pre-state lookup
+        // via self.flashblocks_state.flashblocks() is no longer available until
+        // the full migration to WorldChainPayloadProcessor is complete.
         Ok(None)
     }
 }

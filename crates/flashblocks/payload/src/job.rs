@@ -6,9 +6,9 @@ use std::{
 };
 
 use alloy_primitives::{B256, ruint::aliases::U256};
-use flashblocks_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
-};
+use flashblocks_builder::traits::payload_builder::FlashblockPayloadBuilder;
+// TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+// use flashblocks_builder::coordinator::FlashblocksExecutionCoordinator;
 
 use flashblocks_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use flashblocks_primitives::{
@@ -263,8 +263,9 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) recommit_interval: Interval,
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
-    /// The flashblocks state executor
-    pub(crate) flashblocks_state: FlashblocksExecutionCoordinator,
+    // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+    // /// The flashblocks state executor
+    // pub(crate) flashblocks_state: FlashblocksExecutionCoordinator,
     /// Block index
     pub(crate) block_index: u64,
 }
@@ -357,14 +358,16 @@ where
 
         trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "creating authorized flashblock");
 
-        let authorized_payload =
+        let _authorized_payload =
             self.authorization_for(flashblock.into_flashblock(), authorization)?;
 
-        self.flashblocks_state
-            .publish_built_payload(authorized_payload, payload.to_owned())
-            .inspect_err(|err| {
-                error!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
-            })
+        // TODO: migrate to WorldChainPayloadProcessor from flashblocks_engine::processor
+        // self.flashblocks_state
+        //     .publish_built_payload(authorized_payload, payload.to_owned())
+        //     .inspect_err(|err| {
+        //         error!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), %err, "failed to publish new payload");
+        //     })
+        Ok(())
     }
 
     pub(crate) fn authorization_for(
