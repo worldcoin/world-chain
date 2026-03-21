@@ -2,6 +2,7 @@ use clap::Parser;
 
 mod docs;
 mod hooks;
+mod preflight;
 mod stress;
 mod swarm;
 mod toolkit;
@@ -13,6 +14,8 @@ enum Command {
     Docs(docs::Args),
     /// Install git hooks (pre-commit, etc.)
     InstallHooks(hooks::Args),
+    /// Run preflight checks (auto-fix + verify)
+    Preflight(preflight::Args),
     /// Launch a local node swarm
     LaunchNode(swarm::Args),
     /// Run stress tests against a live network
@@ -36,6 +39,7 @@ async fn main() -> eyre::Result<()> {
             tracing_subscriber::fmt::init();
             hooks::run(args)
         }
+        Command::Preflight(args) => preflight::run(args),
         Command::LaunchNode(args) => {
             tracing_subscriber::fmt()
                 .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
