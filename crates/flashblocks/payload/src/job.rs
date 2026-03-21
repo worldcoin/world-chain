@@ -504,7 +504,16 @@ where
             {
                 trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "best payload already committed, publishing payload");
 
-                if let Some(authorization) = &this.authorization {
+                // if the payload is identical to the last relayed pending payload, we skip publishing and re-commit over
+                // the same flashblock index on the next payload.,
+                let changed = this
+                    .committed_payload
+                    .payload()
+                    .is_none_or(|p| p.block().hash() != payload.block().hash());
+
+                if let Some(authorization) = &this.authorization
+                    && changed
+                {
                     // publish the new payload to the p2p network
                     if let Err(err) = this.publish_payload(
                         &payload,
@@ -523,8 +532,10 @@ where
                 this.committed_payload =
                     CommittedPayloadState::from((this.best_payload.0.clone(), access_list));
 
-                // increment the pre-confirmation index
-                this.block_index += 1;
+                // increment the pre-confirmation index if the payload is better
+                if changed {
+                    this.block_index += 1;
+                }
             }
 
             this.spawn_build_job();
