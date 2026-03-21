@@ -1720,3 +1720,120 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
 
     Ok(())
 }
+
+/// Asserts that the flashblock payload builder never relays a flashblock with the same block hash
+/// twice, and that the flashblock index only increases for changed pending blocks.
+///
+/// Without the tx spammer, the payload builder will repeatedly build identical payloads (no new
+/// transactions arrive). The commit logic in [`FlashblocksPayloadJob::poll`] must detect this and
+/// skip publishing duplicate flashblocks.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_flashblocks_no_duplicate_relay() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Single builder node, flashblocks enabled, NO spammer started.
+    let (_, mut nodes, _tasks, mut env, _tx_spammer) =
+        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+
+    let builder_node = &mut nodes[0];
+    let builder_context = builder_node.ext_context.clone();
+    let block_hash = builder_node.node.block_hash(0);
+
+    let flashblocks_handle = &builder_context.as_ref().unwrap().flashblocks_handle;
+
+    let builder_vk = flashblocks_handle.builder_sk().unwrap().verifying_key();
+    let authorization_gen = crate::setup::create_authorization_generator(block_hash, builder_vk);
+
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params = crate::setup::encode_eip1559_params(
+        builder_node.node.inner.chain_spec().as_ref(),
+        timestamp,
+    )?;
+
+    let attributes = crate::setup::build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
+    );
+
+    // Collect all flashblocks published during the build interval.
+    let collected: Arc<
+        std::sync::Mutex<Vec<flashblocks_primitives::primitives::FlashblocksPayloadV1>>,
+    > = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let collected_writer = collected.clone();
+
+    let mut fb_stream = flashblocks_handle.flashblock_stream();
+    let stream_task = tokio::spawn(async move {
+        while let Some(fb) = futures::StreamExt::next(&mut fb_stream).await {
+            collected_writer.lock().unwrap().push(fb);
+        }
+    });
+
+    // Mine a single block with a generous build interval so that many recommit
+    // cycles fire while no new transactions are available.
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_gen,
+        Duration::from_millis(3000),
+        true,
+        tx,
+    )
+    .await;
+
+    tokio::spawn(async move {
+        let mut action = mine_block;
+        action.execute(&mut env).await
+    });
+
+    // Wait for the block to be mined.
+    rx.recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block"))?;
+
+    // Give the stream a moment to flush.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    stream_task.abort();
+
+    let flashblocks = collected.lock().unwrap().clone();
+
+    info!(
+        target: "test",
+        count = flashblocks.len(),
+        "collected flashblocks for invariant check"
+    );
+
+    assert!(
+        !flashblocks.is_empty(),
+        "expected at least one flashblock to be published"
+    );
+
+    // ── Invariant 1: no duplicate block hashes ──
+    // Each published flashblock must have a unique block hash.
+    let mut seen_hashes = std::collections::HashSet::new();
+    for fb in &flashblocks {
+        let hash = fb.diff.block_hash;
+        assert!(
+            seen_hashes.insert(hash),
+            "flashblock index {} relayed a duplicate block hash {hash}",
+            fb.index,
+        );
+    }
+
+    // ── Invariant 2: index strictly increases ──
+    // Since every published flashblock has a new block hash (invariant 1),
+    // the index must be strictly monotonically increasing.
+    for window in flashblocks.windows(2) {
+        let (prev, next) = (&window[0], &window[1]);
+        assert!(
+            next.index > prev.index,
+            "flashblock index did not increase: prev={} next={}",
+            prev.index,
+            next.index,
+        );
+    }
+
+    Ok(())
+}
