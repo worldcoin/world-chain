@@ -48,7 +48,6 @@ alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 alloy-network.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types-debug.workspace = true
 alloy-signer-local.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types.workspace = true
@@ -82,7 +81,6 @@ either.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 serde.workspace = true
-derive_more.workspace = true
 semaphore-rs.workspace = true
 
 # Optional deps for test_utils (activated by `test-utils` / `bench` features,
