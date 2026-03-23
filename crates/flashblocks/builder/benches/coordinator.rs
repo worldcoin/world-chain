@@ -95,6 +95,7 @@ fn bench_launch_flashblock_sequence_case<F>(
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
             b.iter(|| {
                 let (coordinator, handle, pending_tx) = fresh_coordinator(&rt);
+                let coordinator = Arc::new(coordinator);
                 let pending_tx_clone = pending_tx.clone();
 
                 // Create the stream first - this subscribes to the broadcast channel.
@@ -113,13 +114,20 @@ fn bench_launch_flashblock_sequence_case<F>(
 
                 // Drive through the same function that `launch` calls.
                 rt.block_on(run_flashblock_processor(
-                    Arc::new(coordinator),
+                    coordinator.clone(),
                     stream,
                     provider.clone(),
                     EVM_CONFIG.clone(),
                     CHAIN_SPEC.clone(),
                     pending_tx,
                 ));
+
+                let processed = coordinator.flashblocks();
+                assert_eq!(processed.flashblocks().len(), sequence.len());
+                assert_eq!(
+                    coordinator.last().flashblock().index,
+                    sequence.last().expect("sequence is non-empty").index
+                );
             });
         });
     }
