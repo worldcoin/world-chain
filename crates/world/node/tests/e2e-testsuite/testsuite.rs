@@ -1754,7 +1754,11 @@ async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
 
     let authorization_generator = crate::setup::create_authorization_generator(
         block_hash,
-        builder_context.flashblocks_handle.builder_sk().unwrap().verifying_key(),
+        builder_context
+            .flashblocks_handle
+            .builder_sk()
+            .unwrap()
+            .verifying_key(),
     );
 
     let timestamp = crate::setup::current_timestamp();
