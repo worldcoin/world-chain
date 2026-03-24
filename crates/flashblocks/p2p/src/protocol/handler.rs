@@ -1318,6 +1318,12 @@ impl FlashblocksP2PCtx {
             state.flashblocks.fill(None);
         }
 
+        // Skip flashblocks from old payloads — late-arriving flashblocks from
+        // a previous block must not fill slots in the current block's cache.
+        if payload.payload_id != state.payload_id {
+            return;
+        }
+
         // Resize our array if needed
         if payload.index as usize > MAX_FLASHBLOCK_INDEX {
             tracing::error!(
