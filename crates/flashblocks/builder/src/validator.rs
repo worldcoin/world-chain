@@ -3,11 +3,12 @@ use std::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
 use alloy_op_evm::{
-    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor,
-    OpBlockExecutorFactory, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+    block::receipt_builder::OpReceiptBuilder,
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types_engine::PayloadId;
+use eyre::eyre::bail;
 use flashblocks_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     primitives::ExecutionPayloadFlashblockDeltaV1,
@@ -15,33 +16,35 @@ use flashblocks_primitives::{
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::IntoParallelIterator;
 use reth::revm::database::StateProviderDatabase;
+use reth_chain_state::ExecutedBlock;
 use reth_primitives::transaction::SignedTransaction;
 
 use reth_evm::{
+    Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
     op_revm::{OpHaltReason, OpSpecId, OpTransaction},
-    Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use reth_node_api::BuiltPayloadExecutedBlock;
+use reth_node_api::{BuiltPayload, BuiltPayloadExecutedBlock};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
+use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
-    context::{result::ExecutionResult, BlockEnv, TxEnv},
-    database::{BundleAccount, BundleState},
     DatabaseRef,
+    context::{BlockEnv, TxEnv, result::ExecutionResult},
+    database::{BundleAccount, BundleState},
 };
 use revm_database::State;
 use tracing::{error, info, trace};
 
 use crate::{
+    BlockBuilderExt,
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
     database::{
@@ -51,7 +54,6 @@ use crate::{
     },
     executor::FlashblocksBlockBuilder,
     metrics::metered_fn,
-    BlockBuilderExt,
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -75,8 +77,9 @@ impl FlashblocksBlockValidator {
         state: Option<&OpBuiltPayload<OpPrimitives>>,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let has_bal = diff.access_list_data.is_some();
+        let diff_clone = diff.clone();
 
-        metered_fn(
+        let next_payload = metered_fn(
             tracing::trace_span!(
                 target: "flashblocks::coordinator",
                 "validate",
@@ -100,7 +103,49 @@ impl FlashblocksBlockValidator {
                     self.validate_flashblock(client, diff, parent, payload_id, state)
                 }
             },
-        )
+        )?;
+
+        let executed = next_payload
+            .executed_block()
+            .ok_or(BalExecutorError::MissingExecutedBlock)
+            .inspect_err(|e| {
+                error!(
+                    target: "flashblocks::coordinator",
+                    ?payload_id,
+                    error = ?e,
+                    "Missing executed block for payload"
+                )
+            })?;
+
+        self.validate_payload(&executed.into_executed_payload(), diff_clone)
+            .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
+            .inspect_err(|e| {
+                error!(
+                    target: "flashblocks::coordinator",
+                    ?payload_id,
+                    error = ?e,
+                    "Payload validation failed"
+                )
+            })?;
+
+        Ok(next_payload)
+    }
+
+    pub fn validate_payload(
+        &self,
+        block: &ExecutedBlock<OpPrimitives>,
+        diff: ExecutionPayloadFlashblockDeltaV1,
+    ) -> eyre::Result<()> {
+        // make sure the block matches the diff
+        if block.sealed_block().hash() != diff.block_hash {
+            bail!(
+                "Block hash mismatch: expected {}, got {}",
+                diff.block_hash,
+                block.sealed_block().hash()
+            );
+        }
+
+        Ok(())
     }
 
     pub fn validate_flashblock(
@@ -457,11 +502,11 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
-        DB = ValidatorDb<'a, DBRef>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        BlockEnv = BlockEnv,
-    >,
+            DB = ValidatorDb<'a, DBRef>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
     OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
@@ -516,12 +561,12 @@ impl<'a, DB, R, E> BlockBuilder for BalBlockValidator<'a, DB, R, E>
 where
     DB: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
-        DB = ValidatorDb<'a, DB>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = ValidatorDb<'a, DB>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     OpTransaction<TxEnv>:
         FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
@@ -618,12 +663,12 @@ impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
 where
     DbRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
-        DB = ValidatorDb<'a, DbRef>,
-        Tx = OpTransaction<TxEnv>,
-        Spec = OpSpecId,
-        HaltReason = OpHaltReason,
-        BlockEnv = BlockEnv,
-    >,
+            DB = ValidatorDb<'a, DbRef>,
+            Tx = OpTransaction<TxEnv>,
+            Spec = OpSpecId,
+            HaltReason = OpHaltReason,
+            BlockEnv = BlockEnv,
+        >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>
         + Send
         + Sync
@@ -634,9 +679,10 @@ where
     pub fn execute_block(
         mut self,
         state_provider: impl StateProvider + Clone,
-        transactions: impl IntoParallelIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
-            + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
-            + Clone,
+        transactions: impl IntoParallelIterator<
+            Item = (BlockAccessIndex, Recovered<OpTransactionSigned>),
+        > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
+        + Clone,
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
         if self.index_range.0 == 0 {
             self.prepare_database(0)?;

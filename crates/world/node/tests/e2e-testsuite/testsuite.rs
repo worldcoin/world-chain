@@ -1,4 +1,5 @@
 use crate::setup::{TX_SET_L1_BLOCK, build_payload_attributes};
+use alloy_consensus::BlockHeader;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
 use alloy_primitives::{Bytes, b64};
 use alloy_provider::ProviderBuilder;
@@ -1612,7 +1613,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
 
     let (_, nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
 
     let builder_context = nodes[0].ext_context.clone().unwrap();
     let block_hash = nodes[0].node.block_hash(0);
@@ -1717,6 +1718,172 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     );
 
     result.assert_all_passed();
+
+    Ok(())
+}
+
+/// Test that the `OpBuiltPayload` produced by the coordinator (consuming flashblocks)
+/// matches the payload built by the payload builder on the builder node.
+///
+/// Flow:
+/// 1. Builder mines a block with flashblocks enabled, producing flashblocks over P2P
+/// 2. Follower processes flashblocks through the coordinator (`validate_flashblock_with_state`)
+/// 3. After mining, the builder's `get_payload_v4` result and the follower's coordinator
+///    pending block should agree on block_hash, state_root, receipts_root, and gas_used.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const TRANSACTIONS_PER_FLASHBLOCK: u64 = 10;
+
+    // Builder (node 0) and Follower (node 1) with flashblocks enabled
+    let (_, mut nodes, _tasks, mut env, tx_spammer) =
+        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+
+    let [builder_node, follower_node] = &mut nodes[..] else {
+        unreachable!()
+    };
+
+    let builder_context = builder_node.ext_context.clone().unwrap();
+    let follower_context = follower_node.ext_context.clone().unwrap();
+
+    let rpc_url = builder_node.node.rpc_url();
+    tx_spammer.spawn(TRANSACTIONS_PER_FLASHBLOCK, rpc_url);
+
+    let block_hash = builder_node.node.block_hash(0);
+
+    let authorization_generator = crate::setup::create_authorization_generator(
+        block_hash,
+        builder_context.flashblocks_handle.builder_sk().unwrap().verifying_key(),
+    );
+
+    let timestamp = crate::setup::current_timestamp();
+    let eip1559_params = crate::setup::encode_eip1559_params(
+        builder_node.node.inner.chain_spec().as_ref(),
+        timestamp,
+    )?;
+
+    let attributes = crate::setup::build_payload_attributes(
+        timestamp,
+        eip1559_params,
+        Some(vec![crate::setup::TX_SET_L1_BLOCK.clone()]),
+    );
+
+    // Mine a block on the builder — this produces flashblocks that the follower processes
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    let mine_block = crate::actions::AssertMineBlock::new(
+        0,
+        None,
+        attributes,
+        authorization_generator,
+        Duration::from_millis(3000),
+        true,
+        tx,
+    )
+    .await;
+
+    tokio::spawn(async move {
+        let mut mine_action = mine_block;
+        mine_action.execute(&mut env).await
+    });
+
+    // Wait for mining to complete and get the builder's payload envelope
+    let builder_envelope = rx
+        .recv()
+        .await
+        .ok_or(eyre!("failed to receive mined block from builder"))?;
+
+    let builder_block_hash = builder_envelope
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .block_hash;
+    let builder_state_root = builder_envelope
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .state_root;
+    let builder_receipts_root = builder_envelope
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .receipts_root;
+    let builder_gas_used = builder_envelope
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .gas_used;
+    let builder_tx_count = builder_envelope
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .transactions
+        .len();
+
+    info!(
+        target: "test",
+        ?builder_block_hash,
+        ?builder_state_root,
+        ?builder_receipts_root,
+        builder_gas_used,
+        builder_tx_count,
+        "Builder produced final payload"
+    );
+
+    // Give the follower time to process the final flashblock
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    // Get the follower's coordinator-built pending block
+    let pending_block = follower_context.flashblocks_state.pending_block();
+    let coordinator_block = pending_block
+        .borrow()
+        .clone()
+        .ok_or(eyre!("Follower has no pending block from coordinator"))?;
+
+    let coord_block = coordinator_block.recovered_block();
+    let coord_block_hash = coord_block.hash();
+    let coord_state_root = coord_block.state_root();
+    let coord_receipts_root = coord_block.receipts_root();
+    let coord_gas_used = coord_block.gas_used();
+    let coord_tx_count = coord_block.body().transactions.len();
+
+    info!(
+        target: "test",
+        ?coord_block_hash,
+        ?coord_state_root,
+        ?coord_receipts_root,
+        coord_gas_used,
+        coord_tx_count,
+        "Coordinator produced pending block"
+    );
+
+    // Assert the coordinator's payload matches the builder's payload
+    assert_eq!(
+        builder_block_hash, coord_block_hash,
+        "Block hash mismatch between builder and coordinator"
+    );
+    assert_eq!(
+        builder_state_root, coord_state_root,
+        "State root mismatch between builder and coordinator"
+    );
+    assert_eq!(
+        builder_receipts_root, coord_receipts_root,
+        "Receipts root mismatch between builder and coordinator"
+    );
+    assert_eq!(
+        builder_gas_used, coord_gas_used,
+        "Gas used mismatch between builder and coordinator"
+    );
+    assert_eq!(
+        builder_tx_count, coord_tx_count,
+        "Transaction count mismatch between builder and coordinator"
+    );
 
     Ok(())
 }
