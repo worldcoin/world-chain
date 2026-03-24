@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(test, feature = "bench")), warn(unused_crate_dependencies))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 //! Crate containing all World Chain Payload Building Primitives
 //!
@@ -192,15 +192,6 @@ pub mod utils;
 
 /// Metric name constants.
 pub mod metrics;
-/// Test utilities shared between integration tests and benchmarks.
-///
-/// Available when:
-/// - `cfg(test)` is set (unit tests within this crate).
-/// - The `test-utils` feature is enabled (integration tests activate this
-///   via a self-referencing dev-dependency; benchmarks use the `bench` feature
-///   which implies `test-utils`).
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].

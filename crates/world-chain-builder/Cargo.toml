@@ -5,17 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[features]
-test-utils = [
-    "alloy-genesis",
-    "alloy-sol-types",
-    "alloy-trie",
-    "op-alloy-network",
-    "lazy_static",
-    "world-chain-p2p/test-utils",
-]
-bench = ["test-utils"]
-
 [dependencies]
 # reth
 reth.workspace = true
@@ -83,16 +72,7 @@ metrics-derive.workspace = true
 serde.workspace = true
 semaphore-rs.workspace = true
 
-# Optional deps for test_utils (activated by `test-utils` / `bench` features,
-# or implicitly by dev-dependencies when running `cargo test`).
-alloy-genesis = { workspace = true, optional = true }
-alloy-sol-types = { workspace = true, optional = true }
-alloy-trie = { workspace = true, optional = true }
-op-alloy-network = { workspace = true, optional = true }
-lazy_static = { workspace = true, optional = true }
-
 [dev-dependencies]
-world-chain-builder = { path = ".", features = ["test-utils"] }
 world-chain-test-utils.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 serde.workspace = true
@@ -111,4 +91,3 @@ criterion.workspace = true
 [[bench]]
 name = "coordinator"
 harness = false
-required-features = ["bench"]

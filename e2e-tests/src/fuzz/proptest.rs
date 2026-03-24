@@ -161,7 +161,7 @@ mod property_tests {
         ];
 
         // Build payloads with 2 flashblocks (4 txs each)
-        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+        let payloads = build_chained_payloads(sequence, 2, true).expect("Failed to build payloads");
 
         assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
 
@@ -228,7 +228,7 @@ mod property_tests {
             ),
         ];
 
-        let payloads = build_chained_payloads(sequence, 2).expect("Failed to build payloads");
+        let payloads = build_chained_payloads(sequence, 2, true).expect("Failed to build payloads");
 
         assert_eq!(payloads.len(), 2, "Expected 2 flashblocks");
 

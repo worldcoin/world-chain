@@ -77,6 +77,8 @@ pub fn arb_execution_payload_sequence(
 > {
     arb_transaction_sequence(transactions).prop_filter_map(
         "execution must succeed",
-        move |sequence: Vec<(TxOp, u64)>| build_chained_payloads(sequence, max_flashblocks).ok(),
+        move |sequence: Vec<(TxOp, u64)>| {
+            build_chained_payloads(sequence, max_flashblocks, true).ok()
+        },
     )
 }
