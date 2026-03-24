@@ -2,10 +2,7 @@
 
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
-use flashblocks_builder::{
-    bal_executor::CommittedState,
-    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
-};
+use flashblocks_builder::{bal_executor::CommittedState, validator::FlashblocksBlockValidator};
 use flashblocks_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 use proptest::prelude::*;
 use reth_optimism_evm::OpRethReceiptBuilder;
@@ -22,23 +19,23 @@ pub fn validate(
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
-    // The transaction offset is the number of previously committed transactions offset 1.
-    let transactions_offset = committed_state.transactions.len() as u16 + 1;
 
-    let executor_transactions =
-        decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
-
-    let validator = FlashblocksBlockValidator::<OpRethReceiptBuilder> {
+    let validator = FlashblocksBlockValidator {
         chain_spec: CHAIN_SPEC.clone(),
         evm_config: EVM_CONFIG.clone(),
         execution_context: BLOCK_EXECUTION_CTX.clone(),
         evm_env: EVM_ENV.clone(),
-        committed_state,
-        executor_transactions,
+        header: std::sync::Arc::new(SEALED_HEADER.clone()),
     };
 
     let payload_id = PayloadId::default();
-    let payload = validator.validate(state_provider, diff.clone(), &SEALED_HEADER, payload_id)?;
+    let payload = validator.validate_flashblock_parallel(
+        state_provider,
+        diff.clone(),
+        &SEALED_HEADER,
+        payload_id,
+        committed_state,
+    )?;
 
     Ok(payload)
 }

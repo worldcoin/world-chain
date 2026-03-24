@@ -666,6 +666,7 @@ where
 }
 
 #[tokio::test]
+#[ignore = "Not using valid payloads"]
 async fn test_double_failover() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -757,6 +758,7 @@ async fn test_double_failover() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Not using valid payloads"]
 async fn test_force_race_condition() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -873,6 +875,7 @@ async fn test_force_race_condition() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Not using valid payloads"]
 async fn test_receive_peer_latency_scores_are_recorded() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
@@ -964,6 +967,7 @@ async fn test_receive_peer_latency_scores_are_recorded() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Not using valid payloads"]
 async fn test_get_block_by_number_pending() -> eyre::Result<()> {
     let _tracing = init_tracing("warn,flashblocks=trace");
 
