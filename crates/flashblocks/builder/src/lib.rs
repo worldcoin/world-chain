@@ -153,7 +153,7 @@ pub mod access_list;
 pub mod bal_executor;
 
 /// Flashblock validation with parallel execution support.
-pub mod bal_validator;
+pub mod validator;
 
 /// Flashblocks execution coordinator.
 ///
