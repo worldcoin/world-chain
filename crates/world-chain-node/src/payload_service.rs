@@ -15,8 +15,9 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
-use world_chain_engine::WorldChainPayloadProcessor;
+use world_chain_builder::{
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
+};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_payload::{
     generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
@@ -29,7 +30,7 @@ use world_chain_primitives::p2p::Authorization;
 pub struct FlashblocksPayloadServiceBuilder<PB> {
     pb: PB,
     p2p_handler: Option<FlashblocksHandle>,
-    flashblocks_state: Option<WorldChainPayloadProcessor>,
+    flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
     override_authorizer_sk: Option<SigningKey>,
     force_publish: bool,
@@ -42,7 +43,7 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
     pub const fn new(
         pb: PB,
         p2p_handler: Option<FlashblocksHandle>,
-        flashblocks_state: Option<WorldChainPayloadProcessor>,
+        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         authorizations_rx: Option<tokio::sync::watch::Receiver<Option<Authorization>>>,
         override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use crate::{
     engine::FlashblocksEngineApiBuilder,
-    engine_validator::WorldChainEngineValidatorBuilder,
     node::{WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext},
     payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -25,8 +24,8 @@ use reth_optimism_node::{
     args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
+use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
-use world_chain_engine::WorldChainPayloadProcessor;
 use world_chain_p2p::{
     monitor::PeerMonitor,
     protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol},
@@ -192,7 +191,7 @@ where
         FlashblocksEthApiBuilder,
         OpEngineValidatorBuilder,
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
-        WorldChainEngineValidatorBuilder<BasicEngineValidatorBuilder<OpEngineValidatorBuilder>>,
+        BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
     >;
 
     type ExtContext = Option<FlashblocksComponentsContext>;
@@ -333,9 +332,7 @@ where
             FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
 
         let engine_validator_builder =
-            WorldChainEngineValidatorBuilder::new(BasicEngineValidatorBuilder::<
-                OpEngineValidatorBuilder,
-            >::default());
+            BasicEngineValidatorBuilder::<OpEngineValidatorBuilder>::default();
 
         let rpc_add_ons = RpcAddOns::new(
             flashblocks_eth_api_builder,
@@ -365,7 +362,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
-    pub flashblocks_state: WorldChainPayloadProcessor,
+    pub flashblocks_state: FlashblocksExecutionCoordinator,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -413,7 +410,7 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
         let flashblocks_state =
-            WorldChainPayloadProcessor::new(flashblocks_handle.clone(), pending_block);
+            FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 

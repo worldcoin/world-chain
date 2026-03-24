@@ -6,8 +6,9 @@ use std::{
 };
 
 use alloy_primitives::{B256, ruint::aliases::U256};
-use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
-use world_chain_engine::WorldChainPayloadProcessor;
+use world_chain_builder::{
+    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
+};
 
 use world_chain_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use world_chain_primitives::{
@@ -263,7 +264,7 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// The p2p handler for flashblocks
     pub(crate) p2p_handler: FlashblocksHandle,
     /// The flashblocks state executor
-    pub(crate) flashblocks_state: WorldChainPayloadProcessor,
+    pub(crate) flashblocks_state: FlashblocksExecutionCoordinator,
     /// Block index
     pub(crate) block_index: u64,
 }

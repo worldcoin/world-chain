@@ -30,9 +30,12 @@ use reth_provider::{
 };
 use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
 use std::sync::{Arc, LazyLock};
-use tokio::sync::{
-    Semaphore,
-    broadcast::{self, Sender},
+use tokio::{
+    sync::{
+        Semaphore,
+        broadcast::{self, Sender},
+    },
+    task::JoinSet,
 };
 use tracing::{error, trace};
 
@@ -232,8 +235,10 @@ impl FlashblocksExecutionCoordinator {
 ///
 /// Consumes flashblocks from `stream` and processes each one through
 /// [`process_flashblock`]. This is the same loop that `launch` spawns as a
-/// critical task — exposed here so benchmarks and tests can drive it
-/// directly without needing a full [`BuilderContext`].
+/// critical task. The function only returns after any in-flight flashblock
+/// processing jobs have completed, which lets benchmarks and tests measure the
+/// full processing cost of a bounded stream directly without needing a full
+/// [`BuilderContext`].
 pub async fn run_flashblock_processor<T, S, Provider>(
     coordinator: Arc<FlashblocksExecutionCoordinator>,
     stream: S,
@@ -250,45 +255,67 @@ pub async fn run_flashblock_processor<T, S, Provider>(
         + 'static,
 {
     futures::pin_mut!(stream);
+    let mut in_flight = JoinSet::new();
+    let mut stream_closed = false;
 
-    while let Some(event) = stream.next().await {
-        if let WorldChainEvent::Chain(ChainEvent::Pending(flashblock)) = event {
-            let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
+    loop {
+        tokio::select! {
+            maybe_event = stream.next(), if !stream_closed => {
+                match maybe_event {
+                    Some(WorldChainEvent::Chain(ChainEvent::Pending(flashblock))) => {
+                        let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
 
-            trace!(
-                target: "flashblocks::coordinator",
-                payload_id = %flashblock.payload_id,
-                index = %flashblock.index,
-                is_base = flashblock.base.is_some(),
-                "received pending flashblock"
-            );
+                        trace!(
+                            target: "flashblocks::coordinator",
+                            payload_id = %flashblock.payload_id,
+                            index = %flashblock.index,
+                            is_base = flashblock.base.is_some(),
+                            "received pending flashblock"
+                        );
 
-            let permit = SEMAPHORE_TASK_PERMIT
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("semaphore is never closed");
+                        let permit = SEMAPHORE_TASK_PERMIT
+                            .clone()
+                            .acquire_owned()
+                            .await
+                            .expect("semaphore is never closed");
 
-            let provider = provider.clone();
-            let evm_config = evm_config.clone();
-            let coordinator = coordinator.clone();
-            let chain_spec = chain_spec.clone();
-            let pending_block = pending_block.clone();
+                        let provider = provider.clone();
+                        let evm_config = evm_config.clone();
+                        let coordinator = coordinator.clone();
+                        let chain_spec = chain_spec.clone();
+                        let pending_block = pending_block.clone();
 
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
+                        in_flight.spawn_blocking(move || {
+                            let _permit = permit;
 
-                if let Err(e) = process_flashblock(
-                    provider,
-                    &evm_config,
-                    &coordinator,
-                    chain_spec,
-                    flashblock,
-                    pending_block,
-                ) {
-                    error!("error processing flashblock: {e:#?}");
+                            if let Err(e) = process_flashblock(
+                                provider,
+                                &evm_config,
+                                &coordinator,
+                                chain_spec,
+                                flashblock,
+                                pending_block,
+                            ) {
+                                error!("error processing flashblock: {e:#?}");
+                            }
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        stream_closed = true;
+                    }
                 }
-            });
+            }
+            join_result = in_flight.join_next(), if !in_flight.is_empty() => {
+                if let Some(Err(err)) = join_result {
+                    error!("flashblock processing task failed: {err}");
+                }
+            }
+            else => {
+                if stream_closed {
+                    break;
+                }
+            }
         }
     }
 }

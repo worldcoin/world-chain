@@ -4,15 +4,24 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
-use world_chain_builder::coordinator::{
-    FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor,
+use world_chain_builder::{
+    coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
+    test_utils::{
+        BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
+        build_flashblock_fixture_fib, build_flashblock_sequence_fixture_eth_transfers,
+        build_flashblock_sequence_fixture_fib,
+    },
 };
+
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
-use world_chain_primitives::ed25519_dalek::SigningKey;
-use world_chain_test_utils::builder::{
-    BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture,
-    build_flashblock_sequence_fixture,
-};
+use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1};
+
+const TX_COUNTS: [usize; 3] = [50, 500, 1000];
+const FLASHBLOCK_SEQUENCE_PARAMS: [(usize, usize); 3] = [
+    (4, 50),  // 200 total txs across 4 flashblocks
+    (4, 125), // 500 total txs across 4 flashblocks
+    (4, 250), // 1000 total txs across 4 flashblocks
+];
 
 /// Helper: creates a fresh coordinator + handle + watch channel.
 fn fresh_coordinator(
@@ -32,17 +41,20 @@ fn fresh_coordinator(
     (coordinator, handle, pending_tx)
 }
 
-// ---------------------------------------------------------------------------
-// Single flashblock benchmark
-// ---------------------------------------------------------------------------
-
-fn bench_process_flashblock(c: &mut Criterion) {
+fn bench_process_flashblock_case<F>(
+    c: &mut Criterion,
+    group_name: &str,
+    is_bal_enabled: bool,
+    build_flashblock: F,
+) where
+    F: Fn(usize, bool) -> FlashblocksPayloadV1,
+{
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-    let mut group = c.benchmark_group("process_flashblock");
+    let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
-    for tx_count in [50, 500, 1000] {
-        let flashblock = build_flashblock_fixture(tx_count);
+    for tx_count in TX_COUNTS {
+        let flashblock = build_flashblock(tx_count, is_bal_enabled);
         let provider = BenchProvider::new();
 
         group.bench_with_input(BenchmarkId::new("txs", tx_count), &tx_count, |b, &_n| {
@@ -60,35 +72,34 @@ fn bench_process_flashblock(c: &mut Criterion) {
             });
         });
     }
+
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Multi-flashblock via launch path (stream-driven through run_flashblock_processor)
-// ---------------------------------------------------------------------------
-
-fn bench_launch_flashblock_sequence(c: &mut Criterion) {
+fn bench_launch_flashblock_sequence_case<F>(
+    c: &mut Criterion,
+    group_name: &str,
+    is_bal_enabled: bool,
+    build_sequence: F,
+) where
+    F: Fn(usize, usize, bool) -> Vec<FlashblocksPayloadV1>,
+{
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-    let mut group = c.benchmark_group("launch_flashblock_sequence");
+    let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
-    let params: &[(usize, usize)] = &[
-        (4, 50),  // 200 total txs across 4 flashblocks
-        (4, 125), // 500 total txs across 4 flashblocks
-        (4, 250), // 1000 total txs across 4 flashblocks
-    ];
-
-    for &(num_fb, txs_per_fb) in params {
-        let sequence = build_flashblock_sequence_fixture(num_fb, txs_per_fb);
+    for (num_fb, txs_per_fb) in FLASHBLOCK_SEQUENCE_PARAMS {
+        let sequence = build_sequence(num_fb, txs_per_fb, is_bal_enabled);
         let provider = BenchProvider::new();
-        let label = format!("{}fb_x_{}tx", num_fb, txs_per_fb);
+        let label = format!("{num_fb}fb_x_{txs_per_fb}tx");
 
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
             b.iter(|| {
                 let (coordinator, handle, pending_tx) = fresh_coordinator(&rt);
+                let coordinator = Arc::new(coordinator);
                 let pending_tx_clone = pending_tx.clone();
 
-                // Create the stream first --- this subscribes to the broadcast channel.
+                // Create the stream first - this subscribes to the broadcast channel.
                 // Bound to N+1 items: 1 initial Canon(genesis) + N Pending flashblocks.
                 let stream = handle
                     .event_stream(provider.clone(), move |event| {
@@ -104,22 +115,116 @@ fn bench_launch_flashblock_sequence(c: &mut Criterion) {
 
                 // Drive through the same function that `launch` calls.
                 rt.block_on(run_flashblock_processor(
-                    Arc::new(coordinator),
+                    coordinator.clone(),
                     stream,
                     provider.clone(),
                     EVM_CONFIG.clone(),
                     CHAIN_SPEC.clone(),
                     pending_tx,
                 ));
+
+                let processed = coordinator.flashblocks();
+                assert_eq!(processed.flashblocks().len(), sequence.len());
+                assert_eq!(
+                    coordinator.last().flashblock().index,
+                    sequence.last().expect("sequence is non-empty").index
+                );
             });
         });
     }
+
     group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Single flashblock benchmark
+// ---------------------------------------------------------------------------
+
+fn bench_process_flashblock_eth_transfers(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_eth_transfers",
+        false,
+        build_flashblock_fixture_eth_transfers,
+    );
+}
+
+fn bench_process_flashblock_eth_transfers_with_bal(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_eth_transfers_with_bal",
+        true,
+        build_flashblock_fixture_eth_transfers,
+    );
+}
+
+fn bench_process_flashblock_fib(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_fib",
+        false,
+        build_flashblock_fixture_fib,
+    );
+}
+
+fn bench_process_flashblock_fib_with_bal(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_fib_with_bal",
+        true,
+        build_flashblock_fixture_fib,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-flashblock via launch path (stream-driven through run_flashblock_processor)
+// ---------------------------------------------------------------------------
+
+fn bench_launch_flashblock_sequence_eth_transfers(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_eth_transfers",
+        false,
+        build_flashblock_sequence_fixture_eth_transfers,
+    );
+}
+
+fn bench_launch_flashblock_sequence_eth_transfers_with_bal(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_eth_transfers_with_bal",
+        true,
+        build_flashblock_sequence_fixture_eth_transfers,
+    );
+}
+
+fn bench_launch_flashblock_sequence_fib(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_fib",
+        false,
+        build_flashblock_sequence_fixture_fib,
+    );
+}
+
+fn bench_launch_flashblock_sequence_fib_with_bal(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_fib_with_bal",
+        true,
+        build_flashblock_sequence_fixture_fib,
+    );
 }
 
 criterion_group!(
     benches,
-    bench_process_flashblock,
-    bench_launch_flashblock_sequence
+    bench_process_flashblock_eth_transfers,
+    bench_process_flashblock_eth_transfers_with_bal,
+    bench_process_flashblock_fib,
+    bench_process_flashblock_fib_with_bal,
+    bench_launch_flashblock_sequence_eth_transfers,
+    bench_launch_flashblock_sequence_eth_transfers_with_bal,
+    bench_launch_flashblock_sequence_fib,
+    bench_launch_flashblock_sequence_fib_with_bal,
 );
 criterion_main!(benches);

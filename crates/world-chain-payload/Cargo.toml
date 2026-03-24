@@ -10,7 +10,6 @@ license.workspace = true
 world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p.workspace = true
-world-chain-engine.workspace = true
 world-chain-pool.workspace = true
 world-chain-rpc.workspace = true
 

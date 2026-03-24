@@ -36,7 +36,7 @@ use crate::{
     job::{CommittedPayloadState, FlashblocksPayloadJob},
     metrics::PayloadBuilderMetrics,
 };
-use world_chain_engine::WorldChainPayloadProcessor;
+use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_primitives::flashblocks::Flashblock;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
@@ -62,7 +62,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     /// The P2P handler for flashblocks.
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
-    flashblocks_state: WorldChainPayloadProcessor,
+    flashblocks_state: FlashblocksExecutionCoordinator,
     /// Metrics for tracking job generator operations and errors
     metrics: PayloadBuilderMetrics,
 }
@@ -80,7 +80,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         auth_rx: tokio::sync::watch::Receiver<Option<Authorization>>,
         override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,
-        flashblocks_state: WorldChainPayloadProcessor,
+        flashblocks_state: FlashblocksExecutionCoordinator,
         metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {

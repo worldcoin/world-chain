@@ -20,7 +20,6 @@ members = [
     "crates/world-chain-payload",
     "crates/world-chain-pool",
     "crates/world-chain-pbh",
-    "crates/world-chain-engine",
     "e2e-tests",
     "xtask",
 ]
@@ -46,7 +45,6 @@ world-chain-node = { path = "crates/world-chain-node" }
 world-chain-pbh = { path = "crates/world-chain-pbh" }
 world-chain-rpc = { path = "crates/world-chain-rpc" }
 world-chain-pool = { path = "crates/world-chain-pool" }
-world-chain-engine = { path = "crates/world-chain-engine" }
 world-chain-test-utils = { path = "crates/world-chain-test-utils" }
 
 # reth

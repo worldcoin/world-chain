@@ -1,9 +1,9 @@
 use world_chain_builder::{
     FlashblocksPayloadBuilderConfig,
+    coordinator::FlashblocksExecutionCoordinator,
     payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-use world_chain_engine::WorldChainPayloadProcessor;
 
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};
@@ -19,7 +19,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
-    pub flashblocks_state: Option<WorldChainPayloadProcessor>,
+    pub flashblocks_state: Option<FlashblocksExecutionCoordinator>,
     pub builder_config: FlashblocksPayloadBuilderConfig,
 }
 
@@ -29,7 +29,7 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx_builder: CtxBuilder,
-        flashblocks_state: Option<WorldChainPayloadProcessor>,
+        flashblocks_state: Option<FlashblocksExecutionCoordinator>,
         builder_config: FlashblocksPayloadBuilderConfig,
     ) -> Self {
         Self {
