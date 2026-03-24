@@ -5,12 +5,10 @@ use std::time::Duration;
 use crate::{
     engine::FlashblocksEngineApiBuilder,
     engine_validator::WorldChainEngineValidatorBuilder,
-    node::{
-        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
-        WorldChainPoolBuilder,
-    },
+    node::{WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext},
     payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
+    pool::WorldChainPoolBuilder,
 };
 use ed25519_dalek::VerifyingKey;
 use hex::ToHex;
@@ -169,13 +167,13 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct FlashblocksContext {
+pub struct WorldChainDefaultContext {
     config: WorldChainNodeConfig,
     components_context: Option<FlashblocksComponentsContext>,
 }
 
-impl<N: FullNodeTypes<Types = WorldChainNode<FlashblocksContext>>> WorldChainNodeContext<N>
-    for FlashblocksContext
+impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>
+    for WorldChainDefaultContext
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
@@ -372,7 +370,7 @@ pub struct FlashblocksComponentsContext {
     pub authorizer_vk: VerifyingKey,
 }
 
-impl From<WorldChainNodeConfig> for FlashblocksContext {
+impl From<WorldChainNodeConfig> for WorldChainDefaultContext {
     fn from(value: WorldChainNodeConfig) -> Self {
         let components_context = value
             .args

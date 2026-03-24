@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use tracing::info;
-use world_chain_node::context::FlashblocksContext;
+use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_p2p::protocol::event::{ChainEvent, WorldChainEvent};
 use world_chain_test_utils::{
     e2e_harness::setup::{TX_SET_L1_BLOCK, build_payload_attributes},
@@ -33,6 +33,37 @@ use world_chain_test_utils::e2e_harness::setup::{
     CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
     setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
 };
+
+use alloy_provider::{Provider, RootProvider};
+use alloy_rpc_client::RpcClient;
+use alloy_rpc_types_engine::PayloadId;
+use ed25519_dalek::SigningKey;
+use reth_network::{Peers, PeersInfo};
+use reth_network_peers::PeerId;
+use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
+use std::{
+    collections::HashMap,
+    fmt,
+    io::Write,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tempfile::NamedTempFile;
+use tokio::time::{Instant, sleep};
+use tracing::Dispatch;
+use world_chain_cli::FlashblocksArgs;
+use world_chain_p2p::{
+    monitor,
+    protocol::{connection::ReceiveStatus, handler::PublishingStatus},
+};
+use world_chain_primitives::{
+    flashblocks::FlashblockMetadata,
+    p2p::{
+        Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
+        StartPublish,
+    },
+    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+};
+use world_chain_test_utils::utils::{eip1559, raw_tx};
 
 async fn create_priority_transaction(
     signer_index: u32,
@@ -63,7 +94,7 @@ async fn create_priority_transaction(
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -94,7 +125,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
 
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
@@ -148,7 +179,7 @@ async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
         TX_SET_L1_BLOCK.len() as u64 + tx1.len() as u64 + tx_small.len() as u64;
 
     let (_, mut nodes, _tasks, _, _) =
-        setup_with_block_uncompressed_size_limit::<FlashblocksContext>(
+        setup_with_block_uncompressed_size_limit::<WorldChainDefaultContext>(
             1,
             optimism_payload_attributes,
             false,
@@ -240,7 +271,7 @@ async fn test_without_block_uncompressed_size_limit_includes_all_transactions() 
     reth_tracing::init_test_tracing();
 
     let (_, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
 
     let (tx1, tx1_hash) = create_priority_transaction(0, 0, 50_000, 600_000, 100).await?;
@@ -287,7 +318,7 @@ async fn test_without_block_uncompressed_size_limit_includes_all_transactions() 
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
     let raw_tx = raw_pbh_bundle_bytes(signer, 0, 0, U256::ZERO, CHAIN_SPEC.chain_id()).await;
@@ -302,7 +333,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_signers, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, false).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, false).await?;
     let node = &mut nodes[0].node;
     let signer = 0;
 
@@ -334,17 +365,18 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     // Builder and Follower
     let (_, mut nodes, _tasks, mut flashblocks_env, tx_spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(2, optimism_payload_attributes, true).await?;
 
     // Verifier
-    let (_, basic_nodes, _tasks, mut basic_env, _) = setup_with_tx_peers::<FlashblocksContext>(
-        1,
-        optimism_payload_attributes,
-        false,
-        false,
-        true,
-    )
-    .await?;
+    let (_, basic_nodes, _tasks, mut basic_env, _) =
+        setup_with_tx_peers::<WorldChainDefaultContext>(
+            1,
+            optimism_payload_attributes,
+            false,
+            false,
+            true,
+        )
+        .await?;
 
     let basic_worldchain_node = &basic_nodes[0];
 
@@ -456,7 +488,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (_, nodes, _tasks, mut env, _spammer) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -548,7 +580,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -627,7 +659,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, _nodes, _tasks, mut env, _) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, true).await?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
@@ -648,7 +680,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let (_, nodes, _tasks, mut env, spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(2, optimism_payload_attributes, true).await?;
 
     let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
@@ -736,7 +768,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 
     // Spin up 3 nodes WITHOUT tx_peers configuration
     let (_, mut nodes, _tasks, _, _) =
-        setup::<FlashblocksContext>(3, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -810,7 +842,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // We disconnect Node 0 from Node 2 to prevent multi-hop forwarding in Part 1
-    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers::<FlashblocksContext>(
+    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers::<WorldChainDefaultContext>(
         3,
         optimism_payload_attributes,
         true,
@@ -974,9 +1006,14 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
 async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (_, mut nodes, _tasks, _, _) =
-        setup_with_tx_peers::<FlashblocksContext>(3, optimism_payload_attributes, true, true, true)
-            .await?;
+    let (_, mut nodes, _tasks, _, _) = setup_with_tx_peers::<WorldChainDefaultContext>(
+        3,
+        optimism_payload_attributes,
+        true,
+        true,
+        true,
+    )
+    .await?;
 
     let [node_0_ctx, node_1_ctx, node_2_ctx] = &mut nodes[..] else {
         unreachable!()
@@ -1047,7 +1084,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let (_, mut nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, true).await?;
 
     let builder_node = &mut nodes[0];
     let builder_context = builder_node.ext_context.clone().unwrap();
@@ -1214,7 +1251,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
 
     // 2 nodes: builder + follower
     let (_, nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(2, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(2, optimism_payload_attributes, true).await?;
 
     let builder_context = nodes[0].ext_context.clone().unwrap();
     let block_hash = nodes[0].node.block_hash(0);
@@ -1412,7 +1449,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
     const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
 
     let (_, nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, true).await?;
 
     let builder_context = nodes[0].ext_context.clone().unwrap();
     let block_hash = nodes[0].node.block_hash(0);
@@ -1646,7 +1683,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
 
     let (_, nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(1, optimism_payload_attributes, true).await?;
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, true).await?;
 
     let builder_context = nodes[0].ext_context.clone().unwrap();
     let block_hash = nodes[0].node.block_hash(0);
@@ -1758,4 +1795,1037 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     result.assert_all_passed();
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_double_failover() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (_, nodes, _tasks, _, _) =
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+
+    let p2p_0 = nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+    let p2p_1 = nodes[1].ext_context.clone().unwrap().flashblocks_handle;
+    let p2p_2 = nodes[2].ext_context.clone().unwrap().flashblocks_handle;
+
+    let mut publish_flashblocks = p2p_0.ctx.flashblock_tx.subscribe();
+    tokio::spawn(async move {
+        while let Ok(payload) = publish_flashblocks.recv().await {
+            println!("\n////////////////////////////////////////////////////////////////////\n");
+            println!(
+                "Received flashblock, payload_id: {}, index: {}",
+                payload.payload_id, payload.index
+            );
+            println!("\n////////////////////////////////////////////////////////////////////\n");
+        }
+    });
+
+    let provider = provider_from_url(nodes[0].node.rpc_url()).await;
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    assert_eq!(latest_block.number(), 0);
+
+    let pending_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+        .await?;
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
+
+    let payload_0 = base_payload(0, test_payload_id(10), 0, latest_block.hash(), AUTH_TS_BASE);
+    let authorization_0 = Authorization::new(
+        payload_0.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+    let msg = payload_0.clone();
+    let authorized_0 = AuthorizedPayload::new(p2p_0.builder_sk()?, authorization_0, msg);
+    p2p_0.start_publishing(authorization_0)?;
+    p2p_0.publish_new(authorized_0).unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    let payload_1 = next_payload(payload_0.payload_id, 1).await;
+    let authorization_1 = Authorization::new(
+        payload_1.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_1.builder_sk()?.verifying_key(),
+    );
+    let authorized_1 =
+        AuthorizedPayload::new(p2p_1.builder_sk()?, authorization_1, payload_1.clone());
+    p2p_1.start_publishing(authorization_1)?;
+    sleep(Duration::from_millis(100)).await;
+    p2p_1.publish_new(authorized_1).unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    let payload_2 = next_payload(payload_0.payload_id, 2).await;
+    let msg = payload_2.clone();
+    let authorization_2 = Authorization::new(
+        payload_2.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_2.builder_sk()?.verifying_key(),
+    );
+    let authorized_2 = AuthorizedPayload::new(p2p_2.builder_sk()?, authorization_2, msg.clone());
+    p2p_2.start_publishing(authorization_2)?;
+    sleep(Duration::from_millis(100)).await;
+    p2p_2.publish_new(authorized_2).unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_force_race_condition() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let (_, nodes, _tasks, _, _) =
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+
+    let p2p_0 = nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+    let p2p_1 = nodes[1].ext_context.clone().unwrap().flashblocks_handle;
+    let p2p_2 = nodes[2].ext_context.clone().unwrap().flashblocks_handle;
+
+    let mut publish_flashblocks = p2p_0.ctx.flashblock_tx.subscribe();
+    tokio::spawn(async move {
+        while let Ok(payload) = publish_flashblocks.recv().await {
+            println!("\n////////////////////////////////////////////////////////////////////\n");
+            println!(
+                "Received flashblock, payload_id: {}, index: {}",
+                payload.payload_id, payload.index
+            );
+            println!("\n////////////////////////////////////////////////////////////////////\n");
+        }
+    });
+
+    let provider = provider_from_url(nodes[0].node.rpc_url()).await;
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    assert_eq!(latest_block.number(), 0);
+    let expected_pending_number = latest_block.number() + 1;
+
+    let pending_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+        .await?;
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
+
+    let payload_0 = base_payload(0, test_payload_id(20), 0, latest_block.hash(), AUTH_TS_BASE);
+    info!("Sending payload 0, index 0");
+    let authorization = Authorization::new(
+        payload_0.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+    let msg = payload_0.clone();
+    let authorized = AuthorizedPayload::new(p2p_0.builder_sk()?, authorization, msg);
+    p2p_0.start_publishing(authorization)?;
+    p2p_0.publish_new(authorized).unwrap();
+
+    p2p_wait_for_pending_block(nodes[0].node.rpc_url(), expected_pending_number, 0).await?;
+
+    info!("Sending payload 0, index 1");
+    let payload_1 = next_payload(payload_0.payload_id, 1).await;
+    let authorization = Authorization::new(
+        payload_1.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(p2p_0.builder_sk()?, authorization, payload_1.clone());
+    p2p_0.publish_new(authorized).unwrap();
+
+    p2p_wait_for_pending_block(nodes[0].node.rpc_url(), expected_pending_number, 0).await?;
+
+    let payload_2 = base_payload(1, test_payload_id(21), 0, latest_block.hash(), AUTH_TS_NEXT);
+    info!("Sending payload 1, index 0");
+    let authorization_1 = Authorization::new(
+        payload_2.payload_id,
+        AUTH_TS_NEXT,
+        &authorizer,
+        p2p_1.builder_sk()?.verifying_key(),
+    );
+    let authorization_2 = Authorization::new(
+        payload_2.payload_id,
+        AUTH_TS_NEXT,
+        &authorizer,
+        p2p_2.builder_sk()?.verifying_key(),
+    );
+    let msg = payload_2.clone();
+    let authorized_1 = AuthorizedPayload::new(p2p_1.builder_sk()?, authorization_1, msg.clone());
+    p2p_1.start_publishing(authorization_1)?;
+    p2p_2.start_publishing(authorization_2)?;
+    sleep(Duration::from_millis(100)).await;
+    tracing::error!("{}", p2p_1.publish_new(authorized_1.clone()).unwrap_err());
+    sleep(Duration::from_millis(100)).await;
+
+    p2p_2.stop_publishing()?;
+    sleep(Duration::from_millis(100)).await;
+
+    p2p_1.publish_new(authorized_1)?;
+    sleep(Duration::from_millis(100)).await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_receive_peer_latency_scores_are_recorded() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let (_, nodes, _tasks, _, _) =
+        setup::<WorldChainDefaultContext>(3, optimism_payload_attributes, true).await?;
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+    let p2p_0 = nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+
+    let (receive_peers, candidate_peers) = wait_for_flashblocks_topology(&p2p_0, 2, 2).await?;
+    assert!(
+        candidate_peers.is_empty(),
+        "expected no spare candidate peer"
+    );
+
+    let slow_peer = receive_peers[0];
+    let fast_peer = receive_peers[1];
+
+    let peer_map: HashMap<_, _> = nodes
+        .iter()
+        .skip(1)
+        .map(|node| {
+            let peer_id = node.node.network.record().id;
+            let p2p = node.ext_context.clone().unwrap().flashblocks_handle;
+            let rpc_url = node.node.rpc_url();
+            (peer_id, (p2p, rpc_url))
+        })
+        .collect();
+
+    let (fast_p2p, fast_rpc) = peer_map
+        .get(&fast_peer)
+        .expect("fast peer should map to a node");
+    let (slow_p2p, slow_rpc) = peer_map
+        .get(&slow_peer)
+        .expect("slow peer should map to a node");
+
+    for (payload_suffix, authorization_timestamp) in [(41, 41_u64), (42, 42), (43, 43), (44, 44)] {
+        publish_flashblock_with_latency(
+            fast_p2p,
+            fast_rpc.clone(),
+            &authorizer,
+            test_payload_id(payload_suffix),
+            authorization_timestamp,
+            Duration::from_millis(10),
+        )
+        .await?;
+        sleep(Duration::from_millis(50)).await;
+
+        publish_flashblock_with_latency(
+            slow_p2p,
+            slow_rpc.clone(),
+            &authorizer,
+            test_payload_id(payload_suffix + 10),
+            authorization_timestamp + 10,
+            Duration::from_millis(300),
+        )
+        .await?;
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    sleep(Duration::from_millis(250)).await;
+
+    let timeout = Duration::from_secs(15);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let fast_score = receive_peer_score(&p2p_0, fast_peer)?;
+        let slow_score = receive_peer_score(&p2p_0, slow_peer)?;
+
+        if fast_score.is_some() && slow_score.is_some() {
+            break;
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(eyre!(
+                "timed out waiting for latency scores to be recorded: fast={fast_peer} fast_score={fast_score:?}, slow={slow_peer} slow_score={slow_score:?}"
+            ));
+        }
+
+        sleep(poll_interval).await;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_block_by_number_pending() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let (_, nodes, _tasks, _, _) =
+        setup::<WorldChainDefaultContext>(1, optimism_payload_attributes, true).await?;
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+    let p2p_0 = nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+
+    let provider = provider_from_url(nodes[0].node.rpc_url()).await;
+
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    assert_eq!(latest_block.number(), 0);
+    let expected_pending_number = latest_block.number() + 1;
+
+    let pending_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+        .await?;
+    assert_eq!(pending_block.unwrap().number(), latest_block.number());
+
+    let payload_id = test_payload_id(30);
+    let base = base_payload(0, payload_id, 0, latest_block.hash(), AUTH_TS_BASE);
+    let authorization = Authorization::new(
+        base.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(p2p_0.builder_sk()?, authorization, base);
+    p2p_0.start_publishing(authorization)?;
+    p2p_0.publish_new(authorized).unwrap();
+
+    p2p_wait_for_pending_block(nodes[0].node.rpc_url(), expected_pending_number, 0).await?;
+
+    let next = next_payload(payload_id, 1).await;
+    let authorization = Authorization::new(
+        next.payload_id,
+        AUTH_TS_BASE,
+        &authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(p2p_0.builder_sk()?, authorization, next);
+    p2p_0.start_publishing(authorization)?;
+    p2p_0.publish_new(authorized).unwrap();
+
+    p2p_wait_for_pending_block(nodes[0].node.rpc_url(), expected_pending_number, 0).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_peer_reputation() -> eyre::Result<()> {
+    let _tracing = init_tracing("warn,flashblocks=trace");
+
+    let (_, nodes, _tasks, _, _) =
+        setup::<WorldChainDefaultContext>(2, optimism_payload_attributes, true).await?;
+
+    let p2p_0 = nodes[0].ext_context.clone().unwrap().flashblocks_handle;
+    let network_1 = &nodes[1].node.inner.network;
+
+    let invalid_authorizer = SigningKey::from_bytes(&[99; 32]);
+    let provider = provider_from_url(nodes[0].node.rpc_url()).await;
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+
+    let payload_0 = base_payload(0, test_payload_id(40), 0, latest_block.hash(), AUTH_TS_BASE);
+    info!("Sending bad authorization");
+    let authorization = Authorization::new(
+        payload_0.payload_id,
+        AUTH_TS_BASE,
+        &invalid_authorizer,
+        p2p_0.builder_sk()?.verifying_key(),
+    );
+
+    let authorized_msg = AuthorizedMsg::StartPublish(StartPublish);
+    let authorized_payload = Authorized::new(p2p_0.builder_sk()?, authorization, authorized_msg);
+    let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
+    let bytes = p2p_msg.encode();
+
+    let peers = network_1.get_all_peers().await?;
+    let peer_0 = &peers[0].remote_id;
+
+    let mut reputation_was_negative = false;
+    let mut peer_banned = false;
+    for _ in 0..100 {
+        p2p_0.send_serialized_to_all_peers(bytes.clone());
+        sleep(Duration::from_millis(10)).await;
+        let rep_0 = network_1.reputation_by_id(*peer_0).await?;
+        if let Some(rep) = rep_0
+            && rep < 0
+        {
+            reputation_was_negative = true;
+        }
+
+        if network_1.get_all_peers().await?.is_empty() {
+            peer_banned = true;
+            break;
+        }
+    }
+
+    assert!(
+        reputation_was_negative,
+        "Peer reputation should have become negative"
+    );
+    assert!(peer_banned, "Peer should have been banned");
+
+    Ok(())
+}
+
+#[ignore]
+#[tokio::test]
+async fn test_peer_monitoring() -> eyre::Result<()> {
+    use reth::builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
+    use reth_e2e_test_utils::TmpDB;
+    use reth_network_peers::TrustedPeer;
+    use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+    use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+    use reth_provider::providers::BlockchainProvider;
+    use reth_tasks::TaskExecutor;
+    use std::{
+        net::{IpAddr, SocketAddr},
+        path::PathBuf,
+    };
+    use tracing_subscriber::layer::SubscriberExt;
+    use url::Host;
+    use world_chain_cli::{BuilderArgs, PbhArgs, WorldChainArgs, WorldChainNodeConfig};
+    use world_chain_node::node::WorldChainNode;
+    use world_chain_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
+
+    /// Local setup for the peer monitoring test that needs per-node control
+    /// over port, P2P key, and task executor.
+    async fn setup_monitoring_node(
+        exec: TaskExecutor,
+        authorizer_sk: SigningKey,
+        builder_sk: SigningKey,
+        peers: Vec<(PeerId, SocketAddr)>,
+        port: Option<u16>,
+        p2p_secret_key: Option<PathBuf>,
+    ) -> eyre::Result<(
+        world_chain_p2p::protocol::handler::FlashblocksHandle,
+        reth_network_peers::NodeRecord,
+        reth_network::NetworkHandle<
+            reth_eth_wire::BasicNetworkPrimitives<
+                reth_optimism_primitives::OpPrimitives,
+                op_alloy_consensus::OpPooledTransaction,
+                reth_network::types::NewBlock<
+                    alloy_consensus::Block<op_alloy_consensus::OpTxEnvelope>,
+                >,
+            >,
+        >,
+        reth_node_core::exit::NodeExitFuture,
+        Box<dyn std::any::Any + Sync + Send>,
+    )> {
+        let op_chain_spec: Arc<reth_optimism_chainspec::OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
+
+        let mut network_config = NetworkArgs {
+            discovery: DiscoveryArgs {
+                disable_discovery: true,
+                ..DiscoveryArgs::default()
+            },
+            ..NetworkArgs::default()
+        };
+
+        if let Some(p) = port {
+            network_config.port = p;
+        }
+        if let Some(key_path) = p2p_secret_key {
+            network_config.p2p_secret_key = Some(key_path);
+        }
+
+        network_config.trusted_peers = peers
+            .into_iter()
+            .map(|(peer_id, addr)| {
+                let host = match addr.ip() {
+                    IpAddr::V4(ip) => Host::Ipv4(ip),
+                    IpAddr::V6(ip) => Host::Ipv6(ip),
+                };
+                TrustedPeer::new(host, addr.port(), peer_id)
+            })
+            .collect();
+
+        let mut node_config = NodeConfig::new(op_chain_spec.clone())
+            .with_chain(op_chain_spec)
+            .with_network(network_config)
+            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+        if port.is_none() {
+            node_config = node_config.with_unused_ports();
+        }
+
+        let pbh = PbhArgs {
+            verified_blockspace_capacity: 70,
+            entrypoint: PBH_DEV_ENTRYPOINT,
+            signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
+            world_id: DEV_WORLD_ID,
+        };
+
+        let builder = BuilderArgs {
+            enabled: false,
+            private_key: world_chain_test_utils::utils::signer(6),
+            block_uncompressed_size_limit: None,
+        };
+
+        let world_chain_node_config = WorldChainNodeConfig {
+            args: WorldChainArgs {
+                rollup: Default::default(),
+                builder,
+                pbh,
+                flashblocks: Some(test_flashblocks_args(&authorizer_sk, &builder_sk)),
+                tx_peers: None,
+                disable_bootnodes: true,
+            },
+            builder_config: Default::default(),
+        };
+
+        let node = WorldChainNode::<WorldChainDefaultContext>::new(
+            world_chain_node_config
+                .args
+                .clone()
+                .into_config(&mut node_config)?,
+        );
+
+        let ext_context = node.ext_context::<FullNodeTypesAdapter<
+            WorldChainNode<WorldChainDefaultContext>,
+            TmpDB,
+            BlockchainProvider<
+                NodeTypesWithDBAdapter<WorldChainNode<WorldChainDefaultContext>, TmpDB>,
+            >,
+        >>();
+        let p2p_handle = ext_context.unwrap().flashblocks_handle.clone();
+
+        let NodeHandle {
+            node,
+            node_exit_future,
+        } = NodeBuilder::new(node_config)
+            .testing_node(exec)
+            .with_types_and_provider::<WorldChainNode<WorldChainDefaultContext>, BlockchainProvider<_>>()
+            .with_components(node.components_builder())
+            .with_add_ons(node.add_ons())
+            .launch()
+            .await?;
+
+        let network_handle = node.network.clone();
+        let local_node_record = network_handle.local_node_record();
+
+        Ok((
+            p2p_handle,
+            local_node_record,
+            network_handle,
+            node_exit_future,
+            Box::new(node),
+        ))
+    }
+
+    let log_buffer = SharedLogBuffer::default();
+    let subscriber = tracing_subscriber::registry().with(log_buffer.clone());
+    tracing::subscriber::set_global_default(subscriber).expect("failed to set global subscriber");
+
+    let authorizer = SigningKey::from_bytes(&[0; 32]);
+
+    let mut p2p_key_file = NamedTempFile::new()?;
+    p2p_key_file.write_all(b"0101010101010101010101010101010101010101010101010101010101010101")?;
+    p2p_key_file.flush()?;
+    let p2p_key_path = p2p_key_file.path().to_path_buf();
+
+    let exec1 = TaskExecutor::default();
+
+    let builder1 = SigningKey::from_bytes(&[1; 32]);
+    let (p2p_1, record_1, network_1, _exit_1, _node_1) = setup_monitoring_node(
+        exec1.clone(),
+        authorizer.clone(),
+        builder1,
+        vec![],
+        None,
+        Some(p2p_key_path.clone()),
+    )
+    .await?;
+
+    let exec2 = TaskExecutor::default();
+
+    let peer1_id = record_1.id;
+    let peer1_addr = record_1.tcp_addr();
+    let peer1_port = peer1_addr.port();
+
+    let builder2 = SigningKey::from_bytes(&[2; 32]);
+    let (_p2p_2, record_2, network_2, _exit_2, _node_2) = setup_monitoring_node(
+        exec2.clone(),
+        authorizer.clone(),
+        builder2,
+        vec![(peer1_id, peer1_addr)],
+        None,
+        None,
+    )
+    .await?;
+
+    let start = Instant::now();
+    loop {
+        let trusted_peers = network_2.get_trusted_peers().await?;
+        if trusted_peers.len() == 1 {
+            info!(
+                "Connection established in {:.2}s",
+                start.elapsed().as_secs_f64()
+            );
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            panic!("Timeout waiting for connection to establish");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    sleep(monitor::PEER_MONITOR_INTERVAL + Duration::from_secs(1)).await;
+
+    info!("Simulating node 1 crash (dropping node and TaskManager)");
+    drop(_node_1);
+    drop(_exit_1);
+    drop(p2p_1);
+    drop(network_1);
+
+    sleep(Duration::from_millis(500)).await;
+
+    {
+        let logs = log_buffer.logs();
+        let disconnect_log_exists = logs.iter().any(|log| {
+            log.contains("trusted peer disconnected") && log.contains(&peer1_id.to_string())
+        });
+        assert!(
+            disconnect_log_exists,
+            "Should have logged 'trusted peer disconnected' for peer {} from event listener",
+            peer1_id
+        );
+    }
+
+    sleep(monitor::PEER_MONITOR_INTERVAL * 2 + Duration::from_secs(1)).await;
+
+    let trusted_peers_after = network_2.get_trusted_peers().await?;
+    assert_eq!(
+        trusted_peers_after.len(),
+        0,
+        "Node 1 should have disconnected"
+    );
+
+    sleep(Duration::from_secs(2)).await;
+
+    info!("Testing peer reconnection after restart");
+    info!("Restarting node 1 with the same port and P2P key");
+
+    let (_, record_1_new, _, _exit_1_new, _node_1_new) = setup_monitoring_node(
+        exec2.clone(),
+        authorizer.clone(),
+        SigningKey::from_bytes(&[1; 32]),
+        vec![(record_2.id, record_2.tcp_addr())],
+        Some(peer1_port),
+        Some(p2p_key_path.clone()),
+    )
+    .await?;
+    let peer1_id_new = record_1_new.id;
+    let peer1_addr_new = record_1_new.tcp_addr();
+
+    assert_eq!(
+        peer1_addr, peer1_addr_new,
+        "Peer address should remain the same after restart (fixed port)"
+    );
+    assert_eq!(
+        peer1_id, peer1_id_new,
+        "Peer ID should remain the same after restart (reused P2P key)"
+    );
+
+    info!(
+        "Restarted peer with same ID and address: peer_id={}, addr={}",
+        peer1_id_new, peer1_addr_new
+    );
+
+    let connection_timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        let trusted_peers = network_2.get_trusted_peers().await?;
+        if trusted_peers.len() == 1 {
+            info!(
+                "Reconnection established in {:.2}s",
+                start.elapsed().as_secs_f64()
+            );
+            break;
+        }
+        if start.elapsed() > connection_timeout {
+            panic!("Timeout waiting for reconnection to establish");
+        }
+        sleep(poll_interval).await;
+    }
+
+    {
+        let logs = log_buffer.logs();
+        let reconnection_log_exists = logs.iter().any(|log| {
+            log.contains("connection to trusted peer established")
+                && log.contains(&peer1_id.to_string())
+        });
+        assert!(
+            reconnection_log_exists,
+            "Should have logged 'connection to trusted peer established' for peer {} after restart",
+            peer1_id
+        );
+    }
+
+    sleep(monitor::PEER_MONITOR_INTERVAL + Duration::from_secs(1)).await;
+
+    {
+        let logs = log_buffer.logs();
+        let reconnection_log_idx = logs
+            .iter()
+            .rposition(|log| log.contains("connection to trusted peer established"))
+            .expect("Could not find 'connection to trusted peer established' log");
+
+        let (logs_before_reconnect, logs_after_reconnect) = logs.split_at(reconnection_log_idx);
+
+        let warnings_before_reconnect: Vec<&String> = logs_before_reconnect
+            .iter()
+            .filter(|log| {
+                log.contains(&peer1_id.to_string())
+                    && log.contains("WARN")
+                    && log.contains("trusted peer disconnected")
+            })
+            .collect();
+
+        assert!(
+            warnings_before_reconnect.len() >= 2,
+            "Should have had at least 2 warnings before reconnection, found {}",
+            warnings_before_reconnect.len()
+        );
+
+        let warnings_after_reconnect: Vec<&String> = logs_after_reconnect
+            .iter()
+            .filter(|log| {
+                log.contains(&peer1_id.to_string())
+                    && log.contains("WARN")
+                    && log.contains("trusted peer disconnected")
+            })
+            .collect();
+
+        assert!(
+            warnings_after_reconnect.is_empty(),
+            "Should have no warnings after reconnection, found {}: {:?}",
+            warnings_after_reconnect.len(),
+            warnings_after_reconnect
+        );
+    }
+
+    Ok(())
+}
+
+/// Thread-safe log buffer for capturing tracing output across threads.
+#[derive(Clone, Default)]
+struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl SharedLogBuffer {
+    fn logs(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for SharedLogBuffer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut visitor = LogVisitor(String::new());
+        visitor
+            .0
+            .push_str(&format!("{} ", event.metadata().level()));
+        visitor
+            .0
+            .push_str(&format!("{}: ", event.metadata().target()));
+        event.record(&mut visitor);
+        self.0.lock().unwrap().push(visitor.0);
+    }
+}
+
+struct LogVisitor(String);
+
+impl tracing::field::Visit for LogVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+        if field.name() == "message" {
+            self.0.push_str(&format!("{:?}", value));
+        } else {
+            self.0.push_str(&format!(" {}={:?}", field.name(), value));
+        }
+    }
+}
+
+const AUTH_TS_BASE: u64 = 1;
+const AUTH_TS_NEXT: u64 = 2;
+
+fn test_payload_id(id: u8) -> PayloadId {
+    PayloadId::new([id; 8])
+}
+
+fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
+    let sub = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_target(false)
+        .without_time()
+        .finish();
+
+    Dispatch::new(sub).set_default()
+}
+
+fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) -> FlashblocksArgs {
+    FlashblocksArgs {
+        enabled: true,
+        authorizer_vk: Some(authorizer_sk.verifying_key()),
+        builder_sk: Some(builder_sk.clone()),
+        force_publish: false,
+        override_authorizer_sk: None,
+        flashblocks_interval: 200,
+        recommit_interval: 200,
+        access_list: true,
+        fanout: Default::default(),
+    }
+}
+
+async fn wait_for_flashblocks_topology(
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
+    expected_connections: usize,
+    expected_receive_peers: usize,
+) -> eyre::Result<(Vec<PeerId>, Vec<PeerId>)> {
+    let timeout = Duration::from_secs(10);
+    let poll_interval = Duration::from_millis(100);
+    let start = Instant::now();
+
+    loop {
+        {
+            let state = p2p_handle.state.lock();
+            if state.peers.len() == expected_connections {
+                let receive_peers: Vec<_> = state
+                    .peers
+                    .iter()
+                    .filter_map(|(peer_id, conn)| {
+                        matches!(conn.receive_status, ReceiveStatus::Receiving { .. })
+                            .then_some(*peer_id)
+                    })
+                    .collect();
+                let candidate_peers: Vec<_> = state
+                    .peers
+                    .iter()
+                    .filter_map(|(peer_id, conn)| {
+                        (conn.receive_status == ReceiveStatus::NotReceiving).then_some(*peer_id)
+                    })
+                    .collect();
+                drop(state);
+
+                if receive_peers.len() == expected_receive_peers
+                    && receive_peers.len() + candidate_peers.len() == expected_connections
+                {
+                    return Ok((receive_peers, candidate_peers));
+                }
+            } else {
+                drop(state);
+            }
+
+            if start.elapsed() >= timeout {
+                return Err(eyre!(
+                    "timed out waiting for flashblocks topology: expected {expected_connections} connections with {expected_receive_peers} receive peers"
+                ));
+            }
+        }
+
+        sleep(poll_interval).await;
+    }
+}
+
+fn receive_peer_score(
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
+    peer_id: PeerId,
+) -> eyre::Result<Option<i64>> {
+    let state = p2p_handle.state.lock();
+    let peer = state
+        .peers
+        .get(&peer_id)
+        .ok_or_else(|| eyre!("peer {peer_id} not found"))?;
+
+    let ReceiveStatus::Receiving { score } = &peer.receive_status else {
+        return Ok(None);
+    };
+
+    let debug = format!("{score:?}");
+    let value = debug
+        .split("value: ")
+        .nth(1)
+        .and_then(|rest| rest.strip_prefix("Some("))
+        .and_then(|rest| rest.split(')').next())
+        .ok_or_else(|| eyre!("failed to parse score from {debug}"))?
+        .parse::<i64>()?;
+
+    Ok(Some(value))
+}
+
+fn base_payload(
+    block_number: u64,
+    payload_id: PayloadId,
+    index: u64,
+    hash: B256,
+    timestamp: u64,
+) -> FlashblocksPayloadV1 {
+    FlashblocksPayloadV1 {
+        payload_id,
+        index,
+        base: Some(ExecutionPayloadBaseV1 {
+            parent_beacon_block_root: B256::default(),
+            parent_hash: hash,
+            fee_recipient: Address::ZERO,
+            prev_randao: B256::default(),
+            block_number,
+            gas_limit: 0,
+            timestamp,
+            extra_data: Bytes::new(),
+            base_fee_per_gas: U256::ZERO,
+        }),
+        metadata: FlashblockMetadata::default(),
+        diff: ExecutionPayloadFlashblockDeltaV1::default(),
+    }
+}
+
+async fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1 {
+    let tx1 = raw_tx(
+        0,
+        eip1559()
+            .chain_id(8453)
+            .nonce(0)
+            .max_fee_per_gas(2_000_000_000u128)
+            .max_priority_fee_per_gas(100_000_000u128)
+            .to(account(1))
+            .call(),
+    )
+    .await;
+    let tx2 = raw_tx(
+        0,
+        eip1559()
+            .chain_id(8453)
+            .nonce(1)
+            .max_fee_per_gas(2_000_000_000u128)
+            .max_priority_fee_per_gas(100_000_000u128)
+            .to(account(2))
+            .call(),
+    )
+    .await;
+
+    FlashblocksPayloadV1 {
+        payload_id,
+        index,
+        base: None,
+        diff: ExecutionPayloadFlashblockDeltaV1 {
+            state_root: B256::default(),
+            receipts_root: B256::default(),
+            gas_used: 0,
+            block_hash: B256::default(),
+            transactions: vec![tx1, tx2],
+            withdrawals: Vec::new(),
+            logs_bloom: Default::default(),
+            withdrawals_root: Default::default(),
+            access_list_data: Default::default(),
+        },
+        metadata: FlashblockMetadata::default(),
+    }
+}
+
+async fn publish_flashblock_with_latency(
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
+    rpc_url: url::Url,
+    authorizer: &SigningKey,
+    payload_id: PayloadId,
+    authorization_timestamp: u64,
+    simulated_latency: Duration,
+) -> eyre::Result<()> {
+    let provider = provider_from_url(rpc_url).await;
+    let latest_block = provider
+        .get_block_by_number(alloy_eips::BlockNumberOrTag::Latest)
+        .await?
+        .expect("latest block expected");
+    let mut payload = base_payload(
+        0,
+        payload_id,
+        0,
+        latest_block.hash(),
+        authorization_timestamp,
+    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_nanos() as i64;
+    payload.metadata.flashblock_timestamp = Some(now - simulated_latency.as_nanos() as i64);
+    let authorization = Authorization::new(
+        payload.payload_id,
+        authorization_timestamp,
+        authorizer,
+        p2p_handle.builder_sk()?.verifying_key(),
+    );
+    let authorized = AuthorizedPayload::new(p2p_handle.builder_sk()?, authorization, payload);
+
+    {
+        let state = p2p_handle.state.lock();
+        state
+            .publishing_status
+            .send_replace(PublishingStatus::Publishing { authorization });
+    }
+    p2p_handle.publish_new(authorized)?;
+    {
+        let state = p2p_handle.state.lock();
+        state
+            .publishing_status
+            .send_replace(PublishingStatus::NotPublishing {
+                active_publishers: Vec::new(),
+            });
+    }
+
+    Ok(())
+}
+
+async fn provider_from_url(url: url::Url) -> RootProvider {
+    let client = RpcClient::builder().http(url);
+    RootProvider::new(client)
+}
+
+async fn p2p_wait_for_pending_block(
+    rpc_url: url::Url,
+    expected_number: u64,
+    expected_txs: usize,
+) -> eyre::Result<()> {
+    let provider = provider_from_url(rpc_url).await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last = String::new();
+
+    loop {
+        let pending = provider
+            .get_block_by_number(alloy_eips::BlockNumberOrTag::Pending)
+            .await?;
+
+        if let Some(ref block) = pending {
+            if block.number() == expected_number
+                && block.transactions.hashes().len() == expected_txs
+            {
+                return Ok(());
+            }
+            last = format!(
+                "number={}, txs={}",
+                block.number(),
+                block.transactions.hashes().len()
+            );
+        }
+
+        if Instant::now() >= deadline {
+            return Err(eyre!(
+                "timed out waiting for pending block: expected number={expected_number} txs={expected_txs}, last observed: {last}"
+            ));
+        }
+
+        sleep(Duration::from_millis(50)).await;
+    }
 }

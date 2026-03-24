@@ -5,7 +5,7 @@ use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_tracing::tracing::info;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_node::{
-    FlashblocksOpApi, OpApiExtServer, context::FlashblocksContext, node::WorldChainNode,
+    FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
 use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
@@ -36,7 +36,7 @@ fn main() {
             let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
             info!(target: "reth::cli", "Starting in Flashblocks mode");
-            let node = WorldChainNode::<FlashblocksContext>::new(config.clone());
+            let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
             let NodeHandle {
                 node_exit_future,
                 node: _node,

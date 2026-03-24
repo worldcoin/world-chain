@@ -18,7 +18,7 @@ use reth_optimism_node::{OpPayloadAttributes, utils::optimism_payload_attributes
 use reth_optimism_payload_builder::payload_id_optimism;
 use tracing::info;
 
-use world_chain_node::context::FlashblocksContext;
+use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_primitives::p2p::Authorization;
 use world_chain_test_utils::e2e_harness::{
     actions::EngineDriver,
@@ -63,9 +63,12 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Spawn node swarm
-    let (_, nodes, _tasks, mut env, tx_spammer) =
-        setup::<FlashblocksContext>(args.nodes, optimism_payload_attributes, args.flashblocks)
-            .await?;
+    let (_, nodes, _tasks, mut env, tx_spammer) = setup::<WorldChainDefaultContext>(
+        args.nodes,
+        optimism_payload_attributes,
+        args.flashblocks,
+    )
+    .await?;
 
     // Print RPC endpoints
     for (i, node) in nodes.iter().enumerate() {

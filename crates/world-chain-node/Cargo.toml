@@ -27,7 +27,6 @@ reth-evm.workspace = true
 reth-engine-local.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
-reth-optimism-payload-builder.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
@@ -55,7 +54,6 @@ metrics-derive.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 alloy-rpc-types-eth.workspace = true
-alloy-signer-local.workspace = true
 alloy-consensus.workspace = true
 
 op-alloy-consensus.workspace = true

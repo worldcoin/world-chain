@@ -6,6 +6,7 @@ pub mod engine_validator;
 pub mod node;
 pub mod payload;
 pub mod payload_service;
+pub mod pool;
 pub mod tx_propagation;
 
 // Re-export for ease of use
