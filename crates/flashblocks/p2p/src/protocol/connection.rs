@@ -360,26 +360,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         }
 
-        if msg.payload_id == p2p_state.payload_id
-            && (msg.index as usize)
-                .saturating_add(crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW)
-                < p2p_state.flashblock_index
-        {
-            tracing::warn!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                payload_id = %msg.payload_id,
-                index = msg.index,
-                current_index = p2p_state.flashblock_index,
-                grace_window = crate::protocol::handler::RECEIVE_FLASHBLOCK_GRACE_WINDOW,
-                "received flashblock outside receive grace window",
-            );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
-            return;
-        }
-
         let Some(peer_state) = p2p_state.connection_state_mut(&self.peer_id) else {
             return;
         };
