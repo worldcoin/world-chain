@@ -4,6 +4,7 @@ use alloy_op_evm::{
     block::{OpTxEnv, receipt_builder::OpReceiptBuilder},
 };
 
+use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, StateDB},
@@ -14,6 +15,7 @@ use reth_evm::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
@@ -196,5 +198,13 @@ where
             },
             db.take_bundle(),
         ))
+    }
+
+    fn set_committed_state(&mut self, _state: &ExecutedBlock<Self::Primitives>) {
+        todo!("FlashblocksBlockBuilder::set_committed_state")
+    }
+
+    fn chain_spec(&self) -> impl OpHardforks {
+        self.inner.executor.spec.clone()
     }
 }

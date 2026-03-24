@@ -368,6 +368,7 @@ where
 pub struct FlashblocksComponentsContext {
     pub flashblocks_handle: FlashblocksHandle,
     pub flashblocks_state: FlashblocksExecutionCoordinator,
+    pub flashblock_processor: std::sync::Arc<flashblocks_builder::coordinator::FlashblockProcessor>,
     pub to_jobs_generator: tokio::sync::watch::Sender<Option<Authorization>>,
     pub authorizer_vk: VerifyingKey,
 }
@@ -414,13 +415,14 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 
-        let flashblocks_state =
+        let (flashblocks_state, flashblock_processor) =
             FlashblocksExecutionCoordinator::new(flashblocks_handle.clone(), pending_block);
 
         let (to_jobs_generator, _) = tokio::sync::watch::channel(None);
 
         Self {
             flashblocks_state,
+            flashblock_processor: std::sync::Arc::new(flashblock_processor),
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,

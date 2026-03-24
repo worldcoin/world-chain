@@ -5,6 +5,7 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpReceipt;
+use reth_chain_state::ExecutedBlock;
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError, StateDB},
@@ -12,7 +13,8 @@ use reth_evm::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_primitives::BuiltPayload;
 use revm::{
     DatabaseCommit,
@@ -34,6 +36,7 @@ use reth_evm::{
     },
     op_revm::OpHaltReason,
 };
+use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
@@ -314,6 +317,14 @@ where
             bundle,
         ))
     }
+
+    fn set_committed_state(&mut self, _state: &ExecutedBlock<Self::Primitives>) {
+        todo!("BalBlockBuilder::set_committed_state")
+    }
+
+    fn chain_spec(&self) -> impl OpHardforks {
+        self.inner.executor.spec.clone()
+    }
 }
 
 /// Simple counter to track sub pre-confirmation block access index bounds.
@@ -382,6 +393,55 @@ where
     }
 }
 
+impl<R> CommittedState<R>
+where
+    R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
+{
+    /// Constructs a [`CommittedState`] from an executed block and accumulated fees.
+    pub fn from_executed_block(
+        executed_block: Option<&BuiltPayloadExecutedBlock<OpPrimitives>>,
+        fees: U256,
+    ) -> Self {
+        let Some(executed_block) = executed_block else {
+            return Self {
+                transactions: vec![],
+                receipts: vec![],
+                gas_used: 0,
+                fees: U256::ZERO,
+                bundle: BundleState::default(),
+            };
+        };
+
+        let gas_used = executed_block.recovered_block.gas_used();
+        let bundle = executed_block.execution_output.state.clone();
+
+        let transactions: Vec<_> = executed_block
+            .recovered_block
+            .clone_transactions_recovered()
+            .enumerate()
+            .map(|(index, tx)| (index as BlockAccessIndex, tx))
+            .collect();
+
+        let receipts: Vec<_> = executed_block
+            .execution_output
+            .result
+            .receipts
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, r)| (index as BlockAccessIndex, r))
+            .collect();
+
+        Self {
+            transactions,
+            receipts,
+            gas_used,
+            fees,
+            bundle,
+        }
+    }
+}
+
 impl<R> TryFrom<Option<&OpBuiltPayload>> for CommittedState<R>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
@@ -393,42 +453,10 @@ where
             let executed_block = value
                 .executed_block()
                 .ok_or(BalExecutorError::MissingExecutedBlock)?;
-
-            let gas_used = executed_block.recovered_block.gas_used();
-
-            let bundle = value
-                .executed_block()
-                .ok_or(BalExecutorError::MissingExecutedBlock)?
-                .execution_output
-                .state
-                .clone();
-
-            let fees = value.fees();
-
-            let transactions: Vec<_> = executed_block
-                .recovered_block
-                .clone_transactions_recovered()
-                .enumerate()
-                .map(|(index, tx)| (index as BlockAccessIndex, tx))
-                .collect();
-
-            let receipts: Vec<_> = executed_block
-                .execution_output
-                .result
-                .receipts
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(|(index, r)| (index as BlockAccessIndex, r))
-                .collect();
-
-            Ok(Self {
-                transactions,
-                receipts,
-                gas_used,
-                fees,
-                bundle,
-            })
+            Ok(Self::from_executed_block(
+                Some(&executed_block),
+                value.fees(),
+            ))
         } else {
             Ok(Self {
                 transactions: vec![],

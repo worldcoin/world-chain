@@ -138,16 +138,45 @@
 //! [`BalBlockBuilder`]: executor::BalBlockBuilder
 //! [`TemporalDb`]: database::temporal_db::TemporalDb
 
-use reth_evm::{
-    block::BlockExecutionError,
-    execute::{BlockBuilder, BlockBuilderOutcome},
+use std::sync::Arc;
+
+use alloy_consensus::{Block, transaction::SignerRecoverable};
+use alloy_eips::{Decodable2718, eip2718::WithEncoded};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
+use alloy_rpc_types_engine::ExecutionData;
+use flashblocks_primitives::{
+    ed25519_dalek::ed25519::signature::rand_core::le, primitives::FlashblocksPayloadV1,
 };
-use reth_optimism_payload_builder::config::OpBuilderConfig;
-use reth_provider::StateProvider;
+use op_alloy_rpc_types_engine::OpExecutionData;
+use reth::{
+    core::primitives::SealedBlock, network::test_utils::transactions,
+    revm::database::StateProviderDatabase,
+};
+use reth_chain_state::{ComputedTrieData, ExecutedBlock};
+use reth_evm::{
+    Evm, EvmEnv, EvmFactory,
+    block::{BlockExecutionError, BlockExecutor, CommitChanges, ExecutableTx, StateDB},
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutorTx},
+    op_revm::OpSpecId,
+};
+use reth_node_api::{NodePrimitives, PayloadTypes};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_node::OpPayloadPrimitives;
+use reth_optimism_payload_builder::{OpExecutionPayloadValidator, config::OpBuilderConfig};
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use reth_primitives::{Recovered, SealedHeader};
+use reth_provider::{BlockExecutionOutput, StateProvider};
+use revm::handler::execution;
 use revm_database::BundleState;
+
+use crate::{bal_validator::decode_transactions_with_indices, executor::FlashblocksBlockBuilder};
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
+
+pub mod processor;
 
 /// Underlying block executor and builder with BAL construction.
 pub mod bal_executor;
@@ -223,4 +252,108 @@ pub trait BlockBuilderExt: BlockBuilder {
         self,
         state_provider: impl StateProvider,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
+
+    fn set_committed_state(&mut self, state: &ExecutedBlock<Self::Primitives>);
+
+    fn chain_spec(&self) -> impl OpHardforks;
+}
+
+pub struct FlashblockBlockValidator {
+    chain_spec: Arc<OpChainSpec>,
+    execution_context: OpBlockExecutionCtx,
+    sealed_header: SealedHeader,
+    evm_env: EvmEnv<OpSpecId>,
+}
+
+impl FlashblockBlockValidator {
+    pub fn new(
+        chain_spec: Arc<OpChainSpec>,
+        execution_context: OpBlockExecutionCtx,
+        sealed_header: SealedHeader,
+        evm_env: EvmEnv<OpSpecId>,
+    ) -> Self {
+        Self {
+            chain_spec,
+            execution_context,
+            sealed_header,
+            evm_env,
+        }
+    }
+
+    pub fn builder(
+        &self,
+        provider: impl StateProvider + Clone + 'static,
+        state: ExecutedBlock<OpPrimitives>,
+    ) -> impl BlockBuilderExt<Primitives = OpPrimitives> {
+        let receipts = state.execution_output.receipts.clone();
+
+        let transactions = state.recovered_block().clone_transactions_recovered();
+
+        let database = StateProviderDatabase::new(provider.clone());
+        let db = revm::database::State::builder()
+            .with_database(database)
+            .with_bundle_update()
+            .with_bundle_prestate(state.execution_outcome().state.clone())
+            .build();
+
+        let evm = OpEvmFactory::default().create_evm(db, self.evm_env.clone());
+
+        let mut executor = OpBlockExecutor::new(
+            evm,
+            self.execution_context.clone(),
+            (*self.chain_spec).clone(),
+            OpRethReceiptBuilder::default(),
+        );
+        executor.receipts = receipts;
+        executor.gas_used = state.execution_outcome().gas_used;
+
+        FlashblocksBlockBuilder::<OpPrimitives, _, _>::new(
+            self.execution_context.clone(),
+            &self.sealed_header,
+            executor,
+            transactions.collect(),
+            self.chain_spec.clone(),
+        )
+    }
+
+    pub fn validate_payload_with_state(
+        self,
+        state_provider: impl StateProvider + Clone + 'static,
+        transactions: &[alloy_primitives::Bytes],
+        pending: Option<ExecutedBlock<OpPrimitives>>,
+    ) -> Result<ExecutedBlock<OpPrimitives>, BlockExecutionError> {
+        let mut builder = self.builder(
+            state_provider.clone(),
+            pending.clone().unwrap_or_default().clone(),
+        );
+
+        decode_transactions_with_indices(
+            transactions,
+            pending
+                .as_ref()
+                .map_or(0_usize, |b| b.recovered_block().transaction_count()) as u16,
+        )
+        .map_err(BlockExecutionError::other)?
+        .into_iter()
+        .map(|(_, tx)| builder.execute_transaction(tx));
+
+        let (outcome, bundle) = builder.finish_with_bundle(state_provider)?;
+
+        let computed_trie_data = ComputedTrieData::without_trie_input(
+            outcome.hashed_state.into_sorted().into(),
+            outcome.trie_updates.into_sorted().into(),
+        );
+
+        let executed = ExecutedBlock::new(
+            outcome.block.into(),
+            BlockExecutionOutput {
+                result: outcome.execution_result,
+                state: bundle,
+            }
+            .into(),
+            computed_trie_data,
+        );
+
+        Ok(executed)
+    }
 }

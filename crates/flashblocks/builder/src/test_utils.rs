@@ -1061,7 +1061,7 @@ impl StateProviderFactory for TestStateProvider {
 // ============================================================================
 
 /// Provider wrapper that adds [`HeaderProvider`] and [`ChainSpecProvider`]
-/// implementations needed by [`process_flashblock`](crate::coordinator::process_flashblock).
+/// implementations needed by [`run_flashblock_processor`](crate::coordinator::run_flashblock_processor).
 #[derive(Debug, Clone)]
 pub struct BenchProvider {
     pub inner: TestStateProvider,
@@ -1398,7 +1398,7 @@ pub fn build_flashblock_fixture_fib(num_txs: usize, bal: bool) -> FlashblocksPay
 
 /// Builds a [`FlashblocksPayloadV1`] fixture with the given number of transactions.
 ///
-/// Returns the payload ready to be passed to `process_flashblock`.
+/// Returns the payload ready to be passed to `run_flashblock_processor`.
 /// The base references `CHAIN_SPEC.genesis_hash()` as `parent_hash` so
 /// `BenchProvider` can serve the sealed header from `sealed_header_by_hash`.
 pub fn build_flashblock_fixture<F>(

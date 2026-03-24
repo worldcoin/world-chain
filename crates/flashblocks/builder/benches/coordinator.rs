@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flashblocks_builder::{
-    coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
+    coordinator::{FlashblocksExecutionCoordinator, run_flashblock_processor},
     test_utils::{
         BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
         build_flashblock_fixture_fib, build_flashblock_sequence_fixture_eth_transfers,
@@ -40,6 +40,8 @@ fn fresh_coordinator(
     (coordinator, handle, pending_tx)
 }
 
+/// Benchmarks a single flashblock by driving it through `run_flashblock_processor`
+/// with a one-item stream.
 fn bench_process_flashblock_case<F>(
     c: &mut Criterion,
     group_name: &str,
@@ -58,16 +60,28 @@ fn bench_process_flashblock_case<F>(
 
         group.bench_with_input(BenchmarkId::new("txs", tx_count), &tx_count, |b, &_n| {
             b.iter(|| {
-                let (coordinator, _handle, pending_tx) = fresh_coordinator(&rt);
-                process_flashblock(
+                let (coordinator, handle, pending_tx) = fresh_coordinator(&rt);
+                let coordinator = Arc::new(coordinator);
+                let pending_tx_clone = pending_tx.clone();
+
+                let stream = handle
+                    .event_stream(provider.clone(), move |event| {
+                        FlashblocksExecutionCoordinator::event_hook(event, &pending_tx_clone)
+                    })
+                    .take(2); // 1 Canon(genesis) + 1 Pending flashblock
+
+                handle.flashblocks_tx().send(flashblock.clone()).ok();
+
+                rt.block_on(run_flashblock_processor(
+                    coordinator.clone(),
+                    stream,
                     provider.clone(),
-                    &EVM_CONFIG,
-                    &coordinator,
+                    EVM_CONFIG.clone(),
                     CHAIN_SPEC.clone(),
-                    flashblock.clone(),
                     pending_tx,
-                )
-                .expect("process_flashblock failed");
+                ));
+
+                assert_eq!(coordinator.flashblocks().flashblocks().len(), 1);
             });
         });
     }
