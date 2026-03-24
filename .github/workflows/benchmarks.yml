@@ -144,7 +144,7 @@ jobs:
           restore-keys: cargo-bench-
 
       - name: Generate baseline
-        run: cargo bench --package world-chain-builder bench --bench coordinator -- --save-baseline main
+        run: cargo bench --package world-chain-builder --bench coordinator -- --save-baseline main
 
       # Dynamic key ensures each push to main overwrites the baseline.
       - name: Save baseline
