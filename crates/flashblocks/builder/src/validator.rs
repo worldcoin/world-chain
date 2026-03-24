@@ -204,12 +204,18 @@ impl FlashblocksBlockValidator {
             committed_state.transactions_iter().count() as u16,
         )?;
 
-        let mut diff_fees: u128 = 0;
+        let mut fees = U256::ZERO;
         for (_, tx) in &transactions {
-            builder
+            let gag_used = builder
                 .execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
-            if !tx.is_deposit() {
-                diff_fees += tx.effective_tip_per_gas(basefee).unwrap_or(0);
+
+            if !tx.is_deposit()
+                && let Some(gas_used) = gag_used
+            {
+                let miner_fee = tx
+                    .effective_tip_per_gas(basefee)
+                    .expect("fee is always valid; execution succeeded");
+                fees += U256::from(gas_used) * U256::from(miner_fee);
             }
         }
 
@@ -244,7 +250,7 @@ impl FlashblocksBlockValidator {
         Ok(OpBuiltPayload::new(
             payload_id,
             sealed_block,
-            committed_state.fees + U256::from(diff_fees),
+            committed_state.fees + fees,
             Some(executed_block),
         ))
     }
