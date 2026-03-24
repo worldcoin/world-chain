@@ -24,7 +24,7 @@ use reth_ethereum::{
     network::{api::PeerId, protocol::ProtocolHandler},
     primitives::{AlloyBlockHeader, NodePrimitives},
 };
-use reth_network::Peers;
+use reth_network::{Peers, PeersInfo};
 use reth_provider::{BlockNumReader, CanonStateSubscriptions, HeaderProvider};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -78,9 +78,15 @@ const RECEIVE_REQUEST_TIMEOUT_SECS: u64 = 2;
 ///
 /// This trait combines all the necessary bounds for a network handle to be used
 /// in the flashblocks P2P system, including peer management capabilities.
-pub trait FlashblocksP2PNetworkHandle: Clone + Unpin + Peers + std::fmt::Debug + 'static {}
+pub trait FlashblocksP2PNetworkHandle:
+    Clone + Unpin + Peers + PeersInfo + std::fmt::Debug + 'static
+{
+}
 
-impl<N: Clone + Unpin + Peers + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle for N {}
+impl<N: Clone + Unpin + Peers + PeersInfo + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle
+    for N
+{
+}
 
 /// The current publishing status of this node in the flashblocks P2P network.
 ///
@@ -719,6 +725,11 @@ impl FlashblocksHandle {
         peer_id: PeerId,
         outbound_tx: mpsc::Sender<BytesMut>,
     ) {
+        // Ignore self-connections (can occur when discovery hairpins through the NLB).
+        if peer_id == network.local_node_record().id {
+            return;
+        }
+
         {
             let mut state = self.state.lock();
             let mut conn_state = FlashblocksPeerState::new();
