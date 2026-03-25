@@ -44,6 +44,11 @@ inherits = "dev"
 [profile.verbose-tracing.package."*"]
 opt-level = 0
 
+[profile.perf-tracing]
+inherits = "maxperf"
+debug = 1
+strip = "none"
+
 [workspace.lints]
 
 [workspace.dependencies]
