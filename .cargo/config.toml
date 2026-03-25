@@ -8,3 +8,4 @@ bc = "bench --package world-chain-builder --bench coordinator -- --baseline main
 [env]
 DEBUG = "info,flashblocks=debug,world_chain=info"
 TRACE = "info,flashblocks=trace,world_chain=trace,engine::tree=trace"
+RUST_BACKTRACE = { value = "full", force = false }

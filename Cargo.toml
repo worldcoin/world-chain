@@ -23,31 +23,21 @@ members = [
     "e2e-tests",
     "xtask",
 ]
-default-members = [
-    "bin/world-chain",
-]
+default-members = ["bin/world-chain"]
 
 [profile.maxperf]
 codegen-units = 1
 inherits = "release"
 lto = "fat"
+strip = "none"
+panic = "abort"
 
 [profile.dev-tracing]
 inherits = "dev"
 
-[profile.dev-tracing.package."*"]
-opt-level = 0
-
 [profile.verbose-tracing]
 inherits = "dev"
 
-[profile.verbose-tracing.package."*"]
-opt-level = 0
-
-[profile.perf-tracing]
-inherits = "maxperf"
-debug = 1
-strip = "none"
 
 [workspace.lints]
 
