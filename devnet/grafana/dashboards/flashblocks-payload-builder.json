@@ -513,6 +513,27 @@
           "legendFormat": "finalize",
           "range": true,
           "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_merge_transitions_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_merge_transitions_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "merge transitions",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_state_root_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_state_root_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "state root",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_block_assembly_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_block_assembly_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "block assembly",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Stage Average Duration",
@@ -732,10 +753,24 @@
         },
         {
           "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "merge transitions",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
           "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds_latest{client_type=\"execution-builder\"})",
           "legendFormat": "state root",
           "range": true,
-          "refId": "G"
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "block assembly",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Latest Stage Durations",
