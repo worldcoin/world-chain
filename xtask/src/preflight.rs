@@ -111,8 +111,8 @@ fn restage_changed() {
 pub fn run(_args: Args) -> Result<()> {
     eprintln!("Running preflight checks...\n");
 
-    let contracts_changed = staged_paths_match("contracts/");
-    let cli_changed = staged_paths_match("crates/world-chain-cli/");
+    let contracts_changed = staged_paths_match("pkg/contracts/");
+    let cli_changed = staged_paths_match("crates/cli/");
     let errors = AtomicUsize::new(0);
 
     // ── Phase 1: Auto-fix ──────────────────────────────────────────────
@@ -126,7 +126,7 @@ pub fn run(_args: Args) -> Result<()> {
 
         if contracts_changed {
             s.spawn(|| {
-                run_cmd("forge", &["fmt", "--root", "contracts"]);
+                run_cmd("forge", &["fmt", "--root", "pkg/contracts"]);
             });
         }
     });
@@ -214,13 +214,13 @@ pub fn run(_args: Args) -> Result<()> {
                 report("Solidity formatting", Status::Skip, &errors);
                 return;
             }
-            let ok = run_cmd("forge", &["fmt", "--check", "--root", "contracts"]);
+            let ok = run_cmd("forge", &["fmt", "--check", "--root", "pkg/contracts"]);
             report(
                 "Solidity formatting",
                 if ok {
                     Status::Pass
                 } else {
-                    Status::Fail("cd contracts && forge fmt".into())
+                    Status::Fail("cd pkg/contracts && forge fmt".into())
                 },
                 &errors,
             );

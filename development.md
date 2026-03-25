@@ -5,21 +5,20 @@
 ```
 world-chain/
 ├── crates/
-│   ├── bin/world-chain/             # Node binary
-│   ├── world-chain-primitives/      # Core types (flashblock payloads, BAL, P2P auth)
-│   ├── world-chain-cli/             # CLI args & node configuration
-│   ├── world-chain-pbh/             # Priority Bundle Handler (nullifiers, proofs)
-│   ├── world-chain-p2p/             # Flashblocks P2P sub-protocol
-│   ├── world-chain-pool/            # Transaction pool with PBH ordering
-│   ├── world-chain-rpc/             # JSON-RPC APIs (ETH, OP, Engine, Sequencer)
-│   ├── world-chain-builder/         # Block builder, BAL, parallel validation
-│   ├── world-chain-payload/         # Payload generation & job management
-│   ├── world-chain-engine/          # Pending Block Consumer, and Engine Tree management.
-│   ├── world-chain-node/            # Node builder components.
-│   └── world-chain-test-utils/      # Shared test utilities & e2e harness
+├── bin/world-chain/                     # Node binary
+│   ├── primitives/                   # Core types (flashblock payloads, BAL, P2P auth)
+│   ├── cli/                          # CLI args & node configuration
+│   ├── pbh/                          # Priority Bundle Handler (nullifiers, proofs)
+│   ├── p2p/                          # Flashblocks P2P sub-protocol
+│   ├── pool/                         # Transaction pool with PBH ordering
+│   ├── rpc/                          # JSON-RPC APIs (ETH, OP, Engine, Sequencer)
+│   ├── builder/                      # Block builder, BAL, parallel validation
+│   ├── payload/                      # Payload generation & job management
+│   ├── node/                         # Node builder components.
+│   └── test-utils/                   # Shared test utilities & e2e harness
 ├── e2e-tests/                       # Integration & property-based tests
 ├── xtask/                           # Development tooling
-├── contracts/                       # Solidity smart contracts
+├── pkg/contracts/                   # Solidity smart contracts
 ├── specs/                           # Protocol Specifications
 └── scripts/                         # Extra scripts
 ```

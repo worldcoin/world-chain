@@ -9,7 +9,7 @@ build:
         -t world-chain:latest .
 
 deploy-contracts:
-    @just ./contracts/deploy-contracts
+    @just ./pkg/contracts/deploy-contracts
 
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
@@ -17,7 +17,7 @@ test *args='':
 fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
-    @just ./contracts/fmt
+    @just ./pkg/contracts/fmt
 
 fmt-fix:
     cargo +nightly fmt --all
@@ -42,4 +42,4 @@ docs:
     cargo xtask docs
 
 install *args='':
-    cargo install --path crates/bin/world-chain --locked $@
+    cargo install --path bin/world-chain --locked $@

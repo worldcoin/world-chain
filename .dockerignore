@@ -1,6 +1,6 @@
 target/
 .env/
-contracts/
+pkg/contracts/
 assets/
 docs/
 devnet/
