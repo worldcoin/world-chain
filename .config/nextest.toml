@@ -1,19 +1,5 @@
 experimental = ["setup-scripts"]
 
-[test-groups.unit]
-max-threads = "num-cpus"
-
-[test-groups.integration]
-max-threads = "num-cpus"
-
-[[profile.default.overrides]]
-filter = 'not package(world-chain-tests)'
-test-group = 'unit'
-
-[[profile.default.overrides]]
-filter = 'package(world-chain-tests)'
-test-group = 'integration'
-
 [profile.default]
 failure-output = "immediate-final"
 success-output = "never"
