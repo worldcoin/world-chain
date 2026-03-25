@@ -35,9 +35,10 @@ pub static EXECUTION: LazyLock<ExecutionMetrics> = LazyLock::new(ExecutionMetric
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PayloadBuildStage {
     Total,
-    Sequencer,
+    PreExecutionChanges,
+    SequencerTxExecution,
     TxPoolFetch,
-    TxExecution,
+    BestTxExecution,
     Finalize,
     MergeTransitions,
     StateRoot,
@@ -48,9 +49,10 @@ impl PayloadBuildStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Total => "total",
-            Self::Sequencer => "sequencer",
+            Self::PreExecutionChanges => "pre_execution_changes",
+            Self::SequencerTxExecution => "sequencer_tx_execution",
             Self::TxPoolFetch => "txpool_fetch",
-            Self::TxExecution => "tx_execution",
+            Self::BestTxExecution => "best_tx_execution",
             Self::Finalize => "finalize",
             Self::MergeTransitions => "merge_transitions",
             Self::StateRoot => "state_root",
@@ -141,18 +143,22 @@ pub struct PayloadBuildMetrics {
     pub total_duration_seconds: Histogram,
     /// Latest total payload build duration in seconds.
     pub total_duration_seconds_latest: Gauge,
+    /// Histogram of pre-execution changes duration in seconds.
+    pub pre_execution_changes_duration_seconds: Histogram,
+    /// Latest pre-execution changes duration in seconds.
+    pub pre_execution_changes_duration_seconds_latest: Gauge,
     /// Histogram of sequencer transaction execution duration in seconds.
-    pub sequencer_duration_seconds: Histogram,
+    pub sequencer_tx_execution_duration_seconds: Histogram,
     /// Latest sequencer transaction execution duration in seconds.
-    pub sequencer_duration_seconds_latest: Gauge,
+    pub sequencer_tx_execution_duration_seconds_latest: Gauge,
     /// Histogram of tx-pool selection and setup duration in seconds.
     pub txpool_fetch_duration_seconds: Histogram,
     /// Latest tx-pool selection and setup duration in seconds.
     pub txpool_fetch_duration_seconds_latest: Gauge,
-    /// Histogram of tx-pool transaction execution duration in seconds.
-    pub tx_execution_duration_seconds: Histogram,
-    /// Latest tx-pool transaction execution duration in seconds.
-    pub tx_execution_duration_seconds_latest: Gauge,
+    /// Histogram of best-transaction execution duration in seconds.
+    pub best_tx_execution_duration_seconds: Histogram,
+    /// Latest best-transaction execution duration in seconds.
+    pub best_tx_execution_duration_seconds_latest: Gauge,
     /// Histogram of payload finalization duration in seconds.
     pub finalize_duration_seconds: Histogram,
     /// Latest payload finalization duration in seconds.
@@ -266,17 +272,27 @@ impl PayloadBuildMetrics {
                 self.total_duration_seconds.record(duration_secs);
                 self.total_duration_seconds_latest.set(duration_secs);
             }
-            PayloadBuildStage::Sequencer => {
-                self.sequencer_duration_seconds.record(duration_secs);
-                self.sequencer_duration_seconds_latest.set(duration_secs);
+            PayloadBuildStage::PreExecutionChanges => {
+                self.pre_execution_changes_duration_seconds
+                    .record(duration_secs);
+                self.pre_execution_changes_duration_seconds_latest
+                    .set(duration_secs);
+            }
+            PayloadBuildStage::SequencerTxExecution => {
+                self.sequencer_tx_execution_duration_seconds
+                    .record(duration_secs);
+                self.sequencer_tx_execution_duration_seconds_latest
+                    .set(duration_secs);
             }
             PayloadBuildStage::TxPoolFetch => {
                 self.txpool_fetch_duration_seconds.record(duration_secs);
                 self.txpool_fetch_duration_seconds_latest.set(duration_secs);
             }
-            PayloadBuildStage::TxExecution => {
-                self.tx_execution_duration_seconds.record(duration_secs);
-                self.tx_execution_duration_seconds_latest.set(duration_secs);
+            PayloadBuildStage::BestTxExecution => {
+                self.best_tx_execution_duration_seconds
+                    .record(duration_secs);
+                self.best_tx_execution_duration_seconds_latest
+                    .set(duration_secs);
             }
             PayloadBuildStage::Finalize => {
                 self.finalize_duration_seconds.record(duration_secs);

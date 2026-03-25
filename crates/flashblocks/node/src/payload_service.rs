@@ -5,9 +5,8 @@ use flashblocks_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use flashblocks_p2p::protocol::handler::FlashblocksHandle;
-use flashblocks_payload::{
-    generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
-    metrics::PayloadBuilderMetrics,
+use flashblocks_payload::generator::{
+    FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
 };
 use flashblocks_primitives::p2p::Authorization;
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
@@ -102,7 +101,6 @@ where
             .deadline(conf.deadline)
             .max_payload_tasks(conf.max_payload_tasks);
 
-        let metrics = PayloadBuilderMetrics::default();
         if let (Some(p2p_handler), Some(authorizations_rx), Some(flashblocks_state)) = (
             self.p2p_handler,
             self.authorizations_rx,
@@ -119,7 +117,6 @@ where
                 self.override_authorizer_sk,
                 self.force_publish,
                 flashblocks_state.clone(),
-                metrics,
             );
 
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(

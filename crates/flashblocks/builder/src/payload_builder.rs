@@ -464,24 +464,31 @@ where
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
     // will already be in the [`BundleState`] at this point if the `best_payload` is set.
     let mut info = if committed_payload.is_none() {
-        let sequencer_started = Instant::now();
-        let sequencer_result = (|| {
-            // 3. apply pre-execution changes
-            builder.apply_pre_execution_changes()?;
+        let pre_execution_changes_started = Instant::now();
+        let pre_execution_changes_result = builder.apply_pre_execution_changes();
+        metrics.record_stage_duration(
+            PayloadBuildStage::PreExecutionChanges,
+            pre_execution_changes_started.elapsed(),
+        );
+        pre_execution_changes_result?;
 
-            // 4. Execute Deposit transactions
-            let sequencer_transactions_uncompressed_size: u64 = ctx
-                .attributes()
-                .transactions
-                .iter()
-                .map(|tx| tx.1.encode_2718_len() as u64)
-                .sum();
-            cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
-            ctx.execute_sequencer_transactions(&mut builder)
-                .map_err(PayloadBuilderError::other)
-        })();
-        metrics.record_stage_duration(PayloadBuildStage::Sequencer, sequencer_started.elapsed());
-        sequencer_result?
+        // 4. Execute the sequencer transactions after the block-level pre-execution changes.
+        let sequencer_tx_execution_started = Instant::now();
+        let sequencer_transactions_uncompressed_size: u64 = ctx
+            .attributes()
+            .transactions
+            .iter()
+            .map(|tx| tx.1.encode_2718_len() as u64)
+            .sum();
+        cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
+        let sequencer_tx_execution_result = ctx
+            .execute_sequencer_transactions(&mut builder)
+            .map_err(PayloadBuilderError::other);
+        metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            sequencer_tx_execution_started.elapsed(),
+        );
+        sequencer_tx_execution_result?
     } else {
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
@@ -514,7 +521,7 @@ where
             cumulative_uncompressed_bytes,
         );
         metrics.record_stage_duration(
-            PayloadBuildStage::TxExecution,
+            PayloadBuildStage::BestTxExecution,
             tx_execution_started.elapsed(),
         );
 
