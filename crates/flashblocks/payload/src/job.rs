@@ -379,7 +379,11 @@ where
         ))
     }
 
-    pub(crate) fn record_payload_metrics(&self, payload: &OpBuiltPayload<OpPrimitives>) {
+    pub(crate) fn record_payload_metrics(
+        &self,
+        payload: &OpBuiltPayload<OpPrimitives>,
+        flashblock_index: u64,
+    ) {
         let block = payload.block();
         let payload_bytes: usize = block
             .body()
@@ -391,6 +395,15 @@ where
 
         self.metrics
             .record_payload_metrics(payload_bytes as u64, gas_used, tx_count);
+        self.builder
+            .payload_build_metrics()
+            .record_committed_payload(
+                payload_bytes as u64,
+                gas_used,
+                tx_count as u64,
+                payload.fees().saturating_to::<u128>() as f64,
+                flashblock_index,
+            );
     }
 }
 
@@ -492,9 +505,6 @@ where
                 this.best_payload.1.clone(),
             )
         {
-            // record metrics
-            this.record_payload_metrics(&payload);
-
             trace!(target: "flashblocks::payload_builder", current_value = %payload.fees(), "committing to best payload");
 
             if this
@@ -522,6 +532,7 @@ where
                 // commit to the best payload
                 this.committed_payload =
                     CommittedPayloadState::from((this.best_payload.0.clone(), access_list));
+                this.record_payload_metrics(&payload, this.block_index);
 
                 // increment the pre-confirmation index
                 this.block_index += 1;

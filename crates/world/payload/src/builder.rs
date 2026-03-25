@@ -2,7 +2,7 @@ use crate::context::WorldChainPayloadBuilderCtx;
 use alloy_eips::Encodable2718;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_signer_local::PrivateKeySigner;
-use flashblocks_builder::traits::context::PayloadBuilderCtx;
+use flashblocks_builder::{metrics::PayloadBuildMetrics, traits::context::PayloadBuilderCtx};
 use reth::{
     api::{BuiltPayloadExecutedBlock, PayloadBuilderError},
     payload::PayloadBuilderAttributes,
@@ -412,6 +412,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
 
         // 3. if mem pool transactions are requested we execute them
         if !op_ctx.attributes().no_tx_pool {
+            let metrics = PayloadBuildMetrics::default();
             let best_txs = best(op_ctx.best_transaction_attributes(builder.evm_mut().block()));
             // TODO: Validate gas limit
             if ctx
@@ -420,6 +421,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                     &mut info,
                     &mut builder,
                     best_txs,
+                    &metrics,
                     gas_limit,
                     cumulative_uncompressed_bytes,
                 )?
@@ -514,6 +516,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
         let cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
         let mut info = ctx.inner.execute_sequencer_transactions(&mut builder)?;
         if !ctx.inner.attributes().no_tx_pool {
+            let metrics = PayloadBuildMetrics::default();
             let best_txs = best(
                 ctx.inner
                     .best_transaction_attributes(builder.evm_mut().block()),
@@ -524,6 +527,7 @@ impl<Txs> WorldChainBuilder<'_, Txs> {
                 &mut info,
                 &mut builder,
                 best_txs,
+                &metrics,
                 0,
                 cumulative_uncompressed_bytes,
             )?;

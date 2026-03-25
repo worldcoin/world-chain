@@ -24,9 +24,9 @@ use revm::{
     database::states::bundle_state::BundleRetention,
 };
 use revm_database::BundleState;
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, sync::Arc, time::Instant};
 
-use crate::BlockBuilderExt;
+use crate::{BlockBuilderExt, metrics::PayloadBuildStage};
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<
@@ -139,12 +139,20 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
+        metrics: Option<&crate::metrics::PayloadBuildMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
+        let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
+        if let Some(metrics) = metrics {
+            metrics.record_stage_duration(
+                PayloadBuildStage::MergeTransitions,
+                merge_started.elapsed(),
+            );
+        }
 
         // Flatten reverts into a single transition:
         // - per account: keep earliest `previous_status`
@@ -159,9 +167,13 @@ where
 
         // calculate the state root
         let hashed_state = state.hashed_post_state(db.bundle_state());
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        let state_root_started = Instant::now();
+        let state_root_result = state.state_root_with_updates(hashed_state.clone());
+        if let Some(metrics) = metrics {
+            metrics
+                .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
+        }
+        let (state_root, trie_updates) = state_root_result.map_err(BlockExecutionError::other)?;
 
         let (transactions, senders) = self
             .inner
@@ -170,7 +182,8 @@ where
             .map(|tx| tx.into_parts())
             .unzip();
 
-        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block_assembly_started = Instant::now();
+        let block_result = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<R>,
@@ -183,7 +196,14 @@ where
             Cow::Borrowed(db.bundle_state()),
             &state,
             state_root,
-        ))?;
+        ));
+        if let Some(metrics) = metrics {
+            metrics.record_stage_duration(
+                PayloadBuildStage::BlockAssembly,
+                block_assembly_started.elapsed(),
+            );
+        }
+        let block = block_result?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

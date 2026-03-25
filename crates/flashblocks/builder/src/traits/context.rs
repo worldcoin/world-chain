@@ -27,7 +27,7 @@ use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
 
-use crate::traits::context_builder::PayloadBuilderCtxBuilder;
+use crate::{metrics::PayloadBuildMetrics, traits::context_builder::PayloadBuilderCtxBuilder};
 
 /// Context trait for building payloads with flashblock support.
 ///
@@ -141,6 +141,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         best_txs: Txs,
+        metrics: &PayloadBuildMetrics,
         gas_limit: u64,
         cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
@@ -256,6 +257,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         best_txs: Txs,
+        _metrics: &PayloadBuildMetrics,
         _gas_limit: u64,
         _cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
