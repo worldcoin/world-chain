@@ -1799,6 +1799,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Not correctly triggering payload building"]
 async fn test_double_failover() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
