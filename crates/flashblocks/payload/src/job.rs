@@ -42,8 +42,6 @@ use tokio::{
 };
 use tracing::{debug, error, info, span, trace};
 
-use crate::metrics::PayloadBuilderMetrics;
-
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
 pub struct FlashblocksPendingPayload<P> {
@@ -244,8 +242,6 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     pub(crate) cached_reads: Option<CachedReads>,
-    // /// metrics for this type
-    pub(crate) metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -294,7 +290,6 @@ where
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.0.payload().cloned();
         let committed_payload = self.committed_payload.clone();
-        self.metrics.inc_initiated_payload_builds();
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
@@ -392,9 +387,6 @@ where
             .sum();
         let gas_used = block.header().gas_used;
         let tx_count = block.body().transactions().count();
-
-        self.metrics
-            .record_payload_metrics(payload_bytes as u64, gas_used, tx_count);
         self.builder
             .payload_build_metrics()
             .record_committed_payload(
@@ -522,7 +514,6 @@ where
                         &this.committed_payload.payload().cloned(),
                         *authorization,
                     ) {
-                        this.metrics.inc_p2p_publishing_errors();
                         error!(target: "flashblocks::payload_builder", %err, "failed to publish new payload to p2p network");
                     } else {
                         trace!(target: "flashblocks::payload_builder", id=%this.config.payload_id(), "published new best payload to p2p network");
@@ -578,34 +569,6 @@ where
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
                     debug!(target: "flashblocks::payload_builder", %error, "payload build attempt failed");
-                    match &error {
-                        PayloadBuilderError::EvmExecutionError(_) => {
-                            this.metrics.inc_evm_execution_errors();
-                        }
-                        PayloadBuilderError::MissingPayload => {
-                            this.metrics.inc_database_errors();
-                        }
-                        PayloadBuilderError::MissingParentHeader(_) => {
-                            this.metrics.inc_database_errors();
-                        }
-                        PayloadBuilderError::MissingParentBlock(_) => {
-                            this.metrics.inc_database_errors();
-                        }
-                        PayloadBuilderError::Internal(_) => {
-                            // RethError from provider/database operations
-                            this.metrics.inc_database_errors();
-                        }
-                        PayloadBuilderError::ChannelClosed => {
-                            // Communication failure between components
-                            this.metrics.inc_payload_build_errors();
-                        }
-                        PayloadBuilderError::Other(_) => {
-                            // Catch-all for unknown errors
-                            this.metrics.inc_payload_build_errors();
-                        }
-                    }
-
-                    this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
                     this.pending_block = Some(fut);
@@ -645,7 +608,6 @@ where
             // Note: it is assumed that this is unlikely to happen, as the payload job is
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
-            self.metrics.inc_requested_empty_payload();
             self.builder.build_empty_payload(self.config.clone())
         }
     }
@@ -684,9 +646,6 @@ where
                 }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
                     debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing empty payload");
-
-                    // if no payload has been built yet
-                    self.metrics.inc_requested_empty_payload();
 
                     // no payload built yet, so we need to return an empty payload
                     let (tx, rx) = oneshot::channel();
