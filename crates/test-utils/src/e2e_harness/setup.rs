@@ -68,7 +68,7 @@ use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 use super::spammer::{TxSpammer, TxType};
 
-const GENESIS: &str = include_str!("../../assets/genesis.json");
+const GENESIS: &str = include_str!("../../res/genesis.json");
 
 // Optimism protocol constants - these addresses are defined by the Optimism specification
 const L1_BLOCK_PREDEPLOY: Address = address!("4200000000000000000000000000000000000015");

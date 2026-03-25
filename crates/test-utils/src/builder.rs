@@ -59,6 +59,18 @@ use world_chain_builder::{
     database::bal_builder_db::BalBuilderDb,
 };
 
+const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
+const WORLD_ID_TREE_DEPTH: u64 = 30;
+const WORLD_ID_ISSUER_SCHEMA_ID: u64 = 1;
+const WORLD_ID_RP_ID: u64 = 0x1a6ccf8f70e5de68;
+const WORLD_ID_ZK_GAS_LIMIT: u64 = 1_000_000;
+
+#[derive(Debug, Clone, Copy)]
+pub struct WorldIdBenchCase {
+    compressed_proof: [U256; 4],
+    public_inputs: [U256; 15],
+}
+
 lazy_static::lazy_static! {
     /// Test signer with deterministic private key
     pub static ref ALICE: PrivateKeySigner =
@@ -81,6 +93,11 @@ lazy_static::lazy_static! {
     pub static ref CHAOS_PROXY_CONTRACT: Address =
         Address::from_slice(&[0xCA, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02]);
+
+    /// World ID Groth16 verifier contract address (deterministic)
+    pub static ref WORLD_ID_VERIFIER_CONTRACT: Address =
+        Address::from_slice(&[0xCA, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03]);
 
     /// ChaosTest contract bytecode (from sol! macro compilation)
     pub static ref CHAOS_BYTECODE: Bytes = Bytes::from(
@@ -105,6 +122,70 @@ lazy_static::lazy_static! {
         storage.insert(impl_slot, B256::from(impl_value));
         storage
     };
+
+    /// Deployed runtime bytecode for world-id-protocol's `Verifier.sol`.
+    pub static ref WORLD_ID_VERIFIER_RUNTIME_BYTECODE: Bytes = {
+        let hex = include_str!("../res/world_id_verifier_runtime.hex");
+        let normalized: String = hex.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+        Bytes::from(
+            hex::decode(normalized.trim_start_matches("0x"))
+                .expect("valid World ID verifier runtime bytecode hex")
+        )
+    };
+
+    /// Real compressed proof vectors sourced from `world-id-protocol` tests.
+    static ref WORLD_ID_BENCH_CASES: Vec<WorldIdBenchCase> = vec![
+        WorldIdBenchCase {
+            compressed_proof: [
+                u256_from_hex("4906f4e17b969ef2cfc44bd96520f01a3f5c32972bca2e10b70e05e03e3d9f13"),
+                u256_from_hex("0d6d9a3456e9af7d8f6f78eb3380deb8c93505c062f62fa18b8ef8a2ccb55db8"),
+                u256_from_hex("a92a48edeb327b190048648788de9a8eff0abed5dc93bee8881387da40571278"),
+                u256_from_hex("38f52985c393efb732be8f54b5f00f7f25370ac5945de84e0d8d2f2d298866b8"),
+            ],
+            public_inputs: [
+                u256_from_hex("1bae01b23e5f0ee96151331fffb0550351c52e5ee0ced452c762e120723ae702"),
+                U256::from(WORLD_ID_ISSUER_SCHEMA_ID),
+                u256_from_hex("252c8234509649bb469ecb7a7e758f306b41415f2d80d4d67967902d6f589a81"),
+                u256_from_hex("230e4f93a5f1187639314dd25e595db06dc18de219cfaeb8cfdf81d4afe910d5"),
+                u256_from_hex("699cfa47"),
+                U256::ZERO,
+                u256_from_hex("0af727d9412a9d5c73b685fd09dc39e727064e65b8269b233009edfc105f9853"),
+                U256::from(WORLD_ID_TREE_DEPTH),
+                U256::from(WORLD_ID_RP_ID),
+                u256_from_hex("15d4b66e5417cb9875f6a2b5be9814dca80651d7c74b3b21685fdd494566e79f"),
+                u256_from_hex("0ac79da013272129ddceae6d20c0f579abd04b0a00160ed2be2151bf4014e8d"),
+                u256_from_hex("187ce5ac507fe0760e95d1893cc6ebf3a115eb9adeaa355c14cc52722a2275be"),
+                u256_from_hex("1578ed0de47522ad0b38e87031739c6a65caecc39ce3410bf3799e756a220f"),
+                u256_from_hex("18e3ab3d5fedc6eaa5e0d06a3a6f3dd5e0bf2d17b18b797a1cc6ff4706169d1e"),
+                U256::ZERO,
+            ],
+        },
+        WorldIdBenchCase {
+            compressed_proof: [
+                u256_from_hex("4533f8d38447da676c8eac8ec01ce031af1cc140d8397f3baf792be414c28790"),
+                u256_from_hex("0e05c9ada0f2a3ebb5863f0a3412aa852cea67099ce26bb46c44b264af5b6927"),
+                u256_from_hex("178bbfe59fc10b5ec4359ecb21b9f42fb8afef08e90cd3dec903fdd45cddc930"),
+                u256_from_hex("409b8908726ca9151d021fcecc882a3f5e93ba35f6043ad0bd51258b55e5018b"),
+            ],
+            public_inputs: [
+                u256_from_hex("1bae01b23e5f0ee96151331fffb0550351c52e5ee0ced452c762e120723ae702"),
+                U256::from(WORLD_ID_ISSUER_SCHEMA_ID),
+                u256_from_hex("252c8234509649bb469ecb7a7e758f306b41415f2d80d4d67967902d6f589a81"),
+                u256_from_hex("230e4f93a5f1187639314dd25e595db06dc18de219cfaeb8cfdf81d4afe910d5"),
+                u256_from_hex("699cfa47"),
+                U256::ZERO,
+                u256_from_hex("0af727d9412a9d5c73b685fd09dc39e727064e65b8269b233009edfc105f9853"),
+                U256::from(WORLD_ID_TREE_DEPTH),
+                U256::from(WORLD_ID_RP_ID),
+                u256_from_hex("15d4b66e5417cb9875f6a2b5be9814dca80651d7c74b3b21685fdd494566e79f"),
+                u256_from_hex("0ac79da013272129ddceae6d20c0f579abd04b0a00160ed2be2151bf4014e8d"),
+                u256_from_hex("187ce5ac507fe0760e95d1893cc6ebf3a115eb9adeaa355c14cc52722a2275be"),
+                u256_from_hex("1578ed0de47522ad0b38e87031739c6a65caecc39ce3410bf3799e756a220f"),
+                u256_from_hex("18e3ab3d5fedc6eaa5e0d06a3a6f3dd5e0bf2d17b18b797a1cc6ff4706169d1e"),
+                u256_from_hex("2025d8e786806a895f7e50ce403f7d6e33e501772b28116908ad6fa5108172f8"),
+            ],
+        },
+    ];
 
     /// Genesis configuration with funded accounts and ChaosTest contracts
     pub static ref GENESIS: Genesis = Genesis::default()
@@ -138,6 +219,12 @@ lazy_static::lazy_static! {
                 GenesisAccount::default()
                     .with_code(Some(CHAOS_PROXY_BYTECODE.clone()))
                     .with_storage(Some(CHAOS_PROXY_STORAGE.clone()))
+                    .with_nonce(Some(1))
+            ),
+            (
+                *WORLD_ID_VERIFIER_CONTRACT,
+                GenesisAccount::default()
+                    .with_code(Some(WORLD_ID_VERIFIER_RUNTIME_BYTECODE.clone()))
                     .with_nonce(Some(1))
             ),
         ])
@@ -177,6 +264,10 @@ lazy_static::lazy_static! {
     pub static ref EVM_ENV: EvmEnv<OpSpecId> = EVM_CONFIG
         .next_evm_env(SEALED_HEADER.header(), &NEXT_BLOCK_ENV_ATTRS)
         .unwrap();
+}
+
+fn u256_from_hex(value: &str) -> U256 {
+    U256::from_str_radix(value.trim_start_matches("0x"), 16).expect("valid U256 hex")
 }
 
 sol! {
@@ -260,6 +351,13 @@ sol! {
         }
         receive() external payable {}
     }
+
+    contract WorldIdGroth16Verifier {
+        function verifyCompressedProof(
+            uint256[4] calldata compressedProof,
+            uint256[15] calldata input
+        ) external view;
+    }
 }
 
 /// Target contract for chaos operations
@@ -286,6 +384,11 @@ pub enum TxOp {
         n: u64,
         target: ChaosTarget,
     },
+    /// Call the real World ID verifier hot path using compressed Groth16 proofs.
+    WorldIdVerifyCompressed {
+        from: PrivateKeySigner,
+        case: Box<WorldIdBenchCase>,
+    },
     /// Call deployNewImplementation() on ChaosTestProxy - deploys new contract
     DeployNewImplementation { from: PrivateKeySigner },
 }
@@ -296,6 +399,7 @@ impl TxOp {
         match self {
             TxOp::Transfer { from, .. } => from,
             TxOp::Fib { from, .. } => from,
+            TxOp::WorldIdVerifyCompressed { from, .. } => from,
             TxOp::DeployNewImplementation { from } => from,
         }
     }
@@ -307,6 +411,14 @@ impl TxOp {
             TxOp::Fib { n, .. } => {
                 // fib(uint256) selector from generated bindings
                 Fib::fibCall { n: U256::from(*n) }.abi_encode().into()
+            }
+            TxOp::WorldIdVerifyCompressed { case, .. } => {
+                WorldIdGroth16Verifier::verifyCompressedProofCall {
+                    compressedProof: case.compressed_proof,
+                    input: case.public_inputs,
+                }
+                .abi_encode()
+                .into()
             }
             TxOp::DeployNewImplementation { .. } => {
                 // deployNewImplementation() selector
@@ -323,6 +435,7 @@ impl TxOp {
                 ChaosTarget::Direct => TxKind::Call(*CHAOS_CONTRACT),
                 ChaosTarget::Proxy => TxKind::Call(*CHAOS_PROXY_CONTRACT),
             },
+            TxOp::WorldIdVerifyCompressed { .. } => TxKind::Call(*WORLD_ID_VERIFIER_CONTRACT),
             TxOp::DeployNewImplementation { .. } => TxKind::Call(*CHAOS_PROXY_CONTRACT),
         }
     }
@@ -340,6 +453,7 @@ impl TxOp {
         match self {
             TxOp::Transfer { .. } => 21_000,
             TxOp::Fib { n, .. } => 100_000 + *n * 20_000,
+            TxOp::WorldIdVerifyCompressed { .. } => WORLD_ID_ZK_GAS_LIMIT,
             TxOp::DeployNewImplementation { .. } => 500_000,
         }
     }
@@ -1397,6 +1511,49 @@ pub fn build_flashblock_fixture_fib(num_txs: usize, bal: bool) -> FlashblocksPay
     })
 }
 
+pub fn build_flashblock_fixture_world_id_like_bn254(
+    num_txs: usize,
+    bal: bool,
+) -> FlashblocksPayloadV1 {
+    build_flashblock_fixture_from_sequence(
+        build_world_id_bench_transaction_sequence(num_txs),
+        bal,
+        PayloadId::new([3u8; 8]),
+    )
+}
+
+fn benchmark_base_payload() -> ExecutionPayloadBaseV1 {
+    ExecutionPayloadBaseV1 {
+        parent_hash: CHAIN_SPEC.genesis_hash(),
+        parent_beacon_block_root: B256::ZERO,
+        fee_recipient: Address::ZERO,
+        prev_randao: B256::ZERO,
+        block_number: 1,
+        gas_limit: CHAIN_SPEC.genesis_header().gas_limit,
+        timestamp: CHAIN_SPEC.genesis_header().timestamp() + 1,
+        extra_data: bytes!("0x000000000800000002"),
+        base_fee_per_gas: U256::from(CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1)),
+    }
+}
+
+fn build_flashblock_fixture_from_sequence(
+    sequence: Vec<(TxOp, u64)>,
+    bal: bool,
+    payload_id: PayloadId,
+) -> FlashblocksPayloadV1 {
+    let payloads =
+        build_chained_payloads(sequence, 1, bal).expect("failed to build chained payloads");
+    let (diff, _committed_state) = payloads.into_iter().next().expect("expected one payload");
+
+    FlashblocksPayloadV1 {
+        payload_id,
+        index: 0,
+        diff,
+        metadata: Default::default(),
+        base: Some(benchmark_base_payload()),
+    }
+}
+
 /// Builds a [`FlashblocksPayloadV1`] fixture with the given number of transactions.
 ///
 /// Returns the payload ready to be passed to `process_flashblock`.
@@ -1413,29 +1570,7 @@ where
     // Build a simple sequence of transactions from ALICE.
     let sequence: Vec<(TxOp, u64)> = (0..num_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
-    let payloads =
-        build_chained_payloads(sequence, 1, bal).expect("failed to build chained payloads");
-    let (diff, _committed_state) = payloads.into_iter().next().expect("expected one payload");
-
-    let base = ExecutionPayloadBaseV1 {
-        parent_hash: CHAIN_SPEC.genesis_hash(),
-        parent_beacon_block_root: B256::ZERO,
-        fee_recipient: Address::ZERO,
-        prev_randao: B256::ZERO,
-        block_number: 1,
-        gas_limit: CHAIN_SPEC.genesis_header().gas_limit,
-        timestamp: CHAIN_SPEC.genesis_header().timestamp() + 1,
-        extra_data: bytes!("0x000000000800000002"),
-        base_fee_per_gas: U256::from(CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1)),
-    };
-
-    FlashblocksPayloadV1 {
-        payload_id: PayloadId::new([1u8; 8]),
-        index: 0,
-        diff,
-        metadata: Default::default(),
-        base: Some(base),
-    }
+    build_flashblock_fixture_from_sequence(sequence, bal, PayloadId::new([1u8; 8]))
 }
 
 pub fn build_flashblock_sequence_fixture_eth_transfers(
@@ -1464,6 +1599,77 @@ pub fn build_flashblock_sequence_fixture_fib(
     })
 }
 
+pub fn build_flashblock_sequence_fixture_world_id_like_bn254(
+    num_flashblocks: usize,
+    txs_per_flashblock: usize,
+    bal: bool,
+) -> Vec<FlashblocksPayloadV1> {
+    build_flashblock_sequence_fixture_from_sequence(
+        build_world_id_bench_transaction_sequence(num_flashblocks * txs_per_flashblock),
+        num_flashblocks,
+        bal,
+        PayloadId::new([4u8; 8]),
+    )
+}
+
+fn build_flashblock_sequence_fixture_from_sequence(
+    sequence: Vec<(TxOp, u64)>,
+    num_flashblocks: usize,
+    bal: bool,
+    payload_id: PayloadId,
+) -> Vec<FlashblocksPayloadV1> {
+    let payloads = build_chained_payloads(sequence, num_flashblocks, bal)
+        .expect("failed to build chained payloads");
+
+    let base = benchmark_base_payload();
+
+    payloads
+        .into_iter()
+        .enumerate()
+        .map(|(i, (diff, _committed_state))| FlashblocksPayloadV1 {
+            payload_id,
+            index: i as u64,
+            diff,
+            metadata: Default::default(),
+            base: if i == 0 { Some(base.clone()) } else { None },
+        })
+        .collect()
+}
+
+fn build_world_id_bench_transaction_sequence(total_txs: usize) -> Vec<(TxOp, u64)> {
+    let mut sender_nonces = [0u64; 3];
+
+    // Bias heavily toward one repeated proof/input pair while periodically injecting a second
+    // valid proof shape to better approximate mainnet traffic and expose future cache wins.
+    (0..total_txs)
+        .map(|tx_index| {
+            let sender_index = tx_index % 3;
+            let from = match sender_index {
+                0 => ALICE.clone(),
+                1 => BOB.clone(),
+                _ => CHARLIE.clone(),
+            };
+            let nonce = sender_nonces[sender_index];
+            sender_nonces[sender_index] += 1;
+
+            let case = if tx_index % WORLD_ID_ALT_INPUT_INTERVAL == WORLD_ID_ALT_INPUT_INTERVAL - 1
+            {
+                &WORLD_ID_BENCH_CASES[1]
+            } else {
+                &WORLD_ID_BENCH_CASES[0]
+            };
+
+            (
+                TxOp::WorldIdVerifyCompressed {
+                    from,
+                    case: Box::new(*case),
+                },
+                nonce,
+            )
+        })
+        .collect()
+}
+
 /// Builds a sequence of [`FlashblocksPayloadV1`] fixtures representing a
 /// multi-flashblock epoch.
 ///
@@ -1490,32 +1696,34 @@ where
     // Build a sequence of transactions with correct per-sender nonces.
     let sequence: Vec<(TxOp, u64)> = (0..total_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
-    let payloads = build_chained_payloads(sequence, num_flashblocks, bal)
-        .expect("failed to build chained payloads");
+    build_flashblock_sequence_fixture_from_sequence(
+        sequence,
+        num_flashblocks,
+        bal,
+        PayloadId::new([2u8; 8]),
+    )
+}
 
-    let payload_id = PayloadId::new([2u8; 8]);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let base = ExecutionPayloadBaseV1 {
-        parent_hash: CHAIN_SPEC.genesis_hash(),
-        parent_beacon_block_root: B256::ZERO,
-        fee_recipient: Address::ZERO,
-        prev_randao: B256::ZERO,
-        block_number: 1,
-        gas_limit: CHAIN_SPEC.genesis_header().gas_limit,
-        timestamp: CHAIN_SPEC.genesis_header().timestamp() + 1,
-        extra_data: bytes!("0x000000000800000002"),
-        base_fee_per_gas: U256::from(CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1)),
-    };
+    #[test]
+    fn builds_world_id_like_flashblock_fixture() {
+        let fixture = build_flashblock_fixture_world_id_like_bn254(3, false);
+        assert_eq!(fixture.diff.transactions.len(), 3);
+    }
 
-    payloads
-        .into_iter()
-        .enumerate()
-        .map(|(i, (diff, _committed_state))| FlashblocksPayloadV1 {
-            payload_id,
-            index: i as u64,
-            diff,
-            metadata: Default::default(),
-            base: if i == 0 { Some(base.clone()) } else { None },
-        })
-        .collect()
+    #[test]
+    fn builds_world_id_like_flashblock_sequence_fixture() {
+        let fixtures = build_flashblock_sequence_fixture_world_id_like_bn254(2, 3, false);
+        assert_eq!(fixtures.len(), 2);
+        assert_eq!(
+            fixtures
+                .iter()
+                .map(|fixture| fixture.diff.transactions.len())
+                .sum::<usize>(),
+            6
+        );
+    }
 }

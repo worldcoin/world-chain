@@ -1,21 +1,14 @@
-use alloy_eips::{Decodable2718, eip2718::WithEncoded, eip4895::Withdrawals};
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use futures::StreamExt;
-use op_alloy_consensus::{OpTxEnvelope, encode_holocene_extra_data};
 use parking_lot::RwLock;
-use reth::{
-    payload::EthPayloadBuilderAttributes,
-    revm::{cancelled::CancelOnDrop, database::StateProviderDatabase},
-};
-use reth_basic_payload_builder::PayloadConfig;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpNextBlockEnvAttributes, OpRethReceiptBuilder};
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadBuilderAttributes};
+use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
 use world_chain_p2p::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
@@ -23,12 +16,10 @@ use world_chain_p2p::protocol::{
 };
 use world_chain_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 
-use reth_payload_util::BestPayloadTransactions;
 use reth_provider::{
     BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
     StateProviderFactory,
 };
-use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
 use std::sync::{Arc, LazyLock};
 use tokio::{
     sync::{
@@ -39,12 +30,7 @@ use tokio::{
 };
 use tracing::{error, trace};
 
-use crate::{
-    bal_executor::CommittedState,
-    bal_validator::{FlashblocksBlockValidator, decode_transactions_with_indices},
-    payload_builder::build,
-    traits::{context::OpPayloadBuilderCtxBuilder, context_builder::PayloadBuilderCtxBuilder},
-};
+use crate::validator::FlashblocksBlockValidator;
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
@@ -374,10 +360,6 @@ where
         inner.latest_payload.as_ref().map(|(p, _)| p.clone())
     };
 
-    // Accumulate committed state from latest payload (brief read lock)
-    let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(latest_payload.as_ref())
-        .map_err(|e| eyre!("Failed to construct committed state {:#?}", e))?;
-
     let diff = flashblock.diff().clone();
     let index = flashblock.flashblock.index;
 
@@ -404,133 +386,47 @@ where
     };
 
     let evm_env = evm_config.next_evm_env(sealed_header.header(), &next_block_context)?;
-    let transactions_offset = committed_state.transactions.len() + 1;
-    let has_bal = flashblock.diff().access_list_data.is_some();
 
-    let validate_span = crate::metrics::MetricsSpan::new(
-        tracing::trace_span!(
-            target: "flashblocks::coordinator",
-            "validate",
-            id = %flashblock.flashblock().payload_id,
-            index,
-            path = if has_bal { "bal" } else { "legacy" },
-            tx_count = flashblock.diff().transactions.len(),
-            duration_ms = tracing::field::Empty,
-        ),
-        metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
-    );
+    let sealed_header = Arc::new(sealed_header);
 
-    let payload = if has_bal {
-        let sealed_header = Arc::new(sealed_header);
-
-        let executor_transactions = decode_transactions_with_indices(
-            &flashblock.diff().transactions,
-            transactions_offset as u16,
-        )?;
-
-        let block_validator = FlashblocksBlockValidator {
-            chain_spec: chain_spec.clone(),
-            evm_config: evm_config.clone(),
-            execution_context: execution_context.clone(),
-            executor_transactions: executor_transactions.clone(),
-            committed_state,
-            evm_env: evm_env.clone(),
-        };
-
-        block_validator.validate(
-            provider,
-            diff.clone(),
-            &sealed_header,
-            *flashblock.payload_id(),
-        )?
-    } else {
-        // TODO: Lots of dup code we can remove here. WIP
-        let transactions = diff
-            .transactions
-            .iter()
-            .map(|b| {
-                let tx: OpTxEnvelope = Decodable2718::decode_2718_exact(b)?;
-                eyre::Result::Ok(WithEncoded::new(b.clone(), tx))
-            })
-            .collect::<eyre::Result<Vec<_>>>()?;
-
-        let eth_attrs = EthPayloadBuilderAttributes {
-            id: flashblock.payload_id().to_owned(),
-            parent: base.parent_hash,
-            timestamp: base.timestamp,
-            suggested_fee_recipient: base.fee_recipient,
-            prev_randao: base.prev_randao,
-            withdrawals: Withdrawals(diff.withdrawals.clone()),
-            parent_beacon_block_root: Some(base.parent_beacon_block_root),
-        };
-
-        let eip1559 = encode_holocene_extra_data(
-            Default::default(),
-            chain_spec.base_fee_params_at_timestamp(base.timestamp),
-        )?;
-
-        let attributes = OpPayloadBuilderAttributes {
-            payload_attributes: eth_attrs,
-            no_tx_pool: true,
-            transactions: transactions.clone(),
-            gas_limit: None,
-            eip_1559_params: Some(eip1559[1..=8].try_into()?),
-            min_base_fee: None,
-        };
-
-        let state_provider = provider.state_by_block_hash(sealed_header.hash())?;
-        let config = PayloadConfig::new(Arc::new(sealed_header), attributes);
-        let cancel = CancelOnDrop::default();
-
-        let builder_ctx = OpPayloadBuilderCtxBuilder.build(
-            provider.clone(),
-            evm_config.clone(),
-            Default::default(),
-            config,
-            &cancel,
-            latest_payload.clone(),
-        );
-
-        let best = |_| BestPayloadTransactions::new(vec![].into_iter());
-        let db = StateProviderDatabase::new(state_provider);
-
-        let outcome = build(
-            provider,
-            best,
-            Option::<NoopTransactionPool<EthPooledTransaction>>::None,
-            db,
-            &builder_ctx,
-            latest_payload.as_ref(),
-            false,
-        )?;
-
-        match outcome.0 {
-            reth_basic_payload_builder::BuildOutcomeKind::Better { payload } => payload,
-            reth_basic_payload_builder::BuildOutcomeKind::Freeze(payload) => payload,
-            _ => return Err(eyre::eyre::eyre!("unexpected build outcome")),
-        }
+    let block_validator = FlashblocksBlockValidator {
+        chain_spec: chain_spec.clone(),
+        evm_config: evm_config.clone(),
+        execution_context: execution_context.clone(),
+        evm_env: evm_env.clone(),
+        header: sealed_header.clone(),
     };
 
-    drop(validate_span);
+    let next_payload = block_validator.validate_flashblock_with_state(
+        provider,
+        diff.clone(),
+        &sealed_header,
+        flashblock.flashblock.payload_id,
+        latest_payload.as_ref(),
+    )?;
 
     {
         let mut inner = coordinator.inner.write();
-        inner.latest_payload = Some((payload.clone(), index));
+        inner.latest_payload = Some((next_payload.clone(), index));
         inner.flashblocks.push(flashblock)?;
     }
 
-    pending_block.send_replace(payload.executed_block().map(|p| p.into_executed_payload()));
+    pending_block.send_replace(
+        next_payload
+            .executed_block()
+            .map(|p| p.into_executed_payload()),
+    );
 
     trace!(
         target: "flashblocks::state_executor",
-        id = %payload.id(),
+        id = %next_payload.id(),
         index = %index,
-        block_hash = %payload.block().hash(),
+        block_hash = %next_payload.block().hash(),
         "built payload from flashblock"
     );
 
     let payload_events = coordinator.inner.read().payload_events.clone();
-    coordinator.broadcast_payload(Events::BuiltPayload(payload), payload_events)?;
+    coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events)?;
 
     Ok(())
 }

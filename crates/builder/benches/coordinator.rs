@@ -9,18 +9,25 @@ use world_chain_builder::coordinator::{
 };
 use world_chain_test_utils::builder::{
     BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
-    build_flashblock_fixture_fib, build_flashblock_sequence_fixture_eth_transfers,
-    build_flashblock_sequence_fixture_fib,
+    build_flashblock_fixture_fib, build_flashblock_fixture_world_id_like_bn254,
+    build_flashblock_sequence_fixture_eth_transfers, build_flashblock_sequence_fixture_fib,
+    build_flashblock_sequence_fixture_world_id_like_bn254,
 };
 
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1};
 
 const TX_COUNTS: [usize; 3] = [50, 500, 1000];
+const WORLD_ID_TX_COUNTS: [usize; 3] = [10, 25, 50];
 const FLASHBLOCK_SEQUENCE_PARAMS: [(usize, usize); 3] = [
     (4, 50),  // 200 total txs across 4 flashblocks
     (4, 125), // 500 total txs across 4 flashblocks
     (4, 250), // 1000 total txs across 4 flashblocks
+];
+const WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS: [(usize, usize); 3] = [
+    (4, 5),  // 20 total txs across 4 flashblocks
+    (4, 10), // 40 total txs across 4 flashblocks
+    (4, 12), // 48 total txs across 4 flashblocks
 ];
 
 /// Helper: creates a fresh coordinator + handle + watch channel.
@@ -45,6 +52,7 @@ fn bench_process_flashblock_case<F>(
     c: &mut Criterion,
     group_name: &str,
     is_bal_enabled: bool,
+    tx_counts: &[usize],
     build_flashblock: F,
 ) where
     F: Fn(usize, bool) -> FlashblocksPayloadV1,
@@ -53,7 +61,7 @@ fn bench_process_flashblock_case<F>(
     let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
-    for tx_count in TX_COUNTS {
+    for &tx_count in tx_counts {
         let flashblock = build_flashblock(tx_count, is_bal_enabled);
         let provider = BenchProvider::new();
 
@@ -80,6 +88,7 @@ fn bench_launch_flashblock_sequence_case<F>(
     c: &mut Criterion,
     group_name: &str,
     is_bal_enabled: bool,
+    sequence_params: &[(usize, usize)],
     build_sequence: F,
 ) where
     F: Fn(usize, usize, bool) -> Vec<FlashblocksPayloadV1>,
@@ -88,7 +97,7 @@ fn bench_launch_flashblock_sequence_case<F>(
     let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
-    for (num_fb, txs_per_fb) in FLASHBLOCK_SEQUENCE_PARAMS {
+    for &(num_fb, txs_per_fb) in sequence_params {
         let sequence = build_sequence(num_fb, txs_per_fb, is_bal_enabled);
         let provider = BenchProvider::new();
         let label = format!("{num_fb}fb_x_{txs_per_fb}tx");
@@ -145,6 +154,7 @@ fn bench_process_flashblock_eth_transfers(c: &mut Criterion) {
         c,
         "process_flashblock_eth_transfers",
         false,
+        &TX_COUNTS,
         build_flashblock_fixture_eth_transfers,
     );
 }
@@ -154,6 +164,7 @@ fn bench_process_flashblock_eth_transfers_with_bal(c: &mut Criterion) {
         c,
         "process_flashblock_eth_transfers_with_bal",
         true,
+        &TX_COUNTS,
         build_flashblock_fixture_eth_transfers,
     );
 }
@@ -163,6 +174,7 @@ fn bench_process_flashblock_fib(c: &mut Criterion) {
         c,
         "process_flashblock_fib",
         false,
+        &TX_COUNTS,
         build_flashblock_fixture_fib,
     );
 }
@@ -172,7 +184,28 @@ fn bench_process_flashblock_fib_with_bal(c: &mut Criterion) {
         c,
         "process_flashblock_fib_with_bal",
         true,
+        &TX_COUNTS,
         build_flashblock_fixture_fib,
+    );
+}
+
+fn bench_process_flashblock_world_id_like_bn254(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_world_id_like_bn254",
+        false,
+        &WORLD_ID_TX_COUNTS,
+        build_flashblock_fixture_world_id_like_bn254,
+    );
+}
+
+fn bench_process_flashblock_world_id_like_bn254_with_bal(c: &mut Criterion) {
+    bench_process_flashblock_case(
+        c,
+        "process_flashblock_world_id_like_bn254_with_bal",
+        true,
+        &WORLD_ID_TX_COUNTS,
+        build_flashblock_fixture_world_id_like_bn254,
     );
 }
 
@@ -185,6 +218,7 @@ fn bench_launch_flashblock_sequence_eth_transfers(c: &mut Criterion) {
         c,
         "launch_flashblock_sequence_eth_transfers",
         false,
+        &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_eth_transfers,
     );
 }
@@ -194,6 +228,7 @@ fn bench_launch_flashblock_sequence_eth_transfers_with_bal(c: &mut Criterion) {
         c,
         "launch_flashblock_sequence_eth_transfers_with_bal",
         true,
+        &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_eth_transfers,
     );
 }
@@ -203,6 +238,7 @@ fn bench_launch_flashblock_sequence_fib(c: &mut Criterion) {
         c,
         "launch_flashblock_sequence_fib",
         false,
+        &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_fib,
     );
 }
@@ -212,7 +248,28 @@ fn bench_launch_flashblock_sequence_fib_with_bal(c: &mut Criterion) {
         c,
         "launch_flashblock_sequence_fib_with_bal",
         true,
+        &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_fib,
+    );
+}
+
+fn bench_launch_flashblock_sequence_world_id_like_bn254(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_world_id_like_bn254",
+        false,
+        &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
+        build_flashblock_sequence_fixture_world_id_like_bn254,
+    );
+}
+
+fn bench_launch_flashblock_sequence_world_id_like_bn254_with_bal(c: &mut Criterion) {
+    bench_launch_flashblock_sequence_case(
+        c,
+        "launch_flashblock_sequence_world_id_like_bn254_with_bal",
+        true,
+        &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
+        build_flashblock_sequence_fixture_world_id_like_bn254,
     );
 }
 
@@ -222,9 +279,13 @@ criterion_group!(
     bench_process_flashblock_eth_transfers_with_bal,
     bench_process_flashblock_fib,
     bench_process_flashblock_fib_with_bal,
+    bench_process_flashblock_world_id_like_bn254,
+    bench_process_flashblock_world_id_like_bn254_with_bal,
     bench_launch_flashblock_sequence_eth_transfers,
     bench_launch_flashblock_sequence_eth_transfers_with_bal,
     bench_launch_flashblock_sequence_fib,
     bench_launch_flashblock_sequence_fib_with_bal,
+    bench_launch_flashblock_sequence_world_id_like_bn254,
+    bench_launch_flashblock_sequence_world_id_like_bn254_with_bal,
 );
 criterion_main!(benches);

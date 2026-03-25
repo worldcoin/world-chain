@@ -16,7 +16,7 @@ use reth_ethereum::{
     network::{api::PeerId, protocol::ProtocolHandler},
     primitives::{AlloyBlockHeader, NodePrimitives},
 };
-use reth_network::Peers;
+use reth_network::{Peers, PeersInfo};
 use reth_provider::{BlockNumReader, CanonStateSubscriptions, HeaderProvider};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -26,7 +26,7 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use world_chain_cli::cli::FanoutArgs;
 use world_chain_primitives::{
     p2p::{
@@ -58,7 +58,7 @@ const MAX_PUBLISH_WAIT_SEC: u64 = 2;
 const BROADCAST_BUFFER_CAPACITY: usize = 100;
 
 /// A missed flashblock should dominate modest latency differences when rotating receive peers.
-const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 10_000_000_000;
+const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 1_000_000_000;
 /// Grace window in number of flashblocks to receive late flashblocks from peers before scoring them for missing flashblocks.
 ///
 /// This must be at least long enough to cover AUTHORIZATION_TIMESTAMP_GRACE_SEC to prevent a spam
@@ -78,9 +78,15 @@ const RECEIVE_REQUEST_TIMEOUT_SECS: u64 = 2;
 ///
 /// This trait combines all the necessary bounds for a network handle to be used
 /// in the flashblocks P2P system, including peer management capabilities.
-pub trait FlashblocksP2PNetworkHandle: Clone + Unpin + Peers + std::fmt::Debug + 'static {}
+pub trait FlashblocksP2PNetworkHandle:
+    Clone + Unpin + Peers + PeersInfo + std::fmt::Debug + 'static
+{
+}
 
-impl<N: Clone + Unpin + Peers + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle for N {}
+impl<N: Clone + Unpin + Peers + PeersInfo + std::fmt::Debug + 'static> FlashblocksP2PNetworkHandle
+    for N
+{
+}
 
 /// The current publishing status of this node in the flashblocks P2P network.
 ///
@@ -212,7 +218,7 @@ impl FlashblocksP2PState {
                     && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
                 {
-                    warn!(
+                    trace!(
                         target: "flashblocks::p2p",
                         %peer_id,
                         payload_id = %evicted.payload_id,
@@ -719,6 +725,11 @@ impl FlashblocksHandle {
         peer_id: PeerId,
         outbound_tx: mpsc::Sender<BytesMut>,
     ) {
+        // Ignore self-connections (can occur when discovery hairpins through the NLB).
+        if peer_id == network.local_node_record().id {
+            return;
+        }
+
         {
             let mut state = self.state.lock();
             let mut conn_state = FlashblocksPeerState::new();
@@ -1305,6 +1316,12 @@ impl FlashblocksP2PCtx {
             state.payload_timestamp = authorization.timestamp;
             state.flashblock_index = 0;
             state.flashblocks.fill(None);
+        }
+
+        // Skip flashblocks from old payloads — late-arriving flashblocks from
+        // a previous block must not fill slots in the current block's cache.
+        if payload.payload_id != state.payload_id {
+            return;
         }
 
         // Resize our array if needed

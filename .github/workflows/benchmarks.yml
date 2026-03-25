@@ -1,13 +1,10 @@
 name: Benchmark Regression Check
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/flashblocks/**'
   pull_request:
     paths:
-      - 'crates/flashblocks/**'
+      - 'crates/**'
+      - '.github/workflows/benchmarks.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +16,6 @@ env:
 
 jobs:
   benchmark:
-    if: github.event_name != 'push'
     runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 60
     steps:
@@ -43,44 +39,51 @@ jobs:
       - name: Install critcmp
         run: cargo install critcmp --locked
 
-      # Restore the most recent baseline using prefix matching.
-      # The save key includes run_id so each push to main creates a new
-      # entry; restore-keys ensures the latest one is always found.
-      - name: Restore baseline
-        id: restore-baseline
-        uses: actions/cache/restore@v5
-        with:
-          path: target/criterion
-          key: criterion-baseline-main-${{ github.run_id }}
-          restore-keys: criterion-baseline-main-
+      # Benchmark the base revision and the PR revision in the same job so
+      # both measurements run on the same machine under similar conditions.
+      - name: Run base benchmarks
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git checkout --detach "$BASE_SHA"
+          cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline base
 
-      # Run benchmarks on the current branch and save as "pr" baseline
+      - name: Run PR benchmarks
+        if: github.event_name == 'pull_request'
+        env:
+          PR_SHA: ${{ github.sha }}
+        run: |
+          git checkout --detach "$PR_SHA"
+          cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline pr
+
       - name: Run benchmarks
-        run: cargo bench --package world-chain-builder --bench coordinator -- --save-baseline pr
+        if: github.event_name == 'workflow_dispatch'
+        run: cargo bench --package world-chain-builder --features bench --bench coordinator
 
       # Compare against main baseline if available
       - name: Check for regressions
-        if: steps.restore-baseline.outputs.cache-matched-key && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         run: |
           echo "=== Full Benchmark Comparison ==="
-          critcmp main pr
+          critcmp base pr
 
           echo ""
           echo "=== Checking for >10% regressions ==="
-          filtered=$(critcmp main pr --threshold 10 2>&1 || true)
+          filtered=$(critcmp base pr --threshold 10 2>&1 || true)
 
           # critcmp always exits 0 - we must parse output to detect regressions.
           # In the output, the FASTER baseline gets ratio 1.00.
-          # If 'main' shows 1.00 in a data row, 'pr' is slower (regression).
+          # If 'base' shows 1.00 in a data row, 'pr' is slower (regression).
           # Data rows start after the header (line 1) and separator (line 2).
           regressions=$(echo "$filtered" | awk 'NR > 2 && NF > 0' | grep -E '^\S+\s+1\.00\s' || true)
 
           if [ -n "$regressions" ]; then
             echo ""
-            echo "Regressions detected (>10% slower than main):"
+            echo "Regressions detected (>10% slower than base):"
             echo "$filtered"
             echo ""
-            echo "::error::Performance regression detected — pr is >10% slower than main baseline"
+            echo "::error::Performance regression detected - pr is >10% slower than the base branch in the same workflow run"
             exit 1
           fi
 
@@ -88,14 +91,14 @@ jobs:
 
       # Post results as PR comment
       - name: Post benchmark comparison
-        if: always() && steps.restore-baseline.outputs.cache-matched-key && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const { execSync } = require('child_process');
             try {
-              const output = execSync('critcmp main pr --color never', { encoding: 'utf-8' });
-              const body = `## Benchmark Results\n\n\`\`\`\n${output}\n\`\`\`\n\n> Threshold: 10% regression triggers failure`;
+              const output = execSync('critcmp base pr --color never', { encoding: 'utf-8' });
+              const body = `## Benchmark Results\n\nCompared on the same runner in the same workflow run.\n\n\`\`\`\n${output}\n\`\`\`\n\n> Threshold: 10% regression triggers failure`;
               // Check for existing comment to update
               const { data: comments } = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
@@ -121,34 +124,3 @@ jobs:
             } catch (e) {
               console.log('Could not post benchmark comment:', e.message);
             }
-
-  # Save baseline on main branch pushes
-  update-baseline:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache
-        uses: actions/cache@v5
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: cargo-bench-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-bench-
-
-      - name: Generate baseline
-        run: cargo bench --package world-chain-builder --bench coordinator -- --save-baseline main
-
-      # Dynamic key ensures each push to main overwrites the baseline.
-      - name: Save baseline
-        uses: actions/cache/save@v5
-        with:
-          path: target/criterion
-          key: criterion-baseline-main-${{ github.run_id }}
