@@ -47,7 +47,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git checkout --detach "$BASE_SHA"
-          cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline base
+          cargo bs base
 
       - name: Run PR benchmarks
         if: github.event_name == 'pull_request'
@@ -55,11 +55,11 @@ jobs:
           PR_SHA: ${{ github.sha }}
         run: |
           git checkout --detach "$PR_SHA"
-          cargo bench --package world-chain-builder --features bench --bench coordinator -- --save-baseline pr
+          cargo bs pr
 
       - name: Run benchmarks
         if: github.event_name == 'workflow_dispatch'
-        run: cargo bench --package world-chain-builder --features bench --bench coordinator
+        run: cargo b
 
       # Compare against main baseline if available
       - name: Check for regressions

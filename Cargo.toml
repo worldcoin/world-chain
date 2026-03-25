@@ -32,6 +32,18 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 
+[profile.dev-tracing]
+inherits = "dev"
+
+[profile.dev-tracing.package."*"]
+opt-level = 0
+
+[profile.verbose-tracing]
+inherits = "dev"
+
+[profile.verbose-tracing.package."*"]
+opt-level = 0
+
 [workspace.lints]
 
 [workspace.dependencies]

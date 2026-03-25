@@ -14,6 +14,14 @@ deploy-contracts:
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
+# Test with flashblocks debug tracing
+test-dev *args='':
+    RUST_LOG="info,flashblocks=debug,world_chain=info" cargo nextest run --workspace $@
+
+# Test with verbose flashblocks tracing (all subsystems at trace level)
+test-verbose *args='':
+    RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
+
 fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
