@@ -222,6 +222,6 @@ pub trait BlockBuilderExt: BlockBuilder {
     fn finish_with_bundle(
         self,
         state_provider: impl StateProvider,
-        metrics: Option<&metrics::PayloadBuildMetrics>,
+        metrics: Option<&mut metrics::PayloadBuildAttemptMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }

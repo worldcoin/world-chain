@@ -26,7 +26,10 @@ use revm::{
 use revm_database::BundleState;
 use std::{borrow::Cow, sync::Arc, time::Instant};
 
-use crate::{BlockBuilderExt, metrics::PayloadBuildStage};
+use crate::{
+    BlockBuilderExt,
+    metrics::{PayloadBuildAttemptMetrics, PayloadBuildStage},
+};
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<
@@ -139,7 +142,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        metrics: Option<&crate::metrics::PayloadBuildMetrics>,
+        mut metrics: Option<&mut PayloadBuildAttemptMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -147,7 +150,7 @@ where
         // merge all transitions into bundle state
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
-        if let Some(metrics) = metrics {
+        if let Some(metrics) = metrics.as_deref_mut() {
             metrics.record_stage_duration(
                 PayloadBuildStage::MergeTransitions,
                 merge_started.elapsed(),
@@ -169,7 +172,7 @@ where
         let hashed_state = state.hashed_post_state(db.bundle_state());
         let state_root_started = Instant::now();
         let state_root_result = state.state_root_with_updates(hashed_state.clone());
-        if let Some(metrics) = metrics {
+        if let Some(metrics) = metrics.as_deref_mut() {
             metrics
                 .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
         }
@@ -197,7 +200,7 @@ where
             &state,
             state_root,
         ));
-        if let Some(metrics) = metrics {
+        if let Some(metrics) = metrics.as_deref_mut() {
             metrics.record_stage_duration(
                 PayloadBuildStage::BlockAssembly,
                 block_assembly_started.elapsed(),

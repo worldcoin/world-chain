@@ -5,7 +5,7 @@ use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use flashblocks_builder::{
-    metrics::{PayloadBuildMetrics, PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    metrics::{PayloadBuildAttemptMetrics, PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use op_alloy_consensus::EIP1559ParamError;
@@ -234,7 +234,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        metrics: &PayloadBuildMetrics,
+        attempt_metrics: &mut PayloadBuildAttemptMetrics,
         mut gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
@@ -267,8 +267,8 @@ where
             let tx_da_size = pooled_tx.estimated_da_size();
             let tx = pooled_tx.clone().into_consensus();
             let tx_uncompressed_size = tx.encode_2718_len() as u64;
-            metrics.record_transaction_size_bytes(tx_uncompressed_size);
-            metrics.record_transaction_da_size_bytes(tx_da_size);
+            attempt_metrics.record_transaction_size_bytes(tx_uncompressed_size);
+            attempt_metrics.record_transaction_da_size_bytes(tx_da_size);
             cumulative_uncompressed_bytes += tx_uncompressed_size;
             let is_uncompressed_block_full =
                 if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
@@ -285,7 +285,7 @@ where
                 };
 
             if is_uncompressed_block_full {
-                metrics.increment_rejection(PayloadBuildRejectionReason::UncompressedSize);
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::UncompressedSize);
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
@@ -298,7 +298,7 @@ where
                 tx.gas_limit(),
                 None, // TODO: related to Jovian
             ) {
-                metrics.increment_rejection(PayloadBuildRejectionReason::OverLimits);
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::OverLimits);
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -309,7 +309,8 @@ where
             if let Some(conditional_options) = pooled_tx.conditional_options()
                 && validate_conditional_options(conditional_options, &self.client).is_err()
             {
-                metrics.increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);
+                attempt_metrics
+                    .increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 invalid_txs.push(*pooled_tx.hash());
                 continue;
@@ -317,7 +318,7 @@ where
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
-                metrics.increment_rejection(PayloadBuildRejectionReason::BlobOrDeposit);
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::BlobOrDeposit);
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
@@ -330,7 +331,8 @@ where
             // If the transaction is verified, check if it can be added within the verified gas limit
             if let Some(payloads) = pooled_tx.pbh_payload() {
                 if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
-                    metrics.increment_rejection(PayloadBuildRejectionReason::VerifiedGasLimit);
+                    attempt_metrics
+                        .increment_rejection(PayloadBuildRejectionReason::VerifiedGasLimit);
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }
@@ -339,7 +341,8 @@ where
                     .iter()
                     .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
                 {
-                    metrics.increment_rejection(PayloadBuildRejectionReason::DuplicateNullifier);
+                    attempt_metrics
+                        .increment_rejection(PayloadBuildRejectionReason::DuplicateNullifier);
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
@@ -348,7 +351,7 @@ where
 
             let tx_execution_started = Instant::now();
             let execution_result = builder.execute_transaction(tx.clone());
-            metrics.record_transaction_execution_duration(tx_execution_started.elapsed());
+            attempt_metrics.record_transaction_execution_duration(tx_execution_started.elapsed());
             let gas_used = match execution_result {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
@@ -367,12 +370,12 @@ where
                             ..
                         }) => {
                             if error.is_nonce_too_low() {
-                                metrics
+                                attempt_metrics
                                     .increment_rejection(PayloadBuildRejectionReason::NonceTooLow);
                                 // if the nonce is too low, we can skip this transaction
                                 trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
                             } else {
-                                metrics.increment_rejection(
+                                attempt_metrics.increment_rejection(
                                     PayloadBuildRejectionReason::InvalidDescendant,
                                 );
                                 // if the transaction is invalid, we can skip it and all of its
@@ -392,19 +395,21 @@ where
                 }
             };
 
-            metrics.record_transaction_gas_used(gas_used);
+            attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
         if !spent_nullifier_hashes.is_empty() {
             let spend_nullifiers_started = Instant::now();
-            metrics.increment_spend_nullifiers_attempts();
-            metrics.record_spend_nullifiers_count(spent_nullifier_hashes.len() as u64);
+            attempt_metrics.increment_spend_nullifiers_attempts();
+            attempt_metrics.record_spend_nullifiers_count(spent_nullifier_hashes.len() as u64);
             let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(
                 |e| {
-                    metrics.record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
-                    metrics.record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
+                    attempt_metrics
+                        .record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
                     error!(target: "payload_builder", %e, "failed to build spend nullifiers transaction");
                     PayloadBuilderError::Other(e.into())
                 },
@@ -417,14 +422,16 @@ where
             match builder.execute_transaction(tx.clone()) {
                 Ok(gas_used) => {
                     self.commit_changes(info, base_fee, gas_used, tx);
-                    metrics.record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
                 }
                 Err(e) => {
-                    metrics.record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
                     error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
                 }
             }
-            metrics.record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
+            attempt_metrics.record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
         }
 
         let invalid_transactions_removed = invalid_txs.len() as u64;
@@ -432,9 +439,9 @@ where
             pool.remove_transactions(invalid_txs);
         }
 
-        metrics.record_transactions_considered_per_build(transactions_considered);
-        metrics.record_transactions_executed_per_build(transactions_executed);
-        metrics.record_invalid_transactions_removed_per_build(invalid_transactions_removed);
+        attempt_metrics.record_transactions_considered_per_build(transactions_considered);
+        attempt_metrics.record_transactions_executed_per_build(transactions_executed);
+        attempt_metrics.record_invalid_transactions_removed_per_build(invalid_transactions_removed);
 
         Ok(None)
     }

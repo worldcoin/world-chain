@@ -61,6 +61,227 @@ impl PayloadBuildStage {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct PayloadBuildAttemptMetrics {
+    total_duration: Option<Duration>,
+    pre_execution_changes_duration: Option<Duration>,
+    sequencer_tx_execution_duration: Option<Duration>,
+    txpool_fetch_duration: Option<Duration>,
+    best_tx_execution_duration: Option<Duration>,
+    finalize_duration: Option<Duration>,
+    merge_transitions_duration: Option<Duration>,
+    state_root_duration: Option<Duration>,
+    block_assembly_duration: Option<Duration>,
+    transactions_considered_per_build: Option<u64>,
+    transactions_executed_per_build: Option<u64>,
+    invalid_transactions_removed_per_build: Option<u64>,
+    transaction_execution_durations: Vec<Duration>,
+    transaction_gas_used: Vec<u64>,
+    transaction_sizes_bytes: Vec<u64>,
+    transaction_da_sizes_bytes: Vec<u64>,
+    transaction_over_limits_rejections: u64,
+    transaction_uncompressed_size_rejections: u64,
+    transaction_conditional_invalid_rejections: u64,
+    transaction_blob_or_deposit_rejections: u64,
+    transaction_verified_gas_limit_rejections: u64,
+    transaction_duplicate_nullifier_rejections: u64,
+    transaction_nonce_too_low_rejections: u64,
+    transaction_invalid_descendant_rejections: u64,
+    spend_nullifiers_attempts: u64,
+    spend_nullifiers_success: u64,
+    spend_nullifiers_failure: u64,
+    spend_nullifiers_durations: Vec<Duration>,
+    spend_nullifiers_counts: Vec<u64>,
+}
+
+impl PayloadBuildAttemptMetrics {
+    pub fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
+        match stage {
+            PayloadBuildStage::Total => self.total_duration = Some(duration),
+            PayloadBuildStage::PreExecutionChanges => {
+                self.pre_execution_changes_duration = Some(duration);
+            }
+            PayloadBuildStage::SequencerTxExecution => {
+                self.sequencer_tx_execution_duration = Some(duration);
+            }
+            PayloadBuildStage::TxPoolFetch => self.txpool_fetch_duration = Some(duration),
+            PayloadBuildStage::BestTxExecution => {
+                self.best_tx_execution_duration = Some(duration);
+            }
+            PayloadBuildStage::Finalize => self.finalize_duration = Some(duration),
+            PayloadBuildStage::MergeTransitions => {
+                self.merge_transitions_duration = Some(duration);
+            }
+            PayloadBuildStage::StateRoot => self.state_root_duration = Some(duration),
+            PayloadBuildStage::BlockAssembly => self.block_assembly_duration = Some(duration),
+        }
+    }
+
+    pub fn record_transactions_considered_per_build(&mut self, count: u64) {
+        self.transactions_considered_per_build = Some(count);
+    }
+
+    pub fn record_transactions_executed_per_build(&mut self, count: u64) {
+        self.transactions_executed_per_build = Some(count);
+    }
+
+    pub fn record_invalid_transactions_removed_per_build(&mut self, count: u64) {
+        self.invalid_transactions_removed_per_build = Some(count);
+    }
+
+    pub fn record_transaction_execution_duration(&mut self, duration: Duration) {
+        self.transaction_execution_durations.push(duration);
+    }
+
+    pub fn record_transaction_gas_used(&mut self, gas_used: u64) {
+        self.transaction_gas_used.push(gas_used);
+    }
+
+    pub fn record_transaction_size_bytes(&mut self, size_bytes: u64) {
+        self.transaction_sizes_bytes.push(size_bytes);
+    }
+
+    pub fn record_transaction_da_size_bytes(&mut self, size_bytes: u64) {
+        self.transaction_da_sizes_bytes.push(size_bytes);
+    }
+
+    pub fn increment_rejection(&mut self, reason: PayloadBuildRejectionReason) {
+        match reason {
+            PayloadBuildRejectionReason::OverLimits => self.transaction_over_limits_rejections += 1,
+            PayloadBuildRejectionReason::UncompressedSize => {
+                self.transaction_uncompressed_size_rejections += 1;
+            }
+            PayloadBuildRejectionReason::ConditionalInvalid => {
+                self.transaction_conditional_invalid_rejections += 1;
+            }
+            PayloadBuildRejectionReason::BlobOrDeposit => {
+                self.transaction_blob_or_deposit_rejections += 1;
+            }
+            PayloadBuildRejectionReason::VerifiedGasLimit => {
+                self.transaction_verified_gas_limit_rejections += 1;
+            }
+            PayloadBuildRejectionReason::DuplicateNullifier => {
+                self.transaction_duplicate_nullifier_rejections += 1;
+            }
+            PayloadBuildRejectionReason::NonceTooLow => {
+                self.transaction_nonce_too_low_rejections += 1;
+            }
+            PayloadBuildRejectionReason::InvalidDescendant => {
+                self.transaction_invalid_descendant_rejections += 1;
+            }
+        }
+    }
+
+    pub fn increment_spend_nullifiers_attempts(&mut self) {
+        self.spend_nullifiers_attempts += 1;
+    }
+
+    pub fn record_spend_nullifiers_outcome(&mut self, outcome: PayloadBuildTaskOutcome) {
+        match outcome {
+            PayloadBuildTaskOutcome::Success => self.spend_nullifiers_success += 1,
+            PayloadBuildTaskOutcome::Failure => self.spend_nullifiers_failure += 1,
+        }
+    }
+
+    pub fn record_spend_nullifiers_duration(&mut self, duration: Duration) {
+        self.spend_nullifiers_durations.push(duration);
+    }
+
+    pub fn record_spend_nullifiers_count(&mut self, count: u64) {
+        self.spend_nullifiers_counts.push(count);
+    }
+
+    pub fn publish(self, metrics: &PayloadBuildMetrics) {
+        if let Some(duration) = self.total_duration {
+            metrics.record_stage_duration(PayloadBuildStage::Total, duration);
+        }
+        if let Some(duration) = self.pre_execution_changes_duration {
+            metrics.record_stage_duration(PayloadBuildStage::PreExecutionChanges, duration);
+        }
+        if let Some(duration) = self.sequencer_tx_execution_duration {
+            metrics.record_stage_duration(PayloadBuildStage::SequencerTxExecution, duration);
+        }
+        if let Some(duration) = self.txpool_fetch_duration {
+            metrics.record_stage_duration(PayloadBuildStage::TxPoolFetch, duration);
+        }
+        if let Some(duration) = self.best_tx_execution_duration {
+            metrics.record_stage_duration(PayloadBuildStage::BestTxExecution, duration);
+        }
+        if let Some(duration) = self.finalize_duration {
+            metrics.record_stage_duration(PayloadBuildStage::Finalize, duration);
+        }
+        if let Some(duration) = self.merge_transitions_duration {
+            metrics.record_stage_duration(PayloadBuildStage::MergeTransitions, duration);
+        }
+        if let Some(duration) = self.state_root_duration {
+            metrics.record_stage_duration(PayloadBuildStage::StateRoot, duration);
+        }
+        if let Some(duration) = self.block_assembly_duration {
+            metrics.record_stage_duration(PayloadBuildStage::BlockAssembly, duration);
+        }
+        if let Some(count) = self.transactions_considered_per_build {
+            metrics.record_transactions_considered_per_build(count);
+        }
+        if let Some(count) = self.transactions_executed_per_build {
+            metrics.record_transactions_executed_per_build(count);
+        }
+        if let Some(count) = self.invalid_transactions_removed_per_build {
+            metrics.record_invalid_transactions_removed_per_build(count);
+        }
+        for duration in self.transaction_execution_durations {
+            metrics.record_transaction_execution_duration(duration);
+        }
+        for gas_used in self.transaction_gas_used {
+            metrics.record_transaction_gas_used(gas_used);
+        }
+        for size_bytes in self.transaction_sizes_bytes {
+            metrics.record_transaction_size_bytes(size_bytes);
+        }
+        for size_bytes in self.transaction_da_sizes_bytes {
+            metrics.record_transaction_da_size_bytes(size_bytes);
+        }
+        metrics
+            .transaction_over_limits_rejections_total
+            .increment(self.transaction_over_limits_rejections);
+        metrics
+            .transaction_uncompressed_size_rejections_total
+            .increment(self.transaction_uncompressed_size_rejections);
+        metrics
+            .transaction_conditional_invalid_rejections_total
+            .increment(self.transaction_conditional_invalid_rejections);
+        metrics
+            .transaction_blob_or_deposit_rejections_total
+            .increment(self.transaction_blob_or_deposit_rejections);
+        metrics
+            .transaction_verified_gas_limit_rejections_total
+            .increment(self.transaction_verified_gas_limit_rejections);
+        metrics
+            .transaction_duplicate_nullifier_rejections_total
+            .increment(self.transaction_duplicate_nullifier_rejections);
+        metrics
+            .transaction_nonce_too_low_rejections_total
+            .increment(self.transaction_nonce_too_low_rejections);
+        metrics
+            .transaction_invalid_descendant_rejections_total
+            .increment(self.transaction_invalid_descendant_rejections);
+        metrics
+            .spend_nullifiers_attempts_total
+            .increment(self.spend_nullifiers_attempts);
+        metrics
+            .spend_nullifiers_success_total
+            .increment(self.spend_nullifiers_success);
+        metrics
+            .spend_nullifiers_failure_total
+            .increment(self.spend_nullifiers_failure);
+        for duration in self.spend_nullifiers_durations {
+            metrics.record_spend_nullifiers_duration(duration);
+        }
+        for count in self.spend_nullifiers_counts {
+            metrics.record_spend_nullifiers_count(count);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PayloadBuildOutcome {
     Better,

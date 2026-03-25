@@ -245,7 +245,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        _metrics: Option<&crate::metrics::PayloadBuildMetrics>,
+        _metrics: Option<&mut crate::metrics::PayloadBuildAttemptMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
