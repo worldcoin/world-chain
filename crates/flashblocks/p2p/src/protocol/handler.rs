@@ -34,7 +34,7 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use reth_ethereum::network::{
     api::Direction,
@@ -58,7 +58,7 @@ const MAX_PUBLISH_WAIT_SEC: u64 = 2;
 const BROADCAST_BUFFER_CAPACITY: usize = 100;
 
 /// A missed flashblock should dominate modest latency differences when rotating receive peers.
-const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 10_000_000_000;
+const MISSED_FLASHBLOCK_PENALTY_NS: i64 = 1_000_000_000;
 /// Grace window in number of flashblocks to receive late flashblocks from peers before scoring them for missing flashblocks.
 ///
 /// This must be at least long enough to cover AUTHORIZATION_TIMESTAMP_GRACE_SEC to prevent a spam
@@ -218,7 +218,7 @@ impl FlashblocksP2PState {
                     && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
                 {
-                    warn!(
+                    trace!(
                         target: "flashblocks::p2p",
                         %peer_id,
                         payload_id = %evicted.payload_id,
