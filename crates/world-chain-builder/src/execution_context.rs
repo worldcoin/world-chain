@@ -1,3 +1,4 @@
+use crate::metrics::PayloadBuildAttemptMetrics;
 use crate::traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder};
 use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::{Encodable2718, Typed2718};

@@ -238,6 +238,10 @@ where
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
+    fn payload_build_metrics(&self) -> Arc<PayloadBuildMetrics> {
+        self.metrics.clone()
+    }
+
     fn try_build_with_precommit(
         &self,
         args: BuildArguments<

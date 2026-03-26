@@ -32,10 +32,7 @@ use reth_provider::{
 use tokio::runtime::Handle;
 use tracing::{debug, warn};
 
-use crate::{
-    job::{CommittedPayloadState, FlashblocksPayloadJob},
-    metrics::PayloadBuilderMetrics,
-};
+use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
 use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_primitives::flashblocks::Flashblock;
 
@@ -63,8 +60,6 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
     flashblocks_state: FlashblocksExecutionCoordinator,
-    /// Metrics for tracking job generator operations and errors
-    metrics: PayloadBuilderMetrics,
 }
 
 impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
@@ -81,7 +76,6 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
         override_authorizer_sk: Option<SigningKey>,
         force_publish: bool,
         flashblocks_state: FlashblocksExecutionCoordinator,
-        metrics: PayloadBuilderMetrics,
     ) -> Self {
         Self {
             client,
@@ -94,7 +88,6 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
             authorizations: auth_rx,
             override_authorizer_sk,
             force_publish,
-            metrics,
         }
     }
 
@@ -168,26 +161,16 @@ where
             // Use latest header for genesis block case
             self.client
                 .latest_header()
-                .map_err(|e| {
-                    self.metrics.inc_job_creation_errors();
-                    PayloadBuilderError::from(e)
-                })?
-                .ok_or_else(|| {
-                    self.metrics.inc_job_creation_errors();
-                    PayloadBuilderError::MissingParentHeader(B256::ZERO)
-                })?
+                .map_err(PayloadBuilderError::from)?
+                .ok_or(PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
             // Fetch specific header by hash
             self.client
                 .sealed_header_by_hash(attributes.parent())
-                .map_err(|e| {
-                    self.metrics.inc_job_creation_errors();
-                    PayloadBuilderError::from(e)
-                })?
-                .ok_or_else(|| {
-                    self.metrics.inc_job_creation_errors();
-                    PayloadBuilderError::MissingParentHeader(attributes.parent())
-                })?
+                .map_err(PayloadBuilderError::from)?
+                .ok_or(PayloadBuilderError::MissingParentHeader(
+                    attributes.parent(),
+                ))?
         };
 
         let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
@@ -202,11 +185,8 @@ where
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
-        let maybe_pre_state = self
-            .check_for_pre_state(self.client.chain_spec(), &config.attributes)
-            .inspect_err(|_| {
-                self.metrics.inc_job_creation_errors();
-            })?;
+        let maybe_pre_state =
+            self.check_for_pre_state(self.client.chain_spec(), &config.attributes)?;
 
         let payload_id = config.attributes.payload_id();
         let mut authorization = self.authorizations.clone();
@@ -311,7 +291,6 @@ where
             pending_block: None,
             cached_reads,
             payload_task_guard,
-            metrics: self.metrics.clone(),
             builder: self.builder.clone(),
             authorization,
             p2p_handler: self.p2p_handler.clone(),
