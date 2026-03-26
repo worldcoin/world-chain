@@ -20,9 +20,8 @@ use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
-use world_chain_payload::{
-    generator::{FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator},
-    metrics::PayloadBuilderMetrics,
+use world_chain_payload::generator::{
+    FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
 };
 use world_chain_primitives::p2p::Authorization;
 

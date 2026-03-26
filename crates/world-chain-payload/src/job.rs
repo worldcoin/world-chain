@@ -189,7 +189,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: world_chain_primitives::access_list::access_list_hash(&access_list),
+            access_list_hash: flashblocks_primitives::access_list::access_list_hash(&access_list),
             access_list,
         });
         match state {
@@ -413,6 +413,42 @@ where
 {
     type Output = Result<(), PayloadBuilderError>;
 
+    /// Polls the payload builder job to drive payload construction and management.
+    ///
+    /// This implementation follows a state-driven approach with the following logic:
+    ///
+    /// # Flow
+    ///
+    /// 1. **Deadline Check**: First checks if the payload building deadline has been reached.
+    ///    If so, returns [`Poll::Ready(Ok(()))`] to complete the job.
+    ///
+    /// 2. **Interval Tick**: Polls the interval timer to determine when to spawn new build jobs.
+    ///    - If the interval is ready, continues to spawn a new build job
+    ///    - If pending, schedules a wake-up and returns [`Poll::Pending`]
+    ///
+    /// 3. **Pending Block Processing**: If there's a pending block being built:
+    ///    - Processes build outcomes ([`BuildOutcome::Better`], [`BuildOutcome::Freeze`], [`BuildOutcome::Aborted`])
+    ///    - [`BuildOutcome::Better`]:
+    ///         - Each successive payload is a pre-commitment to the next payload.
+    ///         - We will continuously build on top of the best payload until the job is resolved.
+    ///    - [`BuildOutcome::Freeze`]: marks payload as frozen and stops further building
+    ///    - [`BuildOutcome::Aborted`]: handles cancellation and potential respawning
+    ///    - On errors: logs and continues operation
+    ///    - If still pending: restores the future and returns [`Poll::Pending`]
+    ///
+    /// 4. **New Job Spawning**: If no pending block exists, spawns a new build job
+    ///    and continues polling.
+    ///
+    /// # Pre-confirmation Behavior
+    ///
+    /// Each time we hit [`BuildOutcome::Better`], we increment `block_index` and create a new
+    /// pre-confirmation on top of the current best payload. This allows for iterative improvement
+    /// where each successive build acts as a pre-commitment to the next block state.
+    ///
+    /// # Returns
+    ///
+    /// The polling continues until either the deadline is reached or an error occurs, returning
+    /// [`Poll::Pending`] for ongoing work or [`Poll::Ready`] when complete.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let _span =
             span!(target: "flashblocks::payload_builder", tracing::Level::TRACE, "poll").entered();
