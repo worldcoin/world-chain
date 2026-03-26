@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
+
 use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
@@ -102,7 +103,6 @@ where
             .deadline(conf.deadline)
             .max_payload_tasks(conf.max_payload_tasks);
 
-        let metrics = PayloadBuilderMetrics::default();
         if let (Some(p2p_handler), Some(authorizations_rx), Some(flashblocks_state)) = (
             self.p2p_handler,
             self.authorizations_rx,
@@ -119,7 +119,6 @@ where
                 self.override_authorizer_sk,
                 self.force_publish,
                 flashblocks_state.clone(),
-                metrics,
             );
 
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(

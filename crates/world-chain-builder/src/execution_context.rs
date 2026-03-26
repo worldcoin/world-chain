@@ -1,3 +1,4 @@
+use crate::metrics::PayloadBuildAttemptMetrics;
 use crate::traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder};
 use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -231,6 +232,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
+        attempt_metrics: &mut PayloadBuildAttemptMetrics,
         mut gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>

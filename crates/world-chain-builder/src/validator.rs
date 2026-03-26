@@ -225,7 +225,7 @@ impl FlashblocksBlockValidator {
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
 
-        let (outcome, bundle) = builder.finish_with_bundle(finish_state_provider.as_ref())?;
+        let (outcome, bundle) = builder.finish_with_bundle(finish_state_provider.as_ref(), None)?;
 
         let BlockBuilderOutcome {
             execution_result,

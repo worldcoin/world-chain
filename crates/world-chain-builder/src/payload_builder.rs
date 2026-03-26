@@ -3,6 +3,9 @@ use crate::{
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     executor::FlashblocksBlockBuilder,
+    metrics::{
+        PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome, PayloadBuildStage,
+    },
     payload_txns::BestPayloadTxns,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
@@ -56,7 +59,7 @@ use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, Stat
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
 
 /// Flashblocks Paylod builder
@@ -76,6 +79,8 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub best_transactions: Txs,
     /// Context builder for the payload.
     pub ctx_builder: CtxBuilder,
+    /// Metrics recorder for the payload build pipeline.
+    pub metrics: Arc<PayloadBuildMetrics>,
 }
 
 impl<Pool, Client, CtxBuilder, Txs> FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
@@ -113,6 +118,9 @@ where
             cancel,
             best_payload,
         } = args;
+        self.metrics.increment_attempts();
+        let build_started = Instant::now();
+        let mut attempt_metrics = PayloadBuildAttemptMetrics::default();
 
         let ctx = self.ctx_builder.build(
             self.client.clone(),
@@ -127,16 +135,32 @@ where
         let db = StateProviderDatabase::new(state_provider);
         let db = cached_reads.as_db_mut(db);
 
-        build(
+        let result = build(
             self.client.clone(),
             best,
             Some(self.pool.clone()),
             db,
             &ctx,
             committed_payload,
+            &mut attempt_metrics,
             self.config.bal_enabled,
-        )
-        .map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
+        );
+
+        attempt_metrics.record_stage_duration(PayloadBuildStage::Total, build_started.elapsed());
+        match &result {
+            Ok((outcome, _)) => {
+                self.metrics.record_outcome(payload_build_outcome(outcome));
+                if matches!(
+                    outcome,
+                    BuildOutcomeKind::Better { .. } | BuildOutcomeKind::Freeze(_)
+                ) {
+                    attempt_metrics.publish(self.metrics.as_ref());
+                }
+            }
+            Err(_) => self.metrics.record_outcome(PayloadBuildOutcome::Error),
+        }
+
+        result.map(|(out, access_list)| (out.with_cached_reads(cached_reads), access_list))
     }
 }
 
@@ -214,6 +238,10 @@ where
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
+    fn payload_build_metrics(&self) -> Arc<PayloadBuildMetrics> {
+        self.metrics.clone()
+    }
+
     fn try_build_with_precommit(
         &self,
         args: BuildArguments<
@@ -247,6 +275,7 @@ pub fn build<'a, Txs, Ctx, Pool>(
     db: impl Database<Error = ProviderError>,
     ctx: &Ctx,
     committed_payload: Option<&OpBuiltPayload>,
+    attempt_metrics: &mut PayloadBuildAttemptMetrics,
     bal_enabled: bool,
 ) -> Result<
     (
@@ -358,6 +387,7 @@ where
             pool,
             ctx,
             builder,
+            attempt_metrics,
             &committed_state,
             Some(access_list_rx),
             cumulative_uncompressed_bytes,
@@ -386,10 +416,20 @@ where
             pool,
             ctx,
             builder,
+            attempt_metrics,
             &committed_state,
             None,
             cumulative_uncompressed_bytes,
         )
+    }
+}
+
+fn payload_build_outcome<P>(outcome: &BuildOutcomeKind<P>) -> PayloadBuildOutcome {
+    match outcome {
+        BuildOutcomeKind::Better { .. } => PayloadBuildOutcome::Better,
+        BuildOutcomeKind::Freeze(_) => PayloadBuildOutcome::Freeze,
+        BuildOutcomeKind::Aborted { .. } => PayloadBuildOutcome::Aborted,
+        BuildOutcomeKind::Cancelled => PayloadBuildOutcome::Cancelled,
     }
 }
 
@@ -409,6 +449,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
             Transaction = R::Transaction,
         >,
     >,
+    attempt_metrics: &mut PayloadBuildAttemptMetrics,
     committed_state: &CommittedState<R>,
     access_list_rx: Option<crossbeam_channel::Receiver<FlashblockAccessList>>,
     mut cumulative_uncompressed_bytes: u64,
@@ -433,10 +474,16 @@ where
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
     // will already be in the [`BundleState`] at this point if the `best_payload` is set.
     let mut info = if committed_payload.is_none() {
-        // 3. apply pre-execution changes
-        builder.apply_pre_execution_changes()?;
+        let pre_execution_changes_started = Instant::now();
+        let pre_execution_changes_result = builder.apply_pre_execution_changes();
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::PreExecutionChanges,
+            pre_execution_changes_started.elapsed(),
+        );
+        pre_execution_changes_result?;
 
-        // 4. Execute Deposit transactions
+        // 4. Execute the sequencer transactions after the block-level pre-execution changes.
+        let sequencer_tx_execution_started = Instant::now();
         let sequencer_transactions_uncompressed_size: u64 = ctx
             .attributes()
             .transactions
@@ -444,8 +491,14 @@ where
             .map(|tx| tx.1.encode_2718_len() as u64)
             .sum();
         cumulative_uncompressed_bytes = sequencer_transactions_uncompressed_size;
-        ctx.execute_sequencer_transactions(&mut builder)
-            .map_err(PayloadBuilderError::other)?
+        let sequencer_tx_execution_result = ctx
+            .execute_sequencer_transactions(&mut builder)
+            .map_err(PayloadBuilderError::other);
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            sequencer_tx_execution_started.elapsed(),
+        );
+        sequencer_tx_execution_result?
     } else {
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
@@ -459,20 +512,30 @@ where
     if let Some(pool) = pool
         && !ctx.attributes().no_tx_pool
     {
+        let txpool_fetch_started = Instant::now();
         let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
         let mut best_txns = BestPayloadTxns::new(best_txs).with_prev(visited_transactions);
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::TxPoolFetch,
+            txpool_fetch_started.elapsed(),
+        );
 
-        if ctx
-            .execute_best_transactions(
-                pool,
-                &mut info,
-                &mut builder,
-                best_txns.guard(),
-                gas_limit,
-                cumulative_uncompressed_bytes,
-            )?
-            .is_some()
-        {
+        let tx_execution_started = Instant::now();
+        let tx_execution_result = ctx.execute_best_transactions(
+            pool,
+            &mut info,
+            &mut builder,
+            best_txns.guard(),
+            attempt_metrics,
+            gas_limit,
+            cumulative_uncompressed_bytes,
+        );
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::BestTxExecution,
+            tx_execution_started.elapsed(),
+        );
+
+        if tx_execution_result?.is_some() {
             trace!(target: "flashblocks::payload_builder", "payload build cancelled");
             if let Some(best_payload) = committed_payload {
                 // we can return the previous best payload since we didn't include any new txs
@@ -496,7 +559,11 @@ where
 
     // 6. Build the block
     let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
-    let (build_outcome, bundle) = builder.finish_with_bundle(state_provider.as_ref())?;
+    let finalize_started = Instant::now();
+    let finalize_result =
+        builder.finish_with_bundle(state_provider.as_ref(), Some(attempt_metrics));
+    attempt_metrics.record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
+    let (build_outcome, bundle) = finalize_result?;
 
     // 7. Seal the block
     let BlockBuilderOutcome {

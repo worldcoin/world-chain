@@ -1,6 +1,7 @@
 use world_chain_builder::{
     FlashblocksPayloadBuilderConfig,
     coordinator::FlashblocksExecutionCoordinator,
+    metrics::PayloadBuildMetrics,
     payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
@@ -16,6 +17,7 @@ use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
@@ -87,6 +89,7 @@ where
             config: self.builder_config,
             best_transactions: (),
             ctx_builder: self.ctx_builder,
+            metrics: Arc::new(PayloadBuildMetrics::default()),
         };
 
         Ok(payload_builder)
