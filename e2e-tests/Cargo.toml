@@ -1,0 +1,85 @@
+[package]
+name = "world-chain-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# World Chain
+world-chain-node.workspace = true
+world-chain-test-utils.workspace = true
+world-chain-primitives.workspace = true
+world-chain-builder.workspace = true
+world-chain-rpc.workspace = true
+world-chain-p2p = { workspace = true, features = ["test-utils"] }
+world-chain-pool.workspace = true
+world-chain-pbh.workspace = true
+
+# reth
+reth.workspace = true
+reth-e2e-test-utils.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-node-core.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-optimism-chainspec.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-forks.workspace = true
+reth-transaction-pool.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-network.workspace = true
+reth-network-api.workspace = true
+reth-network-peers.workspace = true
+reth-eth-wire.workspace = true
+reth-tasks.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-contract.workspace = true
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
+
+# op-alloy
+op-alloy-consensus.workspace = true
+op-alloy-network.workspace = true
+op-alloy-rpc-types.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+
+# revm
+revm.workspace = true
+revm-primitives.workspace = true
+revm-database.workspace = true
+
+# misc
+proptest.workspace = true
+reth-optimism-evm.workspace = true
+reth-tracing.workspace = true
+ed25519-dalek.workspace = true
+eyre.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tempfile.workspace = true
+url.workspace = true
+world-chain-cli.workspace = true

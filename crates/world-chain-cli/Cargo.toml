@@ -1,0 +1,27 @@
+[package]
+name = "world-chain-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-builder.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+alloy-signer-local.workspace = true
+alloy-primitives.workspace = true
+ed25519-dalek.workspace = true
+clap.workspace = true
+eyre.workspace = true
+hex.workspace = true
+reth-network-peers.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alloy-genesis.workspace = true
+
+[[example]]
+name = "sk-to-vk"
+path = "examples/sk_to_vk.rs"

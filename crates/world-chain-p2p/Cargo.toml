@@ -1,0 +1,39 @@
+[package]
+name = "world-chain-p2p"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+test-utils = []
+
+[dependencies]
+world-chain-cli.workspace = true
+world-chain-primitives.workspace = true
+
+reth.workspace = true
+reth-ethereum.workspace = true
+reth-eth-wire.workspace = true
+reth-network = { workspace = true }
+
+ed25519-dalek.workspace = true
+metrics.workspace = true
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+tracing.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+pin-project.workspace = true
+chrono.workspace = true
+reth-provider.workspace = true
+reth-tasks = { workspace = true }
+rand.workspace = true
+
+[dev-dependencies]
+reth-network-api.workspace = true
+reth-network-peers.workspace = true
+enr = { version = "0.13.0", default-features = false, features = ["rust-secp256k1"] }

@@ -1,0 +1,49 @@
+[package]
+name = "world-chain-pool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+world-chain-pbh.workspace = true
+
+reth.workspace = true
+reth-db.workspace = true
+reth-optimism-node.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-eth-wire-types.workspace = true
+reth-optimism-primitives.workspace = true
+revm-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-optimism-forks.workspace = true
+
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types.workspace = true
+alloy-eips.workspace = true
+alloy-sol-types.workspace = true
+alloy-rlp.workspace = true
+op-alloy-consensus.workspace = true
+
+# 3rd party
+tokio.workspace = true
+semaphore-rs.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+reth-transaction-pool.workspace = true
+world-chain-test-utils.workspace = true
+test-case.workspace = true
+chrono.workspace = true
+eyre.workspace = true
+
+[lints]
+workspace = true

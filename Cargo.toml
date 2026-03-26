@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.11.3"
 edition = "2024"
-rust-version = "1.89.0"
+rust-version = "1.94.0"
 license = "MIT"
 homepage = "https://world.org/world-chain"
 repository = "https://github.com/worldcoin/world-chain/"
@@ -9,59 +9,50 @@ repository = "https://github.com/worldcoin/world-chain/"
 [workspace]
 resolver = "3"
 members = [
-    "crates/tests/*",
-    "crates/toolkit",
-    "crates/world/*",
-    "crates/flashblocks/p2p",
-    "crates/flashblocks/primitives",
-    "crates/flashblocks/rpc",
-    "crates/flashblocks/builder",
-    "crates/flashblocks/payload",
-    "crates/flashblocks/node",
-    "crates/flashblocks/cli",
+    "bin/world-chain",
+    "crates/world-chain-node",
+    "crates/world-chain-rpc",
+    "crates/world-chain-test-utils",
+    "crates/world-chain-primitives",
+    "crates/world-chain-cli",
+    "crates/world-chain-p2p",
+    "crates/world-chain-builder",
+    "crates/world-chain-payload",
+    "crates/world-chain-pool",
+    "crates/world-chain-pbh",
+    "e2e-tests",
+    "xtask",
 ]
-default-members = [
-    "crates/flashblocks/p2p",
-    "crates/flashblocks/primitives",
-    "crates/flashblocks/rpc",
-    "crates/flashblocks/builder",
-    "crates/flashblocks/payload",
-    "crates/flashblocks/node",
-    "crates/flashblocks/cli",
-    "crates/world/bin",
-    "crates/world/node",
-    "crates/world/payload",
-    "crates/world/rpc",
-    "crates/world/pbh",
-    "crates/world/pool",
-    "crates/tests/sepolia",
-    "crates/tests/devnet",
-]
+default-members = ["bin/world-chain"]
 
 [profile.maxperf]
 codegen-units = 1
 inherits = "release"
 lto = "fat"
+strip = "none"
+panic = "abort"
+
+[profile.dev-tracing]
+inherits = "dev"
+
+[profile.verbose-tracing]
+inherits = "dev"
+
 
 [workspace.lints]
 
 [workspace.dependencies]
-# Flashblocks
-flashblocks-node = { path = "crates/flashblocks/node" }
-flashblocks-p2p = { path = "crates/flashblocks/p2p" }
-flashblocks-primitives = { path = "crates/flashblocks/primitives" }
-flashblocks-rpc = { path = "crates/flashblocks/rpc" }
-flashblocks-builder = { path = "crates/flashblocks/builder" }
-flashblocks-payload = { path = "crates/flashblocks/payload" }
-flashblocks-cli = { path = "crates/flashblocks/cli" }
-
-# Internal
-world-chain-node = { path = "crates/world/node" }
-world-chain-pbh = { path = "crates/world/pbh" }
-world-chain-payload = { path = "crates/world/payload" }
-world-chain-rpc = { path = "crates/world/rpc" }
-world-chain-pool = { path = "crates/world/pool" }
-world-chain-test = { path = "crates/world/test" }
+# World Chain
+world-chain-primitives = { path = "crates/world-chain-primitives" }
+world-chain-cli = { path = "crates/world-chain-cli" }
+world-chain-p2p = { path = "crates/world-chain-p2p" }
+world-chain-builder = { path = "crates/world-chain-builder" }
+world-chain-payload = { path = "crates/world-chain-payload" }
+world-chain-node = { path = "crates/world-chain-node" }
+world-chain-pbh = { path = "crates/world-chain-pbh" }
+world-chain-rpc = { path = "crates/world-chain-rpc" }
+world-chain-pool = { path = "crates/world-chain-pool" }
+world-chain-test-utils = { path = "crates/world-chain-test-utils" }
 
 # reth
 reth = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
@@ -99,6 +90,7 @@ reth-node-builder = { git = "https://github.com/worldcoin/reth", features = [
 reth-engine-local = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1", features = [
     "op",
 ] }
+reth-engine-tree = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-node-api = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-payload-builder = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
 reth-payload-primitives = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }
