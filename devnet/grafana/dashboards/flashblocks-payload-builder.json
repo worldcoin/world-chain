@@ -453,7 +453,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 6
       },
@@ -589,8 +589,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 6
       },
       "id": 8,
@@ -610,31 +610,66 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(reth_flashblocks_payload_build_total_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
+          "expr": "max(reth_flashblocks_payload_build_total_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
           "legendFormat": "total p95",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(reth_flashblocks_payload_build_best_tx_execution_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
-          "legendFormat": "best tx p95",
+          "expr": "max(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "pre-execution p95",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(reth_flashblocks_payload_build_finalize_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
-          "legendFormat": "finalize p95",
+          "expr": "max(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "sequencer tx p95",
           "range": true,
           "refId": "C"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(reth_flashblocks_payload_build_state_root_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
-          "legendFormat": "state root p95",
+          "expr": "max(reth_flashblocks_payload_build_txpool_fetch_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "txpool fetch p95",
           "range": true,
           "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_best_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "best tx p95",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_finalize_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "finalize p95",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "merge transitions p95",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "state root p95",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "block assembly p95",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Stage p95 Duration",
@@ -690,8 +725,144 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_total_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "total p99",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "pre-execution p99",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "sequencer tx p99",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_txpool_fetch_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "txpool fetch p99",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_best_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "best tx p99",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_finalize_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "finalize p99",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "merge transitions p99",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "state root p99",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "block assembly p99",
+          "range": true,
+          "refId": "I"
+        }
+      ],
+      "title": "Stage p99 Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
         "y": 6
       },
       "id": 9,
@@ -954,14 +1125,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(reth_flashblocks_payload_build_transaction_execution_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
+          "expr": "max(reth_flashblocks_payload_build_transaction_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.5\"})",
           "legendFormat": "p50",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(reth_flashblocks_payload_build_transaction_execution_duration_seconds_bucket{client_type=\"execution-builder\"}[$__rate_interval])))",
+          "expr": "max(reth_flashblocks_payload_build_transaction_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
           "legendFormat": "p95",
           "range": true,
           "refId": "B"
