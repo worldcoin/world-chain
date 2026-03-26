@@ -150,7 +150,7 @@ where
         // merge all transitions into bundle state
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
-        if let Some(metrics) = metrics.as_deref_mut() {
+        if let Some(metrics) = metrics.as_mut() {
             metrics.record_stage_duration(
                 PayloadBuildStage::MergeTransitions,
                 merge_started.elapsed(),
@@ -172,7 +172,7 @@ where
         let hashed_state = state.hashed_post_state(db.bundle_state());
         let state_root_started = Instant::now();
         let state_root_result = state.state_root_with_updates(hashed_state.clone());
-        if let Some(metrics) = metrics.as_deref_mut() {
+        if let Some(metrics) = metrics.as_mut() {
             metrics
                 .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
         }
@@ -200,7 +200,7 @@ where
             &state,
             state_root,
         ));
-        if let Some(metrics) = metrics.as_deref_mut() {
+        if let Some(metrics) = metrics {
             metrics.record_stage_duration(
                 PayloadBuildStage::BlockAssembly,
                 block_assembly_started.elapsed(),
