@@ -231,6 +231,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
+        _attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
         mut gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
