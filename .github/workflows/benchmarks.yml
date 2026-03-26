@@ -47,7 +47,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git checkout --detach "$BASE_SHA"
-          bench --package world-chain-builder --bench coordinator -- --save-baseline base --all-features
+          cargo bench --package world-chain-builder --bench coordinator -- --save-baseline base --all-features
 
       - name: Run PR benchmarks
         if: github.event_name == 'pull_request'
