@@ -24,3 +24,15 @@ just stress-test <stress | stress-precompile>
 just stress-test report
 ```
 
+# Grafana
+
+The devnet observability stack includes Grafana and Prometheus. This repo currently does not
+provision a custom World Chain dashboard into that Grafana automatically, so import the dashboard
+JSON manually from:
+
+```text
+devnet/grafana/dashboards/flashblocks-payload-builder.json
+```
+
+It is built for the `reth_flashblocks_payload_build_*` metrics exposed by the flashblocks-enabled
+payload builder.

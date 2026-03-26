@@ -3949,8 +3949,6 @@ dependencies = [
  "flashblocks-p2p",
  "flashblocks-primitives",
  "futures",
- "metrics",
- "metrics-derive",
  "op-alloy-consensus",
  "reth",
  "reth-basic-payload-builder",
