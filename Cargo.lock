@@ -3790,6 +3790,7 @@ dependencies = [
  "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-network",
+ "op-alloy-rpc-types-engine",
  "parking_lot",
  "proptest",
  "rayon",
@@ -3819,6 +3820,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber 0.3.23",
 ]

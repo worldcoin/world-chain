@@ -47,6 +47,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 op-alloy-consensus.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
 
@@ -59,6 +60,7 @@ revm-database.workspace = true
 
 # tokio
 tokio.workspace = true
+tokio-stream.workspace = true
 
 # misc
 crossbeam-channel.workspace = true
