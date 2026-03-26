@@ -291,18 +291,6 @@ pub enum PayloadBuildOutcome {
     Error,
 }
 
-impl PayloadBuildOutcome {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Better => "better",
-            Self::Freeze => "freeze",
-            Self::Aborted => "aborted",
-            Self::Cancelled => "cancelled",
-            Self::Error => "error",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PayloadBuildRejectionReason {
     OverLimits,
@@ -315,34 +303,10 @@ pub enum PayloadBuildRejectionReason {
     InvalidDescendant,
 }
 
-impl PayloadBuildRejectionReason {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::OverLimits => "over_limits",
-            Self::UncompressedSize => "uncompressed_size",
-            Self::ConditionalInvalid => "conditional_invalid",
-            Self::BlobOrDeposit => "blob_or_deposit",
-            Self::VerifiedGasLimit => "verified_gas_limit",
-            Self::DuplicateNullifier => "duplicate_nullifier",
-            Self::NonceTooLow => "nonce_too_low",
-            Self::InvalidDescendant => "invalid_descendant",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PayloadBuildTaskOutcome {
     Success,
     Failure,
-}
-
-impl PayloadBuildTaskOutcome {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Success => "success",
-            Self::Failure => "failure",
-        }
-    }
 }
 
 #[derive(Clone, Metrics)]
