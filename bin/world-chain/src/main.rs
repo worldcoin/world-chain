@@ -3,11 +3,11 @@ use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_tracing::tracing::info;
-use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
-use world_chain_node::{
+use cli::{WorldChainArgs, WorldChainNodeConfig};
+use node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
-use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+use rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]

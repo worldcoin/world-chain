@@ -3,7 +3,7 @@ use alloy_rlp::Decodable;
 use cli::{ProveArgs, inclusion_proof_source::InclusionProofSourceVariant};
 use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::Proof};
 use serde::{Deserialize, Serialize};
-use world_chain_pbh::{
+use pbh::{
     date_marker::DateMarker,
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::PBHPayload,
@@ -60,7 +60,7 @@ pub async fn run(args: Args) -> eyre::Result<()> {
         external_nullifier,
         nullifier_hash,
         root: inclusion_proof.root,
-        proof: world_chain_pbh::payload::Proof(semaphore_proof),
+        proof: pbh::payload::Proof(semaphore_proof),
     };
 
     let encoded = alloy_rlp::encode(proof);

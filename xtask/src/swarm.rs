@@ -18,9 +18,9 @@ use reth_optimism_node::{OpPayloadAttributes, utils::optimism_payload_attributes
 use reth_optimism_payload_builder::payload_id_optimism;
 use tracing::info;
 
-use world_chain_node::context::WorldChainDefaultContext;
-use world_chain_primitives::p2p::Authorization;
-use world_chain_test_utils::e2e_harness::{
+use node::context::WorldChainDefaultContext;
+use primitives::p2p::Authorization;
+use test_utils::e2e_harness::{
     actions::EngineDriver,
     setup::{TX_SET_L1_BLOCK, build_payload_attributes, encode_eip1559_params, setup},
 };

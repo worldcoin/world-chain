@@ -1,9 +1,9 @@
 [alias]
 xtask = "run --package xtask --"
 docs = "doc --workspace --all-features --no-deps"
-b = "bench --package world-chain-builder --bench coordinator --"
-bs = "bench --package world-chain-builder --bench coordinator -- --save-baseline"
-bc = "bench --package world-chain-builder --bench coordinator -- --baseline main --save-baseline pr"
+b = "bench --package builder --bench coordinator --"
+bs = "bench --package builder --bench coordinator -- --save-baseline"
+bc = "bench --package builder --bench coordinator -- --baseline main --save-baseline pr"
 
 [env]
 DEBUG = "info,flashblocks=debug,world_chain=info"

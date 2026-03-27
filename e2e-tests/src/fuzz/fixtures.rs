@@ -1,10 +1,10 @@
 // Test utilities for high entropy property-based testing of Block Level Access Lists (BAL)
 //
-// The bulk of the fixture code lives in `world_chain_test_utils::builder`.  Only
+// The bulk of the fixture code lives in `test_utils::builder`.  Only
 // proptest strategies remain here since `proptest` is not a dependency of the
 // `bench` feature.
 
-pub use world_chain_test_utils::builder::*;
+pub use test_utils::builder::*;
 
 use proptest::prelude::*;
 
@@ -51,9 +51,9 @@ pub fn arb_execution_payload(
     max_ops_per_flashblock: usize,
 ) -> impl Strategy<
     Value = (
-        world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
+        primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
-            world_chain_builder::bal_executor::CommittedState<
+            builder::bal_executor::CommittedState<
                 reth_optimism_evm::OpRethReceiptBuilder,
             >,
         >,
@@ -67,9 +67,9 @@ pub fn arb_execution_payload_sequence(
     max_flashblocks: usize,
 ) -> impl Strategy<
     Value = Vec<(
-        world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
+        primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
-            world_chain_builder::bal_executor::CommittedState<
+            builder::bal_executor::CommittedState<
                 reth_optimism_evm::OpRethReceiptBuilder,
             >,
         >,

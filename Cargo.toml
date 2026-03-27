@@ -10,19 +10,20 @@ repository = "https://github.com/worldcoin/world-chain/"
 resolver = "3"
 members = [
     "bin/world-chain",
-    "crates/world-chain-node",
-    "crates/world-chain-rpc",
-    "crates/world-chain-test-utils",
-    "crates/world-chain-primitives",
-    "crates/world-chain-cli",
-    "crates/world-chain-p2p",
-    "crates/world-chain-builder",
-    "crates/world-chain-payload",
-    "crates/world-chain-pool",
-    "crates/world-chain-pbh",
+    "crates/node",
+    "crates/rpc",
+    "crates/primitives",
+    "crates/cli",
+    "crates/p2p",
+    "crates/builder",
+    "crates/payload",
+    "crates/pool",
+    "crates/pbh",
+    "crates/test-utils",
     "e2e-tests",
     "xtask",
 ]
+
 default-members = ["bin/world-chain"]
 
 [profile.maxperf]
@@ -43,16 +44,16 @@ inherits = "dev"
 
 [workspace.dependencies]
 # World Chain
-world-chain-primitives = { path = "crates/world-chain-primitives" }
-world-chain-cli = { path = "crates/world-chain-cli" }
-world-chain-p2p = { path = "crates/world-chain-p2p" }
-world-chain-builder = { path = "crates/world-chain-builder" }
-world-chain-payload = { path = "crates/world-chain-payload" }
-world-chain-node = { path = "crates/world-chain-node" }
-world-chain-pbh = { path = "crates/world-chain-pbh" }
-world-chain-rpc = { path = "crates/world-chain-rpc" }
-world-chain-pool = { path = "crates/world-chain-pool" }
-world-chain-test-utils = { path = "crates/world-chain-test-utils" }
+world-chain-primitives = { path = "crates/primitives" }
+world-chain-cli = { path = "crates/cli" }
+world-chain-p2p = { path = "crates/p2p" }
+world-chain-builder = { path = "crates/builder" }
+world-chain-payload = { path = "crates/payload" }
+world-chain-node = { path = "crates/node" }
+world-chain-pbh = { path = "crates/pbh" }
+world-chain-rpc = { path = "crates/rpc" }
+world-chain-pool = { path = "crates/pool" }
+world-chain-test-utils = { path = "crates/test-utils" }
 
 # reth
 reth = { git = "https://github.com/worldcoin/reth", rev = "4c1b4a1" }

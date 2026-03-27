@@ -1,5 +1,3 @@
-experimental = ["setup-scripts"]
-
 [profile.default]
 failure-output = "immediate-final"
 success-output = "never"
@@ -12,22 +10,3 @@ store-success-output = false
 [profile.ci]
 fail-fast = false
 failure-output = "immediate-final"
-
-[profile.ci.junit]
-path = "junit.xml"
-store-failure-output = true
-store-success-output = false
-
-[scripts.setup.tracing-dev]
-command = 'bash -c "echo RUST_LOG=$DEBUG >> $NEXTEST_ENV"'
-
-[scripts.setup.tracing-verbose]
-command = 'bash -c "echo RUST_LOG=$TRACE >> $NEXTEST_ENV"'
-
-[[profile.dev-tracing.scripts]]
-filter = 'all()'
-setup = 'tracing-dev'
-
-[[profile.verbose-tracing.scripts]]
-filter = 'all()'
-setup = 'tracing-verbose'

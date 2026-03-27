@@ -6,7 +6,6 @@
 
 use clap::{CommandFactory, Parser};
 use eyre::Result;
-use world_chain_cli::WorldChainArgs;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -62,5 +61,5 @@ pub fn run(args: Args) -> Result<()> {
 #[command(name = "world-chain", about = "World Chain Node")]
 struct WorldChainCli {
     #[command(flatten)]
-    world_chain: world_chain_cli::WorldChainArgs,
+    world_chain: cli::WorldChainArgs,
 }
