@@ -35,7 +35,10 @@ use reth_evm::{
     ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, op_revm::OpSpecId,
     precompiles::PrecompilesMap,
 };
-use reth_node_api::{BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
+use reth_node_api::{BuiltPayloadExecutedBlock, PayloadBuilderAttributes, PayloadBuilderError};
+use reth_primitives::NodePrimitives;
+use reth_revm::database::StateProviderDatabase;
+use revm_database::State;
 use tracing::trace;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
@@ -46,6 +49,7 @@ use reth_optimism_node::{
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
+    config::OpBuilderConfig,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
@@ -57,7 +61,8 @@ use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
 
-/// Flashblocks Paylod builder
+
+/// Flashblocks Payload builder
 ///
 /// A payload builder
 #[derive(Debug, Clone)]
@@ -68,8 +73,10 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     pub pool: Pool,
     /// Node client.
     pub client: Client,
-    /// Settings for the builder, e.g. DA settings.
-    pub config: FlashblocksPayloadBuilderConfig,
+    /// Inner Optimism builder configuration (DA settings, etc.).
+    pub builder_config: OpBuilderConfig,
+    /// Whether to enable Block Access List (BAL) generation.
+    pub bal_enabled: bool,
     /// Iterator over best transactions from the pool.
     pub best_transactions: Txs,
     /// Context builder for the payload.
@@ -120,7 +127,7 @@ where
         let ctx = self.ctx_builder.build(
             self.client.clone(),
             self.evm_config.clone(),
-            self.config.inner.clone(),
+            self.builder_config.clone(),
             config,
             &cancel,
             best_payload.clone(),
@@ -138,7 +145,7 @@ where
             &ctx,
             committed_payload,
             &mut attempt_metrics,
-            self.config.bal_enabled,
+            self.bal_enabled,
         );
 
         attempt_metrics.record_stage_duration(PayloadBuildStage::Total, build_started.elapsed());

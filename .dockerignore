@@ -12,6 +12,9 @@ book.toml
 CODEOWNERS
 .github/
 .claude/
+pkg/
+
+
 README.md
 LICENSE
 SECURITY.md

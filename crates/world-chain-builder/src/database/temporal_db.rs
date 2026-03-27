@@ -220,8 +220,10 @@ mod tests {
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{U256, address, b256, bytes};
-    use reth::revm::State;
+    
+    use reth_revm::State;
     use revm::{
+        
         database::{CacheDB, EmptyDB, InMemoryDB},
         primitives::KECCAK_EMPTY,
     };

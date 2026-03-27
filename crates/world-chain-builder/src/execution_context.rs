@@ -1,12 +1,17 @@
 use crate::{
+    metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-use alloy_consensus::{SignableTransaction, Transaction};
+use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
+use alloy_network::{TransactionBuilder, TxSignerSync};
+use alloy_primitives::{Address, U256};
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use op_alloy_consensus::EIP1559ParamError;
+use op_alloy_rpc_types::OpTransactionRequest;
 
+use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
@@ -15,7 +20,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
 };
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -28,13 +33,19 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use alloy_primitives::Address;
+use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_revm::cancelled::CancelOnDrop;
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
+use revm_database::State;
+use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
 use tracing::{error, trace};
-use world_chain_pool::tx::WorldChainPoolTransaction;
+use world_chain_pool::{
+    bindings::IPBHEntryPoint::spendNullifierHashesCall,
+    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
+};
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
@@ -223,7 +234,7 @@ where
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Pool: TransactionPool<Pooled: WorldChainPoolTransaction>,
+        Pool: TransactionPool,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
                 Executor: BlockExecutor<
@@ -249,7 +260,7 @@ where
         while let Some(pooled_tx) = best_txs.next(()) {
             transactions_considered += 1;
             let tx_da_size = pooled_tx.estimated_da_size();
-            let tx = pooled_tx.into_consensus();
+            let tx = pooled_tx.clone().into_consensus();
             let tx_uncompressed_size = tx.encode_2718_len() as u64;
             attempt_metrics.record_transaction_size_bytes(tx_uncompressed_size);
             attempt_metrics.record_transaction_da_size_bytes(tx_da_size);
@@ -291,7 +302,11 @@ where
             }
 
             if let Some(conditional_options) = pooled_tx.conditional_options()
-                && world_chain_rpc::transactions::validate_conditional_options(conditional_options, &self.client).is_err()
+                && world_chain_rpc::transactions::validate_conditional_options(
+                    conditional_options,
+                    &self.client,
+                )
+                .is_err()
             {
                 attempt_metrics
                     .increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);

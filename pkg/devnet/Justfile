@@ -1,0 +1,21 @@
+set positional-arguments
+
+# default recipe to display help information
+default:
+    @just --list
+
+# Spawns the devnet
+devnet-up:
+    kurtosis run . --args-file network_params.yaml --enclave world-chain
+
+# Stops the devnet **This will prune all docker containers**
+devnet-down:
+    kurtosis enclave rm -f world-chain
+    kurtosis clean
+
+fmt: 
+    kurtosis lint --format
+
+stress-test *args='':
+    chmod +x ./stress/stress.sh \
+    && ./stress/stress.sh $@

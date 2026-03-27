@@ -1,10 +1,10 @@
 use world_chain_builder::{
-    FlashblocksPayloadBuilderConfig,
     coordinator::FlashblocksExecutionCoordinator,
     metrics::PayloadBuildMetrics,
     payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
+use world_chain_cli::FlashblocksPayloadBuilderConfig;
 
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};
@@ -86,7 +86,8 @@ where
             evm_config,
             pool,
             client: ctx.provider().clone(),
-            config: self.builder_config,
+            builder_config: self.builder_config.inner,
+            bal_enabled: self.builder_config.bal_enabled,
             best_transactions: (),
             ctx_builder: self.ctx_builder,
             metrics: Arc::new(PayloadBuildMetrics::default()),

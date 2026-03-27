@@ -1,19 +1,23 @@
+use crate::{
+    metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
+};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
+use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::EIP1559ParamError;
-use reth::{builder::PayloadBuilderError, payload::PayloadId, revm::State};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    ConfigureEvm, Evm, EvmEnv,
     block::{BlockExecutor, StateDB},
     execute::BlockBuilder,
     op_revm::OpSpecId,
+    ConfigureEvm, Evm, EvmEnv,
 };
+use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpEvmConfig,
     txpool::{OpPooledTransaction, OpPooledTx},
+    OpEvmConfig,
 };
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
@@ -24,12 +28,9 @@ use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives::{SealedHeader, TxTy};
 use reth_provider::ChainSpecProvider;
-use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction};
-use revm::{DatabaseCommit, context::BlockEnv};
-use reth_transaction_pool::TransactionPool;
-use crate::{
-    metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
-};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use revm::{context::BlockEnv, DatabaseCommit};
+use revm_database::State;
 
 /// Context trait for building payloads with flashblock support.
 ///
@@ -112,9 +113,9 @@ pub trait PayloadBuilderCtx: Send + Sync {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-        > + 'a,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
         PayloadBuilderError,
     >
     where
@@ -150,14 +151,11 @@ pub trait PayloadBuilderCtx: Send + Sync {
     where
         Pool: TransactionPool,
         Builder: BlockBuilder<
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<
-                    Evm: Evm<
-                        DB: StateDB + DatabaseCommit + reth_evm::Database,
-                        BlockEnv = BlockEnv,
-                    >,
-                >,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<
+                Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database, BlockEnv = BlockEnv>,
             >,
+        >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;
 
     /// Determines if validator withdrawals should be processed in this block.
@@ -191,7 +189,7 @@ where
             OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
             <<OpEvmConfig as ConfigureEvm>::Primitives as reth_node_api::NodePrimitives>::BlockHeader,
         >,
-        cancel: &reth::revm::cancelled::CancelOnDrop,
+        cancel: &reth_revm::cancelled::CancelOnDrop,
         best_payload: Option<reth_optimism_node::OpBuiltPayload>,
     ) -> Self::PayloadBuilderCtx
     where
@@ -266,11 +264,9 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     where
         Pool: TransactionPool,
         Builder: BlockBuilder<
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<
-                    Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>,
-                >,
-            >,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
+        >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
     {
         self.execute_best_transactions(info, builder, best_txs)
@@ -292,9 +288,9 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-        > + 'a,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+            > + 'a,
         PayloadBuilderError,
     >
     where

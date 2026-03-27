@@ -1,0 +1,8 @@
+{
+    "name": "WorldChain Devnet",
+    "id": 2151908,
+    "da_pre_verification_gas": true,
+    "da_gas_oracle_type": "LOCAL_BEDROCK",
+    "da_gas_oracle_contract_address": "0x420000000000000000000000000000000000000F",
+    "bundle_max_send_interval_millis": 250
+}

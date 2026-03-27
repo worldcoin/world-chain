@@ -4,7 +4,7 @@ use std::{
 };
 
 use alloy_primitives::B256;
-use eyre::eyre::eyre;
+use ::eyre::eyre::eyre;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, ed25519_dalek::SigningKey,

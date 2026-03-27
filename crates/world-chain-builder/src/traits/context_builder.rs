@@ -1,11 +1,11 @@
+use crate::traits::context::PayloadBuilderCtx;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::ConfigureEvm;
 use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_primitives::NodePrimitives;
-use reth::revm::cancelled::CancelOnDrop;
-use crate::traits::context::PayloadBuilderCtx;
+use reth_revm::cancelled::CancelOnDrop;
 
 /// Builder trait for creating [`PayloadBuilderCtx`] instances with specific configurations.
 ///

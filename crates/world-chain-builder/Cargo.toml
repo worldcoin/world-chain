@@ -19,6 +19,7 @@ reth-payload-util.workspace = true
 reth-evm.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
+reth-revm.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -36,7 +37,9 @@ alloy-eip7928.workspace = true
 alloy-network.workspace = true
 alloy-signer-local.workspace = true
 op-alloy-consensus.workspace = true
+op-alloy-rpc-types.workspace = true
 alloy-op-evm.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 world-chain-primitives.workspace = true
 world-chain-p2p.workspace = true
@@ -49,6 +52,8 @@ revm-database.workspace = true
 
 # tokio
 tokio.workspace = true
+
+semaphore-rs.workspace = true
 
 # misc
 crossbeam-channel.workspace = true

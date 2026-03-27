@@ -189,7 +189,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: flashblocks_primitives::access_list::access_list_hash(&access_list),
+            access_list_hash: world_chain_primitives::access_list::access_list_hash(&access_list),
             access_list,
         });
         match state {

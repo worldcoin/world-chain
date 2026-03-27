@@ -34,10 +34,7 @@ use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
 use tracing::info;
-use world_chain_builder::{
-    WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder,
-    traits::payload_builder::FlashblockPayloadBuilder,
-};
+use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;

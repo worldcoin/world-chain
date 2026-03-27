@@ -6,6 +6,7 @@
 
 use clap::{CommandFactory, Parser};
 use eyre::Result;
+use world_chain_cli::WorldChainArgs;
 use std::path::PathBuf;
 use tracing::info;
 

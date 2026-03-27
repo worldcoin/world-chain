@@ -10,51 +10,26 @@ license.workspace = true
 world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p.workspace = true
-world-chain-pool.workspace = true
-world-chain-rpc.workspace = true
 
 # reth
 reth.workspace = true
 reth-basic-payload-builder.workspace = true
-reth-evm.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
-reth-optimism-forks.workspace = true
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-transaction-pool.workspace = true
-reth-payload-util.workspace = true
-
-# revm
-revm.workspace = true
-revm-primitives.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
-alloy-network.workspace = true
-alloy-signer-local.workspace = true
-alloy-consensus.workspace = true
-alloy-eips.workspace = true
-alloy-rpc-types-debug.workspace = true
-alloy-rlp.workspace = true
-
-# op-alloy
-op-alloy-rpc-types.workspace = true
 op-alloy-consensus.workspace = true
 
 # misc
 eyre.workspace = true
 futures.workspace = true
-metrics.workspace = true
-metrics-derive.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-derive_more.workspace = true
-semaphore-rs.workspace = true
-either.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
