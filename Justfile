@@ -35,7 +35,7 @@ fmt-check:
 
 # Launch a local playground (in-process node swarm)
 playground *args='':
-    RUST_LOG="info" cargo run -p xtask --release -- playground $@
+    RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
 
 # Run stress tests against a live network
 stress *args='':
