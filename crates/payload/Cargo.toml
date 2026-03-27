@@ -1,0 +1,39 @@
+[package]
+name = "world-chain-payload"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# internal
+world-chain-primitives.workspace = true
+world-chain-builder.workspace = true
+world-chain-p2p.workspace = true
+
+# reth
+reth.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
+
+# misc
+eyre.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+alloy-sol-types.workspace = true
+alloy-signer-local.workspace = true
+alloy-signer.workspace = true
+alloy-network.workspace = true
