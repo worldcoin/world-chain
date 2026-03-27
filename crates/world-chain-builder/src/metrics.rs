@@ -2,35 +2,7 @@
 
 use metrics::{Counter, Gauge, Histogram};
 use metrics_derive::Metrics;
-use std::{
-    sync::LazyLock,
-    time::{Duration, Instant},
-};
-
-/// Execution coordinator metrics, auto-registered under `flashblocks.coordinator.*`.
-#[derive(Clone, Metrics)]
-#[metrics(scope = "flashblocks.coordinator")]
-pub struct ExecutionMetrics {
-    // -- Latency --
-    /// Validation / build phase duration (seconds).
-    pub validate_duration: Histogram,
-    /// Flashblocks processed in a single epoch (recorded at epoch boundary).
-    pub flashblocks_per_epoch: Histogram,
-
-    // -- Issues --
-    /// Epoch invalidated by a newer canonical tip.
-    pub stale_resets: Counter,
-    /// Invalid payload received from P2P (decode error, bad structure).
-    pub invalid_payload: Counter,
-    /// Broadcast of built payload to in-memory tree failed.
-    pub broadcast_failed: Counter,
-    /// newPayloadV3/V4 cache hit — payload already built for this id+index.
-    // TODO: FIXME: Figure out how to track this
-    pub payload_cache_hits: Counter,
-}
-
-/// Global singleton — zero lookup cost per call site.
-pub static EXECUTION: LazyLock<ExecutionMetrics> = LazyLock::new(ExecutionMetrics::default);
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PayloadBuildStage {

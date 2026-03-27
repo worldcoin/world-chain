@@ -11,13 +11,12 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
-use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use op_alloy_rpc_types_engine::{OpExecutionData, OpFlashblockPayloadBase};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes};
+use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes, PayloadTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
-use reth_optimism_flashblocks::FlashBlockCompleteSequence;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiBuilder, OpEthApiError, eth::OpRpcConvert};
 use reth_rpc_eth_api::{
@@ -294,12 +293,7 @@ where
             >,
             Types: NodeTypes<
                 ChainSpec: Hardforks + EthereumHardforks,
-                Payload: reth_node_api::PayloadTypes<
-                    ExecutionData: for<'a> TryFrom<
-                        &'a FlashBlockCompleteSequence,
-                        Error: std::fmt::Display,
-                    >,
-                >,
+                Payload: PayloadTypes<ExecutionData: for<'a> Into<OpExecutionData>>,
             >,
         >,
     NetworkT: RpcTypes,

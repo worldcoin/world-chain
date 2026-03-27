@@ -2,17 +2,12 @@ use std::{borrow::Cow, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
-use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
-    block::receipt_builder::OpReceiptBuilder,
-};
+
 use alloy_primitives::{Address, B256, Bytes, U256};
-use alloy_rpc_types_engine::PayloadId;
 
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::IntoParallelIterator;
-use reth::revm::database::StateProviderDatabase;
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::transaction::SignedTransaction;
 use world_chain_primitives::{

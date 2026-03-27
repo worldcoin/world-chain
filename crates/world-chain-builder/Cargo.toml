@@ -7,13 +7,11 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth.workspace = true
+reth-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-provider.workspace = true
-reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie-common.workspace = true
 reth-payload-primitives.workspace = true
@@ -36,14 +34,10 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 alloy-network.workspace = true
-alloy-rlp.workspace = true
 alloy-signer-local.workspace = true
 op-alloy-consensus.workspace = true
-op-alloy-rpc-types.workspace = true
-alloy-rpc-types-engine.workspace = true
 alloy-op-evm.workspace = true
 
-world-chain-cli.workspace = true
 world-chain-primitives.workspace = true
 world-chain-p2p.workspace = true
 world-chain-pool.workspace = true
@@ -52,7 +46,6 @@ world-chain-rpc.workspace = true
 # revm
 revm.workspace = true
 revm-database.workspace = true
-revm-primitives.workspace = true
 
 # tokio
 tokio.workspace = true
@@ -70,7 +63,6 @@ either.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 serde.workspace = true
-semaphore-rs.workspace = true
 
 [dev-dependencies]
 world-chain-test-utils.workspace = true
@@ -82,7 +74,6 @@ lazy_static.workspace = true
 reth-tracing.workspace = true
 tracing-subscriber.workspace = true
 alloy-genesis.workspace = true
-op-alloy-network.workspace = true
 alloy-sol-types.workspace = true
 alloy-trie.workspace = true
 bon.workspace = true

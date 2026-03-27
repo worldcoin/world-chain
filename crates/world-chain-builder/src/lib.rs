@@ -145,10 +145,7 @@ use reth_evm::{
 use reth_provider::StateProvider;
 use revm_database::BundleState;
 
-// Re-export the canonical config type from world-chain-cli.
-pub use world_chain_cli::FlashblocksPayloadBuilderConfig;
-
-pub mod execution_context;
+mod execution_context;
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
 pub mod access_list;
@@ -192,6 +189,8 @@ pub mod utils;
 
 /// Metric name constants.
 pub mod metrics;
+
+pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].

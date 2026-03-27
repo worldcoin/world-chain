@@ -1,27 +1,21 @@
-use crate::metrics::PayloadBuildAttemptMetrics;
-use crate::traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder};
+use crate::{
+    traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
+};
 use alloy_consensus::{SignableTransaction, Transaction};
 use alloy_eips::{Encodable2718, Typed2718};
-use alloy_network::{TransactionBuilder, TxSignerSync};
-use alloy_rlp::Encodable;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use op_alloy_consensus::EIP1559ParamError;
-use op_alloy_rpc_types::OpTransactionRequest;
-use reth::{
-    api::PayloadBuilderError,
-    chainspec::EthChainSpec,
-    payload::{PayloadBuilderAttributes, PayloadId},
-    revm::{State, cancelled::CancelOnDrop},
-    transaction_pool::{BestTransactionsAttributes, TransactionPool},
-};
+
 use reth_basic_payload_builder::PayloadConfig;
+use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError, StateDB},
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
 };
+use reth_node_api::PayloadBuilderAttributes;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -34,21 +28,13 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{Block, NodePrimitives, Recovered, SealedHeader, TxTy};
-use reth_primitives_traits::SignerRecoverable;
+use alloy_primitives::Address;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use reth_transaction_pool::PoolTransaction;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
-use revm_primitives::{Address, U256};
-use semaphore_rs::Field;
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
 use tracing::{error, trace};
-
-use world_chain_pool::{
-    bindings::IPBHEntryPoint::spendNullifierHashesCall,
-    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
-};
-use world_chain_rpc::transactions::validate_conditional_options;
+use world_chain_pool::tx::WorldChainPoolTransaction;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
@@ -89,7 +75,7 @@ where
         // add gas used by the transaction to cumulative gas used, before creating the
         // receipt
         info.cumulative_gas_used += gas_used;
-        info.cumulative_da_bytes_used += tx.length() as u64;
+        info.cumulative_da_bytes_used += tx.network_len() as u64;
 
         // update add to total fees
         let miner_fee = tx
@@ -232,12 +218,12 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        _attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
+        attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
         mut gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
-        Pool: TransactionPool,
+        Pool: TransactionPool<Pooled: WorldChainPoolTransaction>,
         Builder: BlockBuilder<
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
                 Executor: BlockExecutor<
@@ -254,15 +240,19 @@ where
         let block_da_limit = self.inner.builder_config.da_config.max_da_block_size();
         let tx_da_limit = self.inner.builder_config.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee;
-
+        let mut transactions_considered = 0;
+        let mut transactions_executed = 0;
         let mut invalid_txs = vec![];
         let verified_gas_limit = (self.verified_blockspace_capacity as u64 * gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
+            transactions_considered += 1;
             let tx_da_size = pooled_tx.estimated_da_size();
-            let tx = pooled_tx.clone().into_consensus();
+            let tx = pooled_tx.into_consensus();
             let tx_uncompressed_size = tx.encode_2718_len() as u64;
+            attempt_metrics.record_transaction_size_bytes(tx_uncompressed_size);
+            attempt_metrics.record_transaction_da_size_bytes(tx_da_size);
             cumulative_uncompressed_bytes += tx_uncompressed_size;
             let is_uncompressed_block_full =
                 if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
@@ -278,6 +268,12 @@ where
                     false
                 };
 
+            if is_uncompressed_block_full {
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::UncompressedSize);
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                continue;
+            }
+
             if info.is_tx_over_limits(
                 tx_da_size,
                 gas_limit,
@@ -285,8 +281,8 @@ where
                 block_da_limit,
                 tx.gas_limit(),
                 None, // TODO: related to Jovian
-            ) || is_uncompressed_block_full
-            {
+            ) {
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::OverLimits);
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -295,8 +291,10 @@ where
             }
 
             if let Some(conditional_options) = pooled_tx.conditional_options()
-                && validate_conditional_options(conditional_options, &self.client).is_err()
+                && world_chain_rpc::transactions::validate_conditional_options(conditional_options, &self.client).is_err()
             {
+                attempt_metrics
+                    .increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 invalid_txs.push(*pooled_tx.hash());
                 continue;
@@ -304,6 +302,7 @@ where
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
+                attempt_metrics.increment_rejection(PayloadBuildRejectionReason::BlobOrDeposit);
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue;
             }
@@ -316,6 +315,8 @@ where
             // If the transaction is verified, check if it can be added within the verified gas limit
             if let Some(payloads) = pooled_tx.pbh_payload() {
                 if info.cumulative_gas_used + tx.gas_limit() > verified_gas_limit {
+                    attempt_metrics
+                        .increment_rejection(PayloadBuildRejectionReason::VerifiedGasLimit);
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue;
                 }
@@ -324,13 +325,18 @@ where
                     .iter()
                     .any(|payload| !spent_nullifier_hashes.insert(payload.nullifier_hash))
                 {
+                    attempt_metrics
+                        .increment_rejection(PayloadBuildRejectionReason::DuplicateNullifier);
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     invalid_txs.push(*pooled_tx.hash());
                     continue;
                 }
             }
 
-            let gas_used = match builder.execute_transaction(tx.clone()) {
+            let tx_execution_started = Instant::now();
+            let execution_result = builder.execute_transaction(tx.clone());
+            attempt_metrics.record_transaction_execution_duration(tx_execution_started.elapsed());
+            let gas_used = match execution_result {
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
                         if spent_nullifier_hashes.len() == payloads.len() {
@@ -348,9 +354,14 @@ where
                             ..
                         }) => {
                             if error.is_nonce_too_low() {
+                                attempt_metrics
+                                    .increment_rejection(PayloadBuildRejectionReason::NonceTooLow);
                                 // if the nonce is too low, we can skip this transaction
                                 trace!(target: "payload_builder", %error, ?tx, "skipping nonce too low transaction");
                             } else {
+                                attempt_metrics.increment_rejection(
+                                    PayloadBuildRejectionReason::InvalidDescendant,
+                                );
                                 // if the transaction is invalid, we can skip it and all of its
                                 // descendants
                                 trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
@@ -368,12 +379,21 @@ where
                 }
             };
 
+            attempt_metrics.record_transaction_gas_used(gas_used);
+            transactions_executed += 1;
             self.commit_changes(info, base_fee, gas_used, tx);
         }
 
         if !spent_nullifier_hashes.is_empty() {
+            let spend_nullifiers_started = Instant::now();
+            attempt_metrics.increment_spend_nullifiers_attempts();
+            attempt_metrics.record_spend_nullifiers_count(spent_nullifier_hashes.len() as u64);
             let tx = spend_nullifiers_tx(self, builder.evm_mut(), spent_nullifier_hashes).map_err(
                 |e| {
+                    attempt_metrics
+                        .record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
                     error!(target: "payload_builder", %e, "failed to build spend nullifiers transaction");
                     PayloadBuilderError::Other(e.into())
                 },
@@ -384,16 +404,28 @@ where
             // PBH transactions still receive priority inclusion, even if the PBH nullifier
             // is not spent rather than sitting in the default execution client's mempool.
             match builder.execute_transaction(tx.clone()) {
-                Ok(gas_used) => self.commit_changes(info, base_fee, gas_used, tx),
+                Ok(gas_used) => {
+                    self.commit_changes(info, base_fee, gas_used, tx);
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
+                }
                 Err(e) => {
+                    attempt_metrics
+                        .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Failure);
                     error!(target: "payload_builder", %e, "spend nullifiers transaction failed")
                 }
             }
+            attempt_metrics.record_spend_nullifiers_duration(spend_nullifiers_started.elapsed());
         }
 
+        let invalid_transactions_removed = invalid_txs.len() as u64;
         if !invalid_txs.is_empty() {
             pool.remove_transactions(invalid_txs);
         }
+
+        attempt_metrics.record_transactions_considered_per_build(transactions_considered);
+        attempt_metrics.record_transactions_executed_per_build(transactions_executed);
+        attempt_metrics.record_invalid_transactions_removed_per_build(invalid_transactions_removed);
 
         Ok(None)
     }

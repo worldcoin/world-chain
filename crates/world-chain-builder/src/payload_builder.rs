@@ -1,5 +1,5 @@
 use crate::{
-    BlockBuilderExt, FlashblocksPayloadBuilderConfig,
+    BlockBuilderExt,
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     executor::FlashblocksBlockBuilder,
@@ -26,11 +26,7 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    api::{PayloadBuilderAttributes, PayloadBuilderError},
-    chainspec::EthChainSpec,
-    revm::{State, database::StateProviderDatabase},
-};
+
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
@@ -39,8 +35,7 @@ use reth_evm::{
     ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, op_revm::OpSpecId,
     precompiles::PrecompilesMap,
 };
-use reth_node_api::BuiltPayloadExecutedBlock;
-use reth_primitives::NodePrimitives;
+use reth_node_api::{BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
 use tracing::trace;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
