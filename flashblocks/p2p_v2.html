@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Priority Blockspace for Humans - World Chain Specs</title>
+        <title>Flashblocks P2P Protocol v2 - World Chain Specs</title>
 
 
         <!-- Custom HTML head -->
@@ -174,20 +174,189 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="priority-blockspace-for-humans"><a class="header" href="#priority-blockspace-for-humans">Priority Blockspace for Humans</a></h1>
-<p>Priority Blockspace for Humans introduces a new transaction ordering policy on World Chain that grants verified World ID holders top-of-block priority, reducing friction and making transactions fairer for real users.</p>
-<!-- h/t to @dmarzzz for this line -->
-<p>Where <a href="https://collective.flashbots.net/t/it-s-time-to-talk-about-l2-mev/3593#p-7700-network-congestions-7">bots create congestion</a>, PBH is a highway for humans.</p>
+                        <h1 id="flashblocks-p2p-protocol-v2"><a class="header" href="#flashblocks-p2p-protocol-v2">Flashblocks P2P Protocol v2</a></h1>
+<p><em>This document specifies changes to the flashblocks P2P protocol (<code>flblk</code>) to replace full-broadcast fanout with bounded, latency-optimized peer selection. It is an amendment to the existing <a href="./specs/flashblocks_p2p.html">Flashblocks P2P Extension</a>.</em></p>
+<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
+<p>The current flashblocks P2P protocol broadcasts every <code>FlashblocksPayloadV1</code> to <strong>all</strong> connected peers (<code>handler.rs:585</code>, <code>connection.rs:97-129</code>). A node with N peers sends N copies of every flashblock. For a node connected to 50 peers, that is 50x outgoing bandwidth per flashblock. As the network grows, this becomes unsustainable.</p>
+<h2 id="design-goals"><a class="header" href="#design-goals">Design Goals</a></h2>
+<ol>
+<li><strong>Reduce bandwidth</strong> — Each node sends flashblocks to a bounded number of peers instead of all peers.</li>
+<li><strong>Optimize latency</strong> — Nodes periodically rotate out their slowest receive peers in favor of random alternatives.</li>
+<li><strong>Reliability</strong> — Multiple receive peers provide redundancy against individual peer failures.</li>
+<li><strong>Trusted peer priority</strong> — Trusted peers are always served when they request flashblocks, regardless of limits.</li>
+<li><strong>Uniform roles</strong> — Builders and consumers follow the same protocol. No special-casing by role.</li>
+</ol>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>Each node maintains two bounded peer sets:</p>
+<ul>
+<li><strong>Send Set</strong> (max <code>max_send_peers</code>, default 10): Peers this node actively forwards flashblocks to. These are peers that have sent a <code>RequestFlashblocks</code> and been accepted. Trusted peers bypass the limit.</li>
+<li><strong>Receive Set</strong> (max <code>max_receive_peers</code>, default 3): Peers this node actively receives flashblocks from. These are peers this node has selected as active feed sources.</li>
+</ul>
+<p>Flashblocks propagate through the network as a directed acyclic graph: the builder sends to its send set, those nodes relay to their send sets, and so on. With a fanout of 10, a network of N nodes requires approximately log₁₀(N) hops from builder to the most distant node.</p>
+<p>Periodically, each node evaluates the latency of its receive peers and may rotate out the highest-latency peer in favor of a randomly-selected alternative, one peer at a time.</p>
+<h2 id="protocol-version"><a class="header" href="#protocol-version">Protocol Version</a></h2>
+<p>This change adds new message types to the <code>flblk</code> protocol. The protocol version is bumped from <code>1</code> to <code>2</code>. Nodes advertising <code>flblk/2</code> support the fanout control messages described below. Nodes running <code>flblk/1</code> will not understand these messages and are incompatible.</p>
+<h2 id="new-message-types"><a class="header" href="#new-message-types">New Message Types</a></h2>
+<p>Four unsigned control messages are added to <code>FlashblocksP2PMsg</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Discriminator</th><th>Message</th><th>Direction</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>0x01</code></td><td><code>RequestFlashblocks</code></td><td>Receiver → Sender</td><td>“I want to receive flashblocks from you”</td></tr>
+<tr><td><code>0x02</code></td><td><code>AcceptFlashblocks</code></td><td>Sender → Receiver</td><td>“Accepted. I will send you flashblocks”</td></tr>
+<tr><td><code>0x03</code></td><td><code>RejectFlashblocks</code></td><td>Sender → Receiver</td><td>“Rejected. I am at capacity”</td></tr>
+<tr><td><code>0x04</code></td><td><code>CancelFlashblocks</code></td><td>Receiver → Sender</td><td>“Stop sending me flashblocks”</td></tr>
+</tbody>
+</table>
+</div>
+<p>These messages carry no payload. The connection context (peer ID) provides all necessary information.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum FlashblocksP2PMsg {
+    /// Existing authorized message wrapper (flashblock payloads, StartPublish, StopPublish).
+    Authorized(Authorized) = 0x00,
+    /// New fanout control messages (unsigned).
+    RequestFlashblocks = 0x01,
+    AcceptFlashblocks = 0x02,
+    RejectFlashblocks = 0x03,
+    CancelFlashblocks = 0x04,
+}
+<span class="boring">}</span></code></pre>
+<h3 id="message-semantics"><a class="header" href="#message-semantics">Message Semantics</a></h3>
+<p><strong><code>RequestFlashblocks</code></strong> — Sent by a node that wants to receive flashblocks from the connected peer. The recipient evaluates:</p>
+<ol>
+<li>Is the requester a trusted peer? → Always accept (trusted peers bypass <code>max_send_peers</code>).</li>
+<li>Is the number of non-trusted peers in the send set below <code>max_send_peers</code>? → Accept.</li>
+<li>Otherwise → Reject.</li>
+</ol>
+<p><strong><code>AcceptFlashblocks</code></strong> — Response to <code>RequestFlashblocks</code>. After this, the sender begins forwarding all <code>Authorized</code> messages to the receiver and adds the receiver to its send set.</p>
+<p><strong><code>RejectFlashblocks</code></strong> — Response to <code>RequestFlashblocks</code> when the sender cannot accommodate more peers. The requester should try another peer.</p>
+<p><strong><code>CancelFlashblocks</code></strong> — Sent only by a receiver to the sender it no longer wants to receive flashblocks from (e.g., during peer rotation).</p>
+<p>After receiving <code>CancelFlashblocks</code>, the sender immediately stops forwarding flashblocks to that peer and removes it from its send set.</p>
+<h2 id="peer-management"><a class="header" href="#peer-management">Peer Management</a></h2>
+<h3 id="per-node-state"><a class="header" href="#per-node-state">Per-Node State</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct FanoutState {
+    /// Peers we are actively sending flashblocks to.
+    send_set: HashSet&lt;PeerId&gt;,
+    /// Peers we are actively receiving flashblocks from.
+    receive_set: HashSet&lt;PeerId&gt;,
+    /// Peers we have sent RequestFlashblocks to but not yet received a response.
+    pending_requests: HashSet&lt;PeerId&gt;,
+    /// Sliding-window latency stats per receive peer.
+    peer_latency: HashMap&lt;PeerId, LatencyTracker&gt;,
+    /// Whether a rotation is currently in progress.
+    rotation_in_progress: bool,
+}
+<span class="boring">}</span></code></pre>
+<h3 id="bootstrapping-node-startup"><a class="header" href="#bootstrapping-node-startup">Bootstrapping (Node Startup)</a></h3>
+<p>When a node starts and connects to peers via devp2p:</p>
+<ol>
+<li>As peers connect and complete the <code>flblk/2</code> handshake, discover whether they are trusted or untrusted.</li>
+<li>Only request peers whose trust classification is known, so trusted peers are always considered first.</li>
+<li>Continue sending requests as new peers connect until <code>receive_set.len() &gt;= max_receive_peers</code>.</li>
+<li>Once the receive set is full, stop sending unsolicited requests (further changes happen via rotation).</li>
+</ol>
+<h3 id="handling-incoming-requestflashblocks"><a class="header" href="#handling-incoming-requestflashblocks">Handling Incoming <code>RequestFlashblocks</code></a></h3>
+<pre><code>receive RequestFlashblocks from peer P:
+
+if P is trusted:
+    add P to send_set
+    send AcceptFlashblocks to P
+
+else if non_trusted_send_count &lt; max_send_peers:
+    add P to send_set
+    send AcceptFlashblocks to P
+
+else:
+    send RejectFlashblocks to P
+</code></pre>
+<h3 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h3>
+<p>When a peer disconnects unexpectedly (connection drops):</p>
+<ul>
+<li>If peer was in <strong>send set</strong> → remove it. The slot is now available for future requests.</li>
+<li>If peer was in <strong>receive set</strong> → remove it. Immediately attempt to fill the slot by sending <code>RequestFlashblocks</code> to a random connected peer not already in <code>receive_set</code> or <code>pending_requests</code>.</li>
+<li>If peer was in <strong>pending requests</strong> → remove it. If receive set is not full, try another peer.</li>
+</ul>
+<h3 id="forwarding-rules"><a class="header" href="#forwarding-rules">Forwarding Rules</a></h3>
+<p>When a node receives an <code>Authorized</code> message from a peer in its receive set:</p>
+<ul>
+<li><strong><code>FlashblocksPayloadV1</code></strong>: Verify signatures, process the flashblock (update state, emit to flashblock stream). Then forward the serialized bytes to all peers in the <strong>send set</strong> except the peer that sent it.</li>
+<li><strong><code>StartPublish</code></strong>: Verify signatures and process locally. Do not relay it beyond the direct neighbor that sent it.</li>
+<li><strong><code>StopPublish</code></strong>: Same as <code>StartPublish</code> — process locally, do not relay.</li>
+</ul>
+<p>If a node receives an <code>Authorized(FlashblocksPayloadV1)</code> from a peer <strong>not</strong> in its receive set, or from a peer whose <code>RequestFlashblocks</code> is still pending, the message should be ignored and the peer should be penalized. This prevents unsolicited data delivery.</p>
+<h3 id="duplicate-handling"><a class="header" href="#duplicate-handling">Duplicate Handling</a></h3>
+<p>Since a node receives from up to <code>max_receive_peers</code> peers, it will receive multiple copies of each flashblock. This is expected behavior in the new protocol.</p>
+<ul>
+<li><strong>First copy</strong>: Process normally (update state, emit to stream, forward to send set). Record latency for the delivering peer.</li>
+<li><strong>Subsequent copies (same flashblock from different peers)</strong>: Record the latency for the delivering peer. Discard the flashblock data.</li>
+<li><strong>Same flashblock from the same peer twice</strong>: This is NOT expected. Apply reputation penalty as before (<code>ReputationChangeKind::AlreadySeenTransaction</code>).</li>
+</ul>
+<p>This is a behavioral change from the current protocol, where any duplicate from any peer triggers a reputation penalty (<code>connection.rs:288-290</code>).</p>
+<h2 id="latency-based-peer-rotation"><a class="header" href="#latency-based-peer-rotation">Latency-Based Peer Rotation</a></h2>
+<h3 id="latency-measurement"><a class="header" href="#latency-measurement">Latency Measurement</a></h3>
+<p>Each <code>FlashblocksPayloadV1</code> includes a <code>flashblock_timestamp</code> in its metadata, set by the builder at creation time. When a node receives a flashblock from a receive peer, it computes:</p>
+<pre><code>one_way_latency = now() - flashblock_timestamp
+</code></pre>
+<p>This measurement is attributed to the specific peer that delivered the flashblock. Nodes maintain a sliding window of the last <code>latency_window</code> (default 1000) measurements per receive peer and compute a moving average.</p>
+<p>Since all receive peers deliver the same flashblock (with the same <code>flashblock_timestamp</code>), the <strong>relative ordering</strong> of peers by latency is accurate even with clock skew between the builder and receiver.</p>
+<h3 id="rotation-algorithm"><a class="header" href="#rotation-algorithm">Rotation Algorithm</a></h3>
+<p>The receive set must never exceed <code>max_receive_peers</code>.</p>
+<p>When rotating:</p>
+<ol>
+<li>Select the worst-scoring peer in the current receive set.</li>
+<li>Remove that peer from the receive set immediately and send <code>CancelFlashblocks</code>.</li>
+<li>Pick a replacement candidate, prioritizing trusted peers.</li>
+<li>Add the replacement peer to the receive set in a provisional state and send <code>RequestFlashblocks</code>.</li>
+</ol>
+<p>The provisional peer occupies a receive slot immediately, so the node still never exceeds <code>max_receive_peers</code>. While provisional, the peer is scored for missed flashblocks the same as any other receive peer. If it fails to respond or fails to deliver flashblocks, its score will deteriorate and it can be rotated out on a later interval.</p>
+<h2 id="configuration-parameters"><a class="header" href="#configuration-parameters">Configuration Parameters</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>max_send_peers</code></td><td>10</td><td>Maximum non-trusted peers to send flashblocks to</td></tr>
+<tr><td><code>max_receive_peers</code></td><td>3</td><td>Maximum peers to receive flashblocks from</td></tr>
+<tr><td><code>rotation_interval</code></td><td>30s</td><td>How often to evaluate and potentially rotate receive peers</td></tr>
+<tr><td><code>latency_window</code></td><td>1000</td><td>Number of flashblocks to track for per-peer latency averaging</td></tr>
+</tbody>
+</table>
+</div>
+<p>Trusted peers are always served on request and <strong>do not count</strong> toward <code>max_send_peers</code>.</p>
+<h2 id="interaction-with-existing-protocol"><a class="header" href="#interaction-with-existing-protocol">Interaction with Existing Protocol</a></h2>
+<h3 id="unchanged-components"><a class="header" href="#unchanged-components">Unchanged Components</a></h3>
+<p>The existing <code>Authorized</code> message types (<code>FlashblocksPayloadV1</code>, <code>StartPublish</code>, <code>StopPublish</code>) remain unchanged. They continue to use the <code>Authorized</code> wrapper with sequencer + builder signatures. The multi-builder coordination state machine (Publishing, WaitingToPublish, NotPublishing) is unaffected. <code>StartPublish</code> and <code>StopPublish</code> remain direct-neighbor messages and are not relayed.</p>
+<h3 id="required-changes-to-existing-code"><a class="header" href="#required-changes-to-existing-code">Required Changes to Existing Code</a></h3>
+<ol>
+<li>
+<p><strong>Duplicate handling must change</strong> — The current per-peer duplicate check at <code>connection.rs:278-291</code> penalizes any duplicate flashblock with <code>ReputationChangeKind::AlreadySeenTransaction</code>. In the new protocol, receiving the same flashblock from different receive peers is expected. Only same-peer duplicates (same flashblock index from the same peer twice) should trigger a penalty.</p>
+</li>
+<li>
+<p><strong>Flashblock forwarding must be scoped to send set</strong> — The current broadcast channel (<code>peer_tx</code>) sends to all connections. This must be replaced with targeted sends to only peers in the send set. The <code>PeerMsg::FlashblocksPayloadV1</code> variant currently uses a broadcast channel subscribed by all connections; this must be changed so each connection checks whether the destination peer is in the send set before forwarding.</p>
+</li>
+<li>
+<p><strong>Receive-peer selection must respect trust discovery</strong> — Nodes should not request unknown peers before their trust classification is available, otherwise untrusted peers can fill the bounded receive set before trusted peers are considered.</p>
+</li>
+<li>
+<p><strong>Protocol version bump</strong> — <code>Capability::new_static("flblk", 1)</code> at <code>handler.rs:239</code> must be updated to version <code>2</code>.</p>
+</li>
+</ol>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../flashblocks/p2p_v2.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../flashblocks/p2p.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../pbh/architecture.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../pbh/overview.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -197,11 +366,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../flashblocks/p2p_v2.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../flashblocks/p2p.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../pbh/architecture.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../pbh/overview.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

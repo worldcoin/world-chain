@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-848543bd.js";
+            window.path_to_searchindex_js = "../searchindex-e49887fd.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f7771e37.js"></script>
+        <script src="../toc-9878744d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,7 +175,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="pbh-transactions"><a class="header" href="#pbh-transactions">PBH Transactions</a></h1>
-<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="./payload.html">PBHPayload</a> encoded in the tx calldata.</p>
+<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="./payload.html">PBHPayload</a> encoded in the tx calldata.</p>
 <!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 <!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
 The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
@@ -206,7 +206,7 @@ The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the 
 
 </code></pre>
 <p>Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.</p>
-<p>Visit the <a href="./validation.html#signal-hash">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBH4337Module.sol">PBH4337Module</a>.</p>
+<p>Visit the <a href="./validation.html#signal-hash">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBH4337Module.sol">PBH4337Module</a>.</p>
 
                     </main>
 
