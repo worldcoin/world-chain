@@ -307,7 +307,7 @@ where
         timestamp: ctx.attributes().timestamp(),
         suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
         prev_randao: ctx.attributes().prev_randao(),
-        gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
+        gas_limit: ctx.gas_limit(),
         parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
         extra_data: if ctx
             .spec()
@@ -340,10 +340,8 @@ where
     let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(committed_payload)
         .map_err(PayloadBuilderError::other)?;
 
-    let gas_limit = ctx
-        .attributes()
-        .gas_limit
-        .unwrap_or(ctx.parent().gas_limit)
+    let effective_gas_limit = ctx
+        .effective_gas_limit()
         .saturating_sub(committed_state.gas_used);
 
     let bundle_state = committed_state.bundle.clone();
@@ -383,7 +381,7 @@ where
             client,
             committed_payload,
             visited_transactions,
-            gas_limit,
+            effective_gas_limit,
             best,
             pool,
             ctx,
@@ -412,7 +410,7 @@ where
             client,
             committed_payload,
             visited_transactions,
-            gas_limit,
+            effective_gas_limit,
             best,
             pool,
             ctx,
@@ -438,7 +436,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
     client: impl StateProviderFactory + Clone,
     committed_payload: Option<&OpBuiltPayload>,
     visited_transactions: Vec<TxHash>,
-    gas_limit: u64,
+    effective_gas_limit: u64,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
     ctx: &Ctx,
@@ -528,7 +526,7 @@ where
             &mut builder,
             best_txns.guard(),
             attempt_metrics,
-            gas_limit,
+            effective_gas_limit,
             cumulative_uncompressed_bytes,
         );
         attempt_metrics.record_stage_duration(
