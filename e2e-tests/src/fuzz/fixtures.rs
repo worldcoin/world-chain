@@ -4,7 +4,7 @@
 // proptest strategies remain here since `proptest` is not a dependency of the
 // `bench` feature.
 
-pub use test_utils::builder::*;
+pub use world_chain_test_utils::builder::*;
 
 use proptest::prelude::*;
 
@@ -51,9 +51,9 @@ pub fn arb_execution_payload(
     max_ops_per_flashblock: usize,
 ) -> impl Strategy<
     Value = (
-        primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
+        world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
-            builder::bal_executor::CommittedState<
+            world_chain_builder::bal_executor::CommittedState<
                 reth_optimism_evm::OpRethReceiptBuilder,
             >,
         >,
@@ -67,9 +67,9 @@ pub fn arb_execution_payload_sequence(
     max_flashblocks: usize,
 ) -> impl Strategy<
     Value = Vec<(
-        primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
+        world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
-            builder::bal_executor::CommittedState<
+            world_chain_builder::bal_executor::CommittedState<
                 reth_optimism_evm::OpRethReceiptBuilder,
             >,
         >,

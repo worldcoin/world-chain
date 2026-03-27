@@ -6,12 +6,12 @@ use std::{
 };
 
 use alloy_primitives::{B256, ruint::aliases::U256};
-use builder::{
+use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
 
-use p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
-use primitives::{
+use world_chain_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
+use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     flashblocks::Flashblock,
     p2p::{Authorization, AuthorizedPayload},
@@ -189,7 +189,7 @@ where
 {
     fn from((state, access_list): (PayloadState<P>, Option<FlashblockAccessList>)) -> Self {
         let access_list_data = access_list.map(|access_list| FlashblockAccessListData {
-            access_list_hash: primitives::access_list::access_list_hash(&access_list),
+            access_list_hash: world_chain_primitives::access_list::access_list_hash(&access_list),
             access_list,
         });
         match state {

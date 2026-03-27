@@ -24,18 +24,18 @@ use reth_optimism_node::{
     args::RollupArgs,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
-use builder::coordinator::FlashblocksExecutionCoordinator;
-use cli::{WorldChainArgs, WorldChainNodeConfig};
-use p2p::{
+use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
+use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
+use world_chain_p2p::{
     monitor::PeerMonitor,
     protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol},
 };
-use primitives::p2p::Authorization;
-use rpc::eth::FlashblocksEthApiBuilder;
+use world_chain_primitives::p2p::Authorization;
+use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
 use tracing::info;
-use builder::WorldChainPayloadBuilderCtxBuilder;
-use pool::BasicWorldChainPool;
+use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
+use world_chain_pool::BasicWorldChainPool;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth::primitives::Hardforks;

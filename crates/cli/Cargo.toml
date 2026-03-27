@@ -13,6 +13,7 @@ reth-optimism-payload-builder.workspace = true
 alloy-signer-local.workspace = true
 alloy-primitives.workspace = true
 ed25519-dalek.workspace = true
+
 clap.workspace = true
 eyre.workspace = true
 hex.workspace = true

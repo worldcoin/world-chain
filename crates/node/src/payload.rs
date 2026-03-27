@@ -1,10 +1,10 @@
-use builder::{
+use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator,
     metrics::PayloadBuildMetrics,
     payload_builder::FlashblocksPayloadBuilder,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-use cli::FlashblocksPayloadBuilderConfig;
+use world_chain_cli::FlashblocksPayloadBuilderConfig;
 
 use op_alloy_consensus::OpTxEnvelope;
 use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};

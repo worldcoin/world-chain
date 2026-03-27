@@ -22,17 +22,12 @@ use std::{
     time::Duration,
 };
 use tracing::info;
-use node::context::WorldChainDefaultContext;
-use p2p::protocol::event::{ChainEvent, WorldChainEvent};
-use test_utils::{
+use world_chain_node::context::WorldChainDefaultContext;
+use world_chain_p2p::protocol::event::{ChainEvent, WorldChainEvent};
+use world_chain_test_utils::{
     e2e_harness::setup::{TX_SET_L1_BLOCK, build_payload_attributes},
     node::{raw_pbh_bundle_bytes, tx},
     utils::{account, signer},
-};
-
-use test_utils::e2e_harness::setup::{
-    CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
-    setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
 };
 
 use alloy_provider::{Provider, RootProvider};
@@ -51,12 +46,12 @@ use std::{
 use tempfile::NamedTempFile;
 use tokio::time::{Instant, sleep};
 use tracing::Dispatch;
-use cli::FlashblocksArgs;
-use p2p::{
+use world_chain_cli::FlashblocksArgs;
+use world_chain_p2p::{
     monitor,
     protocol::{connection::ReceiveStatus, handler::PublishingStatus},
 };
-use primitives::{
+use world_chain_primitives::{
     flashblocks::FlashblockMetadata,
     p2p::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
@@ -64,7 +59,13 @@ use primitives::{
     },
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
-use test_utils::utils::{eip1559, raw_tx};
+use world_chain_test_utils::{
+    e2e_harness::setup::{
+        CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
+        setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
+    },
+    utils::{eip1559, raw_tx},
+};
 
 async fn create_priority_transaction(
     signer_index: u32,
@@ -396,7 +397,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     assert_eq!(block_hash, block_hash_basic);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             builder_context
                 .clone()
@@ -407,18 +408,18 @@ async fn test_flashblocks() -> eyre::Result<()> {
                 .verifying_key(),
         );
 
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
 
-    let eip1559_params = test_utils::e2e_harness::setup::encode_eip1559_params(
+    let eip1559_params = world_chain_test_utils::e2e_harness::setup::encode_eip1559_params(
         builder_node.node.inner.chain_spec().as_ref(),
         timestamp,
     )?;
 
-    let attributes = test_utils::e2e_harness::setup::build_payload_attributes(
+    let attributes = world_chain_test_utils::e2e_harness::setup::build_payload_attributes(
         timestamp,
         eip1559_params,
         Some(vec![
-            test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
+            world_chain_test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
         ]),
     );
 
@@ -426,7 +427,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
 
     let _tx = tx.clone();
 
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
@@ -446,7 +447,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     );
 
     let validation_stream =
-        test_utils::e2e_harness::actions::FlashblocksValidatonStream {
+        world_chain_test_utils::e2e_harness::actions::FlashblocksValidatonStream {
             beacon_engine_handles: vec![
                 basic_worldchain_node
                     .node
@@ -495,7 +496,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     let block_hash = nodes[0].node.block_hash(0);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             ext_context
                 .unwrap()
@@ -505,19 +506,19 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
                 .verifying_key(),
         );
 
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
     let (sender, mut block_rx) = tokio::sync::mpsc::channel(1);
-    let eip1559_params = test_utils::e2e_harness::setup::encode_eip1559_params(
+    let eip1559_params = world_chain_test_utils::e2e_harness::setup::encode_eip1559_params(
         nodes[0].node.inner.chain_spec().as_ref(),
         timestamp,
     )?;
 
     // Compose a Mine Block action with an eth_getTransactionReceipt action
-    let attributes = test_utils::e2e_harness::setup::build_payload_attributes(
+    let attributes = world_chain_test_utils::e2e_harness::setup::build_payload_attributes(
         timestamp,
         eip1559_params,
         Some(vec![
-            test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
+            world_chain_test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
         ]),
     );
 
@@ -528,7 +529,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .flashblocks_handle
         .flashblock_stream();
 
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
@@ -539,13 +540,13 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     )
     .await;
 
-    let transaction_receipt = test_utils::e2e_harness::actions::GetReceipts::new(
+    let transaction_receipt = world_chain_test_utils::e2e_harness::actions::GetReceipts::new(
         vec![0, 1, 2],
         cannon_flashblocks_stream,
     )
     .on_receipts(move |receipts| {
         for receipts in receipts {
-            test_utils::e2e_harness::actions::assert::all_some(
+            world_chain_test_utils::e2e_harness::actions::assert::all_some(
                 &receipts,
                 "transaction receipt",
             )?;
@@ -554,7 +555,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         Ok(())
     });
 
-    let mut action = test_utils::e2e_harness::actions::EthApiAction::new(
+    let mut action = world_chain_test_utils::e2e_harness::actions::EthApiAction::new(
         mine_block,
         transaction_receipt,
     );
@@ -587,7 +588,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     let block_hash = nodes[0].node.block_hash(0);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             ext_context
                 .unwrap()
@@ -597,7 +598,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
                 .verifying_key(),
         );
 
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
     let (sender, _rx) = tokio::sync::mpsc::channel(1);
 
     // 200ms backoff should be enough time to fetch the pending receipt
@@ -613,16 +614,16 @@ async fn test_eth_api_call() -> eyre::Result<()> {
 
     let wallet = EthereumWallet::from(signer(0));
     let raw_tx =
-        test_utils::e2e_harness::setup::sign_transaction(mock_tx.clone(), &wallet)
+        world_chain_test_utils::e2e_harness::setup::sign_transaction(mock_tx.clone(), &wallet)
             .await;
 
-    let attributes = test_utils::e2e_harness::setup::build_payload_attributes(
+    let attributes = world_chain_test_utils::e2e_harness::setup::build_payload_attributes(
         timestamp,
         b64!("0000000800000008"),
         Some(vec![raw_tx.clone()]),
     );
 
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
@@ -639,10 +640,10 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     mock_tx.nonce = None;
 
     let eth_call =
-        test_utils::e2e_harness::actions::EthCall::new(mock_tx, vec![0, 1, 2], 200, tx);
+        world_chain_test_utils::e2e_harness::actions::EthCall::new(mock_tx, vec![0, 1, 2], 200, tx);
 
     let mut action =
-        test_utils::e2e_harness::actions::EthApiAction::new(mine_block, eth_call);
+        world_chain_test_utils::e2e_harness::actions::EthApiAction::new(mine_block, eth_call);
 
     action.execute(&mut env).await?;
 
@@ -665,7 +666,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
     let mut action =
-        test_utils::e2e_harness::actions::SupportedCapabilitiesCall::new(tx);
+        world_chain_test_utils::e2e_harness::actions::SupportedCapabilitiesCall::new(tx);
 
     action.execute(&mut env).await?;
 
@@ -687,7 +688,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     let block_hash = nodes[0].node.block_hash(0);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             ext_context
                 .unwrap()
@@ -707,7 +708,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         .flashblock_stream();
 
     let (sender, mut rx) = tokio::sync::mpsc::channel(1);
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
     let eip1559_params =
         encode_eip1559_params(nodes[0].node.inner.chain_spec().as_ref(), timestamp)?;
 
@@ -718,7 +719,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         Some(vec![TX_SET_L1_BLOCK.clone()]),
     );
 
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
@@ -731,12 +732,12 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 
     let blocks_found = Arc::new(AtomicUsize::new(0));
     let blocks_counter = blocks_found.clone();
-    let eth_block_by_hash = test_utils::e2e_harness::actions::GetBlockByHash::new(
+    let eth_block_by_hash = world_chain_test_utils::e2e_harness::actions::GetBlockByHash::new(
         vec![0, 1],
         cannon_flashblocks_stream,
     )
     .on_blocks(move |blocks| {
-        test_utils::e2e_harness::actions::assert::all_some(
+        world_chain_test_utils::e2e_harness::actions::assert::all_some(
             &blocks,
             "pending block by hash",
         )?;
@@ -744,7 +745,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
         Ok(())
     });
 
-    let mut action = test_utils::e2e_harness::actions::EthApiAction::new(
+    let mut action = world_chain_test_utils::e2e_harness::actions::EthApiAction::new(
         mine_block,
         eth_block_by_hash,
     );
@@ -796,7 +797,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 
     // Create and inject transaction into Node 0
     let (raw_tx, tx_hash) =
-        test_utils::e2e_harness::setup::create_test_transaction(0, 0).await;
+        world_chain_test_utils::e2e_harness::setup::create_test_transaction(0, 0).await;
 
     let result = node_0_ctx.node.rpc.inject_tx(raw_tx).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 0");
@@ -894,7 +895,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
 
     // Create and inject transaction into Node 1 (which has tx_peers = [Node 0 only])
     let (raw_tx, tx_hash) =
-        test_utils::e2e_harness::setup::create_test_transaction(0, 0).await;
+        world_chain_test_utils::e2e_harness::setup::create_test_transaction(0, 0).await;
 
     let result = node_1_ctx.node.rpc.inject_tx(raw_tx).await;
     assert!(result.is_ok(), "Transaction should be accepted by Node 1");
@@ -962,7 +963,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     // Create a new transaction and inject into Node 2
     // Node 2 has tx_peers = [Node 0, Node 1], so it should propagate to both
     let (raw_tx_2, tx_hash_2) =
-        test_utils::e2e_harness::setup::create_test_transaction(1, 0).await;
+        world_chain_test_utils::e2e_harness::setup::create_test_transaction(1, 0).await;
 
     // Inject transaction into Node 2
     let result = node_2_ctx.node.rpc.inject_tx(raw_tx_2).await;
@@ -1096,7 +1097,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
     let block_hash = builder_node.node.block_hash(0);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             builder_context
                 .flashblocks_handle
@@ -1105,7 +1106,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
                 .verifying_key(),
         );
 
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
     let eip1559_params =
         encode_eip1559_params(builder_node.node.inner.chain_spec().as_ref(), timestamp)?;
 
@@ -1177,7 +1178,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
 
     // Mine a block
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,
@@ -1278,7 +1279,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id =
                 reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
-            primitives::p2p::Authorization::new(
+            world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 reth_node_api::PayloadAttributes::timestamp(&attrs),
                 &authorizer_sk,
@@ -1288,7 +1289,6 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
 
     // --- Flashblock stream: capture latest pending flashblock ---
     use std::sync::RwLock;
-    use primitives::primitives::FlashblocksPayloadV1;
 
     let latest_stream_fb: Arc<RwLock<Option<FlashblocksPayloadV1>>> = Arc::new(RwLock::new(None));
     let latest_stream_fb_writer = latest_stream_fb.clone();
@@ -1309,7 +1309,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
 
     let builder_rpc = env.node_clients[0].rpc.clone();
 
-    let mut driver = test_utils::e2e_harness::actions::EngineDriver {
+    let mut driver = world_chain_test_utils::e2e_harness::actions::EngineDriver {
         builder_idx: 0,
         follower_idxs: vec![],
         initial_parent_hash: Some(block_hash),
@@ -1441,7 +1441,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
 async fn test_eth_api_assertions() -> eyre::Result<()> {
     use alloy_provider::Provider;
     use alloy_rpc_types::Filter;
-    use test_utils::e2e_harness::setup::encode_eip1559_params;
+    use world_chain_test_utils::e2e_harness::setup::encode_eip1559_params;
 
     reth_tracing::init_test_tracing();
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1474,7 +1474,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id =
                 reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
-            primitives::p2p::Authorization::new(
+            world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 reth_node_api::PayloadAttributes::timestamp(&attrs),
                 &authorizer_sk,
@@ -1485,7 +1485,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
     let checks_passed = Arc::new(AtomicUsize::new(0));
     let checks_passed_cb = checks_passed.clone();
 
-    let mut driver = test_utils::e2e_harness::actions::EngineDriver {
+    let mut driver = world_chain_test_utils::e2e_harness::actions::EngineDriver {
         builder_idx: 0,
         follower_idxs: vec![],
         initial_parent_hash: Some(block_hash),
@@ -1709,7 +1709,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id =
                 reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
-            primitives::p2p::Authorization::new(
+            world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 reth_node_api::PayloadAttributes::timestamp(&attrs),
                 &authorizer_sk,
@@ -1724,14 +1724,14 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
 
     // Initial canon tip seed from event_stream
     assertions.push(
-        test_utils::e2e_harness::actions::StreamAssertion::Canon { number: None },
+        world_chain_test_utils::e2e_harness::actions::StreamAssertion::Canon { number: None },
     );
 
     // For each block, expect at least the base flashblock.
     // The checker skips intervening canon events automatically.
     for _ in 0..NUM_BLOCKS {
         assertions.push(
-            test_utils::e2e_harness::actions::StreamAssertion::Pending {
+            world_chain_test_utils::e2e_harness::actions::StreamAssertion::Pending {
                 index: 0,
                 is_base: true,
             },
@@ -1748,14 +1748,14 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
 
     // Spawn assertion checker
     let assertion_handle =
-        tokio::spawn(test_utils::e2e_harness::actions::assert_stream(
+        tokio::spawn(world_chain_test_utils::e2e_harness::actions::assert_stream(
             stream,
             assertions,
             Duration::from_secs(NUM_BLOCKS as u64 * 5),
         ));
 
     // Drive the engine
-    let mut driver = test_utils::e2e_harness::actions::EngineDriver {
+    let mut driver = world_chain_test_utils::e2e_harness::actions::EngineDriver {
         builder_idx: 0,
         follower_idxs: vec![],
         initial_parent_hash: Some(block_hash),
@@ -2197,9 +2197,9 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
     };
     use tracing_subscriber::layer::SubscriberExt;
     use url::Host;
-    use cli::{BuilderArgs, PbhArgs, WorldChainArgs, WorldChainNodeConfig};
-    use node::node::WorldChainNode;
-    use test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
+    use world_chain_cli::{BuilderArgs, PbhArgs, WorldChainArgs};
+    use world_chain_node::node::WorldChainNode;
+    use world_chain_test_utils::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
 
     /// Local setup for the peer monitoring test that needs per-node control
     /// over port, P2P key, and task executor.
@@ -2211,7 +2211,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         port: Option<u16>,
         p2p_secret_key: Option<PathBuf>,
     ) -> eyre::Result<(
-        p2p::protocol::handler::FlashblocksHandle,
+        world_chain_p2p::protocol::handler::FlashblocksHandle,
         reth_network_peers::NodeRecord,
         reth_network::NetworkHandle<
             reth_eth_wire::BasicNetworkPrimitives<
@@ -2271,7 +2271,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
         let builder = BuilderArgs {
             enabled: false,
-            private_key: test_utils::utils::signer(6),
+            private_key: world_chain_test_utils::utils::signer(6),
             block_uncompressed_size_limit: None,
         };
 
@@ -2286,9 +2286,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
 
         let wc_config = args.clone().into_config(&mut node_config)?;
 
-        let node = WorldChainNode::<WorldChainDefaultContext>::new(
-            wc_config
-        );
+        let node = WorldChainNode::<WorldChainDefaultContext>::new(wc_config);
 
         let ext_context = node.ext_context::<FullNodeTypesAdapter<
             WorldChainNode<WorldChainDefaultContext>,
@@ -2592,7 +2590,7 @@ fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) ->
 }
 
 async fn wait_for_flashblocks_topology(
-    p2p_handle: &p2p::protocol::handler::FlashblocksHandle,
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
     expected_connections: usize,
     expected_receive_peers: usize,
 ) -> eyre::Result<(Vec<PeerId>, Vec<PeerId>)> {
@@ -2642,7 +2640,7 @@ async fn wait_for_flashblocks_topology(
 }
 
 fn receive_peer_score(
-    p2p_handle: &p2p::protocol::handler::FlashblocksHandle,
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
     peer_id: PeerId,
 ) -> eyre::Result<Option<i64>> {
     let state = p2p_handle.state.lock();
@@ -2737,7 +2735,7 @@ async fn next_payload(payload_id: PayloadId, index: u64) -> FlashblocksPayloadV1
 }
 
 async fn publish_flashblock_with_latency(
-    p2p_handle: &p2p::protocol::handler::FlashblocksHandle,
+    p2p_handle: &world_chain_p2p::protocol::handler::FlashblocksHandle,
     rpc_url: url::Url,
     authorizer: &SigningKey,
     payload_id: PayloadId,
@@ -2860,7 +2858,7 @@ async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
     let block_hash = builder_node.node.block_hash(0);
 
     let authorization_generator =
-        test_utils::e2e_harness::setup::create_authorization_generator(
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
             block_hash,
             builder_context
                 .flashblocks_handle
@@ -2869,24 +2867,24 @@ async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
                 .verifying_key(),
         );
 
-    let timestamp = test_utils::e2e_harness::setup::current_timestamp();
-    let eip1559_params = test_utils::e2e_harness::setup::encode_eip1559_params(
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
+    let eip1559_params = world_chain_test_utils::e2e_harness::setup::encode_eip1559_params(
         builder_node.node.inner.chain_spec().as_ref(),
         timestamp,
     )?;
 
-    let attributes = test_utils::e2e_harness::setup::build_payload_attributes(
+    let attributes = world_chain_test_utils::e2e_harness::setup::build_payload_attributes(
         timestamp,
         eip1559_params,
         Some(vec![
-            test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
+            world_chain_test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
         ]),
     );
 
     // Mine a block on the builder — this produces flashblocks that the follower processes
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
-    let mine_block = test_utils::e2e_harness::actions::AssertMineBlock::new(
+    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
         attributes,

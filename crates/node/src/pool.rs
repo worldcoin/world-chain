@@ -11,7 +11,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::{TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore};
 use tracing::{debug, info};
-use pool::{
+use world_chain_pool::{
     WorldChainTransactionPool, ordering::WorldChainOrdering, root::WorldChainRootValidator,
     validator::WorldChainTransactionValidator,
 };

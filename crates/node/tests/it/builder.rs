@@ -3,8 +3,8 @@ use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
-use node::{context::WorldChainDefaultContext, node::WorldChainNode};
-use test_utils::node::test_config;
+use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
+use world_chain_test_utils::node::test_config;
 
 #[tokio::test]
 async fn test_basic_flashblocks_setup() {

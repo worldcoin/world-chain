@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use primitives::primitives::FlashblocksPayloadV1;
+use world_chain_primitives::primitives::FlashblocksPayloadV1;
 
 #[derive(Clone, Debug)]
 pub enum ChainEvent {
@@ -285,7 +285,7 @@ impl Iterator for BufferedFlashblocks {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use primitives::primitives::{
+    use world_chain_primitives::primitives::{
         ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
     };
 

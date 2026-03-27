@@ -38,7 +38,7 @@ use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
 use std::{borrow::Cow, sync::Arc};
-use primitives::access_list::FlashblockAccessList;
+use world_chain_primitives::access_list::FlashblockAccessList;
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {

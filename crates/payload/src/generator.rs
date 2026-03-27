@@ -3,13 +3,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use alloy_primitives::B256;
 use ::eyre::eyre::eyre;
-use p2p::protocol::handler::FlashblocksHandle;
-use primitives::{
-    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
-};
+use alloy_primitives::B256;
 use op_alloy_consensus::OpTxEnvelope;
 use reth::{
     api::{PayloadBuilderAttributes, PayloadBuilderError},
@@ -19,6 +14,11 @@ use reth::{
 };
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
+};
+use world_chain_p2p::protocol::handler::FlashblocksHandle;
+use world_chain_primitives::{
+    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
+    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
 };
 
 use reth_optimism_chainspec::OpChainSpec;
@@ -32,10 +32,10 @@ use tokio::runtime::Handle;
 use tracing::{debug, warn};
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
-use builder::{
+use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
-use primitives::flashblocks::Flashblock;
+use world_chain_primitives::flashblocks::Flashblock;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {

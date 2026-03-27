@@ -13,9 +13,9 @@ use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OP_ENGINE_CAPABILITIES, OpEngineApi};
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
-use p2p::protocol::handler::FlashblocksHandle;
-use primitives::p2p::Authorization;
-use rpc::engine::OpEngineApiExt;
+use world_chain_p2p::protocol::handler::FlashblocksHandle;
+use world_chain_primitives::p2p::Authorization;
+use world_chain_rpc::engine::OpEngineApiExt;
 
 /// Builder for basic [`OpEngineApiExt`] implementation.
 pub struct FlashblocksEngineApiBuilder<EV> {

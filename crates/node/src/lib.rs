@@ -1,4 +1,4 @@
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod context;
 pub mod engine;
@@ -9,4 +9,4 @@ pub mod pool;
 pub mod tx_propagation;
 
 // Re-export for ease of use
-pub use rpc::op::{FlashblocksOpApi, OpApiExtServer};
+pub use world_chain_rpc::op::{FlashblocksOpApi, OpApiExtServer};

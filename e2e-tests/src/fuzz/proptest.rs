@@ -5,8 +5,8 @@ use alloy_rpc_types_engine::PayloadId;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use revm::database::BundleState;
-use builder::{bal_executor::CommittedState, validator::FlashblocksBlockValidator};
-use primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
+use world_chain_builder::{bal_executor::CommittedState, validator::FlashblocksBlockValidator};
+use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 
 use super::fixtures::{
     BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, create_test_state_provider,
@@ -58,7 +58,7 @@ mod property_tests {
     use eyre::eyre::eyre;
     use proptest::{prelude::Strategy, prop_assert, proptest};
     use tracing::info;
-    use builder::bal_executor::BalExecutorError;
+    use world_chain_builder::bal_executor::BalExecutorError;
 
     use std::io::Write;
 

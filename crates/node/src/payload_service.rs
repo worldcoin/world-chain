@@ -15,14 +15,14 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use builder::{
+use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
-use p2p::protocol::handler::FlashblocksHandle;
-use payload::generator::{
+use world_chain_p2p::protocol::handler::FlashblocksHandle;
+use world_chain_payload::generator::{
     FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
 };
-use primitives::p2p::Authorization;
+use world_chain_primitives::p2p::Authorization;
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
 #[derive(Debug)]

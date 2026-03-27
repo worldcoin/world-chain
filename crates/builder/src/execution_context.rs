@@ -42,7 +42,7 @@ use revm_database::State;
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
 use tracing::{error, trace};
-use pool::{
+use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
 };
@@ -302,7 +302,7 @@ where
             }
 
             if let Some(conditional_options) = pooled_tx.conditional_options()
-                && rpc::transactions::validate_conditional_options(
+                && world_chain_rpc::transactions::validate_conditional_options(
                     conditional_options,
                     &self.client,
                 )

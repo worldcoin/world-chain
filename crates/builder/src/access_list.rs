@@ -4,7 +4,7 @@ use alloy_eip7928::{
 use alloy_primitives::{Address, U256};
 use dashmap::DashMap;
 use rayon::prelude::*;
-use primitives::access_list::FlashblockAccessList;
+use world_chain_primitives::access_list::FlashblockAccessList;
 
 use revm::state::Bytecode;
 use std::collections::{HashMap, HashSet};

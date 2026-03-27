@@ -23,12 +23,12 @@ use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use primitives::{
+use world_chain_primitives::{
     flashblocks::{Flashblock, Flashblocks},
     p2p::Authorization,
     primitives::FlashblocksPayloadV1,
 };
-use rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
+use world_chain_rpc::{engine::FlashblocksEngineApiExtClient, op::OpApiExtClient};
 
 use super::setup::execution_data_from_from_reduced_flashblock;
 
@@ -1499,7 +1499,7 @@ where
 // StreamAssertion — assertion-driven event stream validation
 // ---------------------------------------------------------------------------
 
-use p2p::protocol::event::{ChainEvent, WorldChainEvent};
+use world_chain_p2p::protocol::event::{ChainEvent, WorldChainEvent};
 
 /// Pre-computed assertion on a [`WorldChainEvent`] from the event stream.
 #[derive(Debug, Clone)]

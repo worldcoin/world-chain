@@ -40,7 +40,7 @@ use reth_primitives::NodePrimitives;
 use reth_revm::database::StateProviderDatabase;
 use revm_database::State;
 use tracing::trace;
-use primitives::access_list::FlashblockAccessList;
+use world_chain_primitives::access_list::FlashblockAccessList;
 
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -60,7 +60,6 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
-
 
 /// Flashblocks Payload builder
 ///

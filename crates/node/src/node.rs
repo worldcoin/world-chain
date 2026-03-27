@@ -28,8 +28,8 @@ use reth_optimism_primitives::OpPrimitives;
 
 use reth_transaction_pool::TransactionPool;
 
-use cli::WorldChainNodeConfig;
-use pool::{WorldChainTransactionPool, tx::WorldChainPoolTransaction};
+use world_chain_cli::WorldChainNodeConfig;
+use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPoolTransaction};
 
 use crate::pool::WorldChainPoolBuilder;
 

@@ -1,12 +1,11 @@
 use crate::config::FlashblocksPayloadBuilderConfig;
 use ::eyre::eyre::bail;
-use alloy_primitives::Address;
-use reth::chainspec::NamedChain;
+use alloy_primitives::{Address, address};
+use reth::chainspec::{EthChainSpec, NamedChain};
 use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
-use std::str::FromStr;
 use tracing::{debug, info, warn};
 
 pub mod builder;
@@ -77,7 +76,7 @@ impl WorldChainArgs {
             }
         }
 
-        match spec.chain.named() {
+        match spec.chain().named() {
             Some(NamedChain::World) => {
                 if let Some(flashblocks) = &mut self.flashblocks
                     && flashblocks.authorizer_vk.is_none()
@@ -96,16 +95,14 @@ impl WorldChainArgs {
                 }
 
                 if self.pbh.entrypoint == Address::default() {
-                    self.pbh.entrypoint =
-                        Address::from_str("0x0000000000A21818Ee9F93BB4f2AAad305b5397C")?;
+                    self.pbh.entrypoint = address!("0000000000A21818Ee9F93BB4f2AAad305b5397C");
                 }
                 if self.pbh.world_id == Address::default() {
-                    self.pbh.world_id =
-                        Address::from_str("0x047eE5313F98E26Cc8177fA38877cB36292D2364")?;
+                    self.pbh.world_id = address!("047eE5313F98E26Cc8177fA38877cB36292D2364");
                 }
                 if self.pbh.signature_aggregator == Address::default() {
                     self.pbh.signature_aggregator =
-                        Address::from_str("0xd21306C75C956142c73c0C3BAb282Be68595081E")?;
+                        address!("d21306C75C956142c73c0C3BAb282Be68595081E");
                 }
             }
             Some(NamedChain::WorldSepolia) => {
@@ -119,16 +116,14 @@ impl WorldChainArgs {
                 }
 
                 if self.pbh.entrypoint == Address::default() {
-                    self.pbh.entrypoint =
-                        Address::from_str("0x0000000000A21818Ee9F93BB4f2AAad305b5397C")?;
+                    self.pbh.entrypoint = address!("0x0000000000A21818Ee9F93BB4f2AAad305b5397C");
                 }
                 if self.pbh.world_id == Address::default() {
-                    self.pbh.world_id =
-                        Address::from_str("0xE177F37AF0A862A02edFEa4F59C02668E9d0aAA4")?;
+                    self.pbh.world_id = address!("0xE177F37AF0A862A02edFEa4F59C02668E9d0aAA4");
                 }
                 if self.pbh.signature_aggregator == Address::default() {
                     self.pbh.signature_aggregator =
-                        Address::from_str("0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489")?;
+                        address!("0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489");
                 }
             }
             _ => {

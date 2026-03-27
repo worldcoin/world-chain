@@ -200,4 +200,3 @@ pub trait BlockBuilderExt: BlockBuilder {
         metrics: Option<&mut metrics::PayloadBuildAttemptMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }
-

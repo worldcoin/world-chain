@@ -31,7 +31,7 @@ use reth_primitives::{Block, NodePrimitives, SealedBlock};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use revm_primitives::U256;
 use tracing::info;
-use pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
+use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -320,8 +320,8 @@ pub mod tests {
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{BlockBody, SealedBlock};
-    use pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
-    use test_utils::{
+    use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
+    use world_chain_test_utils::{
         PBH_DEV_ENTRYPOINT,
         utils::{TREE, account, eip1559, eth_tx, pbh_bundle, pbh_multicall, user_op},
     };
@@ -332,7 +332,7 @@ pub mod tests {
     use crate::{
         ordering::WorldChainOrdering, root::LATEST_ROOT_SLOT, tx::WorldChainPooledTransaction,
     };
-    use test_utils::mock::{ExtendedAccount, MockEthProvider};
+    use world_chain_test_utils::mock::{ExtendedAccount, MockEthProvider};
 
     use super::WorldChainTransactionValidator;
 

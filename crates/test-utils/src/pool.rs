@@ -8,7 +8,7 @@ use reth_transaction_pool::{
 use revm_primitives::U256;
 
 use crate::mock::{ExtendedAccount, MockEthProvider};
-use pool::{
+use world_chain_pool::{
     root::WorldChainRootValidator,
     tx::WorldChainPooledTransaction,
     validator::{

@@ -7,7 +7,7 @@ use futures::{Stream, StreamExt};
 use metrics::gauge;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
 use reth_network::types::ReputationChangeKind;
-use primitives::{
+use world_chain_primitives::{
     p2p::{
         Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, StartPublish, StopPublish,
     },

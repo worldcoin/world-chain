@@ -27,8 +27,8 @@ use std::{
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, error, info, trace, warn};
-use cli::cli::FanoutArgs;
-use primitives::{
+use world_chain_cli::cli::FanoutArgs;
+use world_chain_primitives::{
     p2p::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
         StartPublish, StopPublish,

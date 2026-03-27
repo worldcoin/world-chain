@@ -18,7 +18,7 @@ use reth_primitives_traits::InMemorySize;
 use revm_primitives::{Address, B256, TxKind, U256};
 use std::borrow::Cow;
 use thiserror::Error;
-use pbh::payload::{PBHPayload, PBHValidationError};
+use world_chain_pbh::payload::{PBHPayload, PBHValidationError};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {

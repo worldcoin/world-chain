@@ -18,7 +18,7 @@ use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
-use primitives::p2p::Authorization;
+use world_chain_primitives::p2p::Authorization;
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {

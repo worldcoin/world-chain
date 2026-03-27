@@ -53,18 +53,18 @@ use std::{
     time::Duration,
 };
 use tracing::{info, span};
-use node::{
+use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
     node::{WorldChainNode, WorldChainNodeContext},
 };
-use primitives::{flashblocks::Flashblock, p2p::Authorization};
+use world_chain_primitives::{flashblocks::Flashblock, p2p::Authorization};
 
-use pool::{
+use world_chain_pool::{
     BasicWorldChainPool,
     root::LATEST_ROOT_SLOT,
     validator::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT},
 };
-use rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 use super::spammer::{TxSpammer, TxType};
 

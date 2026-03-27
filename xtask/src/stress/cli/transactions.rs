@@ -30,13 +30,13 @@ use tokio::{
     time::sleep,
 };
 use tracing::{debug, error, info};
-use pbh::{
+use world_chain_pbh::{
     date_marker::DateMarker,
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::PBHPayload,
 };
 
-use test_utils::{
+use world_chain_test_utils::{
     DEVNET_ENTRYPOINT, WC_SEPOLIA_CHAIN_ID,
     bindings::{
         IEntryPoint::{PackedUserOperation, UserOpsPerAggregator},
@@ -55,7 +55,7 @@ use super::{
     BundleArgs, SendAAArgs, SendArgs, SendInvalidProofPBHArgs, StakeAAArgs, TxType,
     identities::SerializableIdentity,
 };
-use test_utils::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
+use world_chain_test_utils::bindings::IPBHEntryPoint::PBHPayload as PBHPayloadSolidity;
 
 static SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::const_new(150)));
 
@@ -230,7 +230,7 @@ pub async fn send_user_operations(
                 external_nullifier_hash,
                 signal_hash,
             )?;
-            let proof = pbh::payload::Proof(semaphore_proof);
+            let proof = world_chain_pbh::payload::Proof(semaphore_proof);
             let p0 = proof.0.0.0;
             let p1 = proof.0.0.1;
             let p2 = proof.0.1.0[0];
@@ -369,7 +369,7 @@ pub async fn bundle_pbh_transactions(
                 root,
                 nullifier_hash,
                 external_nullifier,
-                proof: pbh::payload::Proof(semaphore_proof),
+                proof: world_chain_pbh::payload::Proof(semaphore_proof),
             };
 
             let calldata = IPBHEntryPoint::pbhMulticallCall {

@@ -18,7 +18,7 @@ use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::Lazy
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
 
-use pbh::{
+use world_chain_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
     payload::{PBHPayload as PbhPayload, Proof, TREE_DEPTH},
 };

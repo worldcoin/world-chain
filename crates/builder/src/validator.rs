@@ -9,13 +9,13 @@ use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
     block::receipt_builder::OpReceiptBuilder,
 };
+use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
 use rayon::iter::IntoParallelIterator;
 use reth_chain_state::ExecutedBlock;
-use alloy_rpc_types_engine::PayloadId;
 use reth_primitives::transaction::SignedTransaction;
-use primitives::{
+use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
@@ -359,7 +359,7 @@ impl FlashblocksBlockValidator {
             .map_err(BalExecutorError::other)?;
 
         let computed_access_list_hash =
-            primitives::access_list::access_list_hash(&computed_access_list);
+            world_chain_primitives::access_list::access_list_hash(&computed_access_list);
 
         // 5. Verify computed results
         if computed_access_list_hash != access_list_hash {

@@ -7,7 +7,7 @@ use jsonrpsee::{
 };
 use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use pool::tx::WorldChainPooledTransaction;
+use world_chain_pool::tx::WorldChainPooledTransaction;
 
 /// WorldChainEthApi Extension for `sendRawTransactionConditional` and `sendRawTransaction`
 #[derive(Clone, Debug)]

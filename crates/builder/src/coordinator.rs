@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use futures::StreamExt;
@@ -10,11 +11,11 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
 use reth_optimism_primitives::OpPrimitives;
-use p2p::protocol::{
+use world_chain_p2p::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
     handler::FlashblocksHandle,
 };
-use primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
+use world_chain_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
 
 use reth_provider::{
     BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
@@ -31,7 +32,7 @@ use tokio::{
 use tracing::{error, trace};
 
 use crate::validator::FlashblocksBlockValidator;
-use primitives::flashblocks::{Flashblock, Flashblocks};
+use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
 static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
@@ -111,7 +112,7 @@ impl FlashblocksExecutionCoordinator {
             pending_block.send_if_modified(|block| {
                 let should_clear = block.as_ref().is_some_and(|b| {
                     let pending = b.recovered_block();
-                    pending.hash() == tip.hash || pending.number <= tip.number
+                    pending.hash() == tip.hash || pending.number() <= tip.number
                 });
                 if should_clear {
                     *block = None;

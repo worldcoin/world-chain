@@ -6,7 +6,7 @@ use revm::{
     primitives::{HashMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
-use primitives::access_list::FlashblockAccessList;
+use world_chain_primitives::access_list::FlashblockAccessList;
 
 use super::temporal_map::TemporalMap;
 
@@ -220,15 +220,14 @@ mod tests {
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{U256, address, b256, bytes};
-    
+
     use reth_revm::State;
     use revm::{
-        
         database::{CacheDB, EmptyDB, InMemoryDB},
         primitives::KECCAK_EMPTY,
     };
     use serde_json::json;
-    use primitives::access_list::FlashblockAccessListData;
+    use world_chain_primitives::access_list::FlashblockAccessListData;
 
     #[test]
     fn test_temporal_db_factory_with_storage_changes() {

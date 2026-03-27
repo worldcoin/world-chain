@@ -13960,6 +13960,7 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "reth",
  "reth-basic-payload-builder",
+ "reth-db",
  "reth-engine-local",
  "reth-eth-wire",
  "reth-eth-wire-types",
