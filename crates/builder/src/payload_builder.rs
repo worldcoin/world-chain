@@ -302,12 +302,13 @@ where
     );
 
     let _enter = span.enter();
+    let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
     let attributes = OpNextBlockEnvAttributes {
         timestamp: ctx.attributes().timestamp(),
         suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
         prev_randao: ctx.attributes().prev_randao(),
-        gas_limit: ctx.gas_limit(),
+        gas_limit,
         parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
         extra_data: if ctx
             .spec()
@@ -323,8 +324,6 @@ where
             Default::default()
         },
     };
-
-    trace!(target: "flashblocks::payload_builder", ?attributes, "building new payload");
 
     // Prepare EVM environment.
     let evm_env = ctx
@@ -343,6 +342,15 @@ where
     let effective_gas_limit = ctx
         .effective_gas_limit()
         .saturating_sub(committed_state.gas_used);
+
+    trace!(
+        target: "flashblocks::payload_builder",
+        gas_limit,
+        effective_gas_limit,
+        committed_gas_used = committed_state.gas_used,
+        timestamp = ctx.attributes().timestamp(),
+        "building new payload"
+    );
 
     let bundle_state = committed_state.bundle.clone();
 

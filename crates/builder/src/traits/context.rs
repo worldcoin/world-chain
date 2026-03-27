@@ -1,7 +1,6 @@
 use crate::{
-    metrics::PayloadBuildAttemptMetrics,
-    traits::context_builder::PayloadBuilderCtxBuilder,
-    utils::{effective_gas_limit, gas_limit},
+    metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
+    utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
@@ -109,16 +108,16 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// transaction count, MEV opportunities, or builder preferences.
     fn is_better_payload(&self, total_fees: U256) -> bool;
 
-    /// Returns the protocol gas limit for the block being built.
-    fn gas_limit(&self) -> u64 {
-        gas_limit(self.parent().gas_limit, self.attributes().gas_limit)
-    }
-
     /// Returns the local gas limit to use for payload building.
     ///
     /// This may be lower than the protocol gas limit if `--builder.gaslimit` is configured.
     fn effective_gas_limit(&self) -> u64 {
-        effective_gas_limit(self.gas_limit(), self.builder_config())
+        effective_gas_limit(
+            self.attributes()
+                .gas_limit
+                .unwrap_or(self.parent().gas_limit),
+            self.builder_config(),
+        )
     }
 
     /// Creates a block builder that will execute transactions and maintain block state.

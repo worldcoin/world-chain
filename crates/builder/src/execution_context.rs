@@ -165,11 +165,16 @@ where
         DB: Database + 'a,
     {
         // Prepare attributes for next block environment.
+        let gas_limit = self
+            .inner
+            .attributes()
+            .gas_limit
+            .unwrap_or(self.inner.parent().gas_limit);
         let attributes = OpNextBlockEnvAttributes {
             timestamp: self.inner.attributes().timestamp(),
             suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
             prev_randao: self.inner.attributes().prev_randao(),
-            gas_limit: self.gas_limit(),
+            gas_limit,
             parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
             extra_data: if self
                 .spec()

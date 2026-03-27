@@ -46,13 +46,6 @@ pub(crate) fn flatten_reverts(reverts: &Reverts) -> Reverts {
     Reverts::new(vec![flattened])
 }
 
-/// Returns the protocol gas limit for the block being built.
-///
-/// This is the gas limit that should be written into the block header.
-pub(crate) fn gas_limit(parent_gas_limit: u64, payload_gas_limit: Option<u64>) -> u64 {
-    payload_gas_limit.unwrap_or(parent_gas_limit)
-}
-
 /// Returns the local tx-selection gas limit for a payload build.
 ///
 /// This applies the optional `--builder.gaslimit` cap without changing the protocol gas limit in
@@ -80,7 +73,7 @@ mod tests {
         state::AccountInfo,
     };
 
-    use crate::utils::{effective_gas_limit, flatten_reverts, gas_limit};
+    use crate::utils::{effective_gas_limit, flatten_reverts};
     use reth_optimism_payload_builder::config::OpBuilderConfig;
 
     #[bon::builder]
@@ -216,9 +209,11 @@ mod tests {
     }
 
     #[test]
-    fn test_gas_limit_uses_payload_default_without_override() {
-        assert_eq!(gas_limit(30_000_000, Some(28_000_000)), 28_000_000);
-        assert_eq!(gas_limit(30_000_000, None), 30_000_000);
+    fn test_effective_gas_limit_uses_protocol_gas_limit_without_override() {
+        let config = OpBuilderConfig::default();
+
+        assert_eq!(effective_gas_limit(28_000_000, &config), 28_000_000);
+        assert_eq!(effective_gas_limit(30_000_000, &config), 30_000_000);
     }
 
     #[test]
