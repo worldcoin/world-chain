@@ -29,9 +29,7 @@ use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
-    execute::{
-        BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
-    },
+    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
     op_revm::OpHaltReason,
 };
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
@@ -93,13 +91,11 @@ impl BalExecutorError {
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
-    pub inner: BasicBlockBuilder<
-        'a,
-        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
-        OpBlockAssembler<OpChainSpec>,
-        N,
-    >,
+    pub executor: OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
+    pub ctx: OpBlockExecutionCtx,
+    pub transactions: Vec<Recovered<N::SignedTx>>,
+    pub parent: &'a SealedHeader<N::BlockHeader>,
+    pub assembler: OpBlockAssembler<OpChainSpec>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub counter: BlockAccessIndexCounter,
 }
@@ -132,21 +128,19 @@ where
         trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
 
         Self {
-            inner: BasicBlockBuilder {
-                executor,
-                assembler: OpBlockAssembler::new(chain_spec),
-                ctx,
-                parent,
-                transactions,
-            },
+            executor,
+            ctx,
+            transactions,
+            parent,
+            assembler: OpBlockAssembler::new(chain_spec),
             access_list_sender: tx,
             counter,
         }
     }
 
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
-        let length = self.inner.transactions.len() as u16;
-        let db = self.inner.executor.evm_mut().db_mut();
+        let length = self.transactions.len() as u16;
+        let db = self.executor.evm_mut().db_mut();
         let current = self.counter.inc();
         trace!(target: "bal_executor", block_access_index = %current,  receipts_length = %length, "Preparing database for next transaction with index");
         db.set_index(current);
@@ -178,7 +172,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let res = self.inner.executor.apply_pre_execution_changes();
+        let res = self.executor.apply_pre_execution_changes();
         // prepare the transaction index for the next transaction 1
         self.prepare_database()?;
         res
@@ -193,11 +187,10 @@ where
     ) -> Result<Option<u64>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
         if let Some(gas_used) = self
-            .inner
             .executor
             .execute_transaction_with_commit_condition((tx_env, &recovered), f)?
         {
-            self.inner.transactions.push(recovered);
+            self.transactions.push(recovered);
             // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
             Ok(Some(gas_used))
@@ -216,15 +209,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        &mut self.inner.executor
+        &mut self.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        &self.inner.executor
+        &self.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.executor
+        self.executor
     }
 }
 
@@ -253,7 +246,7 @@ where
         state: impl StateProvider,
         _metrics: Option<&mut crate::metrics::PayloadBuildAttemptMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
-        let (evm, result) = self.inner.executor.finish()?;
+        let (evm, result) = self.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
@@ -277,20 +270,19 @@ where
             .map_err(BlockExecutionError::other)?;
 
         let (transactions, senders) = self
-            .inner
             .transactions
             .into_iter()
             .map(|tx| tx.into_parts())
             .unzip();
 
-        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block = self.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
         >::new(
             evm_env,
-            self.inner.ctx,
-            self.inner.parent,
+            self.ctx,
+            self.parent,
             transactions,
             &result,
             db.bundle_state(),
