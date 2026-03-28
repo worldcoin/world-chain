@@ -55,6 +55,7 @@ alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
 alloy-contract.workspace = true
 alloy-op-evm.workspace = true
 alloy-trie.workspace = true

@@ -14190,6 +14190,7 @@ dependencies = [
  "alloy-op-evm",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",

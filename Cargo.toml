@@ -39,6 +39,10 @@ inherits = "dev"
 [profile.verbose-tracing]
 inherits = "dev"
 
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
 
 [workspace.lints]
 
