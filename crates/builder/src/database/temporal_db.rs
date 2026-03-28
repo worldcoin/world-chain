@@ -216,7 +216,7 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eip7928::{
+    use alloy_eips::eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{U256, address, b256, bytes};
@@ -240,7 +240,7 @@ mod tests {
             changes: vec![AccountChanges {
                 address: addr,
                 storage_changes: vec![SlotChanges {
-                    slot,
+                    slot: slot.into(),
                     changes: vec![
                         StorageChange {
                             block_access_index: 1,
@@ -449,7 +449,7 @@ mod tests {
             changes: vec![AccountChanges {
                 address: addr,
                 storage_changes: vec![SlotChanges {
-                    slot,
+                    slot: slot.into(),
                     changes: vec![StorageChange {
                         block_access_index: 1,
                         new_value: U256::from(100).into(),

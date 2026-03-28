@@ -6,11 +6,9 @@ use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    chainspec::EthChainSpec,
-    network::{NetworkSyncUpdater, SyncState},
-};
+use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
+use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{Address, B256, U256};
@@ -862,7 +860,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
     let node_2_peer_id = node_2_ctx.node.network.record().id;
 
     // Set nodes to Idle state to enable transaction propagation
-    use reth::network::Peers;
+    use reth_network_api::Peers;
     node_0_ctx
         .node
         .inner
@@ -1242,7 +1240,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
     use alloy_eips::BlockNumberOrTag;
-    use reth::rpc::api::EthApiClient;
+    use reth_rpc_api::EthApiClient;
 
     reth_tracing::init_test_tracing();
 
@@ -2184,10 +2182,10 @@ async fn test_peer_reputation() -> eyre::Result<()> {
 #[ignore]
 #[tokio::test]
 async fn test_peer_monitoring() -> eyre::Result<()> {
-    use reth::builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
     use reth_e2e_test_utils::TmpDB;
     use reth_network_peers::TrustedPeer;
     use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+    use reth_node_builder::{Node, NodeBuilder, NodeConfig, NodeHandle};
     use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
     use reth_provider::providers::BlockchainProvider;
     use reth_tasks::TaskExecutor;

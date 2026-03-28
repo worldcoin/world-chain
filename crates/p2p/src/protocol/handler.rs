@@ -4,13 +4,13 @@ use crate::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream, world_chain_events_stream},
 };
 use alloy_rlp::BytesMut;
+use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use futures::{Stream, StreamExt, stream};
 use metrics::histogram;
 use parking_lot::Mutex;
 use rand::Rng;
-use reth::payload::PayloadId;
 use reth_eth_wire::Capability;
 use reth_ethereum::{
     network::{api::PeerId, protocol::ProtocolHandler},
@@ -879,7 +879,7 @@ impl FlashblocksHandle {
             .ok()
             .flatten()
             .map(|h| {
-                ChainEvent::Canon(reth::rpc::types::BlockNumHash {
+                ChainEvent::Canon(alloy_eips::BlockNumHash {
                     number: h.number(),
                     hash: h.hash(),
                 })

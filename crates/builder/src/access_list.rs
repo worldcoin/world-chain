@@ -1,4 +1,4 @@
-use alloy_eip7928::{
+use alloy_eips::eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
 use alloy_primitives::{Address, U256};

@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{Address, U256};
 use parking_lot::RwLock;
-use reth::api::Block;
 use reth_primitives::SealedBlock;
+use reth_primitives_traits::Block;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 
 use semaphore_rs::Field;

@@ -1,11 +1,11 @@
 #![warn(unused_crate_dependencies)]
 
 use ordering::WorldChainOrdering;
-use reth::{
-    api::FullNodeTypes,
-    transaction_pool::{Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore},
-};
+use reth_node_api::FullNodeTypes;
 use reth_optimism_node::OpEvmConfig;
+use reth_transaction_pool::{
+    Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore,
+};
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
 
