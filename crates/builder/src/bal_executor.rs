@@ -7,7 +7,7 @@ use alloy_op_evm::{
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError, StateDB},
+    block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -23,6 +23,7 @@ use tracing::trace;
 
 use crate::{
     BlockBuilderExt, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
+    state_db::StateDB,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
@@ -37,7 +38,7 @@ use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
@@ -177,7 +178,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let res = self.inner.apply_pre_execution_changes();
+        let res = self.inner.executor.apply_pre_execution_changes();
         // prepare the transaction index for the next transaction 1
         self.prepare_database()?;
         res
@@ -190,14 +191,19 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        let res = self
+        let (tx_env, recovered) = tx.into_parts();
+        if let Some(gas_used) = self
             .inner
-            .execute_transaction_with_commit_condition(tx, f)?;
-        // only prepare the database index for the next transaction if this one was committed
-        if res.is_some() {
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &recovered), f)?
+        {
+            self.inner.transactions.push(recovered);
+            // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
         }
-        Ok(res)
     }
 
     fn finish(
@@ -210,15 +216,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
+        &mut self.inner.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
+        &self.inner.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        self.inner.executor
     }
 }
 
@@ -287,7 +293,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(db.bundle_state()),
+            db.bundle_state(),
             &state,
             state_root,
         ))?;

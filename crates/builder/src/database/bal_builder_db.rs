@@ -1,8 +1,8 @@
 use std::thread::JoinHandle;
 
+use crate::state_db::StateDB;
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
-use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
     database::{BundleState, states::bundle_state::BundleRetention},
@@ -240,6 +240,19 @@ where
         self.db.merge_transitions(retention);
     }
 
+    fn take_bundle(&mut self) -> BundleState {
+        self.db.take_bundle()
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
+impl<DB> reth_evm::block::StateDB for BalBuilderDb<DB>
+where
+    DB: StateDB + DatabaseCommit + Database,
+{
     fn set_state_clear_flag(&mut self, has_state_clear: bool) {
         self.db.set_state_clear_flag(has_state_clear);
     }
@@ -377,6 +390,16 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
         self.db.merge_transitions(retention);
     }
 
+    fn take_bundle(&mut self) -> BundleState {
+        self.db.take_bundle()
+    }
+
+    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
+        self.db.set_state_clear_flag(has_state_clear);
+    }
+}
+
+impl<DB: StateDB> reth_evm::block::StateDB for AsyncBalBuilderDb<DB> {
     fn set_state_clear_flag(&mut self, has_state_clear: bool) {
         self.db.set_state_clear_flag(has_state_clear);
     }
@@ -444,6 +467,16 @@ impl<DB: DatabaseRef + std::fmt::Debug> StateDB for NoOpCommitDB<DB> {
         // No-op
     }
 
+    fn take_bundle(&mut self) -> BundleState {
+        unimplemented!()
+    }
+
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
+        // No-op
+    }
+}
+
+impl<DB: DatabaseRef + std::fmt::Debug> reth_evm::block::StateDB for NoOpCommitDB<DB> {
     fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
         // No-op
     }
