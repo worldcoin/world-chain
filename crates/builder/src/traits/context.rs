@@ -1,5 +1,6 @@
 use crate::{
     metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
+    utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
@@ -72,6 +73,9 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// features based on block height or timestamp.
     fn spec(&self) -> &Self::ChainSpec;
 
+    /// Returns payload-builder configuration such as DA and gas-limit overrides.
+    fn builder_config(&self) -> &OpBuilderConfig;
+
     /// Provides the parent block header that this payload builds upon.
     ///
     /// The new block inherits context from this parent, including state root,
@@ -104,6 +108,18 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// transaction count, MEV opportunities, or builder preferences.
     fn is_better_payload(&self, total_fees: U256) -> bool;
 
+    /// Returns the local gas limit to use for payload building.
+    ///
+    /// This may be lower than the protocol gas limit if `--builder.gaslimit` is configured.
+    fn effective_gas_limit(&self) -> u64 {
+        effective_gas_limit(
+            self.attributes()
+                .gas_limit
+                .unwrap_or(self.parent().gas_limit),
+            self.builder_config(),
+        )
+    }
+
     /// Creates a block builder that will execute transactions and maintain block state.
     ///
     /// The builder handles transaction execution, state updates, receipt generation,
@@ -135,7 +151,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
-    /// Processes user transactions from the mempool until `gas_limit` is reached.
+    /// Processes user transactions from the mempool until `effective_gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
     fn execute_best_transactions<Pool, Txs, Builder>(
@@ -145,7 +161,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         builder: &mut Builder,
         best_txs: Txs,
         attempt_metrics: &mut PayloadBuildAttemptMetrics,
-        gas_limit: u64,
+        effective_gas_limit: u64,
         cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
@@ -222,6 +238,10 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         self.chain_spec.as_ref()
     }
 
+    fn builder_config(&self) -> &OpBuilderConfig {
+        &self.builder_config
+    }
+
     fn evm_env(&self) -> Result<EvmEnv<OpSpecId>, EIP1559ParamError> {
         self.evm_config.evm_env(self.parent())
     }
@@ -251,7 +271,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         self.is_better_payload(total_fees)
     }
 
-    /// Processes user transactions from the mempool until `gas_limit` is reached.
+    /// Processes user transactions from the mempool until `effective_gas_limit` is reached.
     ///
     /// Returns `None` if the parent [`CancelOnDrop`] token was dropped by the [`PayloadJobsGenerator`] type.
     fn execute_best_transactions<Pool, Txs, Builder>(
@@ -261,7 +281,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
         builder: &mut Builder,
         best_txs: Txs,
         _attempt_metrics: &mut PayloadBuildAttemptMetrics,
-        _gas_limit: u64,
+        _effective_gas_limit: u64,
         _cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where

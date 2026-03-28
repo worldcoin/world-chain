@@ -6,6 +6,7 @@ use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::args::RollupArgs;
+use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
 use tracing::{debug, info, warn};
 
 pub mod builder;
@@ -155,10 +156,17 @@ impl WorldChainArgs {
             if bal_enabled { "enabled" } else { "disabled" }
         );
 
+        let mut inner_builder_config = OpBuilderConfig::default();
+        if let Some(gas_limit) = config.builder.gas_limit {
+            // Despite the type name, op-reth uses this as the payload builder's block gas limit
+            // cap, not a per-transaction limit.
+            inner_builder_config.gas_limit_config = OpGasLimitConfig::new(gas_limit);
+        }
+
         Ok(WorldChainNodeConfig {
             args: self,
             builder_config: FlashblocksPayloadBuilderConfig {
-                inner: Default::default(),
+                inner: inner_builder_config,
                 bal_enabled,
             },
         })
@@ -175,6 +183,14 @@ mod tests {
 
     #[derive(Debug, Parser)]
     struct CommandParser {
+        #[command(flatten)]
+        world: WorldChainArgs,
+    }
+
+    #[derive(Debug, Parser)]
+    struct CommandParserWithPayloadBuilder {
+        #[command(flatten)]
+        builder: reth::args::PayloadBuilderArgs,
         #[command(flatten)]
         world: WorldChainArgs,
     }
@@ -217,6 +233,36 @@ mod tests {
             "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         ])
         .unwrap_err();
+    }
+
+    #[test]
+    fn into_config_preserves_builder_gaslimit_override() {
+        let args = CommandParserWithPayloadBuilder::parse_from([
+            "bin",
+            "--builder.gaslimit",
+            "25000000",
+            "--builder.enabled",
+            "--builder.private_key",
+            "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        ]);
+
+        assert_eq!(args.builder.gas_limit, Some(25_000_000));
+
+        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+
+        node_config.builder = args.builder;
+
+        let world_config = args.world.into_config(&mut node_config).unwrap();
+
+        assert_eq!(
+            world_config
+                .builder_config
+                .inner
+                .gas_limit_config
+                .gas_limit(),
+            Some(25_000_000)
+        );
     }
 
     #[test]

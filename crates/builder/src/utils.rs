@@ -1,3 +1,4 @@
+use reth_optimism_payload_builder::config::OpBuilderConfig;
 use revm_database::states::reverts::{AccountInfoRevert, Reverts};
 use std::collections::{HashMap, hash_map::Entry};
 
@@ -45,6 +46,22 @@ pub(crate) fn flatten_reverts(reverts: &Reverts) -> Reverts {
     Reverts::new(vec![flattened])
 }
 
+/// Returns the local tx-selection gas limit for a payload build.
+///
+/// This applies the optional `--builder.gaslimit` cap without changing the protocol gas limit in
+/// the block header.
+pub(crate) fn effective_gas_limit(
+    protocol_gas_limit: u64,
+    builder_config: &OpBuilderConfig,
+) -> u64 {
+    builder_config
+        .gas_limit_config
+        .gas_limit()
+        .map_or(protocol_gas_limit, |configured_gas_limit| {
+            configured_gas_limit.min(protocol_gas_limit)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, U256};
@@ -56,7 +73,8 @@ mod tests {
         state::AccountInfo,
     };
 
-    use crate::utils::flatten_reverts;
+    use crate::utils::{effective_gas_limit, flatten_reverts};
+    use reth_optimism_payload_builder::config::OpBuilderConfig;
 
     #[bon::builder]
     fn revert(
@@ -188,5 +206,22 @@ mod tests {
             .wipe_storage(true)
             .call();
         assert_eq!(actual_revert, expected);
+    }
+
+    #[test]
+    fn test_effective_gas_limit_uses_protocol_gas_limit_without_override() {
+        let config = OpBuilderConfig::default();
+
+        assert_eq!(effective_gas_limit(28_000_000, &config), 28_000_000);
+        assert_eq!(effective_gas_limit(30_000_000, &config), 30_000_000);
+    }
+
+    #[test]
+    fn test_effective_gas_limit_clamps_to_cli_override() {
+        let config = OpBuilderConfig::default();
+        config.gas_limit_config.set_gas_limit(25_000_000);
+
+        assert_eq!(effective_gas_limit(28_000_000, &config), 25_000_000);
+        assert_eq!(effective_gas_limit(20_000_000, &config), 20_000_000);
     }
 }
