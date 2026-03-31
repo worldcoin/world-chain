@@ -45,6 +45,20 @@ alloy-signer-local.workspace = true
 
 op-alloy-consensus.workspace = true
 
+# kona P2P
+kona-node-service.workspace = true
+kona-disc.workspace = true
+kona-gossip.workspace = true
+kona-peers.workspace = true
+kona-sources.workspace = true
+kona-cli.workspace = true
+kona-genesis.workspace = true
+discv5.workspace = true
+libp2p.workspace = true
+k256.workspace = true
+url.workspace = true
+reqwest.workspace = true
+
 tokio.workspace = true
 eyre.workspace = true
 clap.workspace = true

@@ -20,12 +20,7 @@ members = [
     "crates/flashblocks/node",
     "crates/flashblocks/cli",
 ]
-exclude = [
-    # Exclude kona integration crate from default workspace builds until dependency
-    # compatibility is resolved. It can be built explicitly with:
-    #   cargo check -p world-chain-kona
-    "crates/world/kona",
-]
+exclude = []
 default-members = [
     "crates/flashblocks/p2p",
     "crates/flashblocks/primitives",
@@ -145,11 +140,26 @@ reth-optimism-storage = { git = "https://github.com/0xForerunner/optimism", rev 
 reth-op = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
 reth-optimism-flashblocks = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
 
+# kona (local fork)
+kona-engine = { path = "../../../world-chain-kona/crates/node/engine" }
+kona-node-service = { path = "../../../world-chain-kona/crates/node/service" }
+kona-genesis = { path = "../../../world-chain-kona/crates/protocol/genesis" }
+kona-protocol = { path = "../../../world-chain-kona/crates/protocol/protocol", features = ["serde", "std"] }
+kona-disc = { path = "../../../world-chain-kona/crates/node/disc" }
+kona-gossip = { path = "../../../world-chain-kona/crates/node/gossip" }
+kona-peers = { path = "../../../world-chain-kona/crates/node/peers" }
+kona-sources = { path = "../../../world-chain-kona/crates/node/sources" }
+kona-cli = { path = "../../../world-chain-kona/crates/utilities/cli", default-features = false }
+discv5 = "0.10.2"
+libp2p = "0.56.0"
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
 # alloy op
 op-alloy-consensus = { version = "0.23.1", default-features = false }
 op-alloy-rpc-types = { version = "0.23.1", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
 op-alloy-network = { version = "0.23.1", default-features = false }
+op-alloy-provider = { version = "0.23.1", default-features = false }
 alloy-op-hardforks = { version = "0.4.4", default-features = false }
 
 # alloy
@@ -206,14 +216,6 @@ revm-inspectors = "0.34"
 
 alloy-op-evm = { version = "0.27", default-features = false }
 alloy-evm = { version = "0.27", default-features = false }
-
-# Kona (OP Stack consensus/derivation node)
-kona-engine = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
-kona-node-service = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
-kona-genesis = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
-kona-protocol = { git = "https://github.com/anton-rs/kona", rev = "2586fc56", features = ["serde", "std"] }
-kona-derive = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
-kona-providers-alloy = { git = "https://github.com/anton-rs/kona", rev = "2586fc56" }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
@@ -285,6 +287,7 @@ op-alloy-consensus = { git = "https://github.com/0xForerunner/optimism", rev = "
 op-alloy-network = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
 op-alloy-rpc-types = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
 op-alloy-rpc-types-engine = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
+op-alloy-provider = { git = "https://github.com/0xForerunner/optimism", rev = "954e507" }
 
 alloy-op-evm = { git = "https://github.com/0xforerunner/evm", rev = "f9a7b1250" }
 alloy-evm = { git = "https://github.com/0xforerunner/evm", rev = "f9a7b1250" }
