@@ -20,15 +20,9 @@ use world_chain_primitives::{
 
 use std::task::ready;
 
+use alloy_eips::eip2718::Encodable2718;
 use futures::FutureExt;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    api::{BlockBody, BuiltPayload, PayloadBuilderError, PayloadKind},
-    network::types::Encodable2718,
-    payload::{KeepPayloadJobAlive, PayloadJob},
-    revm::{cached::CachedReads, cancelled::CancelOnDrop},
-    tasks::TaskSpawner,
-};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, HeaderForPayload, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig, PayloadState, PayloadTaskGuard, PendingPayload, ResolveBestPayload,
@@ -36,6 +30,11 @@ use reth_basic_payload_builder::{
 use reth_optimism_node::OpPayloadBuilderAttributes;
 use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
+use reth_primitives_traits::BlockBody;
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
+use reth_tasks::TaskSpawner;
 use tokio::{
     sync::oneshot,
     time::{Interval, Sleep},

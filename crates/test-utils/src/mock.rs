@@ -14,14 +14,12 @@ use alloy_primitives::{
 use alloy_consensus::{Header, constants::EMPTY_ROOT_HASH, transaction::TransactionMeta};
 use alloy_eips::BlockId;
 use parking_lot::Mutex;
-use reth::{
-    api::NodeTypes,
-    chainspec::{ChainInfo, ChainSpec},
-};
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_node_api::NodeTypes;
 use reth_node_ethereum::EthEngineTypes;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;

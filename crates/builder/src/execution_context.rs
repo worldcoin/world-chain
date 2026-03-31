@@ -1,5 +1,6 @@
 use crate::{
     metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
@@ -16,7 +17,7 @@ use reth_basic_payload_builder::PayloadConfig;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
-    block::{BlockExecutionError, BlockValidationError, StateDB},
+    block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
 };

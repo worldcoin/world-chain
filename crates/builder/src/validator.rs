@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
@@ -583,7 +583,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        self.inner.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -593,7 +593,17 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let (tx_env, tx) = tx.into_parts();
+        if let Some(gas_used) = self
+            .inner
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        {
+            self.inner.transactions.push(tx);
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(
@@ -630,7 +640,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(self.bundle_state.as_ref()),
+            self.bundle_state.as_ref(),
             &state,
             state_root,
         ))?;
@@ -655,15 +665,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
+        &mut self.inner.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
+        &self.inner.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        self.inner.executor
     }
 }
 
@@ -742,7 +752,7 @@ where
         results.sort_unstable_by_key(|r| r.index);
 
         let merged_result = merge_transaction_results(results, gas_used);
-        let database = self.inner.executor_mut().evm_mut().db_mut();
+        let database = self.inner.executor.evm_mut().db_mut();
 
         // merge the aggregated access list into the AsyncBalBuilderDb
         database.merge_access_list(merged_result.access_list);

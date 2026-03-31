@@ -5,8 +5,8 @@ use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
 };
-use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_transaction_pool::TransactionPool;
 use world_chain_pool::tx::WorldChainPooledTransaction;
 
 /// WorldChainEthApi Extension for `sendRawTransactionConditional` and `sendRawTransaction`

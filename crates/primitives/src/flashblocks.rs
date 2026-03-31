@@ -14,10 +14,9 @@ use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    api::{Block as _, BlockBody as _},
-    payload::PayloadBuilderAttributes,
-};
+use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_primitives_traits::{Block as _, BlockBody as _};
+
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};

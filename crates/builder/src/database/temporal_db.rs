@@ -65,8 +65,8 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
                         // by the previous transactions, not itself.
                         // The same reasoning applies to below indexes.
                         slot.block_access_index + 1,
-                        storage_change.slot.into(),
-                        slot.new_value.into(),
+                        storage_change.slot,
+                        slot.new_value,
                     );
                 }
             }
@@ -216,7 +216,7 @@ impl<DB: DatabaseRef> DatabaseRef for TemporalDb<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eip7928::{
+    use alloy_eips::eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{U256, address, b256, bytes};
@@ -240,15 +240,15 @@ mod tests {
             changes: vec![AccountChanges {
                 address: addr,
                 storage_changes: vec![SlotChanges {
-                    slot,
+                    slot: slot.into(),
                     changes: vec![
                         StorageChange {
                             block_access_index: 1,
-                            new_value: value1.into(),
+                            new_value: value1,
                         },
                         StorageChange {
                             block_access_index: 3,
-                            new_value: value2.into(),
+                            new_value: value2,
                         },
                     ],
                 }],
@@ -449,10 +449,10 @@ mod tests {
             changes: vec![AccountChanges {
                 address: addr,
                 storage_changes: vec![SlotChanges {
-                    slot,
+                    slot: slot.into(),
                     changes: vec![StorageChange {
                         block_access_index: 1,
-                        new_value: U256::from(100).into(),
+                        new_value: U256::from(100),
                     }],
                 }],
                 storage_reads: vec![],

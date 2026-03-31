@@ -9,10 +9,11 @@ use alloy_rpc_types::TransactionRequest;
 use alloy_sol_types::{SolCall, sol};
 use futures::{StreamExt, stream::FuturesOrdered};
 use reqwest::Url;
-use reth::{chainspec::EthChainSpec, rpc::api::EthApiClient};
+use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::NodeClient;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_rpc_api::EthApiClient;
 use revm_primitives::{Address, Bytes};
 use tracing::{debug, error, info};
 

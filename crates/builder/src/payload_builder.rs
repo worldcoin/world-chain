@@ -7,6 +7,7 @@ use crate::{
         PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome, PayloadBuildStage,
     },
     payload_txns::BestPayloadTxns,
+    state_db::StateDB,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
         payload_builder::FlashblockPayloadBuilder,
@@ -16,7 +17,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
 use reth_evm::{
     Evm, EvmFactory,
-    block::{BlockExecutor, BlockExecutorFactory, StateDB},
+    block::{BlockExecutor, BlockExecutorFactory},
 };
 
 use alloy_consensus::{BlockHeader, Header};
@@ -690,7 +691,11 @@ where
     OpBlockExecutorFactory<OpRethReceiptBuilder>:
         BlockExecutorFactory<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     Tx: PoolTransaction + OpPooledTx,
-    DB: StateDB + DatabaseCommit + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    DB: StateDB
+        + reth_evm::block::StateDB
+        + DatabaseCommit
+        + reth_evm::Database<Error: Send + Sync + 'a>
+        + 'a,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);

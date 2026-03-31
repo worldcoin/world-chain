@@ -6,15 +6,13 @@ use std::{
 use ::eyre::eyre::eyre;
 use alloy_primitives::B256;
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    api::{PayloadBuilderAttributes, PayloadBuilderError},
-    payload::{PayloadJob, PayloadJobGenerator},
-    revm::cached::CachedReads,
-    tasks::TaskSpawner,
-};
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
+use reth_payload_builder::{PayloadJob, PayloadJobGenerator};
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_revm::cached::CachedReads;
+use reth_tasks::TaskSpawner;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, ed25519_dalek::SigningKey,

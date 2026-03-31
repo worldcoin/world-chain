@@ -1,9 +1,9 @@
 //! Test utilities for interfacing with PBH & the World Chain Devnet.
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_primitives::{Address, address};
+use revm_primitives::{Address, address};
 
-const MNEMONIC: &str = "test test test test test test test test test test test junk";
+pub const MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 /// Devnet Test Safes
 pub const TEST_SAFES: [Address; 6] = [
@@ -38,10 +38,17 @@ pub const PBH_DEV_ENTRYPOINT: Address = address!("9fE46736679d2D9a65F0992F2272dE
 
 pub const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
-pub mod bindings;
-pub mod builder;
-pub mod e2e_harness;
-pub mod mock;
 pub mod node;
-pub mod pool;
+pub use node::*;
+
+pub mod builder;
+
 pub mod utils;
+
+pub mod e2e_harness;
+
+pub mod mock;
+
+pub mod bindings;
+
+pub mod pool;

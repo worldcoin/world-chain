@@ -1,6 +1,6 @@
+use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
 use futures::StreamExt as _;
-use reth::payload::PayloadId;
 use std::time::Duration;
 use tokio::task;
 use world_chain_p2p::protocol::handler::{FlashblocksHandle, PublishingStatus};
@@ -18,7 +18,7 @@ fn signing_key(byte: u8) -> SigningKey {
 }
 
 /// Helper: a minimal Flashblock (index 0) for the given payload-id.
-fn payload(payload_id: reth::payload::PayloadId, idx: u64) -> FlashblocksPayloadV1 {
+fn payload(payload_id: alloy_rpc_types_engine::PayloadId, idx: u64) -> FlashblocksPayloadV1 {
     FlashblocksPayloadV1 {
         payload_id,
         index: idx,
@@ -47,7 +47,7 @@ async fn publish_without_clearance_is_rejected() {
     let handle = fresh_handle();
     let builder_sk = handle.builder_sk().unwrap();
 
-    let payload_id = reth::payload::PayloadId::new([0; 8]);
+    let payload_id = alloy_rpc_types_engine::PayloadId::new([0; 8]);
     let auth = Authorization::new(
         payload_id,
         DUMMY_TIMESTAMP,
@@ -71,7 +71,7 @@ async fn expired_authorization_is_rejected() {
     let builder_sk = handle.builder_sk().unwrap();
 
     // Step 1: obtain clearance with auth_1
-    let payload_id = reth::payload::PayloadId::new([1; 8]);
+    let payload_id = alloy_rpc_types_engine::PayloadId::new([1; 8]);
     let auth_1 = Authorization::new(
         payload_id,
         DUMMY_TIMESTAMP,
@@ -103,7 +103,7 @@ async fn flashblock_stream_is_ordered() {
     let builder_sk = handle.builder_sk().unwrap();
 
     // clearance
-    let payload_id = reth::payload::PayloadId::new([2; 8]);
+    let payload_id = alloy_rpc_types_engine::PayloadId::new([2; 8]);
     let auth = Authorization::new(
         payload_id,
         DUMMY_TIMESTAMP,
@@ -134,7 +134,7 @@ async fn stop_and_restart_updates_state() {
     let builder_sk = handle.builder_sk().unwrap();
 
     // 1) start publishing
-    let payload_id_0 = reth::payload::PayloadId::new([3; 8]);
+    let payload_id_0 = alloy_rpc_types_engine::PayloadId::new([3; 8]);
     let auth_0 = Authorization::new(
         payload_id_0,
         DUMMY_TIMESTAMP,
@@ -155,7 +155,7 @@ async fn stop_and_restart_updates_state() {
     ));
 
     // 3) start again with a new payload
-    let payload_id_1 = reth::payload::PayloadId::new([4; 8]);
+    let payload_id_1 = alloy_rpc_types_engine::PayloadId::new([4; 8]);
     let auth_1 = Authorization::new(
         payload_id_1,
         DUMMY_TIMESTAMP + 5,
@@ -380,7 +380,7 @@ async fn await_clearance_unblocks_on_publish() {
     assert!(!waiter.is_finished(), "future must still be pending");
 
     // now grant clearance
-    let payload_id = reth::payload::PayloadId::new([5; 8]);
+    let payload_id = alloy_rpc_types_engine::PayloadId::new([5; 8]);
     let auth = Authorization::new(
         payload_id,
         DUMMY_TIMESTAMP,

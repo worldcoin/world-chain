@@ -1,6 +1,5 @@
 use alloy_consensus::{TxReceipt, transaction::SignerRecoverable};
 use op_alloy_rpc_types::OpTransactionReceipt;
-use reth::rpc::{compat::RpcReceipt, server_types::eth::block::BlockAndReceipts};
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpPrimitives;
@@ -8,11 +7,11 @@ use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 use reth_primitives::TransactionMeta;
 use reth_provider::{ProviderReceipt, ProviderTx};
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
+    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTypes,
     helpers::{LoadPendingBlock, LoadReceipt},
     transaction::ConvertReceiptInput,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, block::BlockAndReceipts};
 use tracing::trace;
 
 use crate::eth::FlashblocksEthApi;

@@ -33,7 +33,6 @@ reth-optimism-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-eip7928.workspace = true
 alloy-network.workspace = true
 alloy-signer-local.workspace = true
 op-alloy-consensus.workspace = true
@@ -71,16 +70,12 @@ serde.workspace = true
 
 [dev-dependencies]
 world-chain-test-utils.workspace = true
+world-chain-builder.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
-lazy_static.workspace = true
 reth-tracing.workspace = true
-tracing-subscriber.workspace = true
-alloy-genesis.workspace = true
-alloy-sol-types.workspace = true
-alloy-trie.workspace = true
 bon.workspace = true
 criterion.workspace = true
 

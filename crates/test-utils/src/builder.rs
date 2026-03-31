@@ -19,7 +19,6 @@ use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
-use reth::revm::{State, database::StateProviderDatabase};
 use reth_chainspec::ChainInfo;
 use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
@@ -35,6 +34,7 @@ use reth_provider::{
     HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
+use reth_revm::{State, database::StateProviderDatabase};
 use reth_trie_common::HashedPostState;
 use revm::{
     DatabaseRef,

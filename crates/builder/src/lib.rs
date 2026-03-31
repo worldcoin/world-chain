@@ -145,6 +145,9 @@ use reth_evm::{
 use reth_provider::StateProvider;
 use revm_database::BundleState;
 
+/// Local `StateDB` trait abstracting over `revm::database::State<DB>`.
+pub mod state_db;
+
 mod execution_context;
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
