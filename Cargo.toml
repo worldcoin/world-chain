@@ -26,6 +26,10 @@ members = [
 
 default-members = ["bin/world-chain"]
 
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
 [profile.maxperf]
 codegen-units = 1
 inherits = "release"

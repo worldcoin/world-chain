@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 use revm::state::Bytecode;
-use std::collections::{HashMap, HashSet};
+use alloy_primitives::map::{HashMap, HashSet};
 
 pub type BlockAccessIndex = u16;
 

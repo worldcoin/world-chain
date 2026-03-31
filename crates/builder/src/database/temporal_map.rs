@@ -1,9 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashMap, btree_map::Entry},
+    collections::{BTreeMap, btree_map::Entry},
     fmt::{self},
     hash::Hash,
     ops::Bound::{Included, Unbounded},
 };
+
+use alloy_primitives::map::HashMap;
 
 use crate::access_list::BlockAccessIndex;
 
@@ -22,7 +24,7 @@ where
 {
     pub fn new() -> Self {
         Self {
-            inner: HashMap::new(),
+            inner: HashMap::default(),
         }
     }
 

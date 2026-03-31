@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, map::HashSet};
 use reth_payload_util::PayloadTransactions;
 use reth_transaction_pool::PoolTransaction;
 
@@ -34,12 +32,13 @@ where
     pub fn new(inner: I) -> Self {
         Self {
             inner,
-            prev: HashSet::new(),
+            prev: HashSet::default(),
             observed: Vec::new(),
         }
     }
 
     pub fn with_prev(mut self, prev: Vec<TxHash>) -> Self {
+        self.prev.reserve(prev.len());
         self.prev.extend(prev);
         self
     }

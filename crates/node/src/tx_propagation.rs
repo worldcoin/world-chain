@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use alloy_primitives::map::HashSet;
 
 use reth_eth_wire_types::primitives::NetworkPrimitives;
 use reth_network::transactions::{PeerMetadata, config::TransactionPropagationPolicy};
