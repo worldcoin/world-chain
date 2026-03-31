@@ -13069,6 +13069,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "ed25519-dalek",
+ "lazy_static",
  "op-alloy-consensus",
  "op-alloy-network",
  "reth-basic-payload-builder",
