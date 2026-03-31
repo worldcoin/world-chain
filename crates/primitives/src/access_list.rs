@@ -148,7 +148,7 @@ impl FlashblockAccessList {
 
             // Apply storage changes
             for slot_changes in &account_changes.storage_changes {
-                let slot: U256 = slot_changes.slot.into();
+                let slot: U256 = slot_changes.slot;
 
                 for change in &slot_changes.changes {
                     let original_value = db
@@ -160,7 +160,7 @@ impl FlashblockAccessList {
                         slot,
                         StorageSlot {
                             previous_or_original_value: original_value, // TODO: Revisit this logic
-                            present_value: change.new_value.into(),
+                            present_value: change.new_value,
                         },
                     );
 

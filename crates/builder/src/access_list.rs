@@ -150,17 +150,17 @@ impl AccountChangesConstruction {
             storage_changes: sorted_storage_changes
                 .into_iter()
                 .map(|(slot, tx_map)| SlotChanges {
-                    slot: slot.into(),
+                    slot,
                     changes: tx_map
                         .into_iter()
                         .map(|(tx_index, value)| StorageChange {
                             block_access_index: tx_index as u64,
-                            new_value: value.into(),
+                            new_value: value,
                         })
                         .collect(),
                 })
                 .collect(),
-            storage_reads: storage_reads_sorted.into_iter().map(Into::into).collect(),
+            storage_reads: storage_reads_sorted.into_iter().collect(),
             balance_changes: balance_changes_sorted
                 .into_iter()
                 .map(|(tx_index, value)| BalanceChange {

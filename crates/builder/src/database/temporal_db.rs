@@ -65,8 +65,8 @@ impl<DB: DatabaseRef + Clone> TemporalDbFactory<DB> {
                         // by the previous transactions, not itself.
                         // The same reasoning applies to below indexes.
                         slot.block_access_index + 1,
-                        storage_change.slot.into(),
-                        slot.new_value.into(),
+                        storage_change.slot,
+                        slot.new_value,
                     );
                 }
             }
@@ -244,11 +244,11 @@ mod tests {
                     changes: vec![
                         StorageChange {
                             block_access_index: 1,
-                            new_value: value1.into(),
+                            new_value: value1,
                         },
                         StorageChange {
                             block_access_index: 3,
-                            new_value: value2.into(),
+                            new_value: value2,
                         },
                     ],
                 }],
@@ -452,7 +452,7 @@ mod tests {
                     slot: slot.into(),
                     changes: vec![StorageChange {
                         block_access_index: 1,
-                        new_value: U256::from(100).into(),
+                        new_value: U256::from(100),
                     }],
                 }],
                 storage_reads: vec![],
