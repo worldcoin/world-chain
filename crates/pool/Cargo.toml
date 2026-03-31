@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 world-chain-pbh.workspace = true
+world-chain-primitives.workspace = true
 
 reth-db.workspace = true
 reth-optimism-node.workspace = true
@@ -22,6 +23,7 @@ reth-optimism-forks.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
 reth-evm.workspace = true
+reth-storage-api.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
@@ -30,6 +32,12 @@ alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
 op-alloy-consensus.workspace = true
+
+# Crypto (for WIA signature verification)
+k256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+sha2.workspace = true
+base64 = "0.22"
 
 # 3rd party
 tokio.workspace = true

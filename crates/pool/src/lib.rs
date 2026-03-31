@@ -17,6 +17,7 @@ pub mod ordering;
 pub mod root;
 pub mod tx;
 pub mod validator;
+pub mod wia;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<
