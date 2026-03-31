@@ -28,7 +28,8 @@ use std::{sync::Arc, time::Instant};
 
 use crate::{
     BlockBuilderExt,
-    metrics::{PayloadBuildAttemptMetrics, PayloadBuildStage},
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
+    payload_builder_metrics::PayloadBuildAttemptMetrics,
     state_db::StateDB,
 };
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
@@ -157,7 +158,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        mut metrics: Option<&mut PayloadBuildAttemptMetrics>,
+        mut metrics: Option<impl FlashblockExecutionMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -166,10 +167,7 @@ where
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
         if let Some(metrics) = metrics.as_mut() {
-            metrics.record_stage_duration(
-                PayloadBuildStage::MergeTransitions,
-                merge_started.elapsed(),
-            );
+            metrics.record_merge_transitions(merge_started.elapsed());
         }
 
         // Flatten reverts into a single transition:
@@ -188,8 +186,7 @@ where
         let state_root_started = Instant::now();
         let state_root_result = state.state_root_with_updates(hashed_state.clone());
         if let Some(metrics) = metrics.as_mut() {
-            metrics
-                .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
+            metrics.record_state_root(state_root_started.elapsed());
         }
         let (state_root, trie_updates) = state_root_result.map_err(BlockExecutionError::other)?;
 
@@ -215,11 +212,8 @@ where
             &state,
             state_root,
         ));
-        if let Some(metrics) = metrics {
-            metrics.record_stage_duration(
-                PayloadBuildStage::BlockAssembly,
-                block_assembly_started.elapsed(),
-            );
+        if let Some(metrics) = metrics.as_mut() {
+            metrics.record_block_assembly(block_assembly_started.elapsed());
         }
         let block = block_result?;
 

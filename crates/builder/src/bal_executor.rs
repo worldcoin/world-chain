@@ -23,7 +23,7 @@ use tracing::trace;
 
 use crate::{
     BlockBuilderExt, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
-    state_db::StateDB,
+    metrics::FlashblockExecutionMetrics, state_db::StateDB,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
@@ -244,7 +244,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        _metrics: Option<&mut crate::metrics::PayloadBuildAttemptMetrics>,
+        _metrics: Option<impl FlashblockExecutionMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (mut db, evm_env) = evm.finish();

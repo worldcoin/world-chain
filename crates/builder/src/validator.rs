@@ -55,7 +55,8 @@ use crate::{
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
     executor::FlashblocksBlockBuilder,
-    metrics::metered_fn,
+    flashblock_validation_metrics::FlashblockValidationMetrics,
+    payload_builder_metrics::metered_fn,
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -226,7 +227,10 @@ impl FlashblocksBlockValidator {
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
 
-        let (outcome, bundle) = builder.finish_with_bundle(finish_state_provider.as_ref(), None)?;
+        let (outcome, bundle) = builder.finish_with_bundle(
+            finish_state_provider.as_ref(),
+            None::<FlashblockValidationMetrics>,
+        )?;
 
         let BlockBuilderOutcome {
             execution_result,
