@@ -630,7 +630,7 @@ impl StateProvider for WorldChainNoopProvider {
 }
 
 impl HashedPostStateProvider for WorldChainNoopProvider {
-    fn hashed_post_state(&self, _bundle_state: &reth::revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

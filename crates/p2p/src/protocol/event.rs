@@ -5,11 +5,12 @@
 //! the current canonical tip, and [`ChainEvent::Canon`] whenever the tip
 //! changes.
 
+use alloy_eips::BlockNumHash;
+use alloy_rpc_types_engine::PayloadId;
 use futures::{
     Stream, StreamExt,
     stream::{self, PollNext},
 };
-use reth::{payload::PayloadId, rpc::types::BlockNumHash};
 use std::{
     collections::VecDeque,
     pin::Pin,

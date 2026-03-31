@@ -18,33 +18,30 @@ use op_alloy_consensus::{OpTxEnvelope, TxDeposit, encode_holocene_extra_data};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
 };
-use reth::{
-    api::TreeConfig,
-    args::PayloadBuilderArgs,
-    builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
-    chainspec::EthChainSpec,
-    network::PeersHandleProvider,
-    tasks::TaskExecutor,
-};
+use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
     testsuite::{BlockInfo, Environment, NodeClient, NodeState},
 };
+use reth_engine_tree::tree::TreeConfig;
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
     FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadAttributes,
     PayloadTypes,
 };
 use reth_node_builder::{
-    NodeComponents, NodeComponentsBuilder,
+    EngineNodeLauncher, Node, NodeBuilder, NodeComponents, NodeComponentsBuilder, NodeConfig,
+    NodeHandle,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
-use reth_node_core::args::RpcServerArgs;
+use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
+use reth_tasks::TaskExecutor;
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,

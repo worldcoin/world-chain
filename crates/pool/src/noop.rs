@@ -3,7 +3,9 @@ use std::{collections::HashSet, sync::Arc};
 use super::tx::WorldChainPooledTransaction;
 use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2};
 use alloy_primitives::{Address, B256, TxHash};
-use reth::transaction_pool::{
+use reth_eth_wire_types::HandleMempoolData;
+use reth_primitives::Recovered;
+use reth_transaction_pool::{
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
     NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
@@ -11,8 +13,6 @@ use reth::transaction_pool::{
     TransactionPool, ValidPoolTransaction, error::PoolError, noop::NoopTransactionPool,
     pool::AddedTransactionState,
 };
-use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::Recovered;
 use revm_primitives::map::FbBuildHasher;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -115,7 +115,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         &self,
         _origin: TransactionOrigin,
         _transaction: Self::Transaction,
-    ) -> PoolResult<reth::transaction_pool::AddedTransactionOutcome> {
+    ) -> PoolResult<AddedTransactionOutcome> {
         Ok(AddedTransactionOutcome {
             hash: B256::ZERO,
             state: AddedTransactionState::Pending,
@@ -126,7 +126,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         &self,
         _origin: TransactionOrigin,
         _transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<reth::transaction_pool::AddedTransactionOutcome>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         vec![]
     }
 
@@ -190,8 +190,7 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<Recovered<<Self::Transaction as reth::transaction_pool::PoolTransaction>::Pooled>>
-    {
+    ) -> Option<Recovered<<Self::Transaction as PoolTransaction>::Pooled>> {
         None
     }
 

@@ -1,7 +1,8 @@
 use crate::config::FlashblocksPayloadBuilderConfig;
 use ::eyre::eyre::bail;
+use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
-use reth::chainspec::{EthChainSpec, NamedChain};
+use reth_chainspec::EthChainSpec;
 use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::OpChainSpec;
@@ -190,7 +191,7 @@ mod tests {
     #[derive(Debug, Parser)]
     struct CommandParserWithPayloadBuilder {
         #[command(flatten)]
-        builder: reth::args::PayloadBuilderArgs,
+        builder: reth_node_core::args::PayloadBuilderArgs,
         #[command(flatten)]
         world: WorldChainArgs,
     }

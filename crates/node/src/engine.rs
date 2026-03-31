@@ -1,16 +1,14 @@
 use alloy_rpc_types::engine::ClientVersionV1;
 use ed25519_dalek::VerifyingKey;
 use op_alloy_rpc_types_engine::OpExecutionData;
-use reth::{
-    payload::PayloadStore,
-    version::{CLIENT_CODE, version_metadata},
-};
 use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
+use reth_node_core::version::{CLIENT_CODE, version_metadata};
 use reth_optimism_node::OP_NAME_CLIENT;
 use reth_optimism_rpc::{OP_ENGINE_CAPABILITIES, OpEngineApi};
+use reth_payload_builder::PayloadStore;
 use reth_primitives::EthereumHardforks;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;

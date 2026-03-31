@@ -4,10 +4,6 @@ use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{Typed2718, eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Bytes, TxHash};
 use alloy_rpc_types::{AccessList, erc4337::TransactionConditional};
-use reth::transaction_pool::{
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
-    error::{InvalidPoolTransactionError, PoolTransactionError},
-};
 use reth_optimism_node::txpool::{
     OpPooledTransaction, OpPooledTx, conditional::MaybeConditionalTransaction,
     estimated_da_size::DataAvailabilitySized, interop::MaybeInteropTransaction,
@@ -15,6 +11,10 @@ use reth_optimism_node::txpool::{
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Recovered, kzg::KzgSettings};
 use reth_primitives_traits::InMemorySize;
+use reth_transaction_pool::{
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
+    error::{InvalidPoolTransactionError, PoolTransactionError},
+};
 use revm_primitives::{Address, B256, TxKind, U256};
 use std::borrow::Cow;
 use thiserror::Error;

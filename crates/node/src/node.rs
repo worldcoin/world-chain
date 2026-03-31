@@ -1,17 +1,15 @@
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use op_alloy_consensus::OpTxEnvelope;
-use reth::builder::{
-    FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder, NodeTypes,
-    components::ComponentsBuilder,
-};
+use reth_node_builder::{Node, NodeAdapter, NodeComponentsBuilder, components::ComponentsBuilder};
 
-use reth::{rpc::eth::EthApiTypes, transaction_pool::blobstore::DiskFileBlobStore};
+use reth_rpc_eth_api::EthApiTypes;
+use reth_transaction_pool::blobstore::DiskFileBlobStore;
 
 use reth_engine_local::LocalPayloadAttributesBuilder;
 
 use reth_evm::ConfigureEvm;
-use reth_node_api::{NodeAddOns, PayloadAttributesBuilder};
+use reth_node_api::{FullNodeTypes, NodeAddOns, NodeTypes, PayloadAttributesBuilder};
 use reth_node_builder::{
     DebugNode, FullNodeComponents, NodeComponents, PayloadTypes, PrimitivesTy,
     components::{NetworkBuilder, PayloadServiceBuilder},

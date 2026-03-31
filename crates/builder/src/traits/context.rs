@@ -1,6 +1,6 @@
 use crate::{
-    metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
-    utils::effective_gas_limit,
+    metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
+    traits::context_builder::PayloadBuilderCtxBuilder, utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
@@ -8,10 +8,7 @@ use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::EIP1559ParamError;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    ConfigureEvm, Evm, EvmEnv,
-    block::{BlockExecutor, StateDB},
-    execute::BlockBuilder,
-    op_revm::OpSpecId,
+    ConfigureEvm, Evm, EvmEnv, block::BlockExecutor, execute::BlockBuilder, op_revm::OpSpecId,
 };
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;

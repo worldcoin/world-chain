@@ -9,13 +9,11 @@ use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
 };
-use reth::{
-    api::{EngineApiValidator, EngineTypes},
-    rpc::api::IntoEngineApiRpcModule,
-};
 use reth_chainspec::EthereumHardforks;
+use reth_node_api::{EngineApiValidator, EngineTypes};
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
 use world_chain_primitives::p2p::Authorization;
