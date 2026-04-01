@@ -57,6 +57,7 @@ use world_chain_builder::{
     BlockBuilderExt,
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
+    payload_builder_metrics::PayloadBuildAttemptMetrics,
 };
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
@@ -662,7 +663,8 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider.as_ref(), None)?;
+    let (outcome, bundle_state) =
+        builder.finish_with_bundle(state_provider.as_ref(), None::<PayloadBuildAttemptMetrics>)?;
 
     let access_list = access_list_rx.recv()?;
 
