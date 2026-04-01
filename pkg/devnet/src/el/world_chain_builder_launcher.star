@@ -294,7 +294,7 @@ def get_config(
     env_vars["RUST_BACKTRACE"] = "full"
     config_args = {
         "image": participant.el_builder_image,
-        "ports": used_ports,
+        "ports": ports,
         "cmd": cmd,
         "files": files,
         "private_ip_address_placeholder": ethereum_package_constants.PRIVATE_IP_ADDRESS_PLACEHOLDER,
