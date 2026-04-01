@@ -1,7 +1,7 @@
 use crate::metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 use metrics::{Counter, Gauge, Histogram};
 use metrics_derive::Metrics;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 #[derive(Debug, Default)]
 pub struct FlashblockValidationAttemptMetrics {
