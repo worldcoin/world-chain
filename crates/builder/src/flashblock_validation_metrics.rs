@@ -161,9 +161,3 @@ impl FlashblockExecutionMetrics for FlashblockValidationAttemptMetrics {
         self.record_stage_duration(stage, duration);
     }
 }
-
-impl FlashblockExecutionMetrics for Arc<FlashblockValidationMetrics> {
-    fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
-        self.as_ref().record_stage_duration(stage, duration);
-    }
-}
