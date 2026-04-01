@@ -228,16 +228,8 @@ impl PayloadBuildAttemptMetrics {
 }
 
 impl FlashblockExecutionMetrics for PayloadBuildAttemptMetrics {
-    fn record_merge_transitions(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::MergeTransitions, duration);
-    }
-
-    fn record_state_root(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::StateRoot, duration);
-    }
-
-    fn record_block_assembly(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::BlockAssembly, duration);
+    fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
+        self.record_stage_duration(stage, duration);
     }
 }
 

@@ -32,7 +32,7 @@ use tokio::{
 use tracing::{error, trace};
 
 use crate::{
-    flashblock_validation_metrics::{self, FlashblockValidationMetrics},
+    flashblock_validation_metrics::FlashblockValidationMetrics,
     validator::FlashblocksBlockValidator,
 };
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};

@@ -157,29 +157,13 @@ impl FlashblockValidationMetrics {
 }
 
 impl FlashblockExecutionMetrics for FlashblockValidationAttemptMetrics {
-    fn record_merge_transitions(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::MergeTransitions, duration);
-    }
-
-    fn record_state_root(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::StateRoot, duration);
-    }
-
-    fn record_block_assembly(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::BlockAssembly, duration);
+    fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
+        self.record_stage_duration(stage, duration);
     }
 }
 
 impl FlashblockExecutionMetrics for Arc<FlashblockValidationMetrics> {
-    fn record_merge_transitions(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::MergeTransitions, duration);
-    }
-
-    fn record_state_root(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::StateRoot, duration);
-    }
-
-    fn record_block_assembly(&mut self, duration: Duration) {
-        self.record_stage_duration(PayloadBuildStage::BlockAssembly, duration);
+    fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
+        self.as_ref().record_stage_duration(stage, duration);
     }
 }

@@ -9,12 +9,8 @@ use std::time::Duration;
 /// generated when validating it (flashblock validation metrics).
 #[auto_impl(&mut)]
 pub trait FlashblockExecutionMetrics {
-    /// Record `PayloadBuildStage::MergeTransitions` stage.
-    fn record_merge_transitions(&mut self, duration: Duration);
-    /// Record `PayloadBuildStage::StateRoot` stage.
-    fn record_state_root(&mut self, duration: Duration);
-    /// Record `PayloadBuildStage::BlockAssembly` stage.
-    fn record_block_assembly(&mut self, duration: Duration);
+    /// Record a flashblock execution stage.
+    fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
