@@ -339,6 +339,7 @@ where
             && latest_payload.0.id() == flashblock.flashblock.payload_id
             && latest_payload.1 >= flashblock.flashblock.index
         {
+            flashblock_validation_metrics.increment_already_processed_flashblocks();
             pending_block.send_replace(
                 latest_payload
                     .0

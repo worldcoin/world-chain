@@ -1,11 +1,13 @@
 use crate::metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use metrics_derive::Metrics;
 use std::{sync::Arc, time::Duration};
 
 #[derive(Clone, Metrics)]
 #[metrics(scope = "flashblocks.validation")]
 pub struct FlashblockValidationMetrics {
+    /// The number of already processed flashblocks that don't need to be re-executed.
+    pub already_processed_flashblocks: Counter,
     /// Histogram of full flashblock validation duration in seconds.
     pub full_flashblock_validation_duration_seconds: Histogram,
     /// Latest full flashblock validation duration in seconds.
@@ -37,6 +39,10 @@ pub struct FlashblockValidationMetrics {
 }
 
 impl FlashblockValidationMetrics {
+    pub fn increment_already_processed_flashblocks(&self) {
+        self.already_processed_flashblocks.increment(1);
+    }
+
     pub fn record_stage_duration(&self, stage: PayloadBuildStage, duration: Duration) {
         let duration_secs = duration.as_secs_f64();
         match stage {
