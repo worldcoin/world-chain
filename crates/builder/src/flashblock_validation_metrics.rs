@@ -1,7 +1,7 @@
 use crate::metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 use metrics::{Gauge, Histogram};
 use metrics_derive::Metrics;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Clone, Metrics)]
 #[metrics(scope = "flashblocks.validation")]
@@ -84,7 +84,7 @@ impl FlashblockValidationMetrics {
     }
 }
 
-impl FlashblockExecutionMetrics for FlashblockValidationMetrics {
+impl FlashblockExecutionMetrics for Arc<FlashblockValidationMetrics> {
     fn record_merge_transitions(&mut self, duration: Duration) {
         self.record_stage_duration(PayloadBuildStage::MergeTransitions, duration);
     }

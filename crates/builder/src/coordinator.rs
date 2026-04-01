@@ -31,7 +31,10 @@ use tokio::{
 };
 use tracing::{error, trace};
 
-use crate::validator::FlashblocksBlockValidator;
+use crate::{
+    flashblock_validation_metrics::{self, FlashblockValidationMetrics},
+    validator::FlashblocksBlockValidator,
+};
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
@@ -244,6 +247,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
     futures::pin_mut!(stream);
     let mut in_flight = JoinSet::new();
     let mut stream_closed = false;
+    let flashblock_validation_metrics = Arc::new(FlashblockValidationMetrics::default());
 
     loop {
         tokio::select! {
@@ -272,6 +276,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                         let chain_spec = chain_spec.clone();
                         let pending_block = pending_block.clone();
 
+                        let flashblock_validation_metrics_clone = flashblock_validation_metrics.clone();
                         in_flight.spawn_blocking(move || {
                             let _permit = permit;
 
@@ -282,6 +287,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                                 chain_spec,
                                 flashblock,
                                 pending_block,
+                                flashblock_validation_metrics_clone
                             ) {
                                 error!("error processing flashblock: {e:#?}");
                             }
@@ -314,6 +320,7 @@ pub fn process_flashblock<Provider>(
     chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
 ) -> eyre::Result<()>
 where
     Provider: StateProviderFactory
@@ -396,6 +403,7 @@ where
         execution_context: execution_context.clone(),
         evm_env: evm_env.clone(),
         header: sealed_header.clone(),
+        flashblock_validation_metrics,
     };
 
     let next_payload = block_validator.validate_flashblock_with_state(

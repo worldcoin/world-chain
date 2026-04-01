@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
+use std::{sync::Arc, time::Instant};
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 
@@ -56,6 +55,7 @@ use crate::{
     },
     executor::FlashblocksBlockBuilder,
     flashblock_validation_metrics::FlashblockValidationMetrics,
+    metrics::PayloadBuildStage,
     payload_builder_metrics::metered_fn,
 };
 
@@ -68,6 +68,7 @@ pub struct FlashblocksBlockValidator {
     pub evm_config: OpEvmConfig,
     pub execution_context: OpBlockExecutionCtx,
     pub header: Arc<SealedHeader>,
+    pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
 }
 
 impl FlashblocksBlockValidator {
@@ -197,7 +198,12 @@ impl FlashblocksBlockValidator {
 
         // 4. Apply pre-execution changes on first flashblock
         if state.is_none() {
+            let pre_execution_changes_started = Instant::now();
             builder.apply_pre_execution_changes()?;
+            self.flashblock_validation_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
         }
 
         // 5. Decode and execute diff transactions, tracking fees
@@ -208,6 +214,7 @@ impl FlashblocksBlockValidator {
         )?;
 
         let mut fees = U256::ZERO;
+        let txs_execution_started = Instant::now();
         for (_, tx) in &transactions {
             let gag_used = builder
                 .execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
@@ -221,16 +228,23 @@ impl FlashblocksBlockValidator {
                 fees += U256::from(gas_used) * U256::from(miner_fee);
             }
         }
+        self.flashblock_validation_metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            txs_execution_started.elapsed(),
+        );
 
         // 6. Finish and seal the block
         let finish_state_provider = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
 
+        let finalize_started = Instant::now();
         let (outcome, bundle) = builder.finish_with_bundle(
             finish_state_provider.as_ref(),
-            None::<FlashblockValidationMetrics>,
+            Some(self.flashblock_validation_metrics.clone()),
         )?;
+        self.flashblock_validation_metrics
+            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 
         let BlockBuilderOutcome {
             execution_result,
