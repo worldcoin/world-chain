@@ -208,13 +208,12 @@ impl FlashblocksExecutionCoordinator {
         &self,
         event: Events<OpEngineTypes>,
         payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
-    ) -> eyre::Result<()> {
+    ) {
         if let Some(payload_events) = payload_events
             && let Err(e) = payload_events.send(event)
         {
             error!("error broadcasting payload: {e:#?}");
         }
-        Ok(())
     }
 }
 
@@ -427,7 +426,7 @@ where
     );
 
     let payload_events = coordinator.inner.read().payload_events.clone();
-    coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events)?;
+    coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events);
 
     Ok(())
 }
