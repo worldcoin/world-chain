@@ -353,7 +353,13 @@ where
             return Ok(());
         }
 
-        let is_new = inner.flashblocks.is_new_payload(&flashblock)?;
+        let is_new = match inner.flashblocks.is_new_payload(&flashblock) {
+            Ok(is_new) => is_new,
+            Err(err) => {
+                flashblock_validation_metrics.increment_validation_errors();
+                return Err(err);
+            }
+        };
         let base = if is_new {
             flashblock.base().unwrap().clone()
         } else {
@@ -378,10 +384,21 @@ where
 
     // This should never fail — the canon-aware event stream guarantees the
     // parent header is available by the time we process a flashblock.
-    let sealed_header = provider
-        .sealed_header_by_hash(base.parent_hash)
-        .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
-        .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
+    let sealed_header = match provider.sealed_header_by_hash(base.parent_hash) {
+        Ok(Some(header)) => header,
+        Ok(None) => {
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(eyre!(
+                "sealed header not found for hash {}",
+                base.parent_hash
+            ));
+        }
+        Err(e) => {
+            error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash);
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(e.into());
+        }
+    };
 
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
@@ -422,7 +439,10 @@ where
     {
         let mut inner = coordinator.inner.write();
         inner.latest_payload = Some((next_payload.clone(), index));
-        inner.flashblocks.push(flashblock)?;
+        if let Err(err) = inner.flashblocks.push(flashblock) {
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(err.into());
+        }
     }
 
     let into_executed_block_started = Instant::now();
