@@ -441,7 +441,7 @@ where
         inner.latest_payload = Some((next_payload.clone(), index));
         if let Err(err) = inner.flashblocks.push(flashblock) {
             flashblock_validation_metrics.increment_validation_errors();
-            return Err(err.into());
+            return Err(err);
         }
     }
 
