@@ -70,6 +70,10 @@ pub struct FlashblockValidationMetrics {
     pub already_processed_flashblocks: Counter,
     /// Total number of flashblock validation errors before completion.
     pub validation_errors_total: Counter,
+    /// Histogram of full `process_flashblock` fn duration in seconds.
+    pub full_process_flashblock_duration_seconds: Histogram,
+    /// Latest full `process_flashblock` fn duration in seconds.
+    pub full_process_flashblock_duration_seconds_latest: Gauge,
     /// Histogram of full flashblock validation duration in seconds.
     pub full_flashblock_validation_duration_seconds: Histogram,
     /// Latest full flashblock validation duration in seconds.
@@ -107,6 +111,14 @@ impl FlashblockValidationMetrics {
 
     pub fn increment_validation_errors(&self) {
         self.validation_errors_total.increment(1);
+    }
+
+    pub fn record_full_process_flashblock(&self, duration: Duration) {
+        let duration_secs = duration.as_secs_f64();
+        self.full_process_flashblock_duration_seconds
+            .record(duration_secs);
+        self.full_process_flashblock_duration_seconds_latest
+            .set(duration_secs);
     }
 
     pub fn record_stage_duration(&self, stage: PayloadBuildStage, duration: Duration) {

@@ -21,7 +21,10 @@ use reth_provider::{
     BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
     StateProviderFactory,
 };
-use std::sync::{Arc, LazyLock};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Instant,
+};
 use tokio::{
     sync::{
         Semaphore,
@@ -329,6 +332,7 @@ where
         + Clone
         + 'static,
 {
+    let process_flashblock_started = Instant::now();
     let flashblock = Flashblock { flashblock };
 
     // --- Short read: check if already processed, extract base info ---
@@ -404,7 +408,7 @@ where
         execution_context: execution_context.clone(),
         evm_env: evm_env.clone(),
         header: sealed_header.clone(),
-        flashblock_validation_metrics,
+        flashblock_validation_metrics: flashblock_validation_metrics.clone(),
     };
 
     let next_payload = block_validator.validate_flashblock_with_state(
@@ -438,5 +442,7 @@ where
     let payload_events = coordinator.inner.read().payload_events.clone();
     coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events)?;
 
+    flashblock_validation_metrics
+        .record_full_process_flashblock(process_flashblock_started.elapsed());
     Ok(())
 }
