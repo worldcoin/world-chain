@@ -67,7 +67,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 6,
         "x": 0,
         "y": 1
       },
@@ -124,8 +124,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 6,
+        "x": 6,
         "y": 1
       },
       "id": 2,
@@ -181,8 +181,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 6,
+        "x": 12,
         "y": 1
       },
       "id": 3,
@@ -238,8 +238,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 12,
+        "w": 6,
+        "x": 18,
         "y": 1
       },
       "id": 4,
@@ -295,9 +295,9 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 1
+        "w": 6,
+        "x": 0,
+        "y": 5
       },
       "id": 5,
       "options": {
@@ -352,9 +352,9 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 1
+        "w": 6,
+        "x": 6,
+        "y": 5
       },
       "id": 6,
       "options": {
@@ -409,8 +409,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 12,
-        "x": 0,
+        "w": 6,
+        "x": 12,
         "y": 5
       },
       "id": 7,
@@ -440,7 +440,7 @@
           "refId": "A"
         }
       ],
-      "title": "Full Flashblock Processing Duration",
+      "title": "Latest Full Flashblock Processing Duration",
       "type": "stat"
     },
     {
@@ -466,8 +466,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 12,
-        "x": 12,
+        "w": 6,
+        "x": 18,
         "y": 5
       },
       "id": 12,
@@ -497,7 +497,7 @@
           "refId": "A"
         }
       ],
-      "title": "Into Executed Block Duration",
+      "title": "Latest Into Executed Block Duration",
       "type": "stat"
     },
     {
@@ -630,6 +630,20 @@
           "legendFormat": "block assembly",
           "range": true,
           "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_validation_full_process_flashblock_duration_seconds_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_validation_full_process_flashblock_duration_seconds_count{instance=~\"$node\"}[$__rate_interval])), 1)",
+          "legendFormat": "full processing",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_validation_into_executed_block_duration_seconds_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_validation_into_executed_block_duration_seconds_count{instance=~\"$node\"}[$__rate_interval])), 1)",
+          "legendFormat": "into executed block",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Stage Average Duration",
@@ -752,6 +766,20 @@
           "legendFormat": "block assembly p95",
           "range": true,
           "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_full_process_flashblock_duration_seconds{instance=~\"$node\",quantile=\"0.95\"})",
+          "legendFormat": "full processing p95",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_into_executed_block_duration_seconds{instance=~\"$node\",quantile=\"0.95\"})",
+          "legendFormat": "into executed block p95",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Stage p95 Duration",
@@ -874,6 +902,20 @@
           "legendFormat": "block assembly p99",
           "range": true,
           "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_full_process_flashblock_duration_seconds{instance=~\"$node\",quantile=\"0.99\"})",
+          "legendFormat": "full processing p99",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_into_executed_block_duration_seconds{instance=~\"$node\",quantile=\"0.99\"})",
+          "legendFormat": "into executed block p99",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Stage p99 Duration",
@@ -996,6 +1038,20 @@
           "legendFormat": "block assembly",
           "range": true,
           "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_full_process_flashblock_duration_seconds_latest{instance=~\"$node\"})",
+          "legendFormat": "full processing",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_validation_into_executed_block_duration_seconds_latest{instance=~\"$node\"})",
+          "legendFormat": "into executed block",
+          "range": true,
+          "refId": "I"
         }
       ],
       "title": "Latest Stage Durations",
