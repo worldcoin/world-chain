@@ -102,6 +102,10 @@ pub struct FlashblockValidationMetrics {
     pub block_assembly_duration_seconds: Histogram,
     /// Latest block assembly duration in seconds.
     pub block_assembly_duration_seconds_latest: Gauge,
+    /// Histogram of the `BuiltPayloadExecutedBlock::into_executed_block()` fn duration.
+    pub into_executed_block_duration_seconds: Histogram,
+    /// Latest `BuiltPayloadExecutedBlock::into_executed_block()` fn duration.
+    pub into_executed_block_duration_seconds_latest: Gauge,
 }
 
 impl FlashblockValidationMetrics {
@@ -118,6 +122,14 @@ impl FlashblockValidationMetrics {
         self.full_process_flashblock_duration_seconds
             .record(duration_secs);
         self.full_process_flashblock_duration_seconds_latest
+            .set(duration_secs);
+    }
+
+    pub fn record_into_executed_block(&self, duration: Duration) {
+        let duration_secs = duration.as_secs_f64();
+        self.into_executed_block_duration_seconds
+            .record(duration_secs);
+        self.into_executed_block_duration_seconds_latest
             .set(duration_secs);
     }
 

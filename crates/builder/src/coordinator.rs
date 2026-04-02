@@ -425,11 +425,13 @@ where
         inner.flashblocks.push(flashblock)?;
     }
 
+    let into_executed_block_started = Instant::now();
     pending_block.send_replace(
         next_payload
             .executed_block()
             .map(|p| p.into_executed_payload()),
     );
+    flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 
     trace!(
         target: "flashblocks::state_executor",
