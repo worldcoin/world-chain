@@ -2708,6 +2708,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid",
+ "pem-rfc7468",
  "zeroize",
 ]
 
@@ -3027,6 +3028,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "pem-rfc7468",
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
@@ -5668,6 +5670,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
+ "serdect",
  "sha2",
 ]
 
@@ -5758,6 +5761,15 @@ checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
  "base64 0.22.1",
  "serde_core",
+]
+
+[[package]]
+name = "pem-rfc7468"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+dependencies = [
+ "base64ct",
 ]
 
 [[package]]
@@ -6002,6 +6014,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
  "elliptic-curve",
+ "serdect",
 ]
 
 [[package]]
@@ -13063,14 +13076,30 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-serde",
+ "alloy-signer",
  "alloy-signer-local",
+ "alloy-sol-types",
+ "arbitrary",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "chrono",
  "color-eyre",
+ "ecdsa",
  "ed25519-dalek",
+ "elliptic-curve",
+ "once_cell",
  "op-alloy-consensus",
  "op-alloy-network",
+ "p256",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.2",
  "reth-basic-payload-builder",
  "reth-optimism-chainspec",
  "reth-optimism-node",
@@ -13081,6 +13110,7 @@ dependencies = [
  "reth-revm",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 

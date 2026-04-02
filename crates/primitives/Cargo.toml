@@ -5,12 +5,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-eyre.workspace = true
-
-alloy-primitives = { workspace = true }
 
 reth-revm.workspace = true
 reth-payload-primitives.workspace = true
@@ -20,6 +14,10 @@ reth-optimism-node.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-chainspec.workspace = true
+
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+alloy-signer.workspace = true
 alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 alloy-consensus.workspace = true
@@ -34,7 +32,39 @@ blake3.workspace = true
 ed25519-dalek.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+sha2.workspace = true
+once_cell.workspace = true
+
+ark-bn254.workspace = true
+ark-ec.workspace = true
+ark-ff.workspace = true
+ark-serialize.workspace = true
+ark-std.workspace = true
+
+thiserror.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+base64.workspace = true
+ecdsa = { workspace = true }
+elliptic-curve = { workspace = true }
+p256 = { workspace = true }
+
+eyre.workspace = true
+
+proptest-arbitrary-interop = { workspace = true, optional = true }
+proptest = { workspace = true, optional = true }
+arbitrary = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-signer-local.workspace = true
+arbitrary = { workspace = true }
 op-alloy-network.workspace = true
+proptest.workspace = true
+rand.workspace = true
+
+[features]
+default = ["serde"]
+
+serde = ["dep:serde", "dep:serde_json", "elliptic-curve/serde", "p256/serde"]
+
+arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-arbitrary-interop"]

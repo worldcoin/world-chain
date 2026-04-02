@@ -244,6 +244,15 @@ arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.2"
 ed25519-dalek = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
+base64 = "0.22"
+ecdsa = "0.16"
+elliptic-curve = "0.13"
+p256 = "0.13"
+ark-bn254 = "0.5"
+ark-ec = { version = "0.5", features = ["default"] }
+ark-ff = "0.5"
+ark-serialize = "0.5"
+ark-std = "0.5"
 url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
@@ -256,6 +265,7 @@ testcontainers-modules = { version = "0.14", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 lazy_static = "1.4"
 proptest = "1.9.0"
+proptest-arbitrary-interop = "0.1.0"
 
 [patch.crates-io]
 op-alloy = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v1.11.3" }
