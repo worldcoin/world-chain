@@ -1,11 +1,16 @@
 //! Property tests for chaos contract interactions and BAL validation.
 
+use std::sync::Arc;
+
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use revm::database::BundleState;
-use world_chain_builder::{bal_executor::CommittedState, validator::FlashblocksBlockValidator};
+use world_chain_builder::{
+    bal_executor::CommittedState, flashblock_validation_metrics::FlashblockValidationMetrics,
+    validator::FlashblocksBlockValidator,
+};
 use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 
 use super::fixtures::{
@@ -25,6 +30,7 @@ pub fn validate(
         execution_context: BLOCK_EXECUTION_CTX.clone(),
         evm_env: EVM_ENV.clone(),
         header: std::sync::Arc::new(SEALED_HEADER.clone()),
+        flashblock_validation_metrics: Arc::new(FlashblockValidationMetrics::default()),
     };
 
     let payload_id = PayloadId::default();

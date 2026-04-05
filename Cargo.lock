@@ -12818,6 +12818,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
+ "auto_impl",
  "bon",
  "color-eyre",
  "criterion",

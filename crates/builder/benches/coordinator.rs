@@ -11,8 +11,9 @@ use world_chain_test_utils::builder::{
     build_flashblock_sequence_fixture_world_id_like_bn254,
 };
 
-use world_chain_builder::coordinator::{
-    FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor,
+use world_chain_builder::{
+    coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
+    flashblock_validation_metrics::FlashblockValidationMetrics,
 };
 
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
@@ -76,6 +77,7 @@ fn bench_process_flashblock_case<F>(
                     CHAIN_SPEC.clone(),
                     flashblock.clone(),
                     pending_tx,
+                    Arc::new(FlashblockValidationMetrics::default()),
                 )
                 .expect("process_flashblock failed");
             });

@@ -1,5 +1,5 @@
 use crate::{
-    metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
     state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
@@ -235,7 +235,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
+        attempt_metrics: &mut crate::payload_builder_metrics::PayloadBuildAttemptMetrics,
         mut effective_gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>

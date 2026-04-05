@@ -28,7 +28,7 @@ use std::{sync::Arc, time::Instant};
 
 use crate::{
     BlockBuilderExt,
-    metrics::{PayloadBuildAttemptMetrics, PayloadBuildStage},
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
     state_db::StateDB,
 };
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
@@ -157,7 +157,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        mut metrics: Option<&mut PayloadBuildAttemptMetrics>,
+        mut metrics: Option<impl FlashblockExecutionMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -215,7 +215,7 @@ where
             &state,
             state_root,
         ));
-        if let Some(metrics) = metrics {
+        if let Some(metrics) = metrics.as_mut() {
             metrics.record_stage_duration(
                 PayloadBuildStage::BlockAssembly,
                 block_assembly_started.elapsed(),

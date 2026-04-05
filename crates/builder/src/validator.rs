@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
+use std::{sync::Arc, time::Instant};
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 
@@ -55,7 +54,11 @@ use crate::{
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
     executor::FlashblocksBlockBuilder,
-    metrics::metered_fn,
+    flashblock_validation_metrics::{
+        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
+    },
+    metrics::PayloadBuildStage,
+    payload_builder_metrics::metered_fn,
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -67,6 +70,7 @@ pub struct FlashblocksBlockValidator {
     pub evm_config: OpEvmConfig,
     pub execution_context: OpBlockExecutionCtx,
     pub header: Arc<SealedHeader>,
+    pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
 }
 
 impl FlashblocksBlockValidator {
@@ -80,57 +84,83 @@ impl FlashblocksBlockValidator {
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let has_bal = diff.access_list_data.is_some();
         let diff_clone = diff.clone();
+        let validation_started = Instant::now();
+        let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
 
-        let next_payload = metered_fn(
-            tracing::trace_span!(
-                target: "flashblocks::coordinator",
-                "validate",
-                id = %payload_id,
-                path = if has_bal { "bal" } else { "legacy" },
-                tx_count = diff.transactions.len(),
-                duration_ms = tracing::field::Empty,
-            ),
-            metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
-            |_span| {
-                if has_bal {
-                    let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
-                    self.validate_flashblock_parallel(
-                        client,
-                        diff,
-                        parent,
-                        payload_id,
-                        committed_state,
+        let result = (|| -> Result<OpBuiltPayload, BalExecutorError> {
+            let next_payload = metered_fn(
+                tracing::trace_span!(
+                    target: "flashblocks::coordinator",
+                    "validate",
+                    id = %payload_id,
+                    path = if has_bal { "bal" } else { "legacy" },
+                    tx_count = diff.transactions.len(),
+                    duration_ms = tracing::field::Empty,
+                ),
+                metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
+                |_span| {
+                    if has_bal {
+                        let committed_state =
+                            CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
+                        self.validate_flashblock_parallel(
+                            client,
+                            diff,
+                            parent,
+                            payload_id,
+                            committed_state,
+                        )
+                    } else {
+                        self.validate_flashblock(
+                            client,
+                            diff,
+                            parent,
+                            payload_id,
+                            state,
+                            &mut attempt_metrics,
+                        )
+                    }
+                },
+            )?;
+
+            let executed = next_payload
+                .executed_block()
+                .ok_or(BalExecutorError::MissingExecutedBlock)
+                .inspect_err(|e| {
+                    error!(
+                        target: "flashblocks::coordinator",
+                        ?payload_id,
+                        error = ?e,
+                        "Missing executed block for payload"
                     )
-                } else {
-                    self.validate_flashblock(client, diff, parent, payload_id, state)
-                }
-            },
-        )?;
+                })?;
 
-        let executed = next_payload
-            .executed_block()
-            .ok_or(BalExecutorError::MissingExecutedBlock)
-            .inspect_err(|e| {
-                error!(
-                    target: "flashblocks::coordinator",
-                    ?payload_id,
-                    error = ?e,
-                    "Missing executed block for payload"
-                )
-            })?;
+            self.validate_payload(&executed.into_executed_payload(), diff_clone)
+                .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
+                .inspect_err(|e| {
+                    error!(
+                        target: "flashblocks::coordinator",
+                        ?payload_id,
+                        error = ?e,
+                        "Payload validation failed"
+                    )
+                })?;
 
-        self.validate_payload(&executed.into_executed_payload(), diff_clone)
-            .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
-            .inspect_err(|e| {
-                error!(
-                    target: "flashblocks::coordinator",
-                    ?payload_id,
-                    error = ?e,
-                    "Payload validation failed"
-                )
-            })?;
+            Ok(next_payload)
+        })();
 
-        Ok(next_payload)
+        match result {
+            Ok(next_payload) => {
+                attempt_metrics
+                    .record_stage_duration(PayloadBuildStage::Total, validation_started.elapsed());
+                attempt_metrics.publish(self.flashblock_validation_metrics.as_ref());
+                Ok(next_payload)
+            }
+            Err(err) => {
+                self.flashblock_validation_metrics
+                    .increment_validation_errors();
+                Err(err)
+            }
+        }
     }
 
     pub fn validate_payload(
@@ -157,6 +187,7 @@ impl FlashblocksBlockValidator {
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
         state: Option<&OpBuiltPayload<OpPrimitives>>,
+        attempt_metrics: &mut FlashblockValidationAttemptMetrics,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
         let bundle_state = committed_state.bundle.clone();
@@ -196,7 +227,12 @@ impl FlashblocksBlockValidator {
 
         // 4. Apply pre-execution changes on first flashblock
         if state.is_none() {
+            let pre_execution_changes_started = Instant::now();
             builder.apply_pre_execution_changes()?;
+            attempt_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
         }
 
         // 5. Decode and execute diff transactions, tracking fees
@@ -207,6 +243,7 @@ impl FlashblocksBlockValidator {
         )?;
 
         let mut fees = U256::ZERO;
+        let txs_execution_started = Instant::now();
         for (_, tx) in &transactions {
             let gag_used = builder
                 .execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
@@ -220,13 +257,21 @@ impl FlashblocksBlockValidator {
                 fees += U256::from(gas_used) * U256::from(miner_fee);
             }
         }
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            txs_execution_started.elapsed(),
+        );
 
         // 6. Finish and seal the block
         let finish_state_provider = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
 
-        let (outcome, bundle) = builder.finish_with_bundle(finish_state_provider.as_ref(), None)?;
+        let finalize_started = Instant::now();
+        let (outcome, bundle) = builder
+            .finish_with_bundle(finish_state_provider.as_ref(), Some(&mut *attempt_metrics))?;
+        attempt_metrics
+            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 
         let BlockBuilderOutcome {
             execution_result,
