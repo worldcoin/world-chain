@@ -5,6 +5,7 @@
 //! the current canonical tip, and [`ChainEvent::Canon`] whenever the tip
 //! changes.
 
+use crate::protocol::metrics::FlashblocksP2PMetrics;
 use alloy_eips::BlockNumHash;
 use alloy_rpc_types_engine::PayloadId;
 use futures::{
@@ -57,6 +58,7 @@ pub type WorldChainEventsStream<T> = Pin<Box<dyn Stream<Item = WorldChainEvent<T
 pub fn world_chain_events_stream<T, F>(
     flashblocks: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,
     canon: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,
+    metrics: FlashblocksP2PMetrics,
     mut hook: F,
 ) -> WorldChainEventsStream<T>
 where
@@ -66,7 +68,7 @@ where
     let merged =
         futures::stream::select_with_strategy(canon, flashblocks, |_: &mut ()| PollNext::Left);
 
-    BufferedStream::new(merged)
+    BufferedStream::new(merged, metrics)
         .map(WorldChainEvent::Chain)
         .flat_map(move |event| {
             let extra = hook(&event);
@@ -89,10 +91,10 @@ struct BufferedStream<S> {
 }
 
 impl<S> BufferedStream<S> {
-    fn new(inner: S) -> Self {
+    fn new(inner: S, metrics: FlashblocksP2PMetrics) -> Self {
         Self {
             inner,
-            state: BufferedFlashblocks::default(),
+            state: BufferedFlashblocks::new(metrics),
         }
     }
 }
@@ -154,7 +156,11 @@ pub(crate) struct BlockEpochState {
 impl BlockEpochState {
     /// Create a new epoch from a base flashblock. Returns `None` if the base
     /// is stale (parent behind the canonical tip) or missing its base field.
-    fn try_new(fb: Arc<FlashblocksPayloadV1>, canon_tip: Option<BlockNumHash>) -> Option<Self> {
+    fn try_new(
+        fb: Arc<FlashblocksPayloadV1>,
+        canon_tip: Option<BlockNumHash>,
+        metrics: &FlashblocksP2PMetrics,
+    ) -> Option<Self> {
         let base = fb.base.as_ref()?;
 
         // Stale check: reject if the epoch's parent is behind the canon tip.
@@ -167,7 +173,7 @@ impl BlockEpochState {
                 canon_tip_number = canon_tip.map(|t| t.number),
                 "stale epoch rejected"
             );
-            metrics::counter!("flashblocks.event_stream.epochs_stale").increment(1);
+            metrics.increment_stale_event_stream_epochs();
             return None;
         }
 
@@ -213,8 +219,9 @@ impl BlockEpochState {
 ///
 /// Implements [`Extend<ChainEvent>`] to accept input events and
 /// [`Iterator<Item = ChainEvent>`] to drain output events.
-#[derive(Default)]
 pub struct BufferedFlashblocks {
+    /// Aggregate metrics shared with the event stream reducer.
+    metrics: FlashblocksP2PMetrics,
     /// Current epoch, if any. `None` means no active epoch.
     epoch: Option<BlockEpochState>,
     /// Most recent canonical tip.
@@ -224,6 +231,15 @@ pub struct BufferedFlashblocks {
 }
 
 impl BufferedFlashblocks {
+    fn new(metrics: FlashblocksP2PMetrics) -> Self {
+        Self {
+            metrics,
+            epoch: None,
+            canon_tip: None,
+            output: VecDeque::new(),
+        }
+    }
+
     /// Process a single input event, updating state and buffering output.
     fn step(&mut self, event: ChainEvent) {
         match event {
@@ -244,7 +260,8 @@ impl BufferedFlashblocks {
                 }
             }
             ChainEvent::Pending(ref fb) if fb.base.is_some() => {
-                self.epoch = BlockEpochState::try_new(Arc::clone(fb), self.canon_tip);
+                self.epoch =
+                    BlockEpochState::try_new(Arc::clone(fb), self.canon_tip, &self.metrics);
             }
             ChainEvent::Pending(fb) => {
                 if let Some(epoch) = &mut self.epoch {
@@ -271,6 +288,12 @@ impl BufferedFlashblocks {
             epoch.cursor += 1;
             self.output.push_back(ChainEvent::Pending(fb));
         }
+    }
+}
+
+impl Default for BufferedFlashblocks {
+    fn default() -> Self {
+        Self::new(FlashblocksP2PMetrics::default())
     }
 }
 
@@ -579,7 +602,9 @@ mod tests {
 
     async fn collect_stream(events: Vec<ChainEvent>) -> Vec<ChainEvent> {
         let inner = futures::stream::iter(events);
-        BufferedStream::new(inner).collect().await
+        BufferedStream::new(inner, FlashblocksP2PMetrics::default())
+            .collect()
+            .await
     }
 
     /// Base flashblock before canon tip must not terminate the stream.
