@@ -1,7 +1,9 @@
-use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
+use crate::protocol::{
+    handler::{
+        FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
+    },
+    metrics::FlashblocksPeerMetrics,
 };
-use crate::protocol::metrics::FlashblocksPeerMetrics;
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
 use futures::{Stream, StreamExt};

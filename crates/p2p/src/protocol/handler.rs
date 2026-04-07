@@ -1378,8 +1378,10 @@ impl FlashblocksP2PCtx {
             }
 
             self.metrics.record_flashblock_size_bytes(len);
-            self.metrics.record_flashblock_gas_used(payload.diff.gas_used);
-            self.metrics.record_flashblock_tx_count(payload.diff.transactions.len());
+            self.metrics
+                .record_flashblock_gas_used(payload.diff.gas_used);
+            self.metrics
+                .record_flashblock_tx_count(payload.diff.transactions.len());
 
             state.send_flashblock_to_send_set(payload.payload_id, payload.index, &bytes);
 
@@ -1401,7 +1403,8 @@ impl FlashblocksP2PCtx {
                 // Don't measure the interval at the block boundary
                 if state.flashblock_index != 0 {
                     let interval = now - state.flashblock_timestamp;
-                    self.metrics.record_flashblock_interval_seconds(interval as f64 / 1_000_000_000.0);
+                    self.metrics
+                        .record_flashblock_interval_seconds(interval as f64 / 1_000_000_000.0);
                 }
 
                 // Update the index and timestamp
