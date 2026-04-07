@@ -13,6 +13,11 @@ devnet-down:
     kurtosis enclave rm -f world-chain
     kurtosis clean
 
+# Restarts the devnet (down + up)
+devnet-restart:
+    @just devnet-down
+    @just devnet-up
+
 fmt: 
     kurtosis lint --format
 
