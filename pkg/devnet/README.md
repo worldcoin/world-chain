@@ -31,8 +31,14 @@ provision a custom World Chain dashboard into that Grafana automatically, so imp
 JSON manually from:
 
 ```text
-devnet/grafana/dashboards/flashblocks-payload-builder.json
+pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json
+pkg/devnet/grafana/dashboards/flashblocks-validation-pipeline.json
+pkg/devnet/grafana/dashboards/flashblocks-p2p.json
 ```
 
-It is built for the `reth_flashblocks_payload_build_*` metrics exposed by the flashblocks-enabled
-payload builder.
+Available dashboards:
+
+- `flashblocks-payload-builder.json` for `reth_flashblocks_payload_build_*`.
+- `flashblocks-validation-pipeline.json` for `reth_flashblocks_validation_*`.
+- `flashblocks-p2p.json` for `reth_flashblocks_p2p*` P2P metrics, including peer-scoped `peer_id`
+  series.
