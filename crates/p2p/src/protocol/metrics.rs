@@ -4,7 +4,7 @@ use reth_ethereum::network::api::PeerId;
 
 /// Aggregate metrics for the flashblocks P2P protocol.
 #[derive(Clone, Metrics)]
-#[metrics(scope = "flashblocks.aggregated_p2p")]
+#[metrics(scope = "flashblocks.p2p")]
 pub struct FlashblocksP2PMetrics {
     /// Current number of connected flashblocks peers.
     #[metric(rename = "peers")]
@@ -58,7 +58,7 @@ impl FlashblocksP2PMetrics {
 
 /// Peer-scoped flashblocks P2P metrics.
 #[derive(Clone, Metrics)]
-#[metrics(scope = "flashblocks.peer_scoped_p2p")]
+#[metrics(scope = "flashblocks.p2p")]
 pub struct FlashblocksPeerMetrics {
     /// Total inbound bandwidth attributed to this peer in bytes.
     #[metric(rename = "bandwidth_inbound")]
