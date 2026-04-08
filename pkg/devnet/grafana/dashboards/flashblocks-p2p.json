@@ -382,7 +382,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(increase(reth_flashblocks_p2p_tx_count_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_p2p_tx_count_count{instance=~\"$node\"}[$__rate_interval])), 1)",
+          "expr": "sum(increase(reth_flashblocks_p2p_tx_count_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_p2p_tx_count{instance=~\"$node\"}[$__rate_interval])), 1)",
           "legendFormat": "avg tx count",
           "range": true,
           "refId": "A"
@@ -1173,7 +1173,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(increase(reth_flashblocks_p2p_tx_count_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_p2p_tx_count_count{instance=~\"$node\"}[$__rate_interval])), 1)",
+          "expr": "sum(increase(reth_flashblocks_p2p_tx_count_sum{instance=~\"$node\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_p2p_tx_count{instance=~\"$node\"}[$__rate_interval])), 1)",
           "legendFormat": "avg",
           "range": true,
           "refId": "A"
