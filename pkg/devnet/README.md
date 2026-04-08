@@ -18,6 +18,9 @@ just devnet-up
 just e2e-test -n
 
 # Run stress tests with contender (requires contender is installed)
+# By default the script resolves the builder and tx-proxy URLs from the
+# running `world-chain` Kurtosis enclave. Override with `BUILDER=...`,
+# `TX_PROXY=...`, or `KURTOSIS_ENCLAVE=...` when needed.
 just stress-test <stress | stress-precompile>
 
 # Generate a performance report
