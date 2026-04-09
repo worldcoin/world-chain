@@ -454,7 +454,9 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 && let ReceiveStatus::Receiving { score } = &mut peer_state.receive_status
             {
                 score.record(latency);
-                if let Some(value) = score.value() {
+                if peer_state.trusted
+                    && let Some(value) = score.value()
+                {
                     peer_metrics.set_score(value);
                 }
             }
