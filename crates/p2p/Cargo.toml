@@ -19,6 +19,7 @@ alloy-rpc-types-engine.workspace = true
 
 ed25519-dalek.workspace = true
 metrics.workspace = true
+metrics-derive.workspace = true
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
