@@ -2,6 +2,8 @@ use metrics::{Counter, Gauge, Histogram, Label};
 use metrics_derive::Metrics;
 use reth_ethereum::network::api::PeerId;
 
+const UNTRUSTED_PEER_LABEL: &str = "untrusted";
+
 /// Aggregate metrics for the flashblocks P2P protocol.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "flashblocks.p2p")]
@@ -78,8 +80,23 @@ pub struct FlashblocksPeerMetrics {
 }
 
 impl FlashblocksPeerMetrics {
-    pub fn for_peer(peer_id: PeerId) -> Self {
-        Self::new_with_labels(vec![Label::new("peer_id", format!("{:#x}", peer_id))])
+    pub fn for_peer(peer_id: PeerId, trusted: bool) -> Self {
+        Self::new_with_labels(Self::peer_labels(peer_id, trusted))
+    }
+
+    fn peer_labels(peer_id: PeerId, trusted: bool) -> Vec<Label> {
+        vec![Label::new(
+            "peer_id",
+            Self::peer_id_label_value(peer_id, trusted),
+        )]
+    }
+
+    fn peer_id_label_value(peer_id: PeerId, trusted: bool) -> String {
+        if trusted {
+            format!("{:#x}", peer_id)
+        } else {
+            UNTRUSTED_PEER_LABEL.to_string()
+        }
     }
 
     pub fn record_inbound_bandwidth_bytes(&self, size_bytes: usize) {
@@ -102,5 +119,36 @@ impl FlashblocksPeerMetrics {
 
     pub fn increment_missed_flashblocks(&self) {
         self.missed_flashblocks_total.increment(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FlashblocksPeerMetrics, UNTRUSTED_PEER_LABEL};
+    use reth_ethereum::network::api::PeerId;
+
+    #[test]
+    fn trusted_peers_use_concrete_peer_id_labels() {
+        let peer_id = PeerId::random();
+
+        assert_eq!(
+            FlashblocksPeerMetrics::peer_id_label_value(peer_id, true),
+            format!("{:#x}", peer_id)
+        );
+    }
+
+    #[test]
+    fn untrusted_peers_share_a_single_label() {
+        let peer_a = PeerId::random();
+        let peer_b = PeerId::random();
+
+        assert_eq!(
+            FlashblocksPeerMetrics::peer_id_label_value(peer_a, false),
+            UNTRUSTED_PEER_LABEL
+        );
+        assert_eq!(
+            FlashblocksPeerMetrics::peer_id_label_value(peer_b, false),
+            UNTRUSTED_PEER_LABEL
+        );
     }
 }

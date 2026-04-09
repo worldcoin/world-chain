@@ -754,7 +754,9 @@ impl FlashblocksHandle {
             for attempt in 1..=MAX_RETRIES {
                 match network.get_peer_by_id(peer_id).await {
                     Ok(Some(peer_info)) => {
-                        trusted = peer_info.kind.is_trusted();
+                        // we consider trusted both trusted peers inserted in the startup command
+                        // and peers inserted through the `admin_addTrustedPeer` JSON RPC
+                        trusted = peer_info.kind.is_trusted() || peer_info.kind.is_static();
                         break;
                     }
                     Ok(None) if attempt < MAX_RETRIES => {
@@ -798,7 +800,7 @@ impl FlashblocksHandle {
 
             let mut state = handle.state.lock();
             if let Some(conn) = state.connection_state_mut(&peer_id) {
-                conn.trusted = trusted;
+                conn.set_trusted(peer_id, trusted);
                 info!(
                     target: "flashblocks::p2p",
                     %peer_id,
@@ -1609,8 +1611,9 @@ mod tests {
     }
 
     fn test_peer_state(trusted: bool) -> FlashblocksPeerState {
-        let mut state = FlashblocksPeerState::new(PeerId::random());
-        state.trusted = trusted;
+        let peer_id = PeerId::random();
+        let mut state = FlashblocksPeerState::new(peer_id);
+        state.set_trusted(peer_id, trusted);
         state
     }
 
@@ -1619,8 +1622,9 @@ mod tests {
         trusted: bool,
     ) -> (FlashblocksPeerState, mpsc::Receiver<BytesMut>) {
         let (tx, rx) = mpsc::channel(100);
-        let mut state = FlashblocksPeerState::new(PeerId::random());
-        state.trusted = trusted;
+        let peer_id = PeerId::random();
+        let mut state = FlashblocksPeerState::new(peer_id);
+        state.set_trusted(peer_id, trusted);
         state.outbound_tx = Some(tx);
         (state, rx)
     }

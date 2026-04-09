@@ -50,7 +50,8 @@ pub enum ReceiveStatus {
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
 pub struct FlashblocksPeerState {
-    /// Metric handles bound to this peer's stable label set.
+    /// Metric handles bound to this peer's current label set.
+    /// Peers begin as `untrusted` until trust classification resolves.
     pub metrics: FlashblocksPeerMetrics,
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
@@ -72,7 +73,7 @@ pub struct FlashblocksPeerState {
 impl FlashblocksPeerState {
     pub(crate) fn new(peer_id: PeerId) -> Self {
         Self {
-            metrics: FlashblocksPeerMetrics::for_peer(peer_id),
+            metrics: FlashblocksPeerMetrics::for_peer(peer_id, false),
             trusted: false,
             send_enabled: false,
             receive_status: ReceiveStatus::NotReceiving,
@@ -81,6 +82,15 @@ impl FlashblocksPeerState {
             control_msg_count: 0,
             control_msg_window_start: Instant::now(),
         }
+    }
+
+    pub(crate) fn set_trusted(&mut self, peer_id: PeerId, trusted: bool) {
+        if self.trusted == trusted {
+            return;
+        }
+
+        self.trusted = trusted;
+        self.metrics = FlashblocksPeerMetrics::for_peer(peer_id, trusted);
     }
 }
 
