@@ -9,5 +9,10 @@
         - [Validation](./pbh/validation.md)
     <!-- - [PBH Contracts](./pbh/contracts.md)
     - [PBH Bundlers](./pbh/bundlers.md) -->
+- [WorldID Accounts](./wid-accounts/overview.md)
+    - [Gas Accounting](./wid-accounts/gas-accounting.md)
+    - [Native Multi-Auth](./wid-accounts/multi-auth.md)
+    - [WorldID Recovery](./wid-accounts/recovery.md)
+    - [New Transaction Type](./wid-accounts/transaction-type.md)
 - [CLI Reference](./cli/reference.md)
 - [Development Guide](./development.md)
