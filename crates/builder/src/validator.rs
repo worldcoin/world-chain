@@ -658,9 +658,13 @@ where
     }
 
     fn finish(
-        self,
+        mut self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
+        let finalize_started = Instant::now();
+        // finalize the database index
+        self.prepare_database(self.index_range.1)?;
+
         let (evm, result) = self.inner.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -715,6 +719,9 @@ where
             .send(access_list)
             .map_err(BlockExecutionError::other)?;
 
+        self.attempt_metrics
+            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
+
         Ok(BlockBuilderOutcome {
             execution_result: result,
             hashed_state,
@@ -763,7 +770,12 @@ where
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
         if self.index_range.0 == 0 {
             self.prepare_database(0)?;
+            let pre_execution_changes_started = Instant::now();
             self.apply_pre_execution_changes()?;
+            self.attempt_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
         }
 
         let spec = self.inner.executor.spec.clone();
@@ -840,9 +852,6 @@ where
             self.index_range.1,
             "Final transaction index should match the expected range"
         );
-
-        // finalize the database index
-        self.prepare_database(self.index_range.1)?;
 
         Ok((self.finish(state_provider)?, merged_result.fees))
     }
