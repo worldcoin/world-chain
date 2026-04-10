@@ -8,7 +8,10 @@ use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use revm::database::BundleState;
 use world_chain_builder::{
-    bal_executor::CommittedState, flashblock_validation_metrics::FlashblockValidationMetrics,
+    bal_executor::CommittedState,
+    flashblock_validation_metrics::{
+        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
+    },
     validator::FlashblocksBlockValidator,
 };
 use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
@@ -33,6 +36,7 @@ pub fn validate(
         flashblock_validation_metrics: Arc::new(FlashblockValidationMetrics::default()),
     };
 
+    let mut flashblock_validatoin_metrics_attempt = FlashblockValidationAttemptMetrics::default();
     let payload_id = PayloadId::default();
     let payload = validator.validate_flashblock_parallel(
         state_provider,
@@ -40,6 +44,7 @@ pub fn validate(
         &SEALED_HEADER,
         payload_id,
         committed_state,
+        &mut flashblock_validatoin_metrics_attempt,
     )?;
 
     Ok(payload)

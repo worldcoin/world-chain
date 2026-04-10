@@ -184,14 +184,15 @@ where
         db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(db.bundle_state());
         let state_root_started = Instant::now();
-        let state_root_result = state.state_root_with_updates(hashed_state.clone());
+        let hashed_state = state.hashed_post_state(db.bundle_state());
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
         if let Some(metrics) = metrics.as_mut() {
             metrics
                 .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
         }
-        let (state_root, trie_updates) = state_root_result.map_err(BlockExecutionError::other)?;
 
         let (transactions, senders) = self
             .inner
@@ -201,7 +202,7 @@ where
             .unzip();
 
         let block_assembly_started = Instant::now();
-        let block_result = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<R>,
@@ -214,14 +215,13 @@ where
             db.bundle_state(),
             &state,
             state_root,
-        ));
+        ))?;
         if let Some(metrics) = metrics.as_mut() {
             metrics.record_stage_duration(
                 PayloadBuildStage::BlockAssembly,
                 block_assembly_started.elapsed(),
             );
         }
-        let block = block_result?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

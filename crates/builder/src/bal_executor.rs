@@ -22,8 +22,11 @@ use revm::{
 use tracing::trace;
 
 use crate::{
-    BlockBuilderExt, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
-    metrics::FlashblockExecutionMetrics, state_db::StateDB,
+    BlockBuilderExt,
+    access_list::BlockAccessIndex,
+    database::bal_builder_db::BalBuilderDb,
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
+    state_db::StateDB,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
@@ -36,7 +39,7 @@ use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
@@ -244,13 +247,20 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        _metrics: Option<impl FlashblockExecutionMetrics>,
+        mut metrics: Option<impl FlashblockExecutionMetrics>,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
+        let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
+        if let Some(metrics) = metrics.as_mut() {
+            metrics.record_stage_duration(
+                PayloadBuildStage::MergeTransitions,
+                merge_started.elapsed(),
+            );
+        }
 
         // Flatten reverts into a single transition:
         // - per account: keep earliest `previous_status`
@@ -264,10 +274,15 @@ where
         db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
+        let state_root_started = Instant::now();
         let hashed_state = state.hashed_post_state(db.bundle_state());
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
+        if let Some(metrics) = metrics.as_mut() {
+            metrics
+                .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
+        }
 
         let (transactions, senders) = self
             .transactions
@@ -275,6 +290,7 @@ where
             .map(|tx| tx.into_parts())
             .unzip();
 
+        let block_assembly_started = Instant::now();
         let block = self.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
@@ -289,6 +305,12 @@ where
             &state,
             state_root,
         ))?;
+        if let Some(metrics) = metrics.as_mut() {
+            metrics.record_stage_duration(
+                PayloadBuildStage::BlockAssembly,
+                block_assembly_started.elapsed(),
+            );
+        }
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
