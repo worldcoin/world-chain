@@ -555,6 +555,19 @@ where
                     }
                     BuildOutcome::Freeze(payload) => {
                         trace!(target: "flashblocks::payload_builder", "payload frozen, no further building will occur");
+                        // If the payload is frozen, we need to commit it into `committed_payload` so
+                        // that it can later be returned to the CL's `getPayload` request, because
+                        // no further payload building will occur.
+                        if this
+                            .committed_payload
+                            .payload()
+                            .is_none_or(|p| p.block().hash() != payload.block().hash())
+                        {
+                            this.committed_payload = CommittedPayloadState::from((
+                                PayloadState::Frozen(payload.clone()),
+                                access_list.clone(),
+                            ))
+                        }
                         this.best_payload = (PayloadState::Frozen(payload), access_list);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
@@ -627,6 +640,17 @@ where
             self.spawn_build_job();
         }
 
+        // If `no_tx_pool` is true, it means we're in the syncing phase, therefore it's fine to
+        // take the `pending_block` and inserts it into the `maybe_better` field.
+        // During syncing, it could happen that the CL sends the `getPayload` engine API request
+        // before the EL has completed the execution of the block, therefore it's important to take
+        // the `pending_block` so that EL can complete the execution and return the payload to the CL.
+        let maybe_better = if self.config.attributes.no_tx_pool {
+            self.pending_block.take().map(Into::into)
+        } else {
+            None
+        };
+
         let mut empty_payload = None;
 
         if self.committed_payload.is_empty() {
@@ -671,7 +695,7 @@ where
 
         let fut = ResolveBestPayload {
             best_payload: self.committed_payload.clone_payload(),
-            maybe_better: None,
+            maybe_better,
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };
 
