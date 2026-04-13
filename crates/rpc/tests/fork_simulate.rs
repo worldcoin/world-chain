@@ -305,3 +305,53 @@ async fn test_approval_for_all_log_parsing() {
     assert_eq!(changes[0].spender, operator);
     assert!(changes[0].is_approved_for_all);
 }
+
+/// Native ETH transfer is captured by the inspector.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_native_eth_transfer_inspector() {
+    let mut db = make_forked_db();
+    let sender = address!("00000000000000000000000000000000DeaDBeef");
+    let recipient = address!("000000000000000000000000000000000000dEaD");
+    let eth_value = U256::from(50_000_000_000_000_000u128);
+
+    db.insert_account_info(
+        sender,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+
+    let (inspector, handle) = new_simulation_inspector();
+    let mut evm =
+        OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTransaction {
+            base: TxEnv {
+                caller: sender,
+                kind: TxKind::Call(recipient),
+                data: Bytes::new(),
+                value: eth_value,
+                gas_limit: 21_000,
+                gas_price: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(result.result, ExecutionResult::Success { .. }));
+
+    let native = handle.take_native_asset_changes();
+    assert_eq!(native.len(), 1);
+    assert_eq!(native[0].change_type, "NATIVE");
+    assert_eq!(native[0].from, sender);
+    assert_eq!(native[0].to, recipient);
+    assert_eq!(native[0].raw_amount, eth_value.to_string());
+    assert_eq!(native[0].asset.symbol, "ETH");
+    assert_eq!(native[0].asset.decimals, 18);
+}
