@@ -705,7 +705,7 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Best-effort decode of a 4-byte function selector to a human-readable name.
-fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
+pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
     match selector {
         // ERC-20
         [0xa9, 0x05, 0x9c, 0xbb] => Some("transfer"),

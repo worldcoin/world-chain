@@ -22,6 +22,7 @@ use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
     decode_revert_reason, new_simulation_inspector, parse_asset_changes, parse_exposure_changes,
+    selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -434,5 +435,36 @@ async fn test_trace_captures_calls() {
     let trace = handle.take_trace_entries();
     for entry in &trace {
         assert!(entry.selector.starts_with("0x"));
+    }
+}
+
+/// Verify that all forbidden Safe admin selectors are recognized by the selector map.
+/// The backend uses trace[].method to detect these and reject the operation.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_forbidden_safe_selectors_recognized() {
+    // Each entry: (4-byte selector, expected decoded name)
+    let forbidden: &[([u8; 4], &str)] = &[
+        ([0x0d, 0x58, 0x2f, 0x13], "addOwnerWithThreshold"),
+        ([0xf8, 0xdc, 0x5d, 0xd9], "removeOwner"),
+        ([0xe3, 0x18, 0xb5, 0x2b], "swapOwner"),
+        ([0x69, 0x4e, 0x80, 0xc3], "changeThreshold"),
+        ([0x61, 0x0b, 0x59, 0x25], "enableModule"),
+        ([0xe0, 0x09, 0xcf, 0xde], "disableModule"),
+        ([0xe1, 0x9a, 0x9d, 0xd9], "setGuard"),
+        ([0xf0, 0x8a, 0x03, 0x23], "setFallbackHandler"),
+        ([0xe3, 0x19, 0xf3, 0x23], "setModuleGuard"),
+        ([0xb6, 0x31, 0x28, 0x05], "setup"),
+    ];
+
+    for (selector, expected_name) in forbidden {
+        let decoded = selector_to_name(*selector);
+        assert_eq!(
+            decoded,
+            Some(*expected_name),
+            "selector 0x{} should decode to {:?}",
+            hex::encode(selector),
+            expected_name,
+        );
     }
 }
