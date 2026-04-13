@@ -397,3 +397,42 @@ async fn test_revert_with_reason() {
         }
     }
 }
+
+/// Trace captures top-level calls from a simulated execution.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_trace_captures_calls() {
+    let mut db = make_forked_db();
+
+    let (inspector, handle) = new_simulation_inspector();
+    let mut evm =
+        OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTransaction {
+            base: TxEnv {
+                caller: ENTRY_POINT,
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::ZERO,
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(result.result, ExecutionResult::Success { .. }));
+
+    let trace = handle.take_trace_entries();
+    for entry in &trace {
+        assert!(entry.selector.starts_with("0x"));
+    }
+}
