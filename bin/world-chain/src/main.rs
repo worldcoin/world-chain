@@ -7,7 +7,12 @@ use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
-use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
+use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_provider::ChainSpecProvider;
+use world_chain_rpc::{
+    EthApiExtServer, SequencerClient, WorldChainEthApiExt, WorldChainSimulate,
+    WorldChainSimulateApiServer,
+};
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -46,10 +51,17 @@ fn main() {
                     let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
                     let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
-                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
+                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider.clone(), sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
+
+                    // Register worldchain_simulateUserOp endpoint
+                    let chain_spec = ctx.provider().chain_spec();
+                    let evm_config = OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
+                    let simulate_api = WorldChainSimulate::new(provider, evm_config);
+                    ctx.modules.merge_configured(simulate_api.into_rpc())?;
+
                     Ok(())
                 })
                 .launch()
