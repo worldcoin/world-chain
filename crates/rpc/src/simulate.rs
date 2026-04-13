@@ -16,6 +16,7 @@ use revm::interpreter::{CallInputs, CallOutcome};
 use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -298,16 +299,24 @@ pub trait WorldChainSimulateApi {
 // Implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Cross-request cache for resolved token metadata.
+type MetadataCache = Arc<Mutex<HashMap<Address, AssetInfo>>>;
+
 /// Implementation of the `worldchain_simulateUnsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
 pub struct WorldChainSimulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
+    metadata_cache: MetadataCache,
 }
 
 impl<Client> WorldChainSimulate<Client> {
     pub fn new(client: Client, evm_config: OpEvmConfig) -> Self {
-        Self { client, evm_config }
+        Self {
+            client,
+            evm_config,
+            metadata_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -405,12 +414,23 @@ where
 
         // 9. Parse logs into structured asset/exposure changes
         let mut asset_changes = parse_asset_changes(&logs);
-        let exposure_changes = parse_exposure_changes(&logs);
+        let mut exposure_changes = parse_exposure_changes(&logs);
 
         // 10. Extract trace and native transfers from inspector
         let trace = inspector_handle.take_trace_entries();
         let native_changes = inspector_handle.take_native_asset_changes();
         asset_changes.extend(native_changes);
+
+        // 11. Resolve on-chain token metadata (name, symbol, decimals) — cached
+        resolve_all_metadata(
+            &self.client,
+            &self.evm_config,
+            header.header(),
+            block_id,
+            &self.metadata_cache,
+            &mut asset_changes,
+            &mut exposure_changes,
+        );
 
         Ok(SimulateUnsignedUserOpResult {
             status,
@@ -716,6 +736,213 @@ fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
         // Permit2
         [0x87, 0x51, 0x7c, 0x45] => Some("permit"),
         _ => None,
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Token metadata resolution
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Well-known ERC-20 function selectors for metadata.
+const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
+const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
+const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
+
+/// Resolve on-chain metadata (name, symbol, decimals) for a token contract.
+/// Uses the pre-simulation state via fresh EVM calls.
+fn resolve_metadata_with_evm<Client>(
+    client: &Client,
+    evm_config: &OpEvmConfig,
+    header: &alloy_consensus::Header,
+    block_id: alloy_rpc_types::BlockId,
+    token: Address,
+    asset_type: &str,
+) -> AssetInfo
+where
+    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    let name = evm_call_string(client, evm_config, header, block_id, token, &NAME_SELECTOR)
+        .unwrap_or_default();
+    let symbol = evm_call_string(client, evm_config, header, block_id, token, &SYMBOL_SELECTOR)
+        .unwrap_or_default();
+    let decimals =
+        evm_call_u8(client, evm_config, header, block_id, token, &DECIMALS_SELECTOR)
+            .unwrap_or(0);
+
+    AssetInfo {
+        address: Some(token),
+        symbol,
+        name,
+        decimals,
+        asset_type: asset_type.to_string(),
+    }
+}
+
+/// Execute a view call that returns a string (ABI-encoded).
+fn evm_call_string<Client>(
+    client: &Client,
+    evm_config: &OpEvmConfig,
+    header: &alloy_consensus::Header,
+    block_id: alloy_rpc_types::BlockId,
+    to: Address,
+    selector: &[u8; 4],
+) -> Option<String>
+where
+    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    let output = evm_static_call(client, evm_config, header, block_id, to, selector)?;
+    decode_abi_string(&output)
+}
+
+/// Execute a view call that returns a uint8.
+fn evm_call_u8<Client>(
+    client: &Client,
+    evm_config: &OpEvmConfig,
+    header: &alloy_consensus::Header,
+    block_id: alloy_rpc_types::BlockId,
+    to: Address,
+    selector: &[u8; 4],
+) -> Option<u8>
+where
+    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    let output = evm_static_call(client, evm_config, header, block_id, to, selector)?;
+    if output.len() >= 32 {
+        Some(output[31])
+    } else {
+        None
+    }
+}
+
+/// Low-level: execute a simple static call and return raw output bytes.
+fn evm_static_call<Client>(
+    client: &Client,
+    evm_config: &OpEvmConfig,
+    header: &alloy_consensus::Header,
+    block_id: alloy_rpc_types::BlockId,
+    to: Address,
+    selector: &[u8; 4],
+) -> Option<Bytes>
+where
+    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    let evm_env = evm_config.evm_env(header).ok()?;
+    let state_provider = client.state_by_block_id(block_id).ok()?;
+    let db = StateProviderDatabase::new(state_provider.as_ref());
+    let mut state = State::builder()
+        .with_database(db)
+        .with_bundle_prestate(BundleState::default())
+        .with_bundle_update()
+        .build();
+
+    let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
+
+    let tx = OpTransaction {
+        base: TxEnv {
+            caller: Address::ZERO,
+            kind: TxKind::Call(to),
+            data: Bytes::copy_from_slice(selector),
+            value: U256::ZERO,
+            gas_limit: 100_000,
+            gas_price: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let result = RethEvm::transact(&mut evm, tx).ok()?;
+    match result.result {
+        ExecutionResult::Success { output, .. } => match output {
+            Output::Call(data) => Some(data),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Decode an ABI-encoded string from raw bytes.
+fn decode_abi_string(data: &[u8]) -> Option<String> {
+    if data.len() < 64 {
+        return None;
+    }
+    let offset: usize = U256::from_be_slice(&data[..32]).try_into().ok()?;
+    if offset + 32 > data.len() {
+        return None;
+    }
+    let len: usize = U256::from_be_slice(&data[offset..offset + 32]).try_into().ok()?;
+    let str_start = offset + 32;
+    if str_start + len > data.len() {
+        return None;
+    }
+    String::from_utf8(data[str_start..str_start + len].to_vec()).ok()
+}
+
+/// Resolve metadata for all unique token addresses, using a persistent cache.
+fn resolve_all_metadata<Client>(
+    client: &Client,
+    evm_config: &OpEvmConfig,
+    header: &alloy_consensus::Header,
+    block_id: alloy_rpc_types::BlockId,
+    cache: &MetadataCache,
+    asset_changes: &mut [AssetChange],
+    exposure_changes: &mut [ExposureChange],
+) where
+    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    // Collect unique addresses that need resolution (not in cache and not yet resolved).
+    let mut to_resolve: Vec<(Address, String)> = Vec::new();
+
+    {
+        let cache_guard = cache.lock().unwrap();
+        let mut seen_this_call = std::collections::HashSet::new();
+
+        for change in asset_changes.iter() {
+            if let Some(addr) = change.asset.address {
+                if change.asset.symbol.is_empty()
+                    && !cache_guard.contains_key(&addr)
+                    && seen_this_call.insert(addr)
+                {
+                    to_resolve.push((addr, change.asset.asset_type.clone()));
+                }
+            }
+        }
+        for change in exposure_changes.iter() {
+            if let Some(addr) = change.asset.address {
+                if change.asset.symbol.is_empty()
+                    && !cache_guard.contains_key(&addr)
+                    && seen_this_call.insert(addr)
+                {
+                    to_resolve.push((addr, change.asset.asset_type.clone()));
+                }
+            }
+        }
+    }
+
+    // Resolve missing metadata via EVM calls and insert into cache
+    if !to_resolve.is_empty() {
+        let mut cache_guard = cache.lock().unwrap();
+        for (addr, asset_type) in &to_resolve {
+            let info =
+                resolve_metadata_with_evm(client, evm_config, header, block_id, *addr, asset_type);
+            cache_guard.insert(*addr, info);
+        }
+    }
+
+    // Apply cached metadata to all changes
+    let cache_guard = cache.lock().unwrap();
+    for change in asset_changes.iter_mut() {
+        if let Some(addr) = change.asset.address {
+            if let Some(info) = cache_guard.get(&addr) {
+                change.asset = info.clone();
+            }
+        }
+    }
+    for change in exposure_changes.iter_mut() {
+        if let Some(addr) = change.asset.address {
+            if let Some(info) = cache_guard.get(&addr) {
+                change.asset = info.clone();
+            }
+        }
     }
 }
 
