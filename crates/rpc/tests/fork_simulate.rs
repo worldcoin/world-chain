@@ -355,3 +355,45 @@ async fn test_native_eth_transfer_inspector() {
     assert_eq!(native[0].asset.symbol, "ETH");
     assert_eq!(native[0].asset.decimals, 18);
 }
+
+/// Reverting ERC-20 transfer returns a decoded revert reason.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_revert_with_reason() {
+    let mut db = make_forked_db();
+    let mut evm = OpEvmFactory::default().create_evm(&mut db, evm_env());
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTransaction {
+            base: TxEnv {
+                caller: address!("00000000000000000000000000ffffffffffffff"),
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::from(1_000_000_000_000_000_000u128),
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    match &result.result {
+        ExecutionResult::Revert { output, .. } => {
+            let reason = decode_revert_reason(output);
+            assert!(!reason.is_empty());
+        }
+        ExecutionResult::Halt { .. } => {
+            // Also acceptable — call failed
+        }
+        ExecutionResult::Success { .. } => {
+            panic!("expected revert, got success");
+        }
+    }
+}
