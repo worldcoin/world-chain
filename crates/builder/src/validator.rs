@@ -269,8 +269,8 @@ impl FlashblocksBlockValidator {
             .map_err(BalExecutorError::other)?;
 
         let finalize_started = Instant::now();
-        let (outcome, bundle) = builder
-            .finish_with_bundle(finish_state_provider.as_ref(), Some(&mut *attempt_metrics))?;
+        let (outcome, bundle) =
+            builder.finish_with_bundle(finish_state_provider.as_ref(), &mut *attempt_metrics)?;
         attempt_metrics
             .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 

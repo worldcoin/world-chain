@@ -208,6 +208,6 @@ pub trait BlockBuilderExt: BlockBuilder {
     fn finish_with_bundle(
         self,
         state_provider: impl StateProvider,
-        metrics: Option<impl FlashblockExecutionMetrics>,
+        metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }
