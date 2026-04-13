@@ -247,3 +247,31 @@ async fn test_erc1155_transfer_single_log_parsing() {
     assert_eq!(changes[0].raw_amount, "100");
     assert_eq!(changes[0].token_id.as_deref(), Some("7"));
 }
+
+/// ERC-20 Approval log is parsed into the correct ExposureChange.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_erc20_approval_log_parsing() {
+    let owner = address!("00000000000000000000000000000000DeaDBeef");
+    let spender = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+
+    let log = alloy_primitives::Log::new(
+        WLD,
+        vec![
+            alloy_primitives::b256!(
+                "8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+            ),
+            alloy_primitives::B256::left_padding_from(owner.as_slice()),
+            alloy_primitives::B256::left_padding_from(spender.as_slice()),
+        ],
+        U256::MAX.to_be_bytes_vec().into(),
+    )
+    .unwrap();
+
+    let changes = parse_exposure_changes(&[log]);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].owner, owner);
+    assert_eq!(changes[0].spender, spender);
+    assert_eq!(changes[0].raw_amount, U256::MAX.to_string());
+    assert!(!changes[0].is_approved_for_all);
+}
