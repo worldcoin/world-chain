@@ -211,3 +211,39 @@ async fn test_erc721_transfer_log_parsing() {
     assert_eq!(changes[0].raw_amount, "1");
     assert_eq!(changes[0].token_id.as_deref(), Some("42"));
 }
+
+/// ERC-1155 TransferSingle log is parsed correctly.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_erc1155_transfer_single_log_parsing() {
+    let contract = address!("0000000000000000000000000000000000001155");
+    let operator = address!("00000000000000000000000000000000000000AA");
+    let from = address!("00000000000000000000000000000000000000BB");
+    let to = address!("00000000000000000000000000000000000000CC");
+
+    let mut data = Vec::with_capacity(64);
+    data.extend_from_slice(&U256::from(7u64).to_be_bytes::<32>());
+    data.extend_from_slice(&U256::from(100u64).to_be_bytes::<32>());
+
+    let log = alloy_primitives::Log::new(
+        contract,
+        vec![
+            alloy_primitives::b256!(
+                "c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"
+            ),
+            alloy_primitives::B256::left_padding_from(operator.as_slice()),
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+        ],
+        data.into(),
+    )
+    .unwrap();
+
+    let changes = parse_asset_changes(&[log]);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].change_type, "ERC1155");
+    assert_eq!(changes[0].from, from);
+    assert_eq!(changes[0].to, to);
+    assert_eq!(changes[0].raw_amount, "100");
+    assert_eq!(changes[0].token_id.as_deref(), Some("7"));
+}
