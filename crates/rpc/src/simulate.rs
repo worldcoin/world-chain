@@ -9,11 +9,14 @@ use reth_evm::op_revm::OpTransaction;
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
+use revm::Inspector;
 use revm::context::TxEnv;
 use revm::context::result::{ExecutionResult, Output};
+use revm::interpreter::{CallInputs, CallOutcome};
 use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types
@@ -135,6 +138,145 @@ pub struct SimulateUnsignedUserOpResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Simulation inspector — captures call trace and native ETH transfers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Shared state captured by the simulation inspector.
+#[derive(Debug, Default)]
+struct InspectorState {
+    /// Top-level calls (depth == 1: calls FROM the smart account to external contracts).
+    traces: Vec<RawTrace>,
+    /// Native ETH transfers (calls with value > 0 at any depth).
+    native_transfers: Vec<NativeTransfer>,
+    /// Current call depth.
+    call_depth: usize,
+}
+
+#[derive(Debug)]
+struct RawTrace {
+    to: Address,
+    selector: [u8; 4],
+    value: U256,
+}
+
+#[derive(Debug)]
+struct NativeTransfer {
+    from: Address,
+    to: Address,
+    value: U256,
+}
+
+/// Captures top-level calls made by the smart account and native ETH transfers.
+///
+/// Uses `Arc<Mutex>` so the caller can read captured data after the EVM consumes
+/// the inspector.
+#[derive(Debug, Clone, Default)]
+struct SimulationInspector {
+    state: Arc<Mutex<InspectorState>>,
+}
+
+/// Handle returned to the caller for reading captured data after execution.
+#[derive(Debug, Clone)]
+struct InspectorHandle {
+    state: Arc<Mutex<InspectorState>>,
+}
+
+impl InspectorHandle {
+    fn take_trace_entries(&self) -> Vec<TraceEntry> {
+        let state = self.state.lock().unwrap();
+        state
+            .traces
+            .iter()
+            .map(|t| {
+                let sel = t.selector;
+                TraceEntry {
+                    to: t.to,
+                    method: selector_to_name(sel).map(str::to_string),
+                    selector: format!("0x{}", hex::encode(sel)),
+                    value: format!("{:#x}", t.value),
+                }
+            })
+            .collect()
+    }
+
+    fn take_native_asset_changes(&self) -> Vec<AssetChange> {
+        let state = self.state.lock().unwrap();
+        state
+            .native_transfers
+            .iter()
+            .map(|t| AssetChange {
+                change_type: "NATIVE".to_string(),
+                from: t.from,
+                to: t.to,
+                raw_amount: t.value.to_string(),
+                token_id: None,
+                asset: AssetInfo {
+                    address: None,
+                    symbol: "ETH".to_string(),
+                    name: "Ether".to_string(),
+                    decimals: 18,
+                    asset_type: "NATIVE".to_string(),
+                },
+            })
+            .collect()
+    }
+}
+
+fn new_simulation_inspector() -> (SimulationInspector, InspectorHandle) {
+    let state = Arc::new(Mutex::new(InspectorState::default()));
+    (
+        SimulationInspector {
+            state: state.clone(),
+        },
+        InspectorHandle { state },
+    )
+}
+
+impl<CTX> Inspector<CTX> for SimulationInspector {
+    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        let mut state = self.state.lock().unwrap();
+
+        // Depth 0 = our entry call (entryPoint → sender)
+        // Depth 1 = calls FROM the smart account to external contracts
+        if state.call_depth == 1 {
+            let selector = match &inputs.input {
+                revm::interpreter::CallInput::Bytes(b) if b.len() >= 4 => {
+                    let mut sel = [0u8; 4];
+                    sel.copy_from_slice(&b[..4]);
+                    sel
+                }
+                _ => [0u8; 4],
+            };
+            let value = inputs.value.transfer().unwrap_or(U256::ZERO);
+            state.traces.push(RawTrace {
+                to: inputs.target_address,
+                selector,
+                value,
+            });
+        }
+
+        // Track native ETH transfers at any depth
+        if let Some(value) = inputs.value.transfer() {
+            if value > U256::ZERO {
+                state.native_transfers.push(NativeTransfer {
+                    from: inputs.caller,
+                    to: inputs.target_address,
+                    value,
+                });
+            }
+        }
+
+        state.call_depth += 1;
+        None
+    }
+
+    fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, _outcome: &mut CallOutcome) {
+        let mut state = self.state.lock().unwrap();
+        state.call_depth = state.call_depth.saturating_sub(1);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // RPC trait
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -214,8 +356,10 @@ where
             .with_bundle_update()
             .build();
 
-        // 5. Create the Optimism-aware EVM
-        let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
+        // 5. Create the Optimism-aware EVM with our simulation inspector
+        let (inspector, inspector_handle) = new_simulation_inspector();
+        let mut evm =
+            OpEvmFactory::default().create_evm_with_inspector(&mut state, evm_env, inspector);
 
         // 6. Build the transaction environment
         //    from = entry_point → msg.sender inside the smart account is the EntryPoint
@@ -259,8 +403,14 @@ where
             }
         };
 
-        let asset_changes = parse_asset_changes(&logs);
+        // 9. Parse logs into structured asset/exposure changes
+        let mut asset_changes = parse_asset_changes(&logs);
         let exposure_changes = parse_exposure_changes(&logs);
+
+        // 10. Extract trace and native transfers from inspector
+        let trace = inspector_handle.take_trace_entries();
+        let native_changes = inspector_handle.take_native_asset_changes();
+        asset_changes.extend(native_changes);
 
         Ok(SimulateUnsignedUserOpResult {
             status,
@@ -269,7 +419,7 @@ where
             gas_used: format!("{gas_used:#x}"),
             asset_changes,
             exposure_changes,
-            trace: vec![],
+            trace,
             warnings: vec![],
         })
     }
@@ -551,8 +701,8 @@ fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
         // Multicall / execute
         [0xb6, 0x1d, 0x27, 0xf6] => Some("execute"),
         [0x51, 0x94, 0x54, 0x47] => Some("executeBatch"),
-        [0x47, 0xe1, 0xda, 0x2a] => Some("multiSend"),
-        // Safe admin methods (flagged by backend)
+        [0x8d, 0x80, 0xff, 0x0a] => Some("multiSend"),
+        // Safe admin methods (flagged by backend as forbidden)
         [0x0d, 0x58, 0x2f, 0x13] => Some("addOwnerWithThreshold"),
         [0xf8, 0xdc, 0x5d, 0xd9] => Some("removeOwner"),
         [0xe3, 0x18, 0xb5, 0x2b] => Some("swapOwner"),
@@ -560,8 +710,11 @@ fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
         [0x61, 0x0b, 0x59, 0x25] => Some("enableModule"),
         [0xe0, 0x09, 0xcf, 0xde] => Some("disableModule"),
         [0xe1, 0x9a, 0x9d, 0xd9] => Some("setGuard"),
+        [0xf0, 0x8a, 0x03, 0x23] => Some("setFallbackHandler"),
+        [0xe3, 0x19, 0xf3, 0x23] => Some("setModuleGuard"),
+        [0xb6, 0x31, 0x28, 0x05] => Some("setup"),
         // Permit2
-        [0x2b, 0x67, 0xb5, 0x70] => Some("permit"),
+        [0x87, 0x51, 0x7c, 0x45] => Some("permit"),
         _ => None,
     }
 }
