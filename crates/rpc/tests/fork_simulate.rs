@@ -50,7 +50,22 @@ fn rpc_url() -> String {
 fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
+    cfg.disable_nonce_check = true;
+    cfg.disable_balance_check = true;
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
+}
+
+/// Build a base TxEnv with chain_id pre-filled.
+fn base_tx(caller: Address, to: Address, data: Bytes, gas_limit: u64) -> TxEnv {
+    TxEnv {
+        caller,
+        kind: TxKind::Call(to),
+        data,
+        gas_limit,
+        gas_price: 0,
+        chain_id: Some(CHAIN_ID),
+        ..Default::default()
+    }
 }
 
 /// Create a forked CacheDB backed by an AlloyDB hitting the World Chain RPC.
@@ -58,7 +73,8 @@ fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
 fn make_forked_db() -> CacheDB<WrapDatabaseAsync<AlloyDB<alloy::network::Ethereum, alloy::providers::RootProvider>>> {
     let provider = alloy::providers::RootProvider::new_http(rpc_url().parse().unwrap());
     let alloy_db = AlloyDB::new(provider, revm_database::BlockId::latest());
-    let wrapped = WrapDatabaseAsync::new(alloy_db).expect("needs tokio runtime");
+    let handle = tokio::runtime::Handle::current();
+    let wrapped = WrapDatabaseAsync::with_handle(alloy_db, handle);
     CacheDB::new(wrapped)
 }
 
@@ -67,7 +83,7 @@ fn make_forked_db() -> CacheDB<WrapDatabaseAsync<AlloyDB<alloy::network::Ethereu
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Verify the fork works by calling WLD.name(), WLD.symbol(), WLD.decimals().
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_fork_view_calls() {
     let mut db = make_forked_db();
@@ -84,6 +100,7 @@ async fn test_fork_view_calls() {
                 data: nameCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -110,6 +127,7 @@ async fn test_fork_view_calls() {
                 data: symbolCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -136,6 +154,7 @@ async fn test_fork_view_calls() {
                 data: decimalsCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -154,7 +173,7 @@ async fn test_fork_view_calls() {
 }
 
 /// ERC-20 Transfer log is parsed into the correct AssetChange.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc20_transfer_log_parsing() {
     let from = address!("00000000000000000000000000000000000000AA");
@@ -184,7 +203,7 @@ async fn test_erc20_transfer_log_parsing() {
 }
 
 /// ERC-721 Transfer (4 topics) is distinguished from ERC-20 (3 topics).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc721_transfer_log_parsing() {
     let contract = address!("0000000000000000000000000000000000000721");
@@ -214,7 +233,7 @@ async fn test_erc721_transfer_log_parsing() {
 }
 
 /// ERC-1155 TransferSingle log is parsed correctly.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc1155_transfer_single_log_parsing() {
     let contract = address!("0000000000000000000000000000000000001155");
@@ -250,7 +269,7 @@ async fn test_erc1155_transfer_single_log_parsing() {
 }
 
 /// ERC-20 Approval log is parsed into the correct ExposureChange.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc20_approval_log_parsing() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
@@ -278,7 +297,7 @@ async fn test_erc20_approval_log_parsing() {
 }
 
 /// ApprovalForAll log is parsed correctly.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_approval_for_all_log_parsing() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
@@ -308,7 +327,7 @@ async fn test_approval_for_all_log_parsing() {
 }
 
 /// Native ETH transfer is captured by the inspector.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_native_eth_transfer_inspector() {
     let mut db = make_forked_db();
@@ -338,6 +357,7 @@ async fn test_native_eth_transfer_inspector() {
                 value: eth_value,
                 gas_limit: 21_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -358,10 +378,12 @@ async fn test_native_eth_transfer_inspector() {
 }
 
 /// Reverting ERC-20 transfer returns a decoded revert reason.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_revert_with_reason() {
     let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(caller, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
     let mut evm = OpEvmFactory::default().create_evm(&mut db, evm_env());
 
     let result = RethEvm::transact(
@@ -378,6 +400,7 @@ async fn test_revert_with_reason() {
                 .into(),
                 gas_limit: 200_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -400,10 +423,11 @@ async fn test_revert_with_reason() {
 }
 
 /// Trace captures top-level calls from a simulated execution.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_captures_calls() {
     let mut db = make_forked_db();
+    db.insert_account_info(ENTRY_POINT, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
 
     let (inspector, handle) = new_simulation_inspector();
     let mut evm =
@@ -423,6 +447,7 @@ async fn test_trace_captures_calls() {
                 .into(),
                 gas_limit: 200_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
@@ -440,7 +465,7 @@ async fn test_trace_captures_calls() {
 
 /// Verify that all forbidden Safe admin selectors are recognized by the selector map.
 /// The backend uses trace[].method to detect these and reject the operation.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_forbidden_safe_selectors_recognized() {
     // Each entry: (4-byte selector, expected decoded name)
@@ -476,10 +501,11 @@ async fn test_forbidden_safe_selectors_recognized() {
 /// This uses a minimal bytecode that DELEGATECALLs or CALLs with the
 /// addOwnerWithThreshold selector, verifying the inspector captures it
 /// at the right depth.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_detects_malicious_safe_call() {
     let mut db = make_forked_db();
+    db.insert_account_info(ENTRY_POINT, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
 
     // Deploy a tiny contract that, when called, makes a CALL to a target
     // address with addOwnerWithThreshold(address,uint256) calldata.
@@ -539,6 +565,7 @@ async fn test_trace_detects_malicious_safe_call() {
                 data: forbidden_calldata,
                 gas_limit: 200_000,
                 gas_price: 0,
+                chain_id: Some(CHAIN_ID),
                 ..Default::default()
             },
             ..Default::default()
