@@ -60,6 +60,7 @@ revm-database.workspace = true
 tokio.workspace = true
 
 # misc
+hex.workspace = true
 serde.workspace = true
 tracing.workspace = true
 jsonrpsee.workspace = true

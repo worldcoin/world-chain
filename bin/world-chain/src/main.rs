@@ -56,7 +56,7 @@ fn main() {
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
 
-                    // Register worldchain_simulateUserOp endpoint
+                    // Register worldchain_simulateUnsignedUserOp endpoint
                     let chain_spec = ctx.provider().chain_spec();
                     let evm_config = OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
                     let simulate_api = WorldChainSimulate::new(provider, evm_config);
