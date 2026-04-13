@@ -181,3 +181,33 @@ async fn test_erc20_transfer_log_parsing() {
     assert_eq!(changes[0].raw_amount, "1000000");
     assert!(changes[0].token_id.is_none());
 }
+
+/// ERC-721 Transfer (4 topics) is distinguished from ERC-20 (3 topics).
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_erc721_transfer_log_parsing() {
+    let contract = address!("0000000000000000000000000000000000000721");
+    let from = Address::ZERO;
+    let to = address!("00000000000000000000000000000000DeaDBeef");
+    let token_id = U256::from(42u64);
+
+    let log = alloy_primitives::Log::new(
+        contract,
+        vec![
+            alloy_primitives::b256!(
+                "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+            ),
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+            token_id.into(),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+
+    let changes = parse_asset_changes(&[log]);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].change_type, "ERC721");
+    assert_eq!(changes[0].raw_amount, "1");
+    assert_eq!(changes[0].token_id.as_deref(), Some("42"));
+}
