@@ -569,8 +569,7 @@ where
     // 6. Build the block
     let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
     let finalize_started = Instant::now();
-    let finalize_result =
-        builder.finish_with_bundle(state_provider.as_ref(), Some(&mut attempt_metrics));
+    let finalize_result = builder.finish_with_bundle(state_provider.as_ref(), &mut attempt_metrics);
     attempt_metrics.record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
     let (build_outcome, bundle) = finalize_result?;
 

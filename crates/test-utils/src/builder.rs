@@ -663,8 +663,10 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) =
-        builder.finish_with_bundle(state_provider.as_ref(), None::<PayloadBuildAttemptMetrics>)?;
+    let (outcome, bundle_state) = builder.finish_with_bundle(
+        state_provider.as_ref(),
+        PayloadBuildAttemptMetrics::default(),
+    )?;
 
     let access_list = access_list_rx.recv()?;
 
