@@ -151,3 +151,33 @@ async fn test_fork_view_calls() {
     };
     assert_eq!(dec, 18);
 }
+
+/// ERC-20 Transfer log is parsed into the correct AssetChange.
+#[tokio::test]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_erc20_transfer_log_parsing() {
+    let from = address!("00000000000000000000000000000000000000AA");
+    let to = address!("00000000000000000000000000000000000000BB");
+    let amount = U256::from(1_000_000u64);
+
+    let log = alloy_primitives::Log::new(
+        address!("79A02482A880bCE3B13e09Da970dC34db4CD24d1"),
+        vec![
+            alloy_primitives::b256!(
+                "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+            ),
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+        ],
+        amount.to_be_bytes_vec().into(),
+    )
+    .unwrap();
+
+    let changes = parse_asset_changes(&[log]);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].change_type, "ERC20");
+    assert_eq!(changes[0].from, from);
+    assert_eq!(changes[0].to, to);
+    assert_eq!(changes[0].raw_amount, "1000000");
+    assert!(changes[0].token_id.is_none());
+}
