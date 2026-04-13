@@ -172,18 +172,18 @@ struct NativeTransfer {
 /// Uses `Arc<Mutex>` so the caller can read captured data after the EVM consumes
 /// the inspector.
 #[derive(Debug, Clone, Default)]
-struct SimulationInspector {
+pub struct SimulationInspector {
     state: Arc<Mutex<InspectorState>>,
 }
 
 /// Handle returned to the caller for reading captured data after execution.
 #[derive(Debug, Clone)]
-struct InspectorHandle {
+pub struct InspectorHandle {
     state: Arc<Mutex<InspectorState>>,
 }
 
 impl InspectorHandle {
-    fn take_trace_entries(&self) -> Vec<TraceEntry> {
+    pub fn take_trace_entries(&self) -> Vec<TraceEntry> {
         let state = self.state.lock().unwrap();
         state
             .traces
@@ -200,7 +200,7 @@ impl InspectorHandle {
             .collect()
     }
 
-    fn take_native_asset_changes(&self) -> Vec<AssetChange> {
+    pub fn take_native_asset_changes(&self) -> Vec<AssetChange> {
         let state = self.state.lock().unwrap();
         state
             .native_transfers
@@ -223,7 +223,7 @@ impl InspectorHandle {
     }
 }
 
-fn new_simulation_inspector() -> (SimulationInspector, InspectorHandle) {
+pub fn new_simulation_inspector() -> (SimulationInspector, InspectorHandle) {
     let state = Arc::new(Mutex::new(InspectorState::default()));
     (
         SimulationInspector {
@@ -473,7 +473,7 @@ const APPROVAL_FOR_ALL_TOPIC: B256 =
 // Log parsing — asset changes
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
+pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
     let mut changes = Vec::new();
 
     for log in logs {
@@ -590,7 +590,7 @@ fn decode_batch_transfer_data(data: &[u8]) -> Option<Vec<(U256, U256)>> {
 // Log parsing — exposure / approval changes
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureChange> {
+pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureChange> {
     let mut changes = Vec::new();
 
     for log in logs {
@@ -655,7 +655,7 @@ fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureChange>
 
 /// Decode revert data into a human-readable string.
 /// Handles `Error(string)` (0x08c379a2) and `Panic(uint256)` (0x4e487b71).
-fn decode_revert_reason(output: &Bytes) -> String {
+pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
         return hex::encode(output.as_ref());
     }

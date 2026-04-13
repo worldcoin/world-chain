@@ -70,3 +70,10 @@ reqwest.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
+
+[dev-dependencies]
+alloy = { workspace = true, features = ["provider-http"] }
+alloy-sol-types.workspace = true
+revm-database = { workspace = true, features = ["alloydb"] }
+revm-database-interface.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
