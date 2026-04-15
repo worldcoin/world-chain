@@ -57,15 +57,14 @@ fn main() {
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
 
-                    // Register worldchain_simulateUnsignedUserOp endpoint
+                    // Register worldchain_simulateUnsignedUserOp on the JWT-protected
+                    // auth server (same as engine API) so only authenticated callers
+                    // (e.g. app-backend-main) can invoke it.
                     let chain_spec = ctx.provider().chain_spec();
                     let evm_config = OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
-                    let simulate_api = WorldChainSimulate::new(
-                        provider,
-                        evm_config,
-                        config.args.simulate_allowed_ips.clone(),
-                    );
-                    ctx.modules.merge_configured(simulate_api.into_rpc())?;
+                    let simulate_api = WorldChainSimulate::new(provider, evm_config);
+                    ctx.auth_module
+                        .merge_auth_methods(simulate_api.into_rpc())?;
 
                     Ok(())
                 })

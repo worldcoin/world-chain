@@ -22,8 +22,7 @@ use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
-    net::IpAddr,
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
@@ -304,7 +303,7 @@ pub trait WorldChainSimulateApi {
     /// Simulates an unsigned ERC-4337 v0.7 PackedUserOperation against the
     /// specified block state. Returns asset transfers, approval changes,
     /// decoded trace, and warnings.
-    #[method(name = "simulateUnsignedUserOp", with_extensions)]
+    #[method(name = "simulateUnsignedUserOp")]
     async fn simulate_unsigned_user_op(
         &self,
         request: SimulateUnsignedUserOpRequest,
@@ -324,17 +323,14 @@ pub struct WorldChainSimulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
     metadata_cache: MetadataCache,
-    /// When `Some`, only requests from these IPs are allowed.
-    allowed_ips: Option<Arc<HashSet<IpAddr>>>,
 }
 
 impl<Client> WorldChainSimulate<Client> {
-    pub fn new(client: Client, evm_config: OpEvmConfig, allowed_ips: Option<Vec<IpAddr>>) -> Self {
+    pub fn new(client: Client, evm_config: OpEvmConfig) -> Self {
         Self {
             client,
             evm_config,
             metadata_cache: Arc::new(Mutex::new(HashMap::new())),
-            allowed_ips: allowed_ips.map(|ips| Arc::new(ips.into_iter().collect())),
         }
     }
 }
@@ -349,32 +345,8 @@ where
 {
     async fn simulate_unsigned_user_op(
         &self,
-        ext: &jsonrpsee::Extensions,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
-        // IP whitelist check
-        if let Some(allowed) = &self.allowed_ips {
-            let caller_ip = ext.get::<std::net::SocketAddr>().map(|addr| addr.ip());
-
-            match caller_ip {
-                Some(ip) if allowed.contains(&ip) => {}
-                Some(ip) => {
-                    return Err(jsonrpsee::types::ErrorObjectOwned::owned(
-                        jsonrpsee::types::error::INVALID_REQUEST_CODE,
-                        format!("IP {ip} is not allowed to call this endpoint"),
-                        None::<String>,
-                    ));
-                }
-                None => {
-                    return Err(jsonrpsee::types::ErrorObjectOwned::owned(
-                        jsonrpsee::types::error::INVALID_REQUEST_CODE,
-                        "Client IP not available; cannot verify against allowlist",
-                        None::<String>,
-                    ));
-                }
-            }
-        }
-
         let block_id = request.block.into();
 
         // 1. Resolve the sealed header for the target block
