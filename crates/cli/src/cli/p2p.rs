@@ -10,7 +10,8 @@ pub const DEFAULT_SCORE_SAMPLES: i64 = 1000;
 pub struct FanoutArgs {
     /// Override the flashblocks send-set size.
     #[arg(
-        long = "flashblocks.max_send_peers",
+        long = "flashblocks.max-send-peers",
+        alias = "flashblocks.max_send_peers",
         env = "FLASHBLOCKS_MAX_SEND_PEERS",
         required = false,
         default_value_t = DEFAULT_MAX_SEND_PEERS
@@ -19,7 +20,8 @@ pub struct FanoutArgs {
 
     /// Override the number of receive peers maintained for flashblocks fanout.
     #[arg(
-        long = "flashblocks.max_receive_peers",
+        long = "flashblocks.max-receive-peers",
+        alias = "flashblocks.max_receive_peers",
         env = "FLASHBLOCKS_MAX_RECEIVE_PEERS",
         required = false,
         default_value_t = DEFAULT_MAX_RECEIVE_PEERS
@@ -28,7 +30,8 @@ pub struct FanoutArgs {
 
     /// Override the flashblocks rotation interval in seconds.
     #[arg(
-        long = "flashblocks.rotation_interval",
+        long = "flashblocks.rotation-interval",
+        alias = "flashblocks.rotation_interval",
         env = "FLASHBLOCKS_ROTATION_INTERVAL",
         required = false,
         default_value_t = DEFAULT_ROTATION_INTERVAL
@@ -37,7 +40,8 @@ pub struct FanoutArgs {
 
     /// Override the number of latency samples retained for receive-peer scoring.
     #[arg(
-        long = "flashblocks.score_samples",
+        long = "flashblocks.score-samples",
+        alias = "flashblocks.score_samples",
         env = "FLASHBLOCKS_SCORE_SAMPLES",
         required = false,
         default_value_t = DEFAULT_SCORE_SAMPLES
@@ -49,7 +53,8 @@ pub struct FanoutArgs {
     /// These peers will be requested as soon as they connect and will never
     /// be evicted by rotation. They count toward `max_receive_peers`.
     #[arg(
-        long = "flashblocks.force_receive_peers",
+        long = "flashblocks.force-receive-peers",
+        alias = "flashblocks.force_receive_peers",
         env = "FLASHBLOCKS_FORCE_RECEIVE_PEERS",
         value_delimiter = ',',
         value_name = "PEER_ID",
