@@ -10,19 +10,25 @@
 //! ```
 
 use alloy_op_evm::OpEvmFactory;
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256, address};
 use alloy_sol_types::{SolCall, sol};
-use reth_evm::op_revm::{OpSpecId, OpTransaction};
-use reth_evm::{Evm as RethEvm, EvmFactory};
-use revm::context::result::{ExecutionResult, Output};
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
-use revm::state::AccountInfo;
+use reth_evm::{
+    Evm as RethEvm, EvmFactory,
+    op_revm::{OpSpecId, OpTransaction},
+};
+use revm::{
+    context::{
+        BlockEnv, CfgEnv, TxEnv,
+        result::{ExecutionResult, Output},
+    },
+    state::AccountInfo,
+};
 use revm_database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
-    decode_revert_reason, new_simulation_inspector, parse_asset_changes, parse_exposure_changes,
-    selector_to_name,
+    AssetType, decode_revert_reason, new_simulation_inspector, parse_approval_changes,
+    parse_asset_changes, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -55,22 +61,10 @@ fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
 }
 
-/// Build a base TxEnv with chain_id pre-filled.
-fn base_tx(caller: Address, to: Address, data: Bytes, gas_limit: u64) -> TxEnv {
-    TxEnv {
-        caller,
-        kind: TxKind::Call(to),
-        data,
-        gas_limit,
-        gas_price: 0,
-        chain_id: Some(CHAIN_ID),
-        ..Default::default()
-    }
-}
-
 /// Create a forked CacheDB backed by an AlloyDB hitting the World Chain RPC.
 /// Uses `RootProvider` directly (which implements Debug, satisfying revm bounds).
-fn make_forked_db() -> CacheDB<WrapDatabaseAsync<AlloyDB<alloy::network::Ethereum, alloy::providers::RootProvider>>> {
+fn make_forked_db()
+-> CacheDB<WrapDatabaseAsync<AlloyDB<alloy::network::Ethereum, alloy::providers::RootProvider>>> {
     let provider = alloy::providers::RootProvider::new_http(rpc_url().parse().unwrap());
     let alloy_db = AlloyDB::new(provider, revm_database::BlockId::latest());
     let handle = tokio::runtime::Handle::current();
@@ -195,7 +189,7 @@ async fn test_erc20_transfer_log_parsing() {
 
     let changes = parse_asset_changes(&[log]);
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].change_type, "ERC20");
+    assert_eq!(changes[0].change_type, AssetType::Erc20);
     assert_eq!(changes[0].from, from);
     assert_eq!(changes[0].to, to);
     assert_eq!(changes[0].raw_amount, "1000000");
@@ -227,7 +221,7 @@ async fn test_erc721_transfer_log_parsing() {
 
     let changes = parse_asset_changes(&[log]);
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].change_type, "ERC721");
+    assert_eq!(changes[0].change_type, AssetType::Erc721);
     assert_eq!(changes[0].raw_amount, "1");
     assert_eq!(changes[0].token_id.as_deref(), Some("42"));
 }
@@ -261,7 +255,7 @@ async fn test_erc1155_transfer_single_log_parsing() {
 
     let changes = parse_asset_changes(&[log]);
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].change_type, "ERC1155");
+    assert_eq!(changes[0].change_type, AssetType::Erc1155);
     assert_eq!(changes[0].from, from);
     assert_eq!(changes[0].to, to);
     assert_eq!(changes[0].raw_amount, "100");
@@ -288,7 +282,7 @@ async fn test_erc20_approval_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_exposure_changes(&[log]);
+    let changes = parse_approval_changes(&[log]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].owner, owner);
     assert_eq!(changes[0].spender, spender);
@@ -319,7 +313,7 @@ async fn test_approval_for_all_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_exposure_changes(&[log]);
+    let changes = parse_approval_changes(&[log]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].owner, owner);
     assert_eq!(changes[0].spender, operator);
@@ -344,8 +338,7 @@ async fn test_native_eth_transfer_inspector() {
     );
 
     let (inspector, handle) = new_simulation_inspector();
-    let mut evm =
-        OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
 
     let result = RethEvm::transact(
         &mut evm,
@@ -369,7 +362,7 @@ async fn test_native_eth_transfer_inspector() {
 
     let native = handle.take_native_asset_changes();
     assert_eq!(native.len(), 1);
-    assert_eq!(native[0].change_type, "NATIVE");
+    assert_eq!(native[0].change_type, AssetType::Native);
     assert_eq!(native[0].from, sender);
     assert_eq!(native[0].to, recipient);
     assert_eq!(native[0].raw_amount, eth_value.to_string());
@@ -383,7 +376,13 @@ async fn test_native_eth_transfer_inspector() {
 async fn test_revert_with_reason() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
-    db.insert_account_info(caller, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
     let mut evm = OpEvmFactory::default().create_evm(&mut db, evm_env());
 
     let result = RethEvm::transact(
@@ -411,14 +410,9 @@ async fn test_revert_with_reason() {
     match &result.result {
         ExecutionResult::Revert { output, .. } => {
             let reason = decode_revert_reason(output);
-            assert!(!reason.is_empty());
+            assert_eq!(reason, "ERC20: transfer amount exceeds balance");
         }
-        ExecutionResult::Halt { .. } => {
-            // Also acceptable — call failed
-        }
-        ExecutionResult::Success { .. } => {
-            panic!("expected revert, got success");
-        }
+        other => panic!("expected revert, got {other:?}"),
     }
 }
 
@@ -427,11 +421,16 @@ async fn test_revert_with_reason() {
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_captures_calls() {
     let mut db = make_forked_db();
-    db.insert_account_info(ENTRY_POINT, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
+    db.insert_account_info(
+        ENTRY_POINT,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
 
     let (inspector, handle) = new_simulation_inspector();
-    let mut evm =
-        OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
 
     let result = RethEvm::transact(
         &mut evm,
@@ -505,7 +504,13 @@ async fn test_forbidden_safe_selectors_recognized() {
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_detects_malicious_safe_call() {
     let mut db = make_forked_db();
-    db.insert_account_info(ENTRY_POINT, AccountInfo { balance: U256::from(10u128.pow(21)), ..Default::default() });
+    db.insert_account_info(
+        ENTRY_POINT,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
 
     // Deploy a tiny contract that, when called, makes a CALL to a target
     // address with addOwnerWithThreshold(address,uint256) calldata.
@@ -552,8 +557,7 @@ async fn test_trace_detects_malicious_safe_call() {
     // (not authorized), the inspector still captures it.
 
     let (inspector, handle) = new_simulation_inspector();
-    let mut evm =
-        OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
 
     // Direct call — this is depth 0, so internal calls safe makes are depth 1.
     let _result = RethEvm::transact(

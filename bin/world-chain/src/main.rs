@@ -2,13 +2,13 @@ use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
+use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_provider::ChainSpecProvider;
 use reth_tracing::tracing::info;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
-use reth_provider::ChainSpecProvider;
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient, WorldChainEthApiExt, WorldChainSimulate,
     WorldChainSimulateApiServer,
@@ -51,7 +51,8 @@ fn main() {
                     let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
                     let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
-                    let eth_api_ext = WorldChainEthApiExt::new(pool, provider.clone(), sequencer_client);
+                    let eth_api_ext =
+                        WorldChainEthApiExt::new(pool, provider.clone(), sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;

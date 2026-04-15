@@ -1,32 +1,39 @@
 use alloy_consensus::BlockHeader;
 use alloy_op_evm::OpEvmFactory;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types::BlockNumberOrTag;
-use jsonrpsee::core::{RpcResult, async_trait};
-use jsonrpsee::proc_macros::rpc;
-use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
-use reth_evm::op_revm::OpTransaction;
+use jsonrpsee::{
+    core::{RpcResult, async_trait},
+    proc_macros::rpc,
+};
+use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, op_revm::OpTransaction};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
-use revm::Inspector;
-use revm::context::TxEnv;
-use revm::context::result::{ExecutionResult, Output};
-use revm::interpreter::{CallInputs, CallOutcome};
+use revm::{
+    Inspector,
+    context::{
+        TxEnv,
+        result::{ExecutionResult, Output},
+    },
+    interpreter::{CallInputs, CallOutcome},
+};
 use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// ERC-4337 v0.7 PackedUserOperation (signature intentionally omitted).
+/// ERC-4337 v0.7 UserOperation without a signature field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PackedUserOperationRequest {
+pub struct UnsignedUserOperation {
     pub sender: Address,
     pub nonce: U256,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,12 +60,10 @@ pub struct PackedUserOperationRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpRequest {
-    pub user_op: PackedUserOperationRequest,
+    pub user_op: UnsignedUserOperation,
     pub entry_point: Address,
-    pub chain_id: u64,
     #[serde(default = "default_block")]
     pub block: BlockNumberOrTag,
-    pub sender: Address,
 }
 
 fn default_block() -> BlockNumberOrTag {
@@ -68,6 +73,16 @@ fn default_block() -> BlockNumberOrTag {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Response types
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/// The standard a token/asset conforms to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetType {
+    Native,
+    Erc20,
+    Erc721,
+    Erc1155,
+}
 
 /// Token/asset metadata resolved from on-chain state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +94,7 @@ pub struct AssetInfo {
     pub name: String,
     pub decimals: u8,
     #[serde(rename = "type")]
-    pub asset_type: String,
+    pub asset_type: AssetType,
 }
 
 /// A discrete asset transfer detected during simulation.
@@ -87,7 +102,7 @@ pub struct AssetInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AssetChange {
     #[serde(rename = "type")]
-    pub change_type: String,
+    pub change_type: AssetType,
     pub from: Address,
     pub to: Address,
     pub raw_amount: String,
@@ -95,10 +110,10 @@ pub struct AssetChange {
     pub asset: AssetInfo,
 }
 
-/// An approval / exposure change detected during simulation.
+/// An ERC-20/721/1155 token approval detected during simulation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExposureChange {
+pub struct ApprovalChange {
     pub owner: Address,
     pub spender: Address,
     pub raw_amount: String,
@@ -124,16 +139,24 @@ pub struct SimulationWarning {
     pub message: String,
 }
 
+/// Outcome of the simulation execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SimulationStatus {
+    Success,
+    Revert,
+}
+
 /// Full response for `worldchain_simulateUnsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpResult {
-    pub status: String,
+    pub status: SimulationStatus,
     pub revert_reason: Option<String>,
     pub block_number: u64,
     pub gas_used: String,
     pub asset_changes: Vec<AssetChange>,
-    pub exposure_changes: Vec<ExposureChange>,
+    pub approval_changes: Vec<ApprovalChange>,
     pub trace: Vec<TraceEntry>,
     pub warnings: Vec<SimulationWarning>,
 }
@@ -206,7 +229,7 @@ impl InspectorHandle {
             .native_transfers
             .iter()
             .map(|t| AssetChange {
-                change_type: "NATIVE".to_string(),
+                change_type: AssetType::Native,
                 from: t.from,
                 to: t.to,
                 raw_amount: t.value.to_string(),
@@ -216,7 +239,7 @@ impl InspectorHandle {
                     symbol: "ETH".to_string(),
                     name: "Ether".to_string(),
                     decimals: 18,
-                    asset_type: "NATIVE".to_string(),
+                    asset_type: AssetType::Native,
                 },
             })
             .collect()
@@ -257,14 +280,14 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
         }
 
         // Track native ETH transfers at any depth
-        if let Some(value) = inputs.value.transfer() {
-            if value > U256::ZERO {
-                state.native_transfers.push(NativeTransfer {
-                    from: inputs.caller,
-                    to: inputs.target_address,
-                    value,
-                });
-            }
+        if let Some(value) = inputs.value.transfer()
+            && value > U256::ZERO
+        {
+            state.native_transfers.push(NativeTransfer {
+                from: inputs.caller,
+                to: inputs.target_address,
+                value,
+            });
         }
 
         state.call_depth += 1;
@@ -349,7 +372,10 @@ where
         let block_number = header.number();
 
         // 2. Build the EVM environment from the header
-        let evm_env = self.evm_config.evm_env(header.header()).map_err(internal_err)?;
+        let evm_env = self
+            .evm_config
+            .evm_env(header.header())
+            .map_err(internal_err)?;
 
         // 3. Get state at the target block
         let state_provider = self
@@ -399,22 +425,27 @@ where
 
         // 8. Build the response
         let (status, revert_reason, gas_used, logs) = match &result_and_state.result {
-            ExecutionResult::Success {
-                gas_used, logs, ..
-            } => ("success".to_string(), None, *gas_used, logs.clone()),
+            ExecutionResult::Success { gas_used, logs, .. } => {
+                (SimulationStatus::Success, None, *gas_used, logs.clone())
+            }
             ExecutionResult::Revert { gas_used, output } => {
                 let reason = decode_revert_reason(output);
-                ("revert".to_string(), Some(reason), *gas_used, vec![])
+                (SimulationStatus::Revert, Some(reason), *gas_used, vec![])
             }
             ExecutionResult::Halt { gas_used, reason } => {
                 let reason_str = format!("{reason:?}");
-                ("revert".to_string(), Some(reason_str), *gas_used, vec![])
+                (
+                    SimulationStatus::Revert,
+                    Some(reason_str),
+                    *gas_used,
+                    vec![],
+                )
             }
         };
 
-        // 9. Parse logs into structured asset/exposure changes
+        // 9. Parse logs into structured asset/approval changes
         let mut asset_changes = parse_asset_changes(&logs);
-        let mut exposure_changes = parse_exposure_changes(&logs);
+        let mut approval_changes = parse_approval_changes(&logs);
 
         // 10. Extract trace and native transfers from inspector
         let trace = inspector_handle.take_trace_entries();
@@ -429,7 +460,7 @@ where
             block_id,
             &self.metadata_cache,
             &mut asset_changes,
-            &mut exposure_changes,
+            &mut approval_changes,
         );
 
         Ok(SimulateUnsignedUserOpResult {
@@ -438,7 +469,7 @@ where
             block_number,
             gas_used: format!("{gas_used:#x}"),
             asset_changes,
-            exposure_changes,
+            approval_changes,
             trace,
             warnings: vec![],
         })
@@ -490,12 +521,12 @@ pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
                     let to = address_from_topic(topics[2]);
                     let token_id = U256::from_be_bytes(topics[3].0);
                     changes.push(AssetChange {
-                        change_type: "ERC721".to_string(),
+                        change_type: AssetType::Erc721,
                         from,
                         to,
                         raw_amount: "1".to_string(),
                         token_id: Some(token_id.to_string()),
-                        asset: placeholder_asset(log.address, "ERC721"),
+                        asset: placeholder_asset(log.address, AssetType::Erc721),
                     });
                 } else if topics.len() == 3 && log.data.data.len() >= 32 {
                     // ERC-20: Transfer(address indexed from, address indexed to, uint256 value)
@@ -503,48 +534,48 @@ pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
                     let to = address_from_topic(topics[2]);
                     let amount = U256::from_be_slice(&log.data.data[..32]);
                     changes.push(AssetChange {
-                        change_type: "ERC20".to_string(),
+                        change_type: AssetType::Erc20,
                         from,
                         to,
                         raw_amount: amount.to_string(),
                         token_id: None,
-                        asset: placeholder_asset(log.address, "ERC20"),
+                        asset: placeholder_asset(log.address, AssetType::Erc20),
                     });
                 }
             }
-            t if t == TRANSFER_SINGLE_TOPIC => {
+            t if t == TRANSFER_SINGLE_TOPIC
                 // ERC-1155: TransferSingle(operator, from, to, id, value)
-                if topics.len() >= 4 && log.data.data.len() >= 64 {
-                    let from = address_from_topic(topics[2]);
-                    let to = address_from_topic(topics[3]);
-                    let id = U256::from_be_slice(&log.data.data[..32]);
-                    let value = U256::from_be_slice(&log.data.data[32..64]);
-                    changes.push(AssetChange {
-                        change_type: "ERC1155".to_string(),
-                        from,
-                        to,
-                        raw_amount: value.to_string(),
-                        token_id: Some(id.to_string()),
-                        asset: placeholder_asset(log.address, "ERC1155"),
-                    });
-                }
+                && topics.len() >= 4 && log.data.data.len() >= 64 =>
+            {
+                let from = address_from_topic(topics[2]);
+                let to = address_from_topic(topics[3]);
+                let id = U256::from_be_slice(&log.data.data[..32]);
+                let value = U256::from_be_slice(&log.data.data[32..64]);
+                changes.push(AssetChange {
+                    change_type: AssetType::Erc1155,
+                    from,
+                    to,
+                    raw_amount: value.to_string(),
+                    token_id: Some(id.to_string()),
+                    asset: placeholder_asset(log.address, AssetType::Erc1155),
+                });
             }
-            t if t == TRANSFER_BATCH_TOPIC => {
+            t if t == TRANSFER_BATCH_TOPIC
                 // ERC-1155: TransferBatch(operator, from, to, ids[], values[])
-                if topics.len() >= 4 {
-                    let from = address_from_topic(topics[2]);
-                    let to = address_from_topic(topics[3]);
-                    if let Some(pairs) = decode_batch_transfer_data(&log.data.data) {
-                        for (id, value) in pairs {
-                            changes.push(AssetChange {
-                                change_type: "ERC1155".to_string(),
-                                from,
-                                to,
-                                raw_amount: value.to_string(),
-                                token_id: Some(id.to_string()),
-                                asset: placeholder_asset(log.address, "ERC1155"),
-                            });
-                        }
+                && topics.len() >= 4 =>
+            {
+                let from = address_from_topic(topics[2]);
+                let to = address_from_topic(topics[3]);
+                if let Some(pairs) = decode_batch_transfer_data(&log.data.data) {
+                    for (id, value) in pairs {
+                        changes.push(AssetChange {
+                            change_type: AssetType::Erc1155,
+                            from,
+                            to,
+                            raw_amount: value.to_string(),
+                            token_id: Some(id.to_string()),
+                            asset: placeholder_asset(log.address, AssetType::Erc1155),
+                        });
                     }
                 }
             }
@@ -565,10 +596,12 @@ fn decode_batch_transfer_data(data: &[u8]) -> Option<Vec<(U256, U256)>> {
     let ids_offset = U256::from_be_slice(&data[..32]).try_into().ok()?;
     let values_offset: usize = U256::from_be_slice(&data[32..64]).try_into().ok()?;
 
-    let ids_len: usize =
-        U256::from_be_slice(data.get(ids_offset..ids_offset + 32)?).try_into().ok()?;
-    let values_len: usize =
-        U256::from_be_slice(data.get(values_offset..values_offset + 32)?).try_into().ok()?;
+    let ids_len: usize = U256::from_be_slice(data.get(ids_offset..ids_offset + 32)?)
+        .try_into()
+        .ok()?;
+    let values_len: usize = U256::from_be_slice(data.get(values_offset..values_offset + 32)?)
+        .try_into()
+        .ok()?;
 
     if ids_len != values_len {
         return None;
@@ -587,10 +620,10 @@ fn decode_batch_transfer_data(data: &[u8]) -> Option<Vec<(U256, U256)>> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Log parsing — exposure / approval changes
+// Log parsing — approval changes
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureChange> {
+pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalChange> {
     let mut changes = Vec::new();
 
     for log in logs {
@@ -606,41 +639,39 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
                     let owner = address_from_topic(topics[1]);
                     let spender = address_from_topic(topics[2]);
                     let amount = U256::from_be_slice(&log.data.data[..32]);
-                    changes.push(ExposureChange {
+                    changes.push(ApprovalChange {
                         owner,
                         spender,
                         raw_amount: amount.to_string(),
                         is_approved_for_all: false,
-                        asset: placeholder_asset(log.address, "ERC20"),
+                        asset: placeholder_asset(log.address, AssetType::Erc20),
                     });
                 } else if topics.len() == 4 {
                     // ERC-721: Approval(owner, approved, tokenId)
-                    // Not a spending exposure in the ERC-20 sense — skip or handle differently.
+                    // Not a spending approval in the ERC-20 sense — skip or handle differently.
                     // The spec focuses on Approval events, so include it.
                     let owner = address_from_topic(topics[1]);
                     let spender = address_from_topic(topics[2]);
-                    changes.push(ExposureChange {
+                    changes.push(ApprovalChange {
                         owner,
                         spender,
                         raw_amount: "1".to_string(),
                         is_approved_for_all: false,
-                        asset: placeholder_asset(log.address, "ERC721"),
+                        asset: placeholder_asset(log.address, AssetType::Erc721),
                     });
                 }
             }
-            t if t == APPROVAL_FOR_ALL_TOPIC => {
-                if topics.len() >= 3 {
-                    let owner = address_from_topic(topics[1]);
-                    let operator = address_from_topic(topics[2]);
-                    // data contains the bool `approved`, but the exposure exists regardless
-                    changes.push(ExposureChange {
-                        owner,
-                        spender: operator,
-                        raw_amount: U256::MAX.to_string(),
-                        is_approved_for_all: true,
-                        asset: placeholder_asset(log.address, "ERC721"),
-                    });
-                }
+            t if t == APPROVAL_FOR_ALL_TOPIC && topics.len() >= 3 => {
+                let owner = address_from_topic(topics[1]);
+                let operator = address_from_topic(topics[2]);
+                // data contains the bool `approved`, but the approval exists regardless
+                changes.push(ApprovalChange {
+                    owner,
+                    spender: operator,
+                    raw_amount: U256::MAX.to_string(),
+                    is_approved_for_all: true,
+                    asset: placeholder_asset(log.address, AssetType::Erc721),
+                });
             }
             _ => {}
         }
@@ -654,7 +685,7 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Decode revert data into a human-readable string.
-/// Handles `Error(string)` (0x08c379a2) and `Panic(uint256)` (0x4e487b71).
+/// Handles `Error(string)` (0x08c379a0) and `Panic(uint256)` (0x4e487b71).
 pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
         return hex::encode(output.as_ref());
@@ -662,18 +693,19 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 
     let selector = &output[..4];
 
-    // Error(string) — 0x08c379a2
-    if selector == [0x08, 0xc3, 0x79, 0xa2] && output.len() >= 68 {
+    // Error(string) — 0x08c379a0
+    if selector == [0x08, 0xc3, 0x79, 0xa0] && output.len() >= 68 {
         let offset: usize = U256::from_be_slice(&output[4..36]).try_into().unwrap_or(0);
         let abs_offset = 4 + offset;
         if abs_offset + 32 <= output.len() {
-            let len: usize =
-                U256::from_be_slice(&output[abs_offset..abs_offset + 32]).try_into().unwrap_or(0);
+            let len: usize = U256::from_be_slice(&output[abs_offset..abs_offset + 32])
+                .try_into()
+                .unwrap_or(0);
             let str_start = abs_offset + 32;
-            if str_start + len <= output.len() {
-                if let Ok(s) = std::str::from_utf8(&output[str_start..str_start + len]) {
-                    return s.to_string();
-                }
+            if str_start + len <= output.len()
+                && let Ok(s) = std::str::from_utf8(&output[str_start..str_start + len])
+            {
+                return s.to_string();
             }
         }
     }
@@ -756,25 +788,38 @@ fn resolve_metadata_with_evm<Client>(
     header: &alloy_consensus::Header,
     block_id: alloy_rpc_types::BlockId,
     token: Address,
-    asset_type: &str,
+    asset_type: AssetType,
 ) -> AssetInfo
 where
     Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
     let name = evm_call_string(client, evm_config, header, block_id, token, &NAME_SELECTOR)
         .unwrap_or_default();
-    let symbol = evm_call_string(client, evm_config, header, block_id, token, &SYMBOL_SELECTOR)
-        .unwrap_or_default();
-    let decimals =
-        evm_call_u8(client, evm_config, header, block_id, token, &DECIMALS_SELECTOR)
-            .unwrap_or(0);
+    let symbol = evm_call_string(
+        client,
+        evm_config,
+        header,
+        block_id,
+        token,
+        &SYMBOL_SELECTOR,
+    )
+    .unwrap_or_default();
+    let decimals = evm_call_u8(
+        client,
+        evm_config,
+        header,
+        block_id,
+        token,
+        &DECIMALS_SELECTOR,
+    )
+    .unwrap_or(0);
 
     AssetInfo {
         address: Some(token),
         symbol,
         name,
         decimals,
-        asset_type: asset_type.to_string(),
+        asset_type,
     }
 }
 
@@ -852,10 +897,10 @@ where
 
     let result = RethEvm::transact(&mut evm, tx).ok()?;
     match result.result {
-        ExecutionResult::Success { output, .. } => match output {
-            Output::Call(data) => Some(data),
-            _ => None,
-        },
+        ExecutionResult::Success {
+            output: Output::Call(data),
+            ..
+        } => Some(data),
         _ => None,
     }
 }
@@ -869,7 +914,9 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
     if offset + 32 > data.len() {
         return None;
     }
-    let len: usize = U256::from_be_slice(&data[offset..offset + 32]).try_into().ok()?;
+    let len: usize = U256::from_be_slice(&data[offset..offset + 32])
+        .try_into()
+        .ok()?;
     let str_start = offset + 32;
     if str_start + len > data.len() {
         return None;
@@ -885,35 +932,33 @@ fn resolve_all_metadata<Client>(
     block_id: alloy_rpc_types::BlockId,
     cache: &MetadataCache,
     asset_changes: &mut [AssetChange],
-    exposure_changes: &mut [ExposureChange],
+    approval_changes: &mut [ApprovalChange],
 ) where
     Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
     // Collect unique addresses that need resolution (not in cache and not yet resolved).
-    let mut to_resolve: Vec<(Address, String)> = Vec::new();
+    let mut to_resolve: Vec<(Address, AssetType)> = Vec::new();
 
     {
         let cache_guard = cache.lock().unwrap();
         let mut seen_this_call = std::collections::HashSet::new();
 
         for change in asset_changes.iter() {
-            if let Some(addr) = change.asset.address {
-                if change.asset.symbol.is_empty()
-                    && !cache_guard.contains_key(&addr)
-                    && seen_this_call.insert(addr)
-                {
-                    to_resolve.push((addr, change.asset.asset_type.clone()));
-                }
+            if let Some(addr) = change.asset.address
+                && change.asset.symbol.is_empty()
+                && !cache_guard.contains_key(&addr)
+                && seen_this_call.insert(addr)
+            {
+                to_resolve.push((addr, change.asset.asset_type));
             }
         }
-        for change in exposure_changes.iter() {
-            if let Some(addr) = change.asset.address {
-                if change.asset.symbol.is_empty()
-                    && !cache_guard.contains_key(&addr)
-                    && seen_this_call.insert(addr)
-                {
-                    to_resolve.push((addr, change.asset.asset_type.clone()));
-                }
+        for change in approval_changes.iter() {
+            if let Some(addr) = change.asset.address
+                && change.asset.symbol.is_empty()
+                && !cache_guard.contains_key(&addr)
+                && seen_this_call.insert(addr)
+            {
+                to_resolve.push((addr, change.asset.asset_type));
             }
         }
     }
@@ -923,7 +968,7 @@ fn resolve_all_metadata<Client>(
         let mut cache_guard = cache.lock().unwrap();
         for (addr, asset_type) in &to_resolve {
             let info =
-                resolve_metadata_with_evm(client, evm_config, header, block_id, *addr, asset_type);
+                resolve_metadata_with_evm(client, evm_config, header, block_id, *addr, *asset_type);
             cache_guard.insert(*addr, info);
         }
     }
@@ -931,17 +976,17 @@ fn resolve_all_metadata<Client>(
     // Apply cached metadata to all changes
     let cache_guard = cache.lock().unwrap();
     for change in asset_changes.iter_mut() {
-        if let Some(addr) = change.asset.address {
-            if let Some(info) = cache_guard.get(&addr) {
-                change.asset = info.clone();
-            }
+        if let Some(addr) = change.asset.address
+            && let Some(info) = cache_guard.get(&addr)
+        {
+            change.asset = info.clone();
         }
     }
-    for change in exposure_changes.iter_mut() {
-        if let Some(addr) = change.asset.address {
-            if let Some(info) = cache_guard.get(&addr) {
-                change.asset = info.clone();
-            }
+    for change in approval_changes.iter_mut() {
+        if let Some(addr) = change.asset.address
+            && let Some(info) = cache_guard.get(&addr)
+        {
+            change.asset = info.clone();
         }
     }
 }
@@ -955,13 +1000,13 @@ fn address_from_topic(topic: B256) -> Address {
 }
 
 /// Placeholder asset info — metadata will be resolved in a later step.
-fn placeholder_asset(contract: Address, asset_type: &str) -> AssetInfo {
+fn placeholder_asset(contract: Address, asset_type: AssetType) -> AssetInfo {
     AssetInfo {
         address: Some(contract),
         symbol: String::new(),
         name: String::new(),
         decimals: 0,
-        asset_type: asset_type.to_string(),
+        asset_type,
     }
 }
 
