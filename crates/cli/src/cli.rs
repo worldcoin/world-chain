@@ -350,6 +350,42 @@ mod tests {
     }
 
     #[test]
+    fn test_simulate_allowed_ips_single() {
+        let args =
+            CommandParser::parse_from(["bin", "--simulate.allowed-ips", "10.0.1.50"]).world;
+        let ips = args.simulate_allowed_ips.unwrap();
+        assert_eq!(ips, vec!["10.0.1.50".parse::<std::net::IpAddr>().unwrap()]);
+    }
+
+    #[test]
+    fn test_simulate_allowed_ips_multiple() {
+        let args = CommandParser::parse_from([
+            "bin",
+            "--simulate.allowed-ips",
+            "10.0.1.50,192.168.1.1,::1",
+        ])
+        .world;
+        let ips = args.simulate_allowed_ips.unwrap();
+        assert_eq!(ips.len(), 3);
+        assert_eq!(ips[0], "10.0.1.50".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(ips[1], "192.168.1.1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(ips[2], "::1".parse::<std::net::IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn test_simulate_allowed_ips_not_set() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        assert!(args.simulate_allowed_ips.is_none());
+    }
+
+    #[test]
+    fn test_simulate_allowed_ips_invalid() {
+        let result =
+            CommandParser::try_parse_from(["bin", "--simulate.allowed-ips", "not-an-ip"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_clap_empty_string_behavior() {
         // Clap with value_delimiter and a type that requires parsing (like PeerId)
         // will ERROR on empty string because it can't parse "" as PeerId
