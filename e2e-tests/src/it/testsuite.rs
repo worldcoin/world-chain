@@ -2280,6 +2280,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             flashblocks: Some(test_flashblocks_args(&authorizer_sk, &builder_sk)),
             tx_peers: None,
             disable_bootnodes: true,
+            simulate_allowed_ips: None,
         };
 
         let wc_config = args.clone().into_config(&mut node_config)?;

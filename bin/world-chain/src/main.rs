@@ -60,7 +60,11 @@ fn main() {
                     // Register worldchain_simulateUnsignedUserOp endpoint
                     let chain_spec = ctx.provider().chain_spec();
                     let evm_config = OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
-                    let simulate_api = WorldChainSimulate::new(provider, evm_config);
+                    let simulate_api = WorldChainSimulate::new(
+                        provider,
+                        evm_config,
+                        config.args.simulate_allowed_ips.clone(),
+                    );
                     ctx.modules.merge_configured(simulate_api.into_rpc())?;
 
                     Ok(())

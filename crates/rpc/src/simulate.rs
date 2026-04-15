@@ -22,7 +22,8 @@ use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    net::IpAddr,
     sync::{Arc, Mutex},
 };
 
@@ -30,40 +31,22 @@ use std::{
 // Request types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// ERC-4337 v0.7 UserOperation without a signature field.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnsignedUserOperation {
-    pub sender: Address,
-    pub nonce: U256,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub factory: Option<Address>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub factory_data: Option<Bytes>,
-    pub call_data: Bytes,
-    pub call_gas_limit: U256,
-    pub verification_gas_limit: U256,
-    pub pre_verification_gas: U256,
-    pub max_fee_per_gas: U256,
-    pub max_priority_fee_per_gas: U256,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paymaster: Option<Address>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paymaster_verification_gas_limit: Option<U256>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paymaster_post_op_gas_limit: Option<U256>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paymaster_data: Option<Bytes>,
-}
-
-/// Top-level request for `worldchain_simulateUnsignedUserOp`.
+/// Request for `worldchain_simulateUnsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpRequest {
-    pub user_op: UnsignedUserOperation,
+    /// The smart account address to call.
+    pub sender: Address,
+    /// The encoded execution payload (e.g. `executeUserOp` calldata).
+    pub call_data: Bytes,
+    /// The ERC-4337 EntryPoint address used as `msg.sender` in the simulation.
     pub entry_point: Address,
+    /// Block to simulate against. Defaults to `latest`.
     #[serde(default = "default_block")]
     pub block: BlockNumberOrTag,
+    /// Optional gas limit for the simulated call. Defaults to 30 000 000.
+    #[serde(default)]
+    pub call_gas_limit: Option<U256>,
 }
 
 fn default_block() -> BlockNumberOrTag {
@@ -321,7 +304,7 @@ pub trait WorldChainSimulateApi {
     /// Simulates an unsigned ERC-4337 v0.7 PackedUserOperation against the
     /// specified block state. Returns asset transfers, approval changes,
     /// decoded trace, and warnings.
-    #[method(name = "simulateUnsignedUserOp")]
+    #[method(name = "simulateUnsignedUserOp", with_extensions)]
     async fn simulate_unsigned_user_op(
         &self,
         request: SimulateUnsignedUserOpRequest,
@@ -341,14 +324,21 @@ pub struct WorldChainSimulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
     metadata_cache: MetadataCache,
+    /// When `Some`, only requests from these IPs are allowed.
+    allowed_ips: Option<Arc<HashSet<IpAddr>>>,
 }
 
 impl<Client> WorldChainSimulate<Client> {
-    pub fn new(client: Client, evm_config: OpEvmConfig) -> Self {
+    pub fn new(
+        client: Client,
+        evm_config: OpEvmConfig,
+        allowed_ips: Option<Vec<IpAddr>>,
+    ) -> Self {
         Self {
             client,
             evm_config,
             metadata_cache: Arc::new(Mutex::new(HashMap::new())),
+            allowed_ips: allowed_ips.map(|ips| Arc::new(ips.into_iter().collect())),
         }
     }
 }
@@ -363,8 +353,34 @@ where
 {
     async fn simulate_unsigned_user_op(
         &self,
+        ext: &jsonrpsee::Extensions,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
+        // IP whitelist check
+        if let Some(allowed) = &self.allowed_ips {
+            let caller_ip = ext
+                .get::<std::net::SocketAddr>()
+                .map(|addr| addr.ip());
+
+            match caller_ip {
+                Some(ip) if allowed.contains(&ip) => {}
+                Some(ip) => {
+                    return Err(jsonrpsee::types::ErrorObjectOwned::owned(
+                        jsonrpsee::types::error::INVALID_REQUEST_CODE,
+                        format!("IP {ip} is not allowed to call this endpoint"),
+                        None::<String>,
+                    ));
+                }
+                None => {
+                    return Err(jsonrpsee::types::ErrorObjectOwned::owned(
+                        jsonrpsee::types::error::INVALID_REQUEST_CODE,
+                        "Client IP not available; cannot verify against allowlist",
+                        None::<String>,
+                    ));
+                }
+            }
+        }
+
         let block_id = request.block.into();
 
         // 1. Resolve the sealed header for the target block
@@ -411,16 +427,15 @@ where
         //    to   = sender      → call the smart account
         //    data = callData    → the UserOp's execution payload
         let gas_limit: u64 = request
-            .user_op
             .call_gas_limit
-            .try_into()
+            .and_then(|g| g.try_into().ok())
             .unwrap_or(30_000_000);
 
         let tx = OpTransaction {
             base: TxEnv {
                 caller: request.entry_point,
-                kind: TxKind::Call(request.user_op.sender),
-                data: request.user_op.call_data.clone(),
+                kind: TxKind::Call(request.sender),
+                data: request.call_data.clone(),
                 value: U256::ZERO,
                 gas_limit,
                 gas_price: 0,
