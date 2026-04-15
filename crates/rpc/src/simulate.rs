@@ -692,7 +692,7 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
 /// Handles `Error(string)` (0x08c379a0) and `Panic(uint256)` (0x4e487b71).
 pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
-        return hex::encode(output.as_ref());
+        return format!("0x{}", hex::encode(output.as_ref()));
     }
 
     let selector = &output[..4];
