@@ -40,15 +40,11 @@ pub struct SimulateUnsignedUserOpRequest {
     /// The ERC-4337 EntryPoint address used as `msg.sender` in the simulation.
     pub entry_point: Address,
     /// Block to simulate against. Defaults to `latest`.
-    #[serde(default = "default_block")]
+    #[serde(default)]
     pub block: BlockNumberOrTag,
     /// Optional gas limit for the simulated call. Defaults to 30 000 000.
     #[serde(default)]
     pub call_gas_limit: Option<U256>,
-}
-
-fn default_block() -> BlockNumberOrTag {
-    BlockNumberOrTag::Latest
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
