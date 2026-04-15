@@ -18,7 +18,6 @@ use revm::{
     },
     interpreter::{CallInputs, CallOutcome},
 };
-use revm_database::BundleState;
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -369,25 +368,28 @@ where
             })?;
         let block_number = header.number();
 
-        // 2. Build the EVM environment from the header
-        let evm_env = self
+        // 2. Build the EVM environment from the header (same as eth_call)
+        let mut evm_env = self
             .evm_config
             .evm_env(header.header())
             .map_err(internal_err)?;
 
-        // 3. Get state at the target block
+        // Relax EVM rules to match eth_call semantics: the simulation should
+        // succeed regardless of gas pricing, sender balance, or block limits.
+        evm_env.cfg_env.disable_block_gas_limit = true;
+        evm_env.cfg_env.disable_eip3607 = true;
+        evm_env.cfg_env.disable_base_fee = true;
+
+        // 3. Get state at the target block (same as eth_call)
         let state_provider = self
             .client
             .state_by_block_id(block_id)
             .map_err(internal_err)?;
 
-        // 4. Build a revm State backed by the provider
+        // 4. Build a revm State backed by the provider — no bundle tracking
+        //    needed since we discard post-execution state (same as eth_call).
         let db = StateProviderDatabase::new(state_provider.as_ref());
-        let mut state = State::builder()
-            .with_database(db)
-            .with_bundle_prestate(BundleState::default())
-            .with_bundle_update()
-            .build();
+        let mut state = State::builder().with_database(db).build();
 
         // 5. Create the Optimism-aware EVM with our simulation inspector
         let (inspector, inspector_handle) = new_simulation_inspector();
@@ -875,14 +877,14 @@ fn evm_static_call<Client>(
 where
     Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
-    let evm_env = evm_config.evm_env(header).ok()?;
+    let mut evm_env = evm_config.evm_env(header).ok()?;
+    evm_env.cfg_env.disable_block_gas_limit = true;
+    evm_env.cfg_env.disable_eip3607 = true;
+    evm_env.cfg_env.disable_base_fee = true;
+
     let state_provider = client.state_by_block_id(block_id).ok()?;
     let db = StateProviderDatabase::new(state_provider.as_ref());
-    let mut state = State::builder()
-        .with_database(db)
-        .with_bundle_prestate(BundleState::default())
-        .with_bundle_update()
-        .build();
+    let mut state = State::builder().with_database(db).build();
 
     let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
 
