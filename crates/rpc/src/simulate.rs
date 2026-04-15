@@ -329,11 +329,7 @@ pub struct WorldChainSimulate<Client> {
 }
 
 impl<Client> WorldChainSimulate<Client> {
-    pub fn new(
-        client: Client,
-        evm_config: OpEvmConfig,
-        allowed_ips: Option<Vec<IpAddr>>,
-    ) -> Self {
+    pub fn new(client: Client, evm_config: OpEvmConfig, allowed_ips: Option<Vec<IpAddr>>) -> Self {
         Self {
             client,
             evm_config,
@@ -358,9 +354,7 @@ where
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
         // IP whitelist check
         if let Some(allowed) = &self.allowed_ips {
-            let caller_ip = ext
-                .get::<std::net::SocketAddr>()
-                .map(|addr| addr.ip());
+            let caller_ip = ext.get::<std::net::SocketAddr>().map(|addr| addr.ip());
 
             match caller_ip {
                 Some(ip) if allowed.contains(&ip) => {}
