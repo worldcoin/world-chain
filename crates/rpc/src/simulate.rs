@@ -554,8 +554,9 @@ pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
                 }
             }
             t if t == TRANSFER_SINGLE_TOPIC
-                // ERC-1155: TransferSingle(operator, from, to, id, value)
-                && topics.len() >= 4 && log.data.data.len() >= 64 =>
+                // ERC-1155: TransferSingle(operator indexed, from indexed, to indexed, id, value)
+                // 4 topics: [sig, operator, from, to]; data: [id, value]
+                && topics.len() == 4 && log.data.data.len() >= 64 =>
             {
                 let from = address_from_topic(topics[2]);
                 let to = address_from_topic(topics[3]);
@@ -571,8 +572,9 @@ pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
                 });
             }
             t if t == TRANSFER_BATCH_TOPIC
-                // ERC-1155: TransferBatch(operator, from, to, ids[], values[])
-                && topics.len() >= 4 =>
+                // ERC-1155: TransferBatch(operator indexed, from indexed, to indexed, ids[], values[])
+                // 4 topics: [sig, operator, from, to]; data: ABI-encoded arrays
+                && topics.len() == 4 =>
             {
                 let from = address_from_topic(topics[2]);
                 let to = address_from_topic(topics[3]);
@@ -671,7 +673,7 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
                     });
                 }
             }
-            t if t == APPROVAL_FOR_ALL_TOPIC && topics.len() >= 3 => {
+            t if t == APPROVAL_FOR_ALL_TOPIC && topics.len() == 3 => {
                 let owner = address_from_topic(topics[1]);
                 let operator = address_from_topic(topics[2]);
                 // data contains the bool `approved`, but the approval exists regardless
