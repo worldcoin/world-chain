@@ -27,8 +27,8 @@ use revm_database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
-    AssetType, decode_revert_reason, new_simulation_inspector, parse_approval_changes,
-    parse_asset_changes, selector_to_name,
+    AssetType, decode_revert_reason, new_simulation_inspector, parse_asset_changes,
+    parse_exposure_changes, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ async fn test_erc20_approval_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_approval_changes(&[log]);
+    let changes = parse_exposure_changes(&[log]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].owner, owner);
     assert_eq!(changes[0].spender, spender);
@@ -313,7 +313,7 @@ async fn test_approval_for_all_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_approval_changes(&[log]);
+    let changes = parse_exposure_changes(&[log]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].owner, owner);
     assert_eq!(changes[0].spender, operator);
@@ -335,7 +335,7 @@ async fn test_approval_for_all_log_parsing() {
     )
     .unwrap();
 
-    let revoke_changes = parse_approval_changes(&[revoke_log]);
+    let revoke_changes = parse_exposure_changes(&[revoke_log]);
     assert_eq!(revoke_changes.len(), 1);
     assert!(!revoke_changes[0].is_approved_for_all);
     assert_eq!(revoke_changes[0].raw_amount, "0");

@@ -90,7 +90,7 @@ pub struct AssetChange {
 /// An ERC-20/721/1155 token approval detected during simulation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApprovalChange {
+pub struct ExposureChange {
     pub owner: Address,
     pub spender: Address,
     pub raw_amount: String,
@@ -145,7 +145,7 @@ pub struct SimulateUnsignedUserOpResult {
     pub block_number: u64,
     pub gas_used: String,
     pub asset_changes: Vec<AssetChange>,
-    pub approval_changes: Vec<ApprovalChange>,
+    pub exposure_changes: Vec<ExposureChange>,
     pub trace: Vec<TraceEntry>,
     pub warnings: Vec<SimulationWarning>,
 }
@@ -440,7 +440,7 @@ where
 
         // 9. Parse logs into structured asset/approval changes
         let mut asset_changes = parse_asset_changes(&logs);
-        let mut approval_changes = parse_approval_changes(&logs);
+        let mut exposure_changes = parse_exposure_changes(&logs);
 
         // 10. Extract trace and native transfers from inspector
         let trace = inspector_handle.take_trace_entries();
@@ -455,7 +455,7 @@ where
             block_id,
             &self.metadata_cache,
             &mut asset_changes,
-            &mut approval_changes,
+            &mut exposure_changes,
         );
 
         Ok(SimulateUnsignedUserOpResult {
@@ -464,7 +464,7 @@ where
             block_number,
             gas_used: format!("{gas_used:#x}"),
             asset_changes,
-            approval_changes,
+            exposure_changes,
             trace,
             warnings: vec![],
         })
@@ -620,7 +620,7 @@ fn decode_batch_transfer_data(data: &[u8]) -> Option<Vec<(U256, U256)>> {
 // Log parsing — approval changes
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalChange> {
+pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureChange> {
     let mut changes = Vec::new();
 
     for log in logs {
@@ -636,7 +636,7 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
                     let owner = address_from_topic(topics[1]);
                     let spender = address_from_topic(topics[2]);
                     let amount = U256::from_be_slice(&log.data.data[..32]);
-                    changes.push(ApprovalChange {
+                    changes.push(ExposureChange {
                         owner,
                         spender,
                         raw_amount: amount.to_string(),
@@ -649,7 +649,7 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
                     // The spec focuses on Approval events, so include it.
                     let owner = address_from_topic(topics[1]);
                     let spender = address_from_topic(topics[2]);
-                    changes.push(ApprovalChange {
+                    changes.push(ExposureChange {
                         owner,
                         spender,
                         raw_amount: "1".to_string(),
@@ -663,7 +663,7 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
                 let operator = address_from_topic(topics[2]);
                 // ABI: bool approved is encoded as 32 bytes, last byte != 0 means true
                 let approved = log.data.data.last().is_some_and(|&b| b != 0);
-                changes.push(ApprovalChange {
+                changes.push(ExposureChange {
                     owner,
                     spender: operator,
                     raw_amount: if approved {
@@ -934,7 +934,7 @@ fn resolve_all_metadata<Client>(
     block_id: alloy_rpc_types::BlockId,
     cache: &MetadataCache,
     asset_changes: &mut [AssetChange],
-    approval_changes: &mut [ApprovalChange],
+    exposure_changes: &mut [ExposureChange],
 ) where
     Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
@@ -954,7 +954,7 @@ fn resolve_all_metadata<Client>(
                 to_resolve.push((addr, change.asset.asset_type));
             }
         }
-        for change in approval_changes.iter() {
+        for change in exposure_changes.iter() {
             if let Some(addr) = change.asset.address
                 && change.asset.symbol.is_empty()
                 && !cache_guard.contains_key(&addr)
@@ -984,7 +984,7 @@ fn resolve_all_metadata<Client>(
             change.asset = info.clone();
         }
     }
-    for change in approval_changes.iter_mut() {
+    for change in exposure_changes.iter_mut() {
         if let Some(addr) = change.asset.address
             && let Some(info) = cache_guard.get(&addr)
         {
