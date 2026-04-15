@@ -103,10 +103,12 @@ pub struct ApprovalChange {
     pub asset: AssetInfo,
 }
 
-/// A top-level internal call made by the smart account.
+/// A call made during execution, forming a full stack trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEntry {
+    pub depth: usize,
+    pub from: Address,
     pub to: Address,
     pub method: Option<String>,
     pub selector: String,
@@ -160,7 +162,7 @@ pub struct SimulateUnsignedUserOpResult {
 /// Shared state captured by the simulation inspector.
 #[derive(Debug, Default)]
 struct InspectorState {
-    /// Top-level calls (depth == 1: calls FROM the smart account to external contracts).
+    /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
     traces: Vec<RawTrace>,
     /// Native ETH transfers (calls with value > 0 at any depth).
     native_transfers: Vec<NativeTransfer>,
@@ -170,6 +172,8 @@ struct InspectorState {
 
 #[derive(Debug)]
 struct RawTrace {
+    depth: usize,
+    from: Address,
     to: Address,
     selector: [u8; 4],
     value: U256,
@@ -206,6 +210,8 @@ impl InspectorHandle {
             .map(|t| {
                 let sel = t.selector;
                 TraceEntry {
+                    depth: t.depth,
+                    from: t.from,
                     to: t.to,
                     method: selector_to_name(sel).map(str::to_string),
                     selector: format!("0x{}", hex::encode(sel)),
@@ -252,24 +258,24 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
     fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         let mut state = self.state.lock().unwrap();
 
-        // Depth 0 = our entry call (entryPoint → sender)
-        // Depth 1 = calls FROM the smart account to external contracts
-        if state.call_depth == 1 {
-            let selector = match &inputs.input {
-                revm::interpreter::CallInput::Bytes(b) if b.len() >= 4 => {
-                    let mut sel = [0u8; 4];
-                    sel.copy_from_slice(&b[..4]);
-                    sel
-                }
-                _ => [0u8; 4],
-            };
-            let value = inputs.value.transfer().unwrap_or(U256::ZERO);
-            state.traces.push(RawTrace {
-                to: inputs.target_address,
-                selector,
-                value,
-            });
-        }
+        // Record every call at every depth for a full stack trace
+        let selector = match &inputs.input {
+            revm::interpreter::CallInput::Bytes(b) if b.len() >= 4 => {
+                let mut sel = [0u8; 4];
+                sel.copy_from_slice(&b[..4]);
+                sel
+            }
+            _ => [0u8; 4],
+        };
+        let value = inputs.value.transfer().unwrap_or(U256::ZERO);
+        let depth = state.call_depth;
+        state.traces.push(RawTrace {
+            depth,
+            from: inputs.caller,
+            to: inputs.target_address,
+            selector,
+            value,
+        });
 
         // Track native ETH transfers at any depth
         if let Some(value) = inputs.value.transfer()
