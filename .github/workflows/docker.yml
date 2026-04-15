@@ -55,3 +55,6 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly
+            type=sha

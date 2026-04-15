@@ -132,7 +132,7 @@ where
 
             Ok(payload_service_handle)
         } else {
-            // flahsblocks disabled
+            // flashblocks disabled
             let payload_job_config = BasicPayloadJobGeneratorConfig::default()
                 .interval(conf.interval)
                 .deadline(conf.deadline)

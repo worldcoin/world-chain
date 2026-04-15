@@ -8,6 +8,9 @@ inputs:
   image_name:
     description: Full image name path (for example org/repo).
     required: true
+  tags:
+    description: Tag rules for docker/metadata-action (newline-separated).
+    required: true
 
 runs:
   using: composite
@@ -34,11 +37,7 @@ runs:
       uses: docker/metadata-action@v5
       with:
         images: ${{ inputs.registry }}/${{ inputs.image_name }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=tag
-          type=sha
-          type=raw,value=latest
+        tags: ${{ inputs.tags }}
 
     - name: Create manifest list and push
       shell: bash
