@@ -676,12 +676,17 @@ pub fn parse_approval_changes(logs: &[alloy_primitives::Log]) -> Vec<ApprovalCha
             t if t == APPROVAL_FOR_ALL_TOPIC && topics.len() == 3 => {
                 let owner = address_from_topic(topics[1]);
                 let operator = address_from_topic(topics[2]);
-                // data contains the bool `approved`, but the approval exists regardless
+                // ABI: bool approved is encoded as 32 bytes, last byte != 0 means true
+                let approved = log.data.data.last().is_some_and(|&b| b != 0);
                 changes.push(ApprovalChange {
                     owner,
                     spender: operator,
-                    raw_amount: U256::MAX.to_string(),
-                    is_approved_for_all: true,
+                    raw_amount: if approved {
+                        U256::MAX.to_string()
+                    } else {
+                        "0".to_string()
+                    },
+                    is_approved_for_all: approved,
                     asset: placeholder_asset(log.address, AssetType::Erc721),
                 });
             }

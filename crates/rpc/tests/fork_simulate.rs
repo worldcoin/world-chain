@@ -318,6 +318,27 @@ async fn test_approval_for_all_log_parsing() {
     assert_eq!(changes[0].owner, owner);
     assert_eq!(changes[0].spender, operator);
     assert!(changes[0].is_approved_for_all);
+    assert_eq!(changes[0].raw_amount, U256::MAX.to_string());
+
+    // Revocation: approved = false
+    let revoke_data = vec![0u8; 32]; // all zeros = false
+    let revoke_log = alloy_primitives::Log::new(
+        address!("0000000000000000000000000000000000000721"),
+        vec![
+            alloy_primitives::b256!(
+                "17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31"
+            ),
+            alloy_primitives::B256::left_padding_from(owner.as_slice()),
+            alloy_primitives::B256::left_padding_from(operator.as_slice()),
+        ],
+        revoke_data.into(),
+    )
+    .unwrap();
+
+    let revoke_changes = parse_approval_changes(&[revoke_log]);
+    assert_eq!(revoke_changes.len(), 1);
+    assert!(!revoke_changes[0].is_approved_for_all);
+    assert_eq!(revoke_changes[0].raw_amount, "0");
 }
 
 /// Native ETH transfer is captured by the inspector.
