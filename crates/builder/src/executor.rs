@@ -28,7 +28,7 @@ use std::{sync::Arc, time::Instant};
 
 use crate::{
     BlockBuilderExt,
-    metrics::{PayloadBuildAttemptMetrics, PayloadBuildStage},
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
     state_db::StateDB,
 };
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
@@ -157,7 +157,7 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        mut metrics: Option<&mut PayloadBuildAttemptMetrics>,
+        mut metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -165,12 +165,7 @@ where
         // merge all transitions into bundle state
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
-        if let Some(metrics) = metrics.as_mut() {
-            metrics.record_stage_duration(
-                PayloadBuildStage::MergeTransitions,
-                merge_started.elapsed(),
-            );
-        }
+        metrics.record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
         // Flatten reverts into a single transition:
         // - per account: keep earliest `previous_status`
@@ -184,14 +179,12 @@ where
         db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(db.bundle_state());
         let state_root_started = Instant::now();
-        let state_root_result = state.state_root_with_updates(hashed_state.clone());
-        if let Some(metrics) = metrics.as_mut() {
-            metrics
-                .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
-        }
-        let (state_root, trie_updates) = state_root_result.map_err(BlockExecutionError::other)?;
+        let hashed_state = state.hashed_post_state(db.bundle_state());
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+        metrics.record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
         let (transactions, senders) = self
             .inner
@@ -201,7 +194,7 @@ where
             .unzip();
 
         let block_assembly_started = Instant::now();
-        let block_result = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<R>,
@@ -214,14 +207,11 @@ where
             db.bundle_state(),
             &state,
             state_root,
-        ));
-        if let Some(metrics) = metrics {
-            metrics.record_stage_duration(
-                PayloadBuildStage::BlockAssembly,
-                block_assembly_started.elapsed(),
-            );
-        }
-        let block = block_result?;
+        ))?;
+        metrics.record_stage_duration(
+            PayloadBuildStage::BlockAssembly,
+            block_assembly_started.elapsed(),
+        );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

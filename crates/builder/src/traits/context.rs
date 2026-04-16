@@ -1,5 +1,5 @@
 use crate::{
-    metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
+    payload_builder_metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
     traits::context_builder::PayloadBuilderCtxBuilder, utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;

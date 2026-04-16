@@ -67,6 +67,7 @@ either.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 serde.workspace = true
+auto_impl.workspace = true
 
 [dev-dependencies]
 world-chain-test-utils.workspace = true

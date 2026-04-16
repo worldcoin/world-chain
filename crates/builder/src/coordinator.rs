@@ -21,7 +21,10 @@ use reth_provider::{
     BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
     StateProviderFactory,
 };
-use std::sync::{Arc, LazyLock};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Instant,
+};
 use tokio::{
     sync::{
         Semaphore,
@@ -31,7 +34,10 @@ use tokio::{
 };
 use tracing::{error, trace};
 
-use crate::validator::FlashblocksBlockValidator;
+use crate::{
+    flashblock_validation_metrics::FlashblockValidationMetrics,
+    validator::FlashblocksBlockValidator,
+};
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
@@ -208,13 +214,12 @@ impl FlashblocksExecutionCoordinator {
         &self,
         event: Events<OpEngineTypes>,
         payload_events: Option<broadcast::Sender<Events<OpEngineTypes>>>,
-    ) -> eyre::Result<()> {
+    ) {
         if let Some(payload_events) = payload_events
             && let Err(e) = payload_events.send(event)
         {
             error!("error broadcasting payload: {e:#?}");
         }
-        Ok(())
     }
 }
 
@@ -244,6 +249,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
     futures::pin_mut!(stream);
     let mut in_flight = JoinSet::new();
     let mut stream_closed = false;
+    let flashblock_validation_metrics = Arc::new(FlashblockValidationMetrics::default());
 
     loop {
         tokio::select! {
@@ -272,6 +278,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                         let chain_spec = chain_spec.clone();
                         let pending_block = pending_block.clone();
 
+                        let flashblock_validation_metrics_clone = flashblock_validation_metrics.clone();
                         in_flight.spawn_blocking(move || {
                             let _permit = permit;
 
@@ -282,6 +289,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                                 chain_spec,
                                 flashblock,
                                 pending_block,
+                                flashblock_validation_metrics_clone
                             ) {
                                 error!("error processing flashblock: {e:#?}");
                             }
@@ -314,6 +322,7 @@ pub fn process_flashblock<Provider>(
     chain_spec: Arc<OpChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
 ) -> eyre::Result<()>
 where
     Provider: StateProviderFactory
@@ -322,6 +331,7 @@ where
         + Clone
         + 'static,
 {
+    let process_flashblock_started = Instant::now();
     let flashblock = Flashblock { flashblock };
 
     // --- Short read: check if already processed, extract base info ---
@@ -332,6 +342,7 @@ where
             && latest_payload.0.id() == flashblock.flashblock.payload_id
             && latest_payload.1 >= flashblock.flashblock.index
         {
+            flashblock_validation_metrics.increment_already_processed_flashblocks();
             pending_block.send_replace(
                 latest_payload
                     .0
@@ -341,7 +352,13 @@ where
             return Ok(());
         }
 
-        let is_new = inner.flashblocks.is_new_payload(&flashblock)?;
+        let is_new = match inner.flashblocks.is_new_payload(&flashblock) {
+            Ok(is_new) => is_new,
+            Err(err) => {
+                flashblock_validation_metrics.increment_validation_errors();
+                return Err(err);
+            }
+        };
         let base = if is_new {
             flashblock.base().unwrap().clone()
         } else {
@@ -366,10 +383,21 @@ where
 
     // This should never fail — the canon-aware event stream guarantees the
     // parent header is available by the time we process a flashblock.
-    let sealed_header = provider
-        .sealed_header_by_hash(base.parent_hash)
-        .inspect_err(|e| error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash))?
-        .ok_or_else(|| eyre!("sealed header not found for hash {}", base.parent_hash))?;
+    let sealed_header = match provider.sealed_header_by_hash(base.parent_hash) {
+        Ok(Some(header)) => header,
+        Ok(None) => {
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(eyre!(
+                "sealed header not found for hash {}",
+                base.parent_hash
+            ));
+        }
+        Err(e) => {
+            error!("failed to fetch sealed header {}: {e:#?}", base.parent_hash);
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(e.into());
+        }
+    };
 
     let execution_context = OpBlockExecutionCtx {
         parent_hash: base.parent_hash,
@@ -396,6 +424,7 @@ where
         execution_context: execution_context.clone(),
         evm_env: evm_env.clone(),
         header: sealed_header.clone(),
+        flashblock_validation_metrics: flashblock_validation_metrics.clone(),
     };
 
     let next_payload = block_validator.validate_flashblock_with_state(
@@ -409,14 +438,19 @@ where
     {
         let mut inner = coordinator.inner.write();
         inner.latest_payload = Some((next_payload.clone(), index));
-        inner.flashblocks.push(flashblock)?;
+        if let Err(err) = inner.flashblocks.push(flashblock) {
+            flashblock_validation_metrics.increment_validation_errors();
+            return Err(err);
+        }
     }
 
+    let into_executed_block_started = Instant::now();
     pending_block.send_replace(
         next_payload
             .executed_block()
             .map(|p| p.into_executed_payload()),
     );
+    flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 
     trace!(
         target: "flashblocks::state_executor",
@@ -427,7 +461,9 @@ where
     );
 
     let payload_events = coordinator.inner.read().payload_events.clone();
-    coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events)?;
+    coordinator.broadcast_payload(Events::BuiltPayload(next_payload), payload_events);
 
+    flashblock_validation_metrics
+        .record_full_process_flashblock(process_flashblock_started.elapsed());
     Ok(())
 }

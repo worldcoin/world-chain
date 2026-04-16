@@ -1,10 +1,12 @@
-use crate::protocol::handler::{
-    FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
+use crate::protocol::{
+    handler::{
+        FlashblocksP2PNetworkHandle, FlashblocksP2PProtocol, MAX_FLASHBLOCK_INDEX, PublishingStatus,
+    },
+    metrics::FlashblocksPeerMetrics,
 };
 use alloy_primitives::bytes::BytesMut;
 use chrono::Utc;
 use futures::{Stream, StreamExt};
-use metrics::gauge;
 use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnection};
 use reth_network::types::ReputationChangeKind;
 use world_chain_primitives::{
@@ -23,7 +25,6 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{info, trace};
 
 /// Grace period for authorization timestamp checks to reduce false positives from
 /// minor skew/races between peers.
@@ -48,6 +49,9 @@ pub enum ReceiveStatus {
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
 pub struct FlashblocksPeerState {
+    /// Metric handles bound to this peer's current label set.
+    /// Peers begin as `untrusted` until trust classification resolves.
+    pub metrics: FlashblocksPeerMetrics,
     /// Whether this peer is marked as trusted or not.
     pub trusted: bool,
     /// Whether we are currently sending flashblocks to this peer.
@@ -66,8 +70,9 @@ pub struct FlashblocksPeerState {
 }
 
 impl FlashblocksPeerState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(peer_id: PeerId) -> Self {
         Self {
+            metrics: FlashblocksPeerMetrics::for_peer(peer_id, false),
             trusted: false,
             send_enabled: false,
             receive_status: ReceiveStatus::NotReceiving,
@@ -78,12 +83,13 @@ impl FlashblocksPeerState {
         }
     }
 
-    pub(crate) fn peer_id_labels(&self, peer_id: PeerId) -> Vec<(&'static str, String)> {
-        if self.trusted {
-            vec![("peer_id", format!("{:#x}", peer_id))]
-        } else {
-            vec![("peer_id", "untrusted".to_string())]
+    pub(crate) fn set_trusted(&mut self, peer_id: PeerId, trusted: bool) {
+        if self.trusted == trusted {
+            return;
         }
+
+        self.trusted = trusted;
+        self.metrics = FlashblocksPeerMetrics::for_peer(peer_id, trusted);
     }
 }
 
@@ -124,8 +130,6 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             .handle
             .on_peer_connected(protocol.network.clone(), peer_id, outbound_tx);
 
-        gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).increment(1);
-
         Self {
             protocol,
             conn,
@@ -137,15 +141,13 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
 impl<N> Drop for FlashblocksConnection<N> {
     fn drop(&mut self) {
-        info!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             peer_id = %self.peer_id,
             "dropping flashblocks connection"
         );
 
         self.protocol.handle.on_peer_disconnected(self.peer_id);
-
-        gauge!("flashblocks.peers", "capability" => FlashblocksP2PProtocol::<N>::capability().to_string()).decrement(1);
     }
 }
 
@@ -157,7 +159,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
         loop {
             if let Poll::Ready(Some(bytes)) = this.outbound_rx.poll_recv(cx) {
-                trace!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     peer_id = %this.peer_id,
                     "Sending serialized flashblocks protocol message to peer"
@@ -228,7 +230,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RequestFlashblocks => {
-                    trace!(
+                    tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
                         "received RequestFlashblocks from peer",
@@ -245,7 +247,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::AcceptFlashblocks => {
-                    trace!(
+                    tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
                         "received AcceptFlashblocks from peer",
@@ -262,7 +264,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::RejectFlashblocks => {
-                    trace!(
+                    tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
                         "received RejectFlashblocks from peer",
@@ -279,7 +281,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                     }
                 }
                 FlashblocksP2PMsg::CancelFlashblocks => {
-                    trace!(
+                    tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
                         "received CancelFlashblocks from peer",
@@ -364,10 +366,8 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
             return;
         };
 
-        let peer_id_labels = peer_state.peer_id_labels(self.peer_id);
-
-        metrics::counter!("flashblocks.bandwidth_inbound", &peer_id_labels)
-            .increment(buf_len as u64);
+        let peer_metrics = peer_state.metrics.clone();
+        peer_metrics.record_inbound_bandwidth_bytes(buf_len);
 
         match &peer_state.receive_status {
             ReceiveStatus::Requesting => {
@@ -448,15 +448,15 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 .expect("time went backwards");
             let latency = now - flashblock_timestamp;
             let latency_secs = latency as f64 / 1_000_000_000.0;
-            metrics::histogram!("flashblocks.latency", &peer_id_labels).record(latency_secs);
+            peer_metrics.record_flashblock_latency_seconds(latency_secs);
             if let Some(peer_state) = p2p_state.connection_state_mut(&self.peer_id)
                 && let ReceiveStatus::Receiving { score } = &mut peer_state.receive_status
             {
                 score.record(latency);
-                if let Some(value) = score.value()
-                    && peer_state.trusted
+                if peer_state.trusted
+                    && let Some(value) = score.value()
                 {
-                    metrics::gauge!("flashblocks.peer_score", &peer_id_labels).set(value as f64);
+                    peer_metrics.set_score(value);
                 }
             }
         }
@@ -508,7 +508,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 PublishingStatus::Publishing {
                     authorization: our_authorization,
                 } => {
-                    tracing::info!(
+                    tracing::debug!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,
                         "Received StartPublish over p2p, stopping publishing flashblocks"
@@ -606,7 +606,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                     ..
                 } => {
                     // We are currently waiting to build, and someone else is requesting to stop building.
-                    tracing::info!(
+                    tracing::debug!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,
                         "Received StopPublish over p2p while waiting to publish",
@@ -627,7 +627,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
 
                     if active_publishers.is_empty() {
                         // If there are no active publishers left, we should stop waiting to publish
-                        tracing::info!(
+                        tracing::debug!(
                             target: "flashblocks::p2p",
                             peer_id = %self.peer_id,
                             "starting to publish"
@@ -636,7 +636,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                             authorization: *authorization,
                         };
                     } else {
-                        tracing::info!(
+                        tracing::debug!(
                             target: "flashblocks::p2p",
                             peer_id = %self.peer_id,
                             "still waiting on active publishers",

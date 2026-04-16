@@ -2,13 +2,13 @@ use crate::protocol::{
     connection::{FlashblocksConnection, FlashblocksPeerState, ReceiveStatus, Score},
     error::FlashblocksP2PError,
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream, world_chain_events_stream},
+    metrics::FlashblocksP2PMetrics,
 };
 use alloy_rlp::BytesMut;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use futures::{Stream, StreamExt, stream};
-use metrics::histogram;
 use parking_lot::Mutex;
 use rand::Rng;
 use reth_eth_wire::Capability;
@@ -26,7 +26,6 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, error, info, trace, warn};
 use world_chain_cli::cli::FanoutArgs;
 use world_chain_primitives::{
     p2p::{
@@ -218,7 +217,7 @@ impl FlashblocksP2PState {
                     && !evicted.send_peers.contains(peer_id)
                     && let ReceiveStatus::Receiving { score } = &mut connection.receive_status
                 {
-                    trace!(
+                    tracing::trace!(
                         target: "flashblocks::p2p",
                         %peer_id,
                         payload_id = %evicted.payload_id,
@@ -226,12 +225,7 @@ impl FlashblocksP2PState {
                         "scoring peer for missed flashblock",
                     );
                     score.record(MISSED_FLASHBLOCK_PENALTY_NS);
-
-                    metrics::counter!(
-                        "flashblocks.missed_flashblocks",
-                        &connection.peer_id_labels(*peer_id)
-                    )
-                    .increment(1);
+                    connection.metrics.increment_missed_flashblocks();
                 }
             }
         }
@@ -297,11 +291,7 @@ impl FlashblocksP2PState {
             if let Some(tx) = &conn.outbound_tx
                 && tx.try_send(bytes.clone()).is_ok()
             {
-                metrics::counter!(
-                    "flashblocks.bandwidth_outbound",
-                    &conn.peer_id_labels(*peer_id)
-                )
-                .increment(bytes.len() as u64);
+                conn.metrics.record_outbound_bandwidth_bytes(bytes.len());
             }
         }
     }
@@ -375,7 +365,7 @@ impl FlashblocksP2PState {
         let timestamp = Utc::now().timestamp() as u64;
         peer_state.receive_status = ReceiveStatus::Requesting;
         peer_state.receive_status_timestamp = timestamp;
-        debug!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             %peer_id,
             "sending RequestFlashblocks to peer",
@@ -425,7 +415,7 @@ impl FlashblocksP2PState {
             if matches!(peer_state.receive_status, ReceiveStatus::Requesting)
                 && peer_state.receive_status_timestamp + RECEIVE_REQUEST_TIMEOUT_SECS <= now
             {
-                debug!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     "receive request timed out, clearing peer",
@@ -480,7 +470,7 @@ impl FlashblocksP2PState {
         let rand = rand::rng().random_range(0..candidates.len());
         let candidate = candidates[rand].0;
 
-        debug!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             evicted_peer = %evict,
             new_peer = %candidate,
@@ -499,7 +489,7 @@ impl FlashblocksP2PState {
     /// Returns `Err` if the peer should receive a reputation penalty.
     fn handle_request(&mut self, ctx: &FlashblocksP2PCtx, peer_id: PeerId) -> Result<(), ()> {
         if self.check_control_rate_limit(&peer_id) {
-            warn!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 "rejecting RequestFlashblocks: rate limit exceeded",
@@ -512,7 +502,7 @@ impl FlashblocksP2PState {
         };
 
         if peer_state.send_enabled {
-            warn!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 "rejecting RequestFlashblocks: already sending to peer",
@@ -523,7 +513,7 @@ impl FlashblocksP2PState {
         let send_count = self.peers.values().filter(|s| s.send_enabled).count();
 
         if !peer_is_trusted && send_count >= ctx.fanout_args.max_send_peers {
-            debug!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 send_count,
@@ -534,7 +524,7 @@ impl FlashblocksP2PState {
             return Ok(());
         }
 
-        info!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             %peer_id,
             trusted = peer_is_trusted,
@@ -559,7 +549,7 @@ impl FlashblocksP2PState {
 
         match peer_state.receive_status {
             ReceiveStatus::Requesting => {
-                info!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     "peer accepted our receive request, now receiving flashblocks",
@@ -571,7 +561,7 @@ impl FlashblocksP2PState {
             }
             // Unsolicited accept — we never asked this peer.
             _ => {
-                warn!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     status = ?peer_state.receive_status,
@@ -594,7 +584,7 @@ impl FlashblocksP2PState {
 
         match peer_state.receive_status {
             ReceiveStatus::Requesting => {
-                info!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     "peer rejected our receive request, will try another peer",
@@ -605,7 +595,7 @@ impl FlashblocksP2PState {
             }
             // Unsolicited reject — we never asked this peer.
             _ => {
-                warn!(
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     status = ?peer_state.receive_status,
@@ -627,7 +617,7 @@ impl FlashblocksP2PState {
         };
 
         if !peer_state.send_enabled {
-            warn!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 "received CancelFlashblocks from peer we are not sending to",
@@ -635,7 +625,7 @@ impl FlashblocksP2PState {
             return Err(());
         }
 
-        info!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             %peer_id,
             "peer cancelled flashblocks, removing from send set",
@@ -656,6 +646,8 @@ pub struct FlashblocksP2PCtx {
     pub authorizer_vk: VerifyingKey,
     /// Flashblocks configuration including signing keys and fanout args.
     pub fanout_args: FanoutArgs,
+    /// Aggregate metrics for the flashblocks P2P protocol.
+    pub metrics: FlashblocksP2PMetrics,
     /// Broadcast sender for verified and strictly ordered flashblock payloads.
     /// Used by RPC overlays and other consumers of flashblock data.
     pub flashblock_tx: broadcast::Sender<FlashblocksPayloadV1>,
@@ -688,9 +680,11 @@ impl FlashblocksHandle {
     ) -> Self {
         let flashblock_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
         let state = Arc::new(Mutex::new(FlashblocksP2PState::default()));
+        let metrics = FlashblocksP2PMetrics::default();
         let ctx = FlashblocksP2PCtx {
             authorizer_vk,
             fanout_args,
+            metrics,
             flashblock_tx,
         };
         let handle = Self {
@@ -732,16 +726,20 @@ impl FlashblocksHandle {
 
         {
             let mut state = self.state.lock();
-            let mut conn_state = FlashblocksPeerState::new();
+            let mut conn_state = FlashblocksPeerState::new(peer_id);
             conn_state.outbound_tx = Some(outbound_tx);
-            state.peers.insert(peer_id, conn_state);
+            let replaced = state.peers.insert(peer_id, conn_state);
 
-            info!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 total_peers = state.peers.len(),
                 "flashblocks peer connected",
             );
+
+            if replaced.is_none() {
+                self.ctx.metrics.increment_connected_peers();
+            }
 
             state.maybe_request_receive_peers(&self.ctx);
         }
@@ -755,11 +753,13 @@ impl FlashblocksHandle {
             for attempt in 1..=MAX_RETRIES {
                 match network.get_peer_by_id(peer_id).await {
                     Ok(Some(peer_info)) => {
-                        trusted = peer_info.kind.is_trusted();
+                        // we consider trusted both trusted peers inserted in the startup command
+                        // and peers inserted through the `admin_addTrustedPeer` JSON RPC
+                        trusted = peer_info.kind.is_trusted() || peer_info.kind.is_static();
                         break;
                     }
                     Ok(None) if attempt < MAX_RETRIES => {
-                        debug!(
+                        tracing::trace!(
                             target: "flashblocks::p2p",
                             %peer_id,
                             attempt,
@@ -768,7 +768,7 @@ impl FlashblocksHandle {
                         tokio::time::sleep(RETRY_DELAY).await;
                     }
                     Ok(None) => {
-                        warn!(
+                        tracing::trace!(
                             target: "flashblocks::p2p",
                             %peer_id,
                             "peer info not found after {MAX_RETRIES} attempts; defaulting to untrusted",
@@ -776,7 +776,7 @@ impl FlashblocksHandle {
                         return;
                     }
                     Err(error) if attempt < MAX_RETRIES => {
-                        warn!(
+                        tracing::trace!(
                             target: "flashblocks::p2p",
                             %peer_id,
                             %error,
@@ -786,7 +786,7 @@ impl FlashblocksHandle {
                         tokio::time::sleep(RETRY_DELAY).await;
                     }
                     Err(error) => {
-                        error!(
+                        tracing::trace!(
                             target: "flashblocks::p2p",
                             %peer_id,
                             %error,
@@ -799,8 +799,8 @@ impl FlashblocksHandle {
 
             let mut state = handle.state.lock();
             if let Some(conn) = state.connection_state_mut(&peer_id) {
-                conn.trusted = trusted;
-                info!(
+                conn.set_trusted(peer_id, trusted);
+                tracing::trace!(
                     target: "flashblocks::p2p",
                     %peer_id,
                     trusted,
@@ -815,7 +815,7 @@ impl FlashblocksHandle {
         let removed = state.peers.remove(&peer_id);
 
         if let Some(conn_state) = &removed {
-            info!(
+            tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
                 was_sending = conn_state.send_enabled,
@@ -823,6 +823,7 @@ impl FlashblocksHandle {
                 remaining_peers = state.peers.len(),
                 "flashblocks peer disconnected",
             );
+            self.ctx.metrics.decrement_connected_peers();
         }
 
         state.maybe_request_receive_peers(&self.ctx);
@@ -909,6 +910,7 @@ impl FlashblocksHandle {
                 .map(|fb| ChainEvent::Pending(Arc::new(fb)))
                 .boxed(),
             canon,
+            self.ctx.metrics.clone(),
             hook,
         )
     }
@@ -1259,7 +1261,7 @@ impl FlashblocksHandle {
                     match receiver.recv().await {
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!(
+                            tracing::warn!(
                                 target: "flashblocks::p2p",
                                 skipped,
                                 "flashblock stream lagged; resyncing from protocol state"
@@ -1376,10 +1378,11 @@ impl FlashblocksP2PCtx {
                 );
             }
 
-            metrics::histogram!("flashblocks.size").record(len as f64);
-            metrics::histogram!("flashblocks.gas_used").record(payload.diff.gas_used as f64);
-            metrics::histogram!("flashblocks.tx_count")
-                .record(payload.diff.transactions.len() as f64);
+            self.metrics.record_flashblock_size_bytes(len);
+            self.metrics
+                .record_flashblock_gas_used(payload.diff.gas_used);
+            self.metrics
+                .record_flashblock_tx_count(payload.diff.transactions.len());
 
             state.send_flashblock_to_send_set(payload.payload_id, payload.index, &bytes);
 
@@ -1390,7 +1393,7 @@ impl FlashblocksP2PCtx {
             // Broadcast any flashblocks in the cache that are in order
             while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
                 // Publish the flashblock
-                debug!(
+                tracing::debug!(
                     target: "flashblocks::p2p",
                     payload_id = %flashblock_event.payload_id,
                     flashblock_index = %state.flashblock_index,
@@ -1401,7 +1404,8 @@ impl FlashblocksP2PCtx {
                 // Don't measure the interval at the block boundary
                 if state.flashblock_index != 0 {
                     let interval = now - state.flashblock_timestamp;
-                    histogram!("flashblocks.interval").record(interval as f64 / 1_000_000_000.0);
+                    self.metrics
+                        .record_flashblock_interval_seconds(interval as f64 / 1_000_000_000.0);
                 }
 
                 // Update the index and timestamp
@@ -1452,7 +1456,7 @@ impl<N: FlashblocksP2PNetworkHandle> ConnectionHandler for FlashblocksP2PProtoco
     ) -> Self::Connection {
         let capability = Self::capability();
 
-        info!(
+        tracing::trace!(
             target: "flashblocks::p2p",
             %peer_id,
             %direction,
@@ -1600,13 +1604,15 @@ mod tests {
         FlashblocksP2PCtx {
             authorizer_vk: authorizer.verifying_key(),
             fanout_args,
+            metrics: FlashblocksP2PMetrics::default(),
             flashblock_tx: broadcast::Sender::new(16),
         }
     }
 
     fn test_peer_state(trusted: bool) -> FlashblocksPeerState {
-        let mut state = FlashblocksPeerState::new();
-        state.trusted = trusted;
+        let peer_id = PeerId::random();
+        let mut state = FlashblocksPeerState::new(peer_id);
+        state.set_trusted(peer_id, trusted);
         state
     }
 
@@ -1615,8 +1621,9 @@ mod tests {
         trusted: bool,
     ) -> (FlashblocksPeerState, mpsc::Receiver<BytesMut>) {
         let (tx, rx) = mpsc::channel(100);
-        let mut state = FlashblocksPeerState::new();
-        state.trusted = trusted;
+        let peer_id = PeerId::random();
+        let mut state = FlashblocksPeerState::new(peer_id);
+        state.set_trusted(peer_id, trusted);
         state.outbound_tx = Some(tx);
         (state, rx)
     }

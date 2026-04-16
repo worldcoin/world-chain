@@ -190,16 +190,24 @@ pub mod executor;
 /// Block building utilities
 pub mod utils;
 
-/// Metric name constants.
+/// General metrics traits.
 pub mod metrics;
 
+/// Payload builder metrics.
+pub mod payload_builder_metrics;
+
+/// Flashblock validation metrics.
+pub mod flashblock_validation_metrics;
+
 pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
+
+use crate::metrics::FlashblockExecutionMetrics;
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].
     fn finish_with_bundle(
         self,
         state_provider: impl StateProvider,
-        metrics: Option<&mut metrics::PayloadBuildAttemptMetrics>,
+        metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }

@@ -21,7 +21,8 @@ pub struct BuilderArgs {
     /// Private key for the builder
     /// used to update PBH nullifiers.
     #[arg(
-        long = "builder.private_key",
+        long = "builder.private-key",
+        alias = "builder.private_key",
         env = "BUILDER_PRIVATE_KEY",
         requires = "builder.enabled",
         default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -55,7 +56,8 @@ pub struct FlashblocksArgs {
     /// Authorizer verifying key
     /// used to verify flashblock authenticity.
     #[arg(
-        long = "flashblocks.authorizer_vk",
+        long = "flashblocks.authorizer-vk",
+        alias = "flashblocks.authorizer_vk",
         env = "FLASHBLOCKS_AUTHORIZER_VK",
         group = "authorizer",
         value_parser = parse_vk,
@@ -67,6 +69,7 @@ pub struct FlashblocksArgs {
     /// used to sign authorized flashblocks payloads.
     #[arg(
         long = "flashblocks.builder_sk",
+        alias = "flashblocks.builder-sk",
         env = "FLASHBLOCKS_BUILDER_SK",
         required = false,
         value_parser = parse_sk,
@@ -75,7 +78,8 @@ pub struct FlashblocksArgs {
 
     /// Override incoming authorizations from rollup boost.
     #[arg(
-        long = "flashblocks.override_authorizer_sk",
+        long = "flashblocks.override-authorizer-sk",
+        alias = "flashblocks.override_authorizer_sk",
         env = "FLASHBLOCKS_OVERRIDE_AUTHORIZER_SK",
         group = "authorizer",
         requires = "builder_sk",
@@ -89,7 +93,8 @@ pub struct FlashblocksArgs {
     ///
     /// This should only be used for testing and development purposes.
     #[arg(
-        long = "flashblocks.force_publish",
+        long = "flashblocks.force-publish",
+        alias = "flashblocks.force_publish",
         env = "FLASHBLOCKS_FORCE_PUBLISH",
         requires = "override_authorizer_sk",
         required = false
@@ -111,7 +116,8 @@ pub struct FlashblocksArgs {
     ///
     /// In milliseconds.
     #[arg(
-        long = "flashblocks.recommit_interval",
+        long = "flashblocks.recommit-interval",
+        alias = "flashblocks.recommit_interval",
         env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
         default_value_t = 200,
         requires = "builder_sk"
@@ -124,7 +130,8 @@ pub struct FlashblocksArgs {
     /// and will use access lists for parallel transaction execution when verifying
     /// flashblocks payloads.
     #[arg(
-        long = "flashblocks.access_list",
+        long = "flashblocks.access-list",
+        alias = "flashblocks.access_list",
         env = "FLASHBLOCKS_ACCESS_LIST",
         default_value_t = false
     )]
@@ -182,14 +189,14 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.override_authorizer_sk",
+            "--flashblocks.override-authorizer-sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
-            "--flashblocks.access_list",
-            "--flashblocks.builder_sk",
+            "--flashblocks.access-list",
+            "--flashblocks.builder-sk",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "--flashblocks.interval",
             "200",
-            "--flashblocks.recommit_interval",
+            "--flashblocks.recommit-interval",
             "200",
         ]);
 
@@ -213,7 +220,7 @@ mod tests {
         let args = CommandParser::parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.authorizer_vk",
+            "--flashblocks.authorizer-vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ]);
 
@@ -230,8 +237,8 @@ mod tests {
         CommandParser::try_parse_from([
             "bin",
             "--flashblocks.enabled",
-            "--flashblocks.override_authorizer",
-            "--flashblocks.authorizer_vk",
+            "--flashblocks.override-authorizer",
+            "--flashblocks.authorizer-vk",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();

@@ -1,7 +1,7 @@
 set positional-arguments
 
 deploy-contracts:
-    chmod +x ./scripts/deploy_kurtosis.sh && ./scripts/deploy_kurtosis.sh
+    chmod +x ./scripts/devnet/deploy_kurtosis.sh && ./scripts/devnet/deploy_kurtosis.sh
 
 fmt: 
     forge fmt
