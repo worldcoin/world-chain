@@ -142,7 +142,7 @@ Flashblocks:
           
           [env: FLASHBLOCKS_AUTHORIZER_VK=]
 
-      --flashblocks.builder_sk <BUILDER_SK>
+      --flashblocks.builder-sk <BUILDER_SK>
           Flashblocks signing key used to sign authorized flashblocks payloads
           
           [env: FLASHBLOCKS_BUILDER_SK=]
