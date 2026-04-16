@@ -144,6 +144,7 @@ where
         false,
         flashblocks_enabled,
         None,
+        Arc::new(CHAIN_SPEC.clone()), // default to CHAIN_SPEC
     )
     .await
 }
@@ -153,6 +154,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -171,6 +173,7 @@ where
         false,
         flashblocks_enabled,
         block_uncompressed_size_limit,
+        chain_spec,
     )
     .await
 }
@@ -182,6 +185,7 @@ pub async fn setup_with_tx_peers<T>(
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -200,6 +204,7 @@ where
         disable_gossip,
         flashblocks_enabled,
         None,
+        chain_spec,
     )
     .await
 }
@@ -211,6 +216,7 @@ async fn setup_inner<T>(
     disable_gossip: bool,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -225,12 +231,12 @@ where
     unsafe {
         std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     }
-    let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
+    //let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
     let exec = TaskExecutor::default();
 
-    let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(op_chain_spec.clone())
-        .with_chain(op_chain_spec.clone())
+    let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(chain_spec.clone())
+        .with_chain(chain_spec)
         .with_rpc(
             RpcServerArgs::default()
                 .with_unused_ports()
