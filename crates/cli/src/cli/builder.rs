@@ -68,8 +68,8 @@ pub struct FlashblocksArgs {
     /// Flashblocks signing key
     /// used to sign authorized flashblocks payloads.
     #[arg(
-        long = "flashblocks.builder_sk",
-        alias = "flashblocks.builder-sk",
+        long = "flashblocks.builder-sk",
+        alias = "flashblocks.builder_sk",
         env = "FLASHBLOCKS_BUILDER_SK",
         required = false,
         value_parser = parse_sk,
