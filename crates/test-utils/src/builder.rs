@@ -271,6 +271,10 @@ fn u256_from_hex(value: &str) -> U256 {
     U256::from_str_radix(value.trim_start_matches("0x"), 16).expect("valid U256 hex")
 }
 
+fn deterministic_recipient(index: u64) -> Address {
+    Address::from_word(keccak256(index.to_be_bytes()))
+}
+
 sol! {
     #[sol(bytecode = "0x6080604052348015600e575f5ffd5b5060b680601a5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c8063c6c2ea1714602a575b5f5ffd5b6039603536600460a0565b604b565b60405190815260200160405180910390f35b5f6001818155600255818015608e576001811460955760025b6001840181101560825780545f198201540160019091019081556064565b5082600101549150609a565b5f9150609a565b600191505b50919050565b5f6020828403121560af575f5ffd5b503591905056")]
     contract Fib {
@@ -1500,10 +1504,15 @@ impl CanonStateSubscriptions for BenchProvider {
 }
 
 pub fn build_flashblock_fixture_eth_transfers(num_txs: usize, bal: bool) -> FlashblocksPayloadV1 {
-    build_flashblock_fixture(num_txs, bal, || TxOp::Transfer {
-        from: ALICE.clone(),
-        to: Address::random(),
-        value: U256::from(100),
+    let mut counter = 0u64;
+    build_flashblock_fixture(num_txs, bal, || {
+        let to = deterministic_recipient(counter);
+        counter += 1;
+        TxOp::Transfer {
+            from: ALICE.clone(),
+            to,
+            value: U256::from(100),
+        }
     })
 }
 
@@ -1582,10 +1591,13 @@ pub fn build_flashblock_sequence_fixture_eth_transfers(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
+    let mut counter = 0u64;
     build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, || {
+        let to = deterministic_recipient(counter);
+        counter += 1;
         TxOp::Transfer {
             from: ALICE.clone(),
-            to: Address::random(),
+            to,
             value: U256::from(100),
         }
     })
