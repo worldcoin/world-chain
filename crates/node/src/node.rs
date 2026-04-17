@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use op_alloy_consensus::OpTxEnvelope;
 use reth_node_builder::{Node, NodeAdapter, NodeComponentsBuilder, components::ComponentsBuilder};
@@ -113,12 +113,7 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
 /// A Generic World Chain node type.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct WorldChainNode<T> {
-    /// World Chain Args
-    pub node_context: T,
-    /// Marker type that defines the `Components` and `AddOns` types for this node.
-    _marker: PhantomData<T>,
-}
+pub struct WorldChainNode<T>(T);
 
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of World Chain specific builders.
 pub type WorldChainNodeComponentBuilder<Node, T> = ComponentsBuilder<
@@ -136,10 +131,7 @@ where
 {
     /// Creates a new instance of the World Chain node type.
     pub fn new(config: WorldChainNodeConfig) -> Self {
-        Self {
-            node_context: config.into(),
-            _marker: PhantomData,
-        }
+        Self(config.into())
     }
 
     /// Returns the components for the given [`WorldChainArgs`].
@@ -148,7 +140,7 @@ where
         Node: FullNodeTypes<Types = Self>,
         T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        <T as WorldChainNodeContext<Node>>::components(&self.node_context)
+        <T as WorldChainNodeContext<Node>>::components(&self.0)
     }
 
     pub fn add_ons<Node>(&self) -> T::AddOns
@@ -156,7 +148,7 @@ where
         Node: FullNodeTypes<Types = Self>,
         T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        <T as WorldChainNodeContext<Node>>::add_ons(&self.node_context)
+        <T as WorldChainNodeContext<Node>>::add_ons(&self.0)
     }
 
     pub fn ext_context<Node>(&self) -> T::ExtContext
@@ -164,7 +156,7 @@ where
         Node: FullNodeTypes<Types = Self>,
         T: WorldChainNodeContext<Node> + From<WorldChainNodeConfig>,
     {
-        <T as WorldChainNodeContext<Node>>::ext_context(&self.node_context)
+        <T as WorldChainNodeContext<Node>>::ext_context(&self.0)
     }
 }
 
