@@ -8,12 +8,12 @@ use std::sync::Arc;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_test_utils::{
     builder::{
-        BenchProvider, CHAIN_SPEC, EVM_CONFIG,
-        build_flashblock_fixture_eth_transfers_with_provider,
+        CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers_with_provider,
         build_flashblock_fixture_fib_with_provider,
         build_flashblock_fixture_world_id_like_bn254_with_provider,
-        build_flashblock_sequence_fixture_eth_transfers, build_flashblock_sequence_fixture_fib,
-        build_flashblock_sequence_fixture_world_id_like_bn254,
+        build_flashblock_sequence_fixture_eth_transfers_with_provider,
+        build_flashblock_sequence_fixture_fib_with_provider,
+        build_flashblock_sequence_fixture_world_id_like_bn254_with_provider,
     },
     e2e_harness::setup::setup_with_block_uncompressed_size_limit,
 };
@@ -121,15 +121,37 @@ fn bench_launch_flashblock_sequence_case<F>(
     sequence_params: &[(usize, usize)],
     build_sequence: F,
 ) where
-    F: Fn(usize, usize, bool) -> Vec<FlashblocksPayloadV1>,
+    F: Fn(&dyn StateProvider, usize, usize, bool) -> Vec<FlashblocksPayloadV1>,
 {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
     for &(num_fb, txs_per_fb) in sequence_params {
-        let sequence = build_sequence(num_fb, txs_per_fb, is_bal_enabled);
-        let provider = BenchProvider::new();
+        // Spin up a real world-chain testing node first so that the sequence
+        // fixture is built against the same state database that
+        // `run_flashblock_processor` will later execute against. Using the mock
+        // `BenchProvider` here would produce state roots that disagree with
+        // what the live node computes and would make this bench duplicate the
+        // synthetic one in `coordinator.rs`.
+        let (_, nodes, _, _, _) = rt
+            .block_on(setup_with_block_uncompressed_size_limit::<
+                WorldChainDefaultContext,
+            >(
+                1,
+                optimism_payload_attributes,
+                true,
+                None,
+                CHAIN_SPEC.clone(),
+            ))
+            .unwrap();
+        let node = &nodes[0];
+        let provider = node.node.inner.provider().clone();
+        let latest = provider
+            .latest()
+            .expect("failed to obtain latest state provider from node");
+
+        let sequence = build_sequence(latest.as_ref(), num_fb, txs_per_fb, is_bal_enabled);
         let label = format!("{num_fb}fb_x_{txs_per_fb}tx");
 
         group.bench_function(BenchmarkId::new("stream", &label), |b| {
@@ -253,7 +275,11 @@ fn bench_launch_flashblock_sequence_eth_transfers_live(c: &mut Criterion) {
         "launch_flashblock_sequence_eth_transfers_live",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_eth_transfers,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_eth_transfers_with_provider(
+                p, num_fb, txs_per_fb, bal,
+            )
+        },
     );
 }
 
@@ -263,7 +289,11 @@ fn bench_launch_flashblock_sequence_eth_transfers_with_bal_live(c: &mut Criterio
         "launch_flashblock_sequence_eth_transfers_with_bal_live",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_eth_transfers,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_eth_transfers_with_provider(
+                p, num_fb, txs_per_fb, bal,
+            )
+        },
     );
 }
 
@@ -273,7 +303,9 @@ fn bench_launch_flashblock_sequence_fib_live(c: &mut Criterion) {
         "launch_flashblock_sequence_fib_live",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_fib,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_fib_with_provider(p, num_fb, txs_per_fb, bal)
+        },
     );
 }
 
@@ -283,7 +315,9 @@ fn bench_launch_flashblock_sequence_fib_with_bal_live(c: &mut Criterion) {
         "launch_flashblock_sequence_fib_with_bal_live",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_fib,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_fib_with_provider(p, num_fb, txs_per_fb, bal)
+        },
     );
 }
 
@@ -293,7 +327,11 @@ fn bench_launch_flashblock_sequence_world_id_like_bn254_live(c: &mut Criterion) 
         "launch_flashblock_sequence_world_id_like_bn254_live",
         false,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_world_id_like_bn254,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_world_id_like_bn254_with_provider(
+                p, num_fb, txs_per_fb, bal,
+            )
+        },
     );
 }
 
@@ -303,7 +341,11 @@ fn bench_launch_flashblock_sequence_world_id_like_bn254_with_bal_live(c: &mut Cr
         "launch_flashblock_sequence_world_id_like_bn254_with_bal_live",
         true,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
-        build_flashblock_sequence_fixture_world_id_like_bn254,
+        |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
+            build_flashblock_sequence_fixture_world_id_like_bn254_with_provider(
+                p, num_fb, txs_per_fb, bal,
+            )
+        },
     );
 }
 
