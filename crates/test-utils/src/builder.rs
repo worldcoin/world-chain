@@ -717,10 +717,8 @@ where
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) = builder.finish_with_bundle(
-        state_provider,
-        PayloadBuildAttemptMetrics::default(),
-    )?;
+    let (outcome, bundle_state) =
+        builder.finish_with_bundle(state_provider, PayloadBuildAttemptMetrics::default())?;
 
     let access_list = access_list_rx.recv()?;
 
@@ -1816,8 +1814,9 @@ fn build_flashblock_sequence_fixture_from_sequence<P>(
 where
     P: StateProvider + ?Sized,
 {
-    let payloads = build_chained_payloads_with_provider(state_provider, sequence, num_flashblocks, bal)
-        .expect("failed to build chained payloads");
+    let payloads =
+        build_chained_payloads_with_provider(state_provider, sequence, num_flashblocks, bal)
+            .expect("failed to build chained payloads");
 
     let base = benchmark_base_payload();
 
