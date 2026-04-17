@@ -3,12 +3,15 @@ use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_optimism_primitives::OpPrimitives;
+use reth_provider::{StateProvider, StateProviderFactory};
 use std::sync::Arc;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_test_utils::{
     builder::{
-        BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
-        build_flashblock_fixture_fib, build_flashblock_fixture_world_id_like_bn254,
+        BenchProvider, CHAIN_SPEC, EVM_CONFIG,
+        build_flashblock_fixture_eth_transfers_with_provider,
+        build_flashblock_fixture_fib_with_provider,
+        build_flashblock_fixture_world_id_like_bn254_with_provider,
         build_flashblock_sequence_fixture_eth_transfers, build_flashblock_sequence_fixture_fib,
         build_flashblock_sequence_fixture_world_id_like_bn254,
     },
@@ -61,14 +64,17 @@ fn bench_process_flashblock_case<F>(
     tx_counts: &[usize],
     build_flashblock: F,
 ) where
-    F: Fn(usize, bool) -> FlashblocksPayloadV1,
+    F: Fn(&dyn StateProvider, usize, bool) -> FlashblocksPayloadV1,
 {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let mut group = c.benchmark_group(group_name);
     group.sample_size(20);
 
     for &tx_count in tx_counts {
-        let flashblock = build_flashblock(tx_count, is_bal_enabled);
+        // Spin up a real world-chain testing node first so that the fixture is
+        // built against the same state database that `process_flashblock` will
+        // later execute against. Using the mock `TestStateProvider` here would
+        // produce state roots that disagree with what the live node computes.
         let (_, nodes, _, _, _) = rt
             .block_on(setup_with_block_uncompressed_size_limit::<
                 WorldChainDefaultContext,
@@ -82,6 +88,11 @@ fn bench_process_flashblock_case<F>(
             .unwrap();
         let node = &nodes[0];
         let provider = node.node.inner.provider().clone();
+        let latest = provider
+            .latest()
+            .expect("failed to obtain latest state provider from node");
+
+        let flashblock = build_flashblock(latest.as_ref(), tx_count, is_bal_enabled);
 
         group.bench_with_input(BenchmarkId::new("txs", tx_count), &tx_count, |b, &_n| {
             b.iter(|| {
@@ -174,7 +185,7 @@ fn bench_process_flashblock_eth_transfers_live(c: &mut Criterion) {
         "process_flashblock_eth_transfers_live",
         false,
         &TX_COUNTS,
-        build_flashblock_fixture_eth_transfers,
+        |p: &dyn StateProvider, n, b| build_flashblock_fixture_eth_transfers_with_provider(p, n, b),
     );
 }
 
@@ -184,7 +195,7 @@ fn bench_process_flashblock_eth_transfers_with_bal_live(c: &mut Criterion) {
         "process_flashblock_eth_transfers_with_bal_live",
         true,
         &TX_COUNTS,
-        build_flashblock_fixture_eth_transfers,
+        |p: &dyn StateProvider, n, b| build_flashblock_fixture_eth_transfers_with_provider(p, n, b),
     );
 }
 
@@ -194,7 +205,7 @@ fn bench_process_flashblock_fib_live(c: &mut Criterion) {
         "process_flashblock_fib_live",
         false,
         &TX_COUNTS,
-        build_flashblock_fixture_fib,
+        |p: &dyn StateProvider, n, b| build_flashblock_fixture_fib_with_provider(p, n, b),
     );
 }
 
@@ -204,7 +215,7 @@ fn bench_process_flashblock_fib_with_bal_live(c: &mut Criterion) {
         "process_flashblock_fib_with_bal_live",
         true,
         &TX_COUNTS,
-        build_flashblock_fixture_fib,
+        |p: &dyn StateProvider, n, b| build_flashblock_fixture_fib_with_provider(p, n, b),
     );
 }
 
@@ -214,7 +225,9 @@ fn bench_process_flashblock_world_id_like_bn254_live(c: &mut Criterion) {
         "process_flashblock_world_id_like_bn254_live",
         false,
         &WORLD_ID_TX_COUNTS,
-        build_flashblock_fixture_world_id_like_bn254,
+        |p: &dyn StateProvider, n, b| {
+            build_flashblock_fixture_world_id_like_bn254_with_provider(p, n, b)
+        },
     );
 }
 
@@ -224,7 +237,9 @@ fn bench_process_flashblock_world_id_like_bn254_with_bal_live(c: &mut Criterion)
         "process_flashblock_world_id_like_bn254_with_bal_live",
         true,
         &WORLD_ID_TX_COUNTS,
-        build_flashblock_fixture_world_id_like_bn254,
+        |p: &dyn StateProvider, n, b| {
+            build_flashblock_fixture_world_id_like_bn254_with_provider(p, n, b)
+        },
     );
 }
 

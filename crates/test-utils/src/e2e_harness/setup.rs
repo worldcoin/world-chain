@@ -247,7 +247,7 @@ where
         .with_payload_builder(PayloadBuilderArgs {
             deadline: Duration::from_secs(12),
             max_payload_tasks: 20,
-            gas_limit: Some(30_000_000),
+            gas_limit: Some(200_000_000), // 200MGas
             interval: Duration::from_millis(200),
             ..Default::default()
         })
@@ -460,7 +460,7 @@ pub fn build_payload_attributes(
         transactions,
         no_tx_pool: Some(false),
         eip_1559_params: Some(eip1559_params),
-        gas_limit: Some(30_000_000),
+        gas_limit: Some(200_000_000), // 200MGas
         min_base_fee: Some(0),
     }
 }
