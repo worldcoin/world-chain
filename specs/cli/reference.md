@@ -98,7 +98,7 @@ Rollup:
           [default: 0]
 
 Priority Blockspace for Humans:
-      --pbh.verified_blockspace_capacity <VERIFIED_BLOCKSPACE_CAPACITY>
+      --pbh.verified-blockspace-capacity <VERIFIED_BLOCKSPACE_CAPACITY>
           Sets the max blockspace reserved for verified transactions. If there are not enough verified transactions to fill the capacity, the remaining blockspace will be filled with unverified transactions. This arg is a percentage of the total blockspace with the default set to 70 (ie 70%)
           
           [default: 70]
@@ -108,12 +108,12 @@ Priority Blockspace for Humans:
           
           [default: 0x0000000000000000000000000000000000000000]
 
-      --pbh.world_id <WORLD_ID>
+      --pbh.world-id <WORLD_ID>
           Sets the WorldID contract address. This contract is used to provide the latest merkle root on chain
           
           [default: 0x0000000000000000000000000000000000000000]
 
-      --pbh.signature_aggregator <SIGNATURE_AGGREGATOR>
+      --pbh.signature-aggregator <SIGNATURE_AGGREGATOR>
           Sets the ERC0-7766 Signature Aggregator contract address This contract signifies that a given bundle should receive priority inclusion if it passes validation
           
           [default: 0x0000000000000000000000000000000000000000]
@@ -122,7 +122,7 @@ Block Builder:
       --builder.enabled
           
 
-      --builder.private_key <PRIVATE_KEY>
+      --builder.private-key <PRIVATE_KEY>
           Private key for the builder used to update PBH nullifiers
           
           [env: BUILDER_PRIVATE_KEY=]
@@ -137,22 +137,22 @@ Flashblocks:
       --flashblocks.enabled
           
 
-      --flashblocks.authorizer_vk <AUTHORIZER_VK>
+      --flashblocks.authorizer-vk <AUTHORIZER_VK>
           Authorizer verifying key used to verify flashblock authenticity
           
           [env: FLASHBLOCKS_AUTHORIZER_VK=]
 
-      --flashblocks.builder_sk <BUILDER_SK>
+      --flashblocks.builder-sk <BUILDER_SK>
           Flashblocks signing key used to sign authorized flashblocks payloads
           
           [env: FLASHBLOCKS_BUILDER_SK=]
 
-      --flashblocks.override_authorizer_sk <OVERRIDE_AUTHORIZER_SK>
+      --flashblocks.override-authorizer-sk <OVERRIDE_AUTHORIZER_SK>
           Override incoming authorizations from rollup boost
           
           [env: FLASHBLOCKS_OVERRIDE_AUTHORIZER_SK=]
 
-      --flashblocks.force_publish
+      --flashblocks.force-publish
           Publish flashblocks payloads even when an authorization has not been received from rollup boost.
           
           This should only be used for testing and development purposes.
@@ -165,7 +165,7 @@ Flashblocks:
           [env: FLASHBLOCKS_INTERVAL=]
           [default: 200]
 
-      --flashblocks.recommit_interval <RECOMMIT_INTERVAL>
+      --flashblocks.recommit-interval <RECOMMIT_INTERVAL>
           Interval at which the block builder should re-commit to the transaction pool when building a payload.
           
           In milliseconds.
@@ -173,38 +173,38 @@ Flashblocks:
           [env: FLASHBLOCKS_RECOMMIT_INTERVAL=]
           [default: 200]
 
-      --flashblocks.access_list
+      --flashblocks.access-list
           Enables flashblocks access list support.
           
           Will create access lists when building flashblocks payloads. and will use access lists for parallel transaction execution when verifying flashblocks payloads.
           
           [env: FLASHBLOCKS_ACCESS_LIST=]
 
-      --flashblocks.max_send_peers <MAX_SEND_PEERS>
+      --flashblocks.max-send-peers <MAX_SEND_PEERS>
           Override the flashblocks send-set size
           
           [env: FLASHBLOCKS_MAX_SEND_PEERS=]
           [default: 10]
 
-      --flashblocks.max_receive_peers <MAX_RECEIVE_PEERS>
+      --flashblocks.max-receive-peers <MAX_RECEIVE_PEERS>
           Override the number of receive peers maintained for flashblocks fanout
           
           [env: FLASHBLOCKS_MAX_RECEIVE_PEERS=]
           [default: 3]
 
-      --flashblocks.rotation_interval <ROTATION_INTERVAL>
+      --flashblocks.rotation-interval <ROTATION_INTERVAL>
           Override the flashblocks rotation interval in seconds
           
           [env: FLASHBLOCKS_ROTATION_INTERVAL=]
           [default: 30]
 
-      --flashblocks.score_samples <SCORE_SAMPLES>
+      --flashblocks.score-samples <SCORE_SAMPLES>
           Override the number of latency samples retained for receive-peer scoring
           
           [env: FLASHBLOCKS_SCORE_SAMPLES=]
           [default: 1000]
 
-      --flashblocks.force_receive_peers <PEER_ID>
+      --flashblocks.force-receive-peers <PEER_ID>
           Peers to always receive flashblocks from regardless of their score.
           
           These peers will be requested as soon as they connect and will never be evicted by rotation. They count toward `max_receive_peers`.

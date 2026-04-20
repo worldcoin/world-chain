@@ -70,6 +70,10 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+            type=sha
 
   build-binaries:
     name: build binaries
