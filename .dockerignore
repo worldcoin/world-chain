@@ -1,6 +1,6 @@
 target/
 .env/
-contracts/
+pkg/contracts/
 assets/
 docs/
 devnet/
@@ -12,6 +12,9 @@ book.toml
 CODEOWNERS
 .github/
 .claude/
+pkg/
+
+
 README.md
 LICENSE
 SECURITY.md

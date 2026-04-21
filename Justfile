@@ -4,34 +4,28 @@ set positional-arguments := true
 default:
     @just --list
 
-# Spawns the devnet
-devnet-up: deploy-devnet deploy-contracts
-
-deploy-devnet: build
-    just ./devnet/devnet-up
-
 build:
     docker buildx build \
         -t world-chain:latest .
 
 deploy-contracts:
-    @just ./contracts/deploy-contracts
-
-# Stops the devnet **This will prune all docker containers**
-devnet-down:
-    @just ./devnet/devnet-down
+    @just ./pkg/contracts/deploy-contracts
 
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
-# Formats the whole workspace
-fmt: devnet-fmt contracts-fmt fmt-fix fmt-check
+# Test with flashblocks debug tracing
+test-dev *args='':
+    RUST_LOG="info,flashblocks=debug,world_chain=info" cargo nextest run --workspace $@
 
-devnet-fmt:
-    @just ./devnet/fmt
+# Test with verbose flashblocks tracing (all subsystems at trace level)
+test-verbose *args='':
+    RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
+
+fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
-    @just ./contracts/fmt
+    @just ./pkg/contracts/fmt
 
 fmt-fix:
     cargo +nightly fmt --all
@@ -39,11 +33,21 @@ fmt-fix:
 fmt-check:
     cargo +nightly fmt --all -- --check
 
-e2e-test *args='':
-    RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
+# Launch a local playground (in-process node swarm)
+playground *args='':
+    RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
+
+# Run stress tests against a live network
+stress *args='':
+    RUST_LOG="info" cargo run -p xtask --release -- stress $@
+
+# Prove a PBH transaction
+prove *args='':
+    cargo run -p xtask -- prove $@
+
+# Generate CLI reference docs for the mdbook
+docs:
+    cargo xtask docs
 
 install *args='':
-    cargo install --path crates/world/bin --locked $@
-
-stress-test *args='':
-    @just ./devnet/stress-test $@
+    cargo install --path bin/world-chain --locked $@

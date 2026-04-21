@@ -1,0 +1,96 @@
+[package]
+name = "world-chain-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-trie-common.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-util.workspace = true
+reth-evm.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-revm.workspace = true
+
+# op-reth
+reth-optimism-forks.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-evm.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-network.workspace = true
+alloy-signer-local.workspace = true
+op-alloy-consensus.workspace = true
+op-alloy-rpc-types.workspace = true
+alloy-op-evm.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+world-chain-primitives.workspace = true
+world-chain-p2p.workspace = true
+world-chain-pool.workspace = true
+world-chain-rpc.workspace = true
+
+# revm
+revm.workspace = true
+revm-database.workspace = true
+
+# tokio
+tokio.workspace = true
+
+semaphore-rs.workspace = true
+
+# misc
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+futures.workspace = true
+eyre.workspace = true
+rayon.workspace = true
+dashmap.workspace = true
+thiserror.workspace = true
+either.workspace = true
+metrics.workspace = true
+metrics-derive.workspace = true
+serde.workspace = true
+auto_impl.workspace = true
+
+[dev-dependencies]
+world-chain-test-utils.workspace = true
+world-chain-builder.workspace = true
+world-chain-p2p = { workspace = true, features = ["test-utils"] }
+world-chain-node.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eyre.workspace = true
+reth-tracing.workspace = true
+bon.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "flashblock_validation_synthetic"
+harness = false
+
+[[bench]]
+name = "flashblock_validation_live_node"
+harness = false
+
+[[bench]]
+name = "flashblock_building_live_node"
+harness = false

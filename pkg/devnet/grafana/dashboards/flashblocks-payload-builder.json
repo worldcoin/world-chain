@@ -1,0 +1,1618 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_attempts_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "attempts/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Attempts / s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_better_outcomes_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "better/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Better / s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_error_outcomes_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "errors/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors / s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_committed_payloads_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "committed/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Committed / s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_flashblock_index_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "index",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Flashblock Index",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_payload_transaction_count_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "txs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Committed Tx Count",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 200,
+      "panels": [],
+      "title": "Latency",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_total_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_total_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "total",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "pre-execution",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "sequencer tx",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_txpool_fetch_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_txpool_fetch_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "txpool fetch",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_best_tx_execution_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_best_tx_execution_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "best tx",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_finalize_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_finalize_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "finalize",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_merge_transitions_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_merge_transitions_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "merge transitions",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_state_root_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_state_root_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "state root",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_block_assembly_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_block_assembly_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "block assembly",
+          "range": true,
+          "refId": "I"
+        }
+      ],
+      "title": "Stage Average Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_total_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "total p95",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "pre-execution p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "sequencer tx p95",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_txpool_fetch_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "txpool fetch p95",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_best_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "best tx p95",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_finalize_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "finalize p95",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "merge transitions p95",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "state root p95",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "block assembly p95",
+          "range": true,
+          "refId": "I"
+        }
+      ],
+      "title": "Stage p95 Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_total_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "total p99",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "pre-execution p99",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "sequencer tx p99",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_txpool_fetch_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "txpool fetch p99",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_best_tx_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "best tx p99",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_finalize_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "finalize p99",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "merge transitions p99",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "state root p99",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds{client_type=\"execution-builder\",quantile=\"0.99\"})",
+          "legendFormat": "block assembly p99",
+          "range": true,
+          "refId": "I"
+        }
+      ],
+      "title": "Stage p99 Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_total_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "total",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_pre_execution_changes_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "pre-execution",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_sequencer_tx_execution_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "sequencer tx",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_txpool_fetch_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "txpool fetch",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_best_tx_execution_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "best tx",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_finalize_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "finalize",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_merge_transitions_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "merge transitions",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_state_root_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "state root",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_block_assembly_duration_seconds_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "block assembly",
+          "range": true,
+          "refId": "I"
+        }
+      ],
+      "title": "Latest Stage Durations",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 300,
+      "panels": [],
+      "title": "Transactions And Payload Shape",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 15
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_transactions_considered_per_build_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_transactions_considered_per_build_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "considered",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_transactions_executed_per_build_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_transactions_executed_per_build_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "executed",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_invalid_transactions_removed_per_build_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_invalid_transactions_removed_per_build_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "invalid removed",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Average Transactions Per Build",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 15
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_transaction_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.5\"})",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_transaction_execution_duration_seconds{client_type=\"execution-builder\",quantile=\"0.95\"})",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Per-Tx Execution Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tx Count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Gas Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Size"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flashblock Index"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_payload_transaction_count_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "Tx Count",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_payload_gas_used_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "Gas Used",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_payload_size_bytes_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "Size",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "max(reth_flashblocks_payload_build_committed_flashblock_index_latest{client_type=\"execution-builder\"})",
+          "legendFormat": "Flashblock Index",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Latest Committed Payload",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 400,
+      "panels": [],
+      "title": "Rejections And Nullifiers",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_over_limits_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "over limits",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_uncompressed_size_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "uncompressed size",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_conditional_invalid_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "conditional invalid",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_blob_or_deposit_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "blob or deposit",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_verified_gas_limit_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "verified gas limit",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_duplicate_nullifier_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "duplicate nullifier",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_nonce_too_low_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "nonce too low",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_transaction_invalid_descendant_rejections_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "invalid descendant",
+          "range": true,
+          "refId": "H"
+        }
+      ],
+      "title": "Rejection Rates",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_spend_nullifiers_attempts_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "attempts",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_spend_nullifiers_success_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "success",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(reth_flashblocks_payload_build_spend_nullifiers_failure_total{client_type=\"execution-builder\"}[$__rate_interval]))",
+          "legendFormat": "failure",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Spend Nullifiers Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg Nullifiers"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "vertical",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_spend_nullifiers_duration_seconds_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_spend_nullifiers_duration_seconds_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "Avg Duration",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(reth_flashblocks_payload_build_spend_nullifiers_nullifier_count_sum{client_type=\"execution-builder\"}[$__rate_interval])) / clamp_min(sum(increase(reth_flashblocks_payload_build_spend_nullifiers_nullifier_count_count{client_type=\"execution-builder\"}[$__rate_interval])), 1)",
+          "legendFormat": "Avg Nullifiers",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Spend Nullifiers Summary",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "world-chain",
+    "flashblocks",
+    "payload-builder"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Flashblocks Payload Builder",
+  "uid": "flashblocks-payload-builder",
+  "version": 1,
+  "weekStart": ""
+}
