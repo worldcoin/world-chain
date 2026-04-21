@@ -1,7 +1,7 @@
 use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator,
-    metrics::PayloadBuildMetrics,
     payload_builder::FlashblocksPayloadBuilder,
+    payload_builder_metrics::PayloadBuildMetrics,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use world_chain_cli::FlashblocksPayloadBuilderConfig;

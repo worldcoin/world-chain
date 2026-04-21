@@ -101,7 +101,7 @@ pub fn test_config_with_peers_and_gossip(
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
             builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
             force_publish: false,
-            recommit_interval: 50,
+            recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
             fanout: FanoutArgs::default(),

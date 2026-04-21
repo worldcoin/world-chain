@@ -57,6 +57,7 @@ use world_chain_builder::{
     BlockBuilderExt,
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
+    payload_builder_metrics::PayloadBuildAttemptMetrics,
 };
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
@@ -229,7 +230,7 @@ lazy_static::lazy_static! {
             ),
         ])
         .with_base_fee(Some(1))
-        .with_gas_limit(30_000_000);
+        .with_gas_limit(200_000_000); // 200MGas
 
     /// Chain spec for tests
     pub static ref CHAIN_SPEC: Arc<OpChainSpec> = Arc::new(
@@ -268,6 +269,10 @@ lazy_static::lazy_static! {
 
 fn u256_from_hex(value: &str) -> U256 {
     U256::from_str_radix(value.trim_start_matches("0x"), 16).expect("valid U256 hex")
+}
+
+fn deterministic_recipient(index: u64) -> Address {
+    Address::from_word(keccak256(index.to_be_bytes()))
 }
 
 sol! {
@@ -511,6 +516,10 @@ pub fn transaction_sequence_to_encoded(sequence: &[(TxOp, u64)]) -> Vec<Bytes> {
 ///
 /// Each flashblock builds on the previous one's outcome, creating a realistic
 /// sequence of incremental flashblock payloads within a single block.
+///
+/// Uses a mock [`TestStateProvider`] as the backing database. For benchmarks
+/// that run against a real node, use [`build_chained_payloads_with_provider`]
+/// to supply the node's own state provider.
 pub fn build_chained_payloads(
     sequence: Vec<(TxOp, u64)>,
     max_flashblocks: usize,
@@ -522,6 +531,27 @@ pub fn build_chained_payloads(
     )>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
+    let state_provider = create_test_state_provider();
+    build_chained_payloads_with_provider(state_provider.as_ref(), sequence, max_flashblocks, bal)
+}
+
+/// Same as [`build_chained_payloads`] but uses the supplied state provider
+/// as the backing database for execution and state-root computation.
+pub fn build_chained_payloads_with_provider<P>(
+    state_provider: &P,
+    sequence: Vec<(TxOp, u64)>,
+    max_flashblocks: usize,
+    bal: bool,
+) -> Result<
+    Vec<(
+        ExecutionPayloadFlashblockDeltaV1,
+        Option<CommittedState<OpRethReceiptBuilder>>,
+    )>,
+    Box<dyn std::error::Error + Send + Sync>,
+>
+where
+    P: StateProvider + ?Sized,
+{
     let mut payloads = Vec::with_capacity(max_flashblocks);
     let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)> = None;
 
@@ -535,7 +565,7 @@ pub fn build_chained_payloads(
 
         // Execute over the previous outcome, if any
         let (outcome, bal_data, bundle_state) =
-            execute_serial(prev_outcome.clone(), &transactions)?;
+            execute_serial_with_provider(state_provider, prev_outcome.clone(), &transactions)?;
 
         for receipt in outcome.execution_result.receipts.iter() {
             if !receipt.as_receipt().status.coerce_status() {
@@ -598,6 +628,11 @@ pub fn build_chained_payloads(
 }
 
 /// Executes a series of transactions serially, building on the previous outcome.
+///
+/// Uses a mock [`TestStateProvider`] backed by the test genesis. For
+/// benchmarks that run against a real node, use
+/// [`execute_serial_with_provider`] to supply the node's own state provider
+/// instead so state roots and account reads reflect the live database.
 pub fn execute_serial(
     prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
     transactions: &[Recovered<OpTransactionSigned>],
@@ -610,7 +645,27 @@ pub fn execute_serial(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let state_provider = create_test_state_provider();
-    let db = StateProviderDatabase::new(state_provider.as_ref());
+    execute_serial_with_provider(state_provider.as_ref(), prev_outcome, transactions)
+}
+
+/// Same as [`execute_serial`] but uses the supplied state provider as the
+/// backing database for execution and state-root computation.
+pub fn execute_serial_with_provider<P>(
+    state_provider: &P,
+    prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)>,
+    transactions: &[Recovered<OpTransactionSigned>],
+) -> Result<
+    (
+        BlockBuilderOutcome<OpPrimitives>,
+        FlashblockAccessListData,
+        BundleState,
+    ),
+    Box<dyn std::error::Error + Send + Sync>,
+>
+where
+    P: StateProvider + ?Sized,
+{
+    let db = StateProviderDatabase::new(state_provider);
 
     let bundle = if let Some((_, bundle_state)) = &prev_outcome {
         bundle_state.clone()
@@ -662,7 +717,8 @@ pub fn execute_serial(
         builder.execute_transaction_with_result_closure(tx.clone(), |_| {})?;
     }
 
-    let (outcome, bundle_state) = builder.finish_with_bundle(state_provider.as_ref(), None)?;
+    let (outcome, bundle_state) =
+        builder.finish_with_bundle(state_provider, PayloadBuildAttemptMetrics::default())?;
 
     let access_list = access_list_rx.recv()?;
 
@@ -1496,15 +1552,44 @@ impl CanonStateSubscriptions for BenchProvider {
 }
 
 pub fn build_flashblock_fixture_eth_transfers(num_txs: usize, bal: bool) -> FlashblocksPayloadV1 {
-    build_flashblock_fixture(num_txs, bal, || TxOp::Transfer {
-        from: ALICE.clone(),
-        to: Address::random(),
-        value: U256::from(100),
+    let state_provider = create_test_state_provider();
+    build_flashblock_fixture_eth_transfers_with_provider(state_provider.as_ref(), num_txs, bal)
+}
+
+pub fn build_flashblock_fixture_eth_transfers_with_provider<P>(
+    state_provider: &P,
+    num_txs: usize,
+    bal: bool,
+) -> FlashblocksPayloadV1
+where
+    P: StateProvider + ?Sized,
+{
+    let mut counter = 0u64;
+    build_flashblock_fixture_with_provider(state_provider, num_txs, bal, || {
+        let to = deterministic_recipient(counter);
+        counter += 1;
+        TxOp::Transfer {
+            from: ALICE.clone(),
+            to,
+            value: U256::from(100),
+        }
     })
 }
 
 pub fn build_flashblock_fixture_fib(num_txs: usize, bal: bool) -> FlashblocksPayloadV1 {
-    build_flashblock_fixture(num_txs, bal, || TxOp::Fib {
+    let state_provider = create_test_state_provider();
+    build_flashblock_fixture_fib_with_provider(state_provider.as_ref(), num_txs, bal)
+}
+
+pub fn build_flashblock_fixture_fib_with_provider<P>(
+    state_provider: &P,
+    num_txs: usize,
+    bal: bool,
+) -> FlashblocksPayloadV1
+where
+    P: StateProvider + ?Sized,
+{
+    build_flashblock_fixture_with_provider(state_provider, num_txs, bal, || TxOp::Fib {
         from: ALICE.clone(),
         n: 300,
         target: ChaosTarget::Proxy,
@@ -1515,7 +1600,24 @@ pub fn build_flashblock_fixture_world_id_like_bn254(
     num_txs: usize,
     bal: bool,
 ) -> FlashblocksPayloadV1 {
+    let state_provider = create_test_state_provider();
+    build_flashblock_fixture_world_id_like_bn254_with_provider(
+        state_provider.as_ref(),
+        num_txs,
+        bal,
+    )
+}
+
+pub fn build_flashblock_fixture_world_id_like_bn254_with_provider<P>(
+    state_provider: &P,
+    num_txs: usize,
+    bal: bool,
+) -> FlashblocksPayloadV1
+where
+    P: StateProvider + ?Sized,
+{
     build_flashblock_fixture_from_sequence(
+        state_provider,
         build_world_id_bench_transaction_sequence(num_txs),
         bal,
         PayloadId::new([3u8; 8]),
@@ -1536,13 +1638,17 @@ fn benchmark_base_payload() -> ExecutionPayloadBaseV1 {
     }
 }
 
-fn build_flashblock_fixture_from_sequence(
+fn build_flashblock_fixture_from_sequence<P>(
+    state_provider: &P,
     sequence: Vec<(TxOp, u64)>,
     bal: bool,
     payload_id: PayloadId,
-) -> FlashblocksPayloadV1 {
-    let payloads =
-        build_chained_payloads(sequence, 1, bal).expect("failed to build chained payloads");
+) -> FlashblocksPayloadV1
+where
+    P: StateProvider + ?Sized,
+{
+    let payloads = build_chained_payloads_with_provider(state_provider, sequence, 1, bal)
+        .expect("failed to build chained payloads");
     let (diff, _committed_state) = payloads.into_iter().next().expect("expected one payload");
 
     FlashblocksPayloadV1 {
@@ -1562,15 +1668,31 @@ fn build_flashblock_fixture_from_sequence(
 pub fn build_flashblock_fixture<F>(
     num_txs: usize,
     bal: bool,
+    build_tx_op: F,
+) -> FlashblocksPayloadV1
+where
+    F: FnMut() -> TxOp,
+{
+    let state_provider = create_test_state_provider();
+    build_flashblock_fixture_with_provider(state_provider.as_ref(), num_txs, bal, build_tx_op)
+}
+
+/// Same as [`build_flashblock_fixture`] but uses the supplied state provider
+/// as the backing database.
+pub fn build_flashblock_fixture_with_provider<P, F>(
+    state_provider: &P,
+    num_txs: usize,
+    bal: bool,
     mut build_tx_op: F,
 ) -> FlashblocksPayloadV1
 where
+    P: StateProvider + ?Sized,
     F: FnMut() -> TxOp,
 {
     // Build a simple sequence of transactions from ALICE.
     let sequence: Vec<(TxOp, u64)> = (0..num_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
-    build_flashblock_fixture_from_sequence(sequence, bal, PayloadId::new([1u8; 8]))
+    build_flashblock_fixture_from_sequence(state_provider, sequence, bal, PayloadId::new([1u8; 8]))
 }
 
 pub fn build_flashblock_sequence_fixture_eth_transfers(
@@ -1578,13 +1700,40 @@ pub fn build_flashblock_sequence_fixture_eth_transfers(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
-    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, || {
-        TxOp::Transfer {
-            from: ALICE.clone(),
-            to: Address::random(),
-            value: U256::from(100),
-        }
-    })
+    let state_provider = create_test_state_provider();
+    build_flashblock_sequence_fixture_eth_transfers_with_provider(
+        state_provider.as_ref(),
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+    )
+}
+
+pub fn build_flashblock_sequence_fixture_eth_transfers_with_provider<P>(
+    state_provider: &P,
+    num_flashblocks: usize,
+    txs_per_flashblock: usize,
+    bal: bool,
+) -> Vec<FlashblocksPayloadV1>
+where
+    P: StateProvider + ?Sized,
+{
+    let mut counter = 0u64;
+    build_flashblock_sequence_fixture_with_provider(
+        state_provider,
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+        || {
+            let to = deterministic_recipient(counter);
+            counter += 1;
+            TxOp::Transfer {
+                from: ALICE.clone(),
+                to,
+                value: U256::from(100),
+            }
+        },
+    )
 }
 
 pub fn build_flashblock_sequence_fixture_fib(
@@ -1592,11 +1741,35 @@ pub fn build_flashblock_sequence_fixture_fib(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
-    build_flashblock_sequence_fixture(num_flashblocks, txs_per_flashblock, bal, || TxOp::Fib {
-        from: ALICE.clone(),
-        n: 300,
-        target: ChaosTarget::Proxy,
-    })
+    let state_provider = create_test_state_provider();
+    build_flashblock_sequence_fixture_fib_with_provider(
+        state_provider.as_ref(),
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+    )
+}
+
+pub fn build_flashblock_sequence_fixture_fib_with_provider<P>(
+    state_provider: &P,
+    num_flashblocks: usize,
+    txs_per_flashblock: usize,
+    bal: bool,
+) -> Vec<FlashblocksPayloadV1>
+where
+    P: StateProvider + ?Sized,
+{
+    build_flashblock_sequence_fixture_with_provider(
+        state_provider,
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+        || TxOp::Fib {
+            from: ALICE.clone(),
+            n: 300,
+            target: ChaosTarget::Proxy,
+        },
+    )
 }
 
 pub fn build_flashblock_sequence_fixture_world_id_like_bn254(
@@ -1604,7 +1777,26 @@ pub fn build_flashblock_sequence_fixture_world_id_like_bn254(
     txs_per_flashblock: usize,
     bal: bool,
 ) -> Vec<FlashblocksPayloadV1> {
+    let state_provider = create_test_state_provider();
+    build_flashblock_sequence_fixture_world_id_like_bn254_with_provider(
+        state_provider.as_ref(),
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+    )
+}
+
+pub fn build_flashblock_sequence_fixture_world_id_like_bn254_with_provider<P>(
+    state_provider: &P,
+    num_flashblocks: usize,
+    txs_per_flashblock: usize,
+    bal: bool,
+) -> Vec<FlashblocksPayloadV1>
+where
+    P: StateProvider + ?Sized,
+{
     build_flashblock_sequence_fixture_from_sequence(
+        state_provider,
         build_world_id_bench_transaction_sequence(num_flashblocks * txs_per_flashblock),
         num_flashblocks,
         bal,
@@ -1612,14 +1804,19 @@ pub fn build_flashblock_sequence_fixture_world_id_like_bn254(
     )
 }
 
-fn build_flashblock_sequence_fixture_from_sequence(
+fn build_flashblock_sequence_fixture_from_sequence<P>(
+    state_provider: &P,
     sequence: Vec<(TxOp, u64)>,
     num_flashblocks: usize,
     bal: bool,
     payload_id: PayloadId,
-) -> Vec<FlashblocksPayloadV1> {
-    let payloads = build_chained_payloads(sequence, num_flashblocks, bal)
-        .expect("failed to build chained payloads");
+) -> Vec<FlashblocksPayloadV1>
+where
+    P: StateProvider + ?Sized,
+{
+    let payloads =
+        build_chained_payloads_with_provider(state_provider, sequence, num_flashblocks, bal)
+            .expect("failed to build chained payloads");
 
     let base = benchmark_base_payload();
 
@@ -1684,9 +1881,32 @@ pub fn build_flashblock_sequence_fixture<F>(
     num_flashblocks: usize,
     txs_per_flashblock: usize,
     bal: bool,
+    build_tx_op: F,
+) -> Vec<FlashblocksPayloadV1>
+where
+    F: FnMut() -> TxOp,
+{
+    let state_provider = create_test_state_provider();
+    build_flashblock_sequence_fixture_with_provider(
+        state_provider.as_ref(),
+        num_flashblocks,
+        txs_per_flashblock,
+        bal,
+        build_tx_op,
+    )
+}
+
+/// Same as [`build_flashblock_sequence_fixture`] but uses the supplied state
+/// provider as the backing database.
+pub fn build_flashblock_sequence_fixture_with_provider<P, F>(
+    state_provider: &P,
+    num_flashblocks: usize,
+    txs_per_flashblock: usize,
+    bal: bool,
     mut build_tx_op: F,
 ) -> Vec<FlashblocksPayloadV1>
 where
+    P: StateProvider + ?Sized,
     F: FnMut() -> TxOp,
 {
     assert!(num_flashblocks > 0, "need at least 1 flashblock");
@@ -1697,6 +1917,7 @@ where
     let sequence: Vec<(TxOp, u64)> = (0..total_txs).map(|i| (build_tx_op(), i as u64)).collect();
 
     build_flashblock_sequence_fixture_from_sequence(
+        state_provider,
         sequence,
         num_flashblocks,
         bal,

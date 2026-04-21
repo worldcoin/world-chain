@@ -3,8 +3,9 @@ use crate::{
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     executor::FlashblocksBlockBuilder,
-    metrics::{
-        PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome, PayloadBuildStage,
+    metrics::PayloadBuildStage,
+    payload_builder_metrics::{
+        PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome,
     },
     payload_txns::BestPayloadTxns,
     state_db::StateDB,
@@ -457,7 +458,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
             Transaction = R::Transaction,
         >,
     >,
-    attempt_metrics: &mut PayloadBuildAttemptMetrics,
+    mut attempt_metrics: &mut PayloadBuildAttemptMetrics,
     committed_state: &CommittedState<R>,
     access_list_rx: Option<crossbeam_channel::Receiver<FlashblockAccessList>>,
     mut cumulative_uncompressed_bytes: u64,
@@ -568,8 +569,7 @@ where
     // 6. Build the block
     let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
     let finalize_started = Instant::now();
-    let finalize_result =
-        builder.finish_with_bundle(state_provider.as_ref(), Some(attempt_metrics));
+    let finalize_result = builder.finish_with_bundle(state_provider.as_ref(), &mut attempt_metrics);
     attempt_metrics.record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
     let (build_outcome, bundle) = finalize_result?;
 
