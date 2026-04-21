@@ -73,6 +73,9 @@ auto_impl.workspace = true
 world-chain-test-utils.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
+world-chain-node.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
@@ -82,4 +85,8 @@ criterion.workspace = true
 
 [[bench]]
 name = "coordinator"
+harness = false
+
+[[bench]]
+name = "live_node"
 harness = false

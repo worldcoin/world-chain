@@ -184,6 +184,7 @@ async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
             optimism_payload_attributes,
             false,
             Some(block_uncompressed_size_limit),
+            Arc::new(CHAIN_SPEC.clone()),
         )
         .await?;
     let node = &mut nodes[0].node;
@@ -375,6 +376,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
             false,
             false,
             true,
+            Arc::new(CHAIN_SPEC.clone()),
         )
         .await?;
 
@@ -848,6 +850,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
         true,
         false,
         true,
+        Arc::new(CHAIN_SPEC.clone()),
     )
     .await?;
 
@@ -1012,6 +1015,7 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
         true,
         true,
         true,
+        Arc::new(CHAIN_SPEC.clone()),
     )
     .await?;
 
