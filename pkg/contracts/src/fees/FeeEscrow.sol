@@ -49,7 +49,7 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
     uint24 private constant SLIPPAGE_TOLERANCE_BASIS_POINTS = 30;
 
     /// @notice Scaling factor for basis point calculations
-    uint24 private constant SCALE = 1e6;
+    uint24 private constant SCALE = 1e5;
 
     /// @notice Address that receives burned WLD
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
