@@ -84,9 +84,13 @@ bon.workspace = true
 criterion.workspace = true
 
 [[bench]]
-name = "coordinator"
+name = "flashblock_validation_synthetic"
 harness = false
 
 [[bench]]
-name = "live_node"
+name = "flashblock_validation_live_node"
+harness = false
+
+[[bench]]
+name = "flashblock_building_live_node"
 harness = false

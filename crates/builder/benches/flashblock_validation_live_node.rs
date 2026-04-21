@@ -204,7 +204,7 @@ fn bench_launch_flashblock_sequence_case<F>(
 fn bench_process_flashblock_eth_transfers_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_eth_transfers_live",
+        "flashblock_validation_process_flashblock_eth_transfers_live",
         false,
         &TX_COUNTS,
         |p: &dyn StateProvider, n, b| build_flashblock_fixture_eth_transfers_with_provider(p, n, b),
@@ -214,7 +214,7 @@ fn bench_process_flashblock_eth_transfers_live(c: &mut Criterion) {
 fn bench_process_flashblock_eth_transfers_with_bal_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_eth_transfers_with_bal_live",
+        "flashblock_validation_process_flashblock_eth_transfers_with_bal_live",
         true,
         &TX_COUNTS,
         |p: &dyn StateProvider, n, b| build_flashblock_fixture_eth_transfers_with_provider(p, n, b),
@@ -224,7 +224,7 @@ fn bench_process_flashblock_eth_transfers_with_bal_live(c: &mut Criterion) {
 fn bench_process_flashblock_fib_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_fib_live",
+        "flashblock_validation_process_flashblock_fib_live",
         false,
         &TX_COUNTS,
         |p: &dyn StateProvider, n, b| build_flashblock_fixture_fib_with_provider(p, n, b),
@@ -234,7 +234,7 @@ fn bench_process_flashblock_fib_live(c: &mut Criterion) {
 fn bench_process_flashblock_fib_with_bal_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_fib_with_bal_live",
+        "flashblock_validation_process_flashblock_fib_with_bal_live",
         true,
         &TX_COUNTS,
         |p: &dyn StateProvider, n, b| build_flashblock_fixture_fib_with_provider(p, n, b),
@@ -244,7 +244,7 @@ fn bench_process_flashblock_fib_with_bal_live(c: &mut Criterion) {
 fn bench_process_flashblock_world_id_like_bn254_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_world_id_like_bn254_live",
+        "flashblock_validation_process_flashblock_world_id_like_bn254_live",
         false,
         &WORLD_ID_TX_COUNTS,
         |p: &dyn StateProvider, n, b| {
@@ -256,7 +256,7 @@ fn bench_process_flashblock_world_id_like_bn254_live(c: &mut Criterion) {
 fn bench_process_flashblock_world_id_like_bn254_with_bal_live(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_world_id_like_bn254_with_bal_live",
+        "flashblock_validation_process_flashblock_world_id_like_bn254_with_bal_live",
         true,
         &WORLD_ID_TX_COUNTS,
         |p: &dyn StateProvider, n, b| {
@@ -272,7 +272,7 @@ fn bench_process_flashblock_world_id_like_bn254_with_bal_live(c: &mut Criterion)
 fn bench_launch_flashblock_sequence_eth_transfers_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_eth_transfers_live",
+        "flashblock_validation_launch_flashblock_sequence_eth_transfers_live",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
@@ -286,7 +286,7 @@ fn bench_launch_flashblock_sequence_eth_transfers_live(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_eth_transfers_with_bal_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_eth_transfers_with_bal_live",
+        "flashblock_validation_launch_flashblock_sequence_eth_transfers_with_bal_live",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
@@ -300,7 +300,7 @@ fn bench_launch_flashblock_sequence_eth_transfers_with_bal_live(c: &mut Criterio
 fn bench_launch_flashblock_sequence_fib_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_fib_live",
+        "flashblock_validation_launch_flashblock_sequence_fib_live",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
@@ -312,7 +312,7 @@ fn bench_launch_flashblock_sequence_fib_live(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_fib_with_bal_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_fib_with_bal_live",
+        "flashblock_validation_launch_flashblock_sequence_fib_with_bal_live",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
@@ -324,7 +324,7 @@ fn bench_launch_flashblock_sequence_fib_with_bal_live(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_world_id_like_bn254_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_world_id_like_bn254_live",
+        "flashblock_validation_launch_flashblock_sequence_world_id_like_bn254_live",
         false,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
@@ -338,7 +338,7 @@ fn bench_launch_flashblock_sequence_world_id_like_bn254_live(c: &mut Criterion) 
 fn bench_launch_flashblock_sequence_world_id_like_bn254_with_bal_live(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_world_id_like_bn254_with_bal_live",
+        "flashblock_validation_launch_flashblock_sequence_world_id_like_bn254_with_bal_live",
         true,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
         |p: &dyn StateProvider, num_fb, txs_per_fb, bal| {
