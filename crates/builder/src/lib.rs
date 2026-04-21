@@ -196,6 +196,9 @@ pub mod metrics;
 /// Payload builder metrics.
 pub mod payload_builder_metrics;
 
+/// Execution and state-root strategy traits and concrete implementations.
+pub mod execution_strategy;
+
 /// Flashblock validation metrics.
 pub mod flashblock_validation_metrics;
 

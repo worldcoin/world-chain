@@ -1,10 +1,10 @@
-use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_consensus::{Header, Transaction};
 use alloy_eips::Decodable2718;
 use op_revm::{OpHaltReason, OpSpecId};
-use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader, SignerRecoverable};
 use std::{io::Error, marker::PhantomData, sync::Arc, time::Instant};
 
-use alloy_primitives::{B256, Bytes, U256};
+use alloy_primitives::Bytes;
 
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
@@ -13,47 +13,44 @@ use alloy_op_evm::{
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
-use rayon::prelude::*;
+use rayon::{iter::IntoParallelIterator, prelude::ParallelIterator};
 use reth_chain_state::ExecutedBlock;
+use reth_revm::database::StateProviderDatabase;
 use world_chain_primitives::{
-    access_list::{FlashblockAccessList, FlashblockAccessListData},
-    primitives::ExecutionPayloadFlashblockDeltaV1,
+    access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 
 use reth_evm::{
-    Evm, EvmEnv, EvmEnvFor, EvmFactory,
+    ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
 };
-use reth_node_api::{BuiltPayload, BuiltPayloadExecutedBlock};
+use reth_node_api::BuiltPayload;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
-use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
+use reth_provider::{StateProvider, StateProviderFactory};
 use revm::{
     DatabaseRef,
     context::{BlockEnv, result::ExecutionResult},
-    database::{BundleAccount, BundleState},
-    primitives::AddressMap,
+    database::BundleState,
 };
-use revm_database::State;
 use tracing::{error, info, trace};
 
 use crate::{
-    BlockBuilderExt,
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
-    bal_executor::{BalExecutorError, BalValidationError, CommittedState},
+    bal_executor::{BalExecutorError, CommittedState},
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    executor::FlashblocksBlockBuilder,
+    execution_strategy::{
+        ExecutionStrategy, FlashblockTypes, StateRootHandle, StateRootResult, ValidationCtx,
+    },
     flashblock_validation_metrics::{
         FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
     },
@@ -64,19 +61,42 @@ use crate::{
 /// A type alias for the BAL builder database with a cache layer.
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
 
-pub struct FlashblocksBlockValidator {
+pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
     pub chain_spec: Arc<OpChainSpec>,
-    pub evm_env: EvmEnvFor<OpEvmConfig>,
-    pub evm_config: OpEvmConfig,
+    pub evm_env: EvmEnvFor<Evm>,
+    pub evm_config: Evm,
     pub execution_context: OpBlockExecutionCtx,
     pub header: Arc<SealedHeader>,
     pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
+    pub execution_strategy: T::Execution,
+    _phantom: PhantomData<fn() -> T>,
 }
 
-impl FlashblocksBlockValidator {
+impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidator<Evm, T> {
+    pub fn new(
+        chain_spec: Arc<OpChainSpec>,
+        evm_env: EvmEnvFor<Evm>,
+        evm_config: Evm,
+        execution_context: OpBlockExecutionCtx,
+        header: Arc<SealedHeader>,
+        flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
+        execution_strategy: T::Execution,
+    ) -> Self {
+        Self {
+            chain_spec,
+            evm_env,
+            evm_config,
+            execution_context,
+            header,
+            flashblock_validation_metrics,
+            execution_strategy,
+            _phantom: PhantomData,
+        }
+    }
+
     pub fn validate_flashblock_with_state(
         &self,
-        client: impl StateProviderFactory + Clone + Sync,
+        client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
@@ -88,6 +108,8 @@ impl FlashblocksBlockValidator {
         let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
 
         let result = (|| -> Result<OpBuiltPayload, BalExecutorError> {
+            let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
+
             let next_payload = metered_fn(
                 tracing::trace_span!(
                     target: "flashblocks::coordinator",
@@ -99,27 +121,21 @@ impl FlashblocksBlockValidator {
                 ),
                 metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
                 |_span| {
-                    if has_bal {
-                        let committed_state =
-                            CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
-                        self.validate_flashblock_parallel(
-                            client,
-                            diff,
+                    self.execution_strategy.execute(
+                        ValidationCtx {
                             parent,
-                            payload_id,
-                            committed_state,
-                            &mut attempt_metrics,
-                        )
-                    } else {
-                        self.validate_flashblock(
-                            client,
-                            diff,
-                            parent,
-                            payload_id,
-                            state,
-                            &mut attempt_metrics,
-                        )
-                    }
+                            attempt_metrics: &mut attempt_metrics,
+                            chain_spec: self.chain_spec.clone(),
+                            evm_env: self.evm_env.clone(),
+                            evm_config: self.evm_config.clone(),
+                            execution_context: self.execution_context.clone(),
+                            header: self.header.clone(),
+                        },
+                        client,
+                        diff,
+                        committed_state,
+                        payload_id,
+                    )
                 },
             )?;
 
@@ -180,345 +196,6 @@ impl FlashblocksBlockValidator {
 
         Ok(())
     }
-
-    pub fn validate_flashblock(
-        &self,
-        client: impl StateProviderFactory + Clone,
-        diff: ExecutionPayloadFlashblockDeltaV1,
-        parent: &SealedHeader<Header>,
-        payload_id: PayloadId,
-        state: Option<&OpBuiltPayload<OpPrimitives>>,
-        attempt_metrics: &mut FlashblockValidationAttemptMetrics,
-    ) -> Result<OpBuiltPayload, BalExecutorError> {
-        let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
-        let bundle_state = committed_state.bundle.clone();
-
-        // 1. Setup state database with committed bundle
-        let state_provider = client
-            .state_by_block_hash(parent.hash())
-            .map_err(BalExecutorError::other)?;
-
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state_provider.as_ref()))
-            .with_bundle_prestate(bundle_state)
-            .with_bundle_update()
-            .build();
-
-        // 2. Create EVM and executor
-        let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, self.evm_env.clone());
-
-        let mut executor = OpBlockExecutor::new(
-            evm,
-            self.execution_context.clone(),
-            (*self.chain_spec).clone(),
-            OpRethReceiptBuilder::default(),
-        );
-
-        executor.gas_used = committed_state.gas_used;
-        executor.receipts = committed_state.receipts_iter().cloned().collect();
-
-        // 3. Create block builder with committed transactions
-        let mut builder = FlashblocksBlockBuilder::<OpPrimitives, _>::new(
-            self.execution_context.clone(),
-            &self.header,
-            executor,
-            committed_state.transactions_iter().cloned().collect(),
-            self.chain_spec.clone(),
-        );
-
-        // 4. Apply pre-execution changes on first flashblock
-        if state.is_none() {
-            let pre_execution_changes_started = Instant::now();
-            builder.apply_pre_execution_changes()?;
-            attempt_metrics.record_stage_duration(
-                PayloadBuildStage::PreExecutionChanges,
-                pre_execution_changes_started.elapsed(),
-            );
-        }
-
-        // 5. Decode and execute diff transactions, tracking fees
-        let basefee = self.evm_env.block_env.basefee;
-        let transactions = decode_transactions_with_indices(
-            &diff.transactions,
-            committed_state.transactions_iter().count() as u16,
-        )?;
-
-        let mut fees = U256::ZERO;
-        let txs_execution_started = Instant::now();
-        for (_, tx) in &transactions {
-            let gag_used = builder
-                .execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
-
-            if !tx.is_deposit()
-                && let Some(gas_used) = gag_used
-            {
-                let miner_fee = tx
-                    .effective_tip_per_gas(basefee)
-                    .expect("fee is always valid; execution succeeded");
-                fees += U256::from(gas_used) * U256::from(miner_fee);
-            }
-        }
-        attempt_metrics.record_stage_duration(
-            PayloadBuildStage::SequencerTxExecution,
-            txs_execution_started.elapsed(),
-        );
-
-        // 6. Finish and seal the block
-        let finish_state_provider = client
-            .state_by_block_hash(parent.hash())
-            .map_err(BalExecutorError::other)?;
-
-        let finalize_started = Instant::now();
-        let (outcome, bundle) =
-            builder.finish_with_bundle(finish_state_provider.as_ref(), &mut *attempt_metrics)?;
-        attempt_metrics
-            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
-
-        let BlockBuilderOutcome {
-            execution_result,
-            block,
-            hashed_state,
-            trie_updates,
-        } = outcome;
-
-        let sealed_block = Arc::new(block.sealed_block().clone());
-
-        let execution_output = BlockExecutionOutput {
-            state: bundle,
-            result: execution_result,
-        };
-
-        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
-            recovered_block: Arc::new(block),
-            execution_output: Arc::new(execution_output),
-            hashed_state: either::Left(Arc::new(hashed_state)),
-            trie_updates: either::Left(Arc::new(trie_updates)),
-        };
-
-        Ok(OpBuiltPayload::new(
-            payload_id,
-            sealed_block,
-            committed_state.fees + fees,
-            Some(executed_block),
-        ))
-    }
-
-    pub fn validate_flashblock_parallel(
-        &self,
-        client: impl StateProviderFactory + Clone + Sync,
-        diff: ExecutionPayloadFlashblockDeltaV1,
-        parent: &SealedHeader<Header>,
-        payload_id: PayloadId,
-        committed_state: CommittedState<OpRethReceiptBuilder>,
-        attempt_metrics: &mut FlashblockValidationAttemptMetrics,
-    ) -> Result<OpBuiltPayload, BalExecutorError> {
-        let FlashblockAccessListData {
-            access_list,
-            access_list_hash,
-        } = diff
-            .access_list_data
-            .ok_or(BalValidationError::MissingAccessListData.boxed())
-            .map_err(BalExecutorError::from)?;
-
-        // 1. Setup database layers for the base evm/executor
-        let state_provider = client
-            .state_by_block_hash(parent.hash())
-            .map_err(BalExecutorError::other)?;
-        let block_access_index = access_list.min_tx_index;
-
-        // 2. Create channel for state root computation
-        let (state_root_sender, state_root_receiver) = crossbeam_channel::bounded(1);
-
-        let mut bundle_state = committed_state.bundle.clone();
-
-        let fallback_bundle_state: Arc<BundleState> = bundle_state.clone().into();
-
-        // The cumulative bundle for state root computation contains all state changes
-        // from prior flashblocks plus the current access list.
-        let state_provider_database = StateProviderDatabase::new(state_provider.as_ref());
-        access_list
-            .extend_bundle(&mut bundle_state, &state_provider_database)
-            .map_err(BalExecutorError::other)?;
-
-        let bundle_database = BundleDb::new(state_provider_database, fallback_bundle_state.clone());
-        let temporal_db_factory = TemporalDbFactory::new(&bundle_database, &access_list);
-        let temporal_db = temporal_db_factory.db(bundle_database, block_access_index as u64);
-        let mut noop_state = NoOpCommitDB::new(temporal_db);
-
-        let mut database = BalBuilderDb::new(&mut noop_state);
-        database.set_index(block_access_index);
-
-        let bundle_clone = bundle_state.clone();
-
-        let state_root_provider = client
-            .state_by_block_hash(parent.hash())
-            .map_err(BalExecutorError::other)?;
-
-        // 3. Spawn the state root computation in a separate thread
-        rayon::spawn(move || {
-            let result = compute_state_root(state_root_provider.into(), &bundle_clone.state);
-            let _ = state_root_sender.send(result);
-        });
-
-        let evm = OpEvmFactory::default().create_evm(database, self.evm_env.clone());
-
-        let mut executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<OpChainSpec>> =
-            OpBlockExecutor::new(
-                evm,
-                self.execution_context.clone(),
-                self.chain_spec.clone(),
-                OpRethReceiptBuilder::default(),
-            );
-
-        executor.gas_used = committed_state.gas_used;
-        executor.receipts = committed_state.receipts_iter().cloned().collect();
-
-        let (validator, access_list_receiver) = BalBlockValidator::new(
-            self.execution_context.clone(),
-            parent,
-            executor,
-            bundle_state.clone().into(),
-            fallback_bundle_state,
-            committed_state.transactions_iter().cloned().collect(),
-            self.chain_spec.clone(),
-            &temporal_db_factory,
-            state_root_receiver,
-            self.evm_env.clone(),
-            (access_list.min_tx_index, access_list.max_tx_index),
-            attempt_metrics,
-        );
-
-        // Decode diff transactions for parallel execution.
-        // Start index is committed tx count + 1 (accounting for pre-execution at index 0).
-        let transactions_offset = committed_state.transactions.len() as u16 + 1;
-        let executor_transactions =
-            decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
-
-        let finish_state_provider = client
-            .state_by_block_hash(parent.hash())
-            .map_err(BalExecutorError::other)?;
-
-        // 4. Compute the block using BAL in parallel
-        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) = validator.execute_block(
-            client.clone(),
-            finish_state_provider.as_ref(),
-            executor_transactions,
-        )?;
-
-        let computed_access_list = access_list_receiver
-            .recv()
-            .map_err(BalExecutorError::other)?;
-
-        let computed_access_list_hash =
-            world_chain_primitives::access_list::access_list_hash(&computed_access_list);
-
-        // 5. Verify computed results
-        if computed_access_list_hash != access_list_hash {
-            error!(
-                target: "flashblocks::state_executor",
-                ?access_list_hash,
-                expected = ?access_list_hash,
-                access_list = ?computed_access_list,
-                expected_access_list = ?access_list.clone(),
-                block_number = outcome.block.number(),
-                block_hash = ?outcome.block.hash(),
-                execution_context = ?self.execution_context,
-                "Access list hash mismatch"
-            );
-
-            return Err(BalValidationError::BalHashMismatch {
-                expected: access_list_hash,
-                got: computed_access_list_hash,
-                expected_bal: access_list,
-                got_bal: computed_access_list,
-            }
-            .boxed()
-            .into());
-        }
-
-        if outcome.block.receipts_root != diff.receipts_root {
-            error!(
-                target: "flashblocks::state_executor",
-                got = ?outcome.block.receipts_root,
-                expected = ?diff.receipts_root,
-                "Receipts root mismatch"
-            );
-
-            return Err(BalValidationError::ReceiptsRootMismatch {
-                expected: diff.receipts_root,
-                got: outcome.block.receipts_root,
-            }
-            .boxed()
-            .into());
-        }
-
-        if outcome.block.state_root != diff.state_root {
-            error!(
-                target: "flashblocks::state_executor",
-                got = ?outcome.block.state_root,
-                expected = ?diff.state_root,
-                expected_bundle = ?bundle_state,
-                "State root mismatch"
-            );
-
-            return Err(BalValidationError::StateRootMismatch {
-                expected: diff.state_root,
-                got: outcome.block.state_root,
-                bundle_state: bundle_state.clone(),
-            }
-            .boxed()
-            .into());
-        }
-
-        if outcome.block.hash() != diff.block_hash {
-            error!(
-                target: "flashblocks::state_executor",
-                got = ?outcome.block.hash(),
-                expected = ?diff.block_hash,
-                "Block hash mismatch"
-            );
-
-            return Err(BalValidationError::BalHashMismatch {
-                expected: diff.block_hash,
-                got: outcome.block.hash(),
-                expected_bal: access_list,
-                got_bal: computed_access_list,
-            }
-            .boxed()
-            .into());
-        }
-
-        // 6. Seal the block
-        let BlockBuilderOutcome {
-            execution_result,
-            block,
-            hashed_state,
-            trie_updates,
-        } = outcome;
-
-        let sealed_block = Arc::new(block.sealed_block().clone());
-
-        let execution_output = BlockExecutionOutput {
-            state: bundle_state.clone(),
-            result: execution_result,
-        };
-
-        let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
-            recovered_block: Arc::new(block),
-            execution_output: Arc::new(execution_output),
-            hashed_state: either::Left(Arc::new(hashed_state)),
-            trie_updates: either::Left(Arc::new(trie_updates)),
-        };
-
-        let payload = OpBuiltPayload::new(
-            payload_id,
-            sealed_block,
-            U256::from(fees),
-            Some(executed_block),
-        );
-
-        Ok(payload)
-    }
 }
 
 /// Result of executing a single transaction in parallel.
@@ -526,7 +203,7 @@ impl FlashblocksBlockValidator {
 /// This struct accumulates execution artifacts that will be merged
 /// after all transactions complete.
 #[derive(Default)]
-pub struct ParalleExecutionResult {
+pub struct ParallelExecutionResult {
     pub receipts: Vec<OpReceipt>,
     /// Gas consumed by this transaction
     pub gas_used: u64,
@@ -539,7 +216,13 @@ pub struct ParalleExecutionResult {
 }
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
-pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'a, R: OpReceiptBuilder, Evm> {
+pub struct BalBlockValidator<
+    'a,
+    DbRef: DatabaseRef + 'a,
+    R: OpReceiptBuilder,
+    Evm,
+    H: StateRootHandle,
+> {
     pub inner: BasicBlockBuilder<
         'a,
         OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
@@ -550,8 +233,7 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'a, R: OpReceiptBuilder, E
     pub bundle_state: Arc<BundleState>,
     pub fallback_bundle_state: Arc<BundleState>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
-    pub state_root_receiver:
-        crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
+    pub state_root_handle: H,
     pub temporal_db_factory: &'a TemporalDbFactory,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
@@ -559,11 +241,18 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'a, R: OpReceiptBuilder, E
     _db_ref: PhantomData<DbRef>,
 }
 
-impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
+impl<'a, DBRef, R, E, H> BalBlockValidator<'a, DBRef, R, E, H>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: Evm<
+            DB = ValidatorDb<'a, DBRef>,
+            Tx = OpTx,
+            Spec = OpSpecId,
+            BlockEnv = BlockEnv,
+        >,
+    H: StateRootHandle,
+    OpTx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
@@ -575,9 +264,7 @@ where
         transactions: Vec<Recovered<OpTransactionSigned>>,
         chain_spec: Arc<OpChainSpec>,
         temporal_db_factory: &'a TemporalDbFactory,
-        state_root_receiver: crossbeam_channel::Receiver<
-            Result<StateRootResult, BlockExecutionError>,
-        >,
+        state_root_handle: H,
         evm_env: EvmEnv<OpSpecId>,
         index_range: (u16, u16),
         attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
@@ -596,7 +283,7 @@ where
                 bundle_state,
                 fallback_bundle_state,
                 access_list_sender: tx,
-                state_root_receiver,
+                state_root_handle,
                 temporal_db_factory,
                 evm_env,
                 index_range,
@@ -618,7 +305,7 @@ where
     }
 }
 
-impl<'a, DB, R, E> BlockBuilder for BalBlockValidator<'a, DB, R, E>
+impl<'a, DB, R, E, H> BlockBuilder for BalBlockValidator<'a, DB, R, E, H>
 where
     DB: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
@@ -629,6 +316,8 @@ where
             BlockEnv = BlockEnv,
         >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    H: StateRootHandle,
+    OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
@@ -660,7 +349,10 @@ where
     fn finish(
         mut self,
         state: impl StateProvider,
-        _state_root_precomputed: Option<(B256, TrieUpdates)>,
+        _state_root_precomputed: Option<(
+            alloy_primitives::B256,
+            reth_trie_common::updates::TrieUpdates,
+        )>,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
         let finalize_started = Instant::now();
         // finalize the database index
@@ -675,10 +367,7 @@ where
             state_root,
             trie_updates,
             hashed_state,
-        } = self
-            .state_root_receiver
-            .recv()
-            .map_err(BlockExecutionError::other)??;
+        } = self.state_root_handle.finish()?;
         self.attempt_metrics
             .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
@@ -744,7 +433,7 @@ where
     }
 }
 
-impl<'a, DbRef, R, E> BalBlockValidator<'a, DbRef, R, E>
+impl<'a, DbRef, R, E, H> BalBlockValidator<'a, DbRef, R, E, H>
 where
     DbRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
@@ -758,6 +447,8 @@ where
         + Send
         + Sync
         + Clone,
+    H: StateRootHandle,
+    OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     pub fn execute_block<Client>(
         mut self,
@@ -879,11 +570,11 @@ where
 
 /// Merge individual transaction results into an aggregated result.
 fn merge_transaction_results(
-    results: Vec<ParalleExecutionResult>,
+    results: Vec<ParallelExecutionResult>,
     initial_gas_used: u64,
-) -> ParalleExecutionResult {
+) -> ParallelExecutionResult {
     results.into_iter().fold(
-        ParalleExecutionResult {
+        ParallelExecutionResult {
             gas_used: initial_gas_used,
             ..Default::default()
         },
@@ -910,13 +601,14 @@ pub fn execute_transaction<R, DBRef>(
     evm_env: EvmEnv<OpSpecId>,
     db_factory: &TemporalDbFactory,
     db: DBRef,
-) -> Result<ParalleExecutionResult, BalExecutorError>
+) -> Result<ParallelExecutionResult, BalExecutorError>
 where
     DBRef: DatabaseRef + std::fmt::Debug,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>
         + Send
         + Sync
         + Clone,
+    OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     let temporal_db = db_factory.db(db, index as u64);
     let state = NoOpCommitDB::new(temporal_db);
@@ -960,38 +652,12 @@ where
     let (db, _evm_env) = evm.finish();
     let access_list = db.finish().map_err(BalExecutorError::other)?;
 
-    Ok(ParalleExecutionResult {
+    Ok(ParallelExecutionResult {
         receipts: result.receipts,
         gas_used: result.gas_used,
         fees,
         access_list,
         index,
-    })
-}
-
-/// Result of computing the state root from a bundle state.
-pub struct StateRootResult {
-    pub state_root: B256,
-    pub trie_updates: TrieUpdates,
-    pub hashed_state: HashedPostState,
-}
-
-pub fn compute_state_root(
-    state_provider: Arc<dyn StateProvider + Send>,
-    bundle_state: &AddressMap<BundleAccount>,
-) -> Result<StateRootResult, BlockExecutionError> {
-    // compute hashed post state
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
-
-    // compute state root & trie updates
-    let (state_root, trie_updates) = state_provider
-        .state_root_with_updates(hashed_state.clone())
-        .map_err(BlockExecutionError::other)?;
-
-    Ok(StateRootResult {
-        state_root,
-        trie_updates,
-        hashed_state,
     })
 }
 
@@ -1007,9 +673,10 @@ pub fn decode_transactions_with_indices(
             let tx_envelope = OpTransactionSigned::decode_2718(&mut tx.as_ref())
                 .map_err(BalExecutorError::other)?;
 
-            let recovered = tx_envelope
-                .try_clone_into_recovered()
+            let signer = tx_envelope
+                .recover_signer()
                 .map_err(BalExecutorError::other)?;
+            let recovered = Recovered::new_unchecked(tx_envelope, signer);
 
             Ok((start_index + i as BlockAccessIndex, recovered))
         })
