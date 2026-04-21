@@ -73,6 +73,9 @@ auto_impl.workspace = true
 world-chain-test-utils.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
+world-chain-node.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eyre.workspace = true
@@ -81,5 +84,13 @@ bon.workspace = true
 criterion.workspace = true
 
 [[bench]]
-name = "coordinator"
+name = "flashblock_validation_synthetic"
+harness = false
+
+[[bench]]
+name = "flashblock_validation_live_node"
+harness = false
+
+[[bench]]
+name = "flashblock_building_live_node"
 harness = false

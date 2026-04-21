@@ -155,7 +155,7 @@ fn bench_launch_flashblock_sequence_case<F>(
 fn bench_process_flashblock_eth_transfers(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_eth_transfers",
+        "flashblock_validation_process_flashblock_eth_transfers",
         false,
         &TX_COUNTS,
         build_flashblock_fixture_eth_transfers,
@@ -165,7 +165,7 @@ fn bench_process_flashblock_eth_transfers(c: &mut Criterion) {
 fn bench_process_flashblock_eth_transfers_with_bal(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_eth_transfers_with_bal",
+        "flashblock_validation_process_flashblock_eth_transfers_with_bal",
         true,
         &TX_COUNTS,
         build_flashblock_fixture_eth_transfers,
@@ -175,7 +175,7 @@ fn bench_process_flashblock_eth_transfers_with_bal(c: &mut Criterion) {
 fn bench_process_flashblock_fib(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_fib",
+        "flashblock_validation_process_flashblock_fib",
         false,
         &TX_COUNTS,
         build_flashblock_fixture_fib,
@@ -185,7 +185,7 @@ fn bench_process_flashblock_fib(c: &mut Criterion) {
 fn bench_process_flashblock_fib_with_bal(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_fib_with_bal",
+        "flashblock_validation_process_flashblock_fib_with_bal",
         true,
         &TX_COUNTS,
         build_flashblock_fixture_fib,
@@ -195,7 +195,7 @@ fn bench_process_flashblock_fib_with_bal(c: &mut Criterion) {
 fn bench_process_flashblock_world_id_like_bn254(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_world_id_like_bn254",
+        "flashblock_validation_process_flashblock_world_id_like_bn254",
         false,
         &WORLD_ID_TX_COUNTS,
         build_flashblock_fixture_world_id_like_bn254,
@@ -205,7 +205,7 @@ fn bench_process_flashblock_world_id_like_bn254(c: &mut Criterion) {
 fn bench_process_flashblock_world_id_like_bn254_with_bal(c: &mut Criterion) {
     bench_process_flashblock_case(
         c,
-        "process_flashblock_world_id_like_bn254_with_bal",
+        "flashblock_validation_process_flashblock_world_id_like_bn254_with_bal",
         true,
         &WORLD_ID_TX_COUNTS,
         build_flashblock_fixture_world_id_like_bn254,
@@ -219,7 +219,7 @@ fn bench_process_flashblock_world_id_like_bn254_with_bal(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_eth_transfers(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_eth_transfers",
+        "flashblock_validation_launch_flashblock_sequence_eth_transfers",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_eth_transfers,
@@ -229,7 +229,7 @@ fn bench_launch_flashblock_sequence_eth_transfers(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_eth_transfers_with_bal(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_eth_transfers_with_bal",
+        "flashblock_validation_launch_flashblock_sequence_eth_transfers_with_bal",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_eth_transfers,
@@ -239,7 +239,7 @@ fn bench_launch_flashblock_sequence_eth_transfers_with_bal(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_fib(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_fib",
+        "flashblock_validation_launch_flashblock_sequence_fib",
         false,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_fib,
@@ -249,7 +249,7 @@ fn bench_launch_flashblock_sequence_fib(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_fib_with_bal(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_fib_with_bal",
+        "flashblock_validation_launch_flashblock_sequence_fib_with_bal",
         true,
         &FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_fib,
@@ -259,7 +259,7 @@ fn bench_launch_flashblock_sequence_fib_with_bal(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_world_id_like_bn254(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_world_id_like_bn254",
+        "flashblock_validation_launch_flashblock_sequence_world_id_like_bn254",
         false,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_world_id_like_bn254,
@@ -269,7 +269,7 @@ fn bench_launch_flashblock_sequence_world_id_like_bn254(c: &mut Criterion) {
 fn bench_launch_flashblock_sequence_world_id_like_bn254_with_bal(c: &mut Criterion) {
     bench_launch_flashblock_sequence_case(
         c,
-        "launch_flashblock_sequence_world_id_like_bn254_with_bal",
+        "flashblock_validation_launch_flashblock_sequence_world_id_like_bn254_with_bal",
         true,
         &WORLD_ID_FLASHBLOCK_SEQUENCE_PARAMS,
         build_flashblock_sequence_fixture_world_id_like_bn254,
