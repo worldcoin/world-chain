@@ -25,7 +25,6 @@ use world_chain_primitives::{
     access_list::FlashblockAccessListData, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 
-use crate::state_root_strategy::StateRootStrategy;
 use crate::{
     BlockBuilderExt,
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
@@ -37,6 +36,7 @@ use crate::{
     executor::FlashblocksBlockBuilder,
     flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
     metrics::PayloadBuildStage,
+    state_root_strategy::StateRootStrategy,
     validator::{BalBlockValidator, decode_transactions_with_indices},
 };
 

@@ -1,8 +1,9 @@
-use crate::execution_strategy;
-use crate::execution_strategy::{ExecutionStrategy, StateRootResult};
+use crate::{
+    execution_strategy,
+    execution_strategy::{ExecutionStrategy, StateRootResult},
+};
 use alloy_primitives::B256;
-use reth_evm::ConfigureEvm;
-use reth_evm::block::BlockExecutionError;
+use reth_evm::{ConfigureEvm, block::BlockExecutionError};
 use reth_provider::StateProviderFactory;
 use revm_database::BundleState;
 

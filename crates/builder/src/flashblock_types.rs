@@ -1,7 +1,7 @@
-use crate::execution_strategy::{
-    FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy,
+use crate::{
+    execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
+    state_root_strategy::{AsyncStateRootStrategy, FlashblockTypes},
 };
-use crate::state_root_strategy::{AsyncStateRootStrategy, FlashblockTypes};
 use reth_optimism_evm::OpEvmConfig;
 
 /// BAL-enabled flashblock types: parallel execution with parallel state root.

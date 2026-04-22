@@ -40,7 +40,6 @@ use revm::{
 };
 use tracing::{error, info, trace};
 
-use crate::state_root_strategy::{FlashblockTypes, StateRootHandle};
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     bal_executor::{BalExecutorError, CommittedState},
@@ -55,6 +54,7 @@ use crate::{
     },
     metrics::PayloadBuildStage,
     payload_builder_metrics::metered_fn,
+    state_root_strategy::{FlashblockTypes, StateRootHandle},
 };
 
 /// A type alias for the BAL builder database with a cache layer.
