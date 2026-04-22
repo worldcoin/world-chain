@@ -199,8 +199,10 @@ pub mod payload_builder_metrics;
 /// Execution and state-root strategy traits and concrete implementations.
 pub mod execution_strategy;
 
+mod flashblock_types;
 /// Flashblock validation metrics.
 pub mod flashblock_validation_metrics;
+mod state_root_strategy;
 
 pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
 

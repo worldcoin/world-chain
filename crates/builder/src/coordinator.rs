@@ -34,11 +34,10 @@ use tokio::{
 };
 use tracing::{error, trace};
 
+use crate::flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes};
+use crate::state_root_strategy::AsyncStateRootStrategy;
 use crate::{
-    execution_strategy::{
-        AsyncStateRootStrategy, BalFlashblockTypes, FlashblocksBalExecutionStrategy,
-        FlashblocksLegacyExecutionStrategy, LegacyFlashblockTypes,
-    },
+    execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_validation_metrics::FlashblockValidationMetrics,
     validator::FlashblocksBlockValidator,
 };

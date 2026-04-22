@@ -18,13 +18,14 @@ use reth_primitives_traits::SealedHeader;
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
-use revm::database::{BundleAccount, BundleState};
+use revm::database::BundleAccount;
 use revm_database::State;
 use tracing::error;
 use world_chain_primitives::{
     access_list::FlashblockAccessListData, primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 
+use crate::state_root_strategy::StateRootStrategy;
 use crate::{
     BlockBuilderExt,
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
@@ -38,10 +39,6 @@ use crate::{
     metrics::PayloadBuildStage,
     validator::{BalBlockValidator, decode_transactions_with_indices},
 };
-
-// ---------------------------------------------------------------------------
-// State root result + free computation function
-// ---------------------------------------------------------------------------
 
 /// Result of computing the state root from a bundle state.
 pub struct StateRootResult {
@@ -65,10 +62,6 @@ pub fn compute_state_root<'a>(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Traits
-// ---------------------------------------------------------------------------
-
 /// Context passed to an [`ExecutionStrategy`] for each flashblock.
 pub struct ValidationCtx<'a, Evm: ConfigureEvm> {
     pub parent: &'a SealedHeader<Header>,
@@ -91,70 +84,6 @@ pub trait ExecutionStrategy<Evm: ConfigureEvm>: Send + Sync {
         payload_id: PayloadId,
     ) -> Result<OpBuiltPayload, BalExecutorError>;
 }
-
-/// Strategy for state root computation.
-pub trait StateRootStrategy: Send + Sync {
-    type EpochState: Default + Send;
-    type Handle: StateRootHandle;
-
-    fn prepare(
-        &self,
-        client: impl StateProviderFactory + Clone + 'static,
-        parent_hash: B256,
-        bundle_state: BundleState,
-    ) -> Self::Handle;
-}
-
-pub trait StateRootHandle: Send {
-    fn finish(self) -> Result<StateRootResult, BlockExecutionError>;
-}
-
-/// Associates execution and state-root strategies for an EVM.
-pub trait FlashblockTypes<Evm: ConfigureEvm> {
-    type Execution: ExecutionStrategy<Evm>;
-}
-
-// ---------------------------------------------------------------------------
-// StateRootStrategy: async (BAL path)
-// ---------------------------------------------------------------------------
-
-pub struct AsyncStateRootStrategy;
-
-pub struct ChannelStateRootHandle {
-    pub receiver: crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
-}
-
-impl StateRootStrategy for AsyncStateRootStrategy {
-    type EpochState = ();
-    type Handle = ChannelStateRootHandle;
-
-    fn prepare(
-        &self,
-        client: impl StateProviderFactory + Clone + 'static,
-        parent_hash: B256,
-        bundle_state: BundleState,
-    ) -> Self::Handle {
-        let (sender, receiver) = crossbeam_channel::bounded(1);
-        let state_root_provider = client
-            .state_by_block_hash(parent_hash)
-            .expect("state provider must be available for state root computation");
-        rayon::spawn(move || {
-            let result = compute_state_root(state_root_provider.into(), bundle_state.state.iter());
-            let _ = sender.send(result);
-        });
-        ChannelStateRootHandle { receiver }
-    }
-}
-
-impl StateRootHandle for ChannelStateRootHandle {
-    fn finish(self) -> Result<StateRootResult, BlockExecutionError> {
-        self.receiver.recv().map_err(BlockExecutionError::other)?
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ExecutionStrategy: BAL path
-// ---------------------------------------------------------------------------
 
 pub struct FlashblocksBalExecutionStrategy<S: StateRootStrategy> {
     pub state_root_strategy: S,
@@ -198,11 +127,10 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig> for FlashblocksBalExec
         let mut database = BalBuilderDb::new(&mut noop_state);
         database.set_index(block_access_index);
 
-        let state_root_handle = self.state_root_strategy.prepare(
-            client.clone(),
-            ctx.parent.hash(),
-            bundle_state.clone(),
-        );
+        let state_root_handle = self
+            .state_root_strategy
+            .prepare(client.clone(), ctx.parent.hash(), bundle_state.clone())
+            .map_err(BalExecutorError::other)?;
 
         let evm = OpEvmFactory::default().create_evm(database, ctx.evm_env.clone());
 
@@ -349,10 +277,6 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig> for FlashblocksBalExec
     }
 }
 
-// ---------------------------------------------------------------------------
-// ExecutionStrategy: legacy (non-BAL) path
-// ---------------------------------------------------------------------------
-
 pub struct FlashblocksLegacyExecutionStrategy;
 
 impl ExecutionStrategy<OpEvmConfig> for FlashblocksLegacyExecutionStrategy {
@@ -437,10 +361,8 @@ impl ExecutionStrategy<OpEvmConfig> for FlashblocksLegacyExecutionStrategy {
             .map_err(BalExecutorError::other)?;
 
         let finalize_started = Instant::now();
-        let (outcome, bundle) = builder.finish_with_bundle(
-            finish_state_provider.as_ref(),
-            &mut *ctx.attempt_metrics,
-        )?;
+        let (outcome, bundle) = builder
+            .finish_with_bundle(finish_state_provider.as_ref(), &mut *ctx.attempt_metrics)?;
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 
@@ -470,22 +392,4 @@ impl ExecutionStrategy<OpEvmConfig> for FlashblocksLegacyExecutionStrategy {
             Some(executed_block),
         ))
     }
-}
-
-// ---------------------------------------------------------------------------
-// Concrete FlashblockTypes bundles
-// ---------------------------------------------------------------------------
-
-/// BAL-enabled flashblock types: parallel execution with parallel state root.
-pub struct BalFlashblockTypes;
-
-impl FlashblockTypes<OpEvmConfig> for BalFlashblockTypes {
-    type Execution = FlashblocksBalExecutionStrategy<AsyncStateRootStrategy>;
-}
-
-/// Legacy (non-BAL) flashblock types: sequential execution, no external state root.
-pub struct LegacyFlashblockTypes;
-
-impl FlashblockTypes<OpEvmConfig> for LegacyFlashblockTypes {
-    type Execution = FlashblocksLegacyExecutionStrategy;
 }

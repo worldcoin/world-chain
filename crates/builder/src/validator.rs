@@ -40,6 +40,7 @@ use revm::{
 };
 use tracing::{error, info, trace};
 
+use crate::state_root_strategy::{FlashblockTypes, StateRootHandle};
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
     bal_executor::{BalExecutorError, CommittedState},
@@ -48,9 +49,7 @@ use crate::{
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    execution_strategy::{
-        ExecutionStrategy, FlashblockTypes, StateRootHandle, StateRootResult, ValidationCtx,
-    },
+    execution_strategy::{ExecutionStrategy, StateRootResult, ValidationCtx},
     flashblock_validation_metrics::{
         FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
     },
