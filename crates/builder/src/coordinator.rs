@@ -429,9 +429,7 @@ where
         FlashblocksBlockValidator::<_, BalFlashblockTypes>::new(
             chain_spec.clone(),
             evm_env.clone(),
-            evm_config.clone(),
             execution_context.clone(),
-            sealed_header.clone(),
             flashblock_validation_metrics.clone(),
             FlashblocksBalExecutionStrategy {
                 state_root_strategy: AsyncStateRootStrategy,
@@ -448,9 +446,7 @@ where
         FlashblocksBlockValidator::<_, LegacyFlashblockTypes>::new(
             chain_spec.clone(),
             evm_env.clone(),
-            evm_config.clone(),
             execution_context.clone(),
-            sealed_header.clone(),
             flashblock_validation_metrics.clone(),
             FlashblocksLegacyExecutionStrategy,
         )

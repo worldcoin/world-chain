@@ -68,9 +68,7 @@ pub struct ValidationCtx<'a, Evm: ConfigureEvm> {
     pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
     pub chain_spec: Arc<OpChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
-    pub evm_config: Evm,
     pub execution_context: OpBlockExecutionCtx,
-    pub header: Arc<SealedHeader>,
 }
 
 /// Strategy for executing flashblock diff transactions.

@@ -202,7 +202,7 @@ pub mod execution_strategy;
 mod flashblock_types;
 /// Flashblock validation metrics.
 pub mod flashblock_validation_metrics;
-mod state_root_strategy;
+pub mod state_root_strategy;
 
 pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
 

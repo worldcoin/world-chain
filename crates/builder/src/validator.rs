@@ -63,9 +63,7 @@ pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>
 pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
     pub chain_spec: Arc<OpChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
-    pub evm_config: Evm,
     pub execution_context: OpBlockExecutionCtx,
-    pub header: Arc<SealedHeader>,
     pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
     pub execution_strategy: T::Execution,
     _phantom: PhantomData<fn() -> T>,
@@ -75,18 +73,14 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
     pub fn new(
         chain_spec: Arc<OpChainSpec>,
         evm_env: EvmEnvFor<Evm>,
-        evm_config: Evm,
         execution_context: OpBlockExecutionCtx,
-        header: Arc<SealedHeader>,
         flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
         execution_strategy: T::Execution,
     ) -> Self {
         Self {
             chain_spec,
             evm_env,
-            evm_config,
             execution_context,
-            header,
             flashblock_validation_metrics,
             execution_strategy,
             _phantom: PhantomData,
@@ -126,9 +120,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                             attempt_metrics: &mut attempt_metrics,
                             chain_spec: self.chain_spec.clone(),
                             evm_env: self.evm_env.clone(),
-                            evm_config: self.evm_config.clone(),
                             execution_context: self.execution_context.clone(),
-                            header: self.header.clone(),
                         },
                         client,
                         diff,
