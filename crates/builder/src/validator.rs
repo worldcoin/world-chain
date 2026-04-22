@@ -841,7 +841,7 @@ where
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
 
-        let db_factory = (*self.temporal_db_factory).clone();
+        let db_factory = self.temporal_db_factory.clone();
 
         trace!(
             target: "flashblocks::builder::block_validator",
