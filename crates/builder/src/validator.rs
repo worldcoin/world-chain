@@ -11,7 +11,8 @@ use alloy_op_evm::{
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
-use rayon::iter::IntoParallelIterator;
+use parking_lot::Mutex;
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::transaction::SignedTransaction;
 use world_chain_primitives::{
@@ -33,7 +34,10 @@ use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{
+    AccountReader, BlockExecutionOutput, BlockHashReader, BytecodeReader, ProviderError,
+    StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
@@ -63,6 +67,56 @@ use crate::{
 
 /// A type alias for the BAL builder database with a cache layer.
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
+
+#[derive(Clone)]
+struct SharedStateProviderDatabase {
+    provider: Arc<Mutex<StateProviderBox>>,
+}
+
+impl SharedStateProviderDatabase {
+    fn new(provider: StateProviderBox) -> Self {
+        Self {
+            provider: Arc::new(Mutex::new(provider)),
+        }
+    }
+}
+
+impl std::fmt::Debug for SharedStateProviderDatabase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedStateProviderDatabase")
+            .finish_non_exhaustive()
+    }
+}
+
+impl DatabaseRef for SharedStateProviderDatabase {
+    type Error = ProviderError;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<revm::state::AccountInfo>, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(AccountReader::basic_account(&**provider, &address)?.map(Into::into))
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<revm::state::Bytecode, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(BytecodeReader::bytecode_by_hash(&**provider, &code_hash)?
+            .unwrap_or_default()
+            .0)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: revm::primitives::StorageKey,
+    ) -> Result<revm::primitives::StorageValue, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(StateProvider::storage(&**provider, address, index.into())?.unwrap_or_default())
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(BlockHashReader::block_hash(&**provider, number)?.unwrap_or_default())
+    }
+}
 
 pub struct FlashblocksBlockValidator {
     pub chain_spec: Arc<OpChainSpec>,
@@ -324,7 +378,7 @@ impl FlashblocksBlockValidator {
         let state_provider_ref = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
-        let state_provider_database = StateProviderDatabase::new(state_provider_ref.as_ref());
+        let state_provider_database = SharedStateProviderDatabase::new(state_provider_ref);
         let block_access_index = access_list.min_tx_index;
 
         // 2. Create channel for state root computation
@@ -767,7 +821,10 @@ where
             Item = (BlockAccessIndex, Recovered<OpTransactionSigned>),
         > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
         + Clone,
-    ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
+    ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError>
+    where
+        DbRef: Send,
+    {
         if self.index_range.0 == 0 {
             self.prepare_database(0)?;
             let pre_execution_changes_started = Instant::now();
@@ -784,7 +841,7 @@ where
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
 
-        let db_factory = &self.temporal_db_factory;
+        let db_factory = (*self.temporal_db_factory).clone();
 
         trace!(
             target: "flashblocks::builder::block_validator",
@@ -799,10 +856,8 @@ where
         let txs_execution_started = Instant::now();
         let mut results = transactions
             .clone()
-            // .into_par_iter()
-            // TODO: get rayon to work
-            .into_iter()
-            .map(|(index, tx)| {
+            .into_par_iter()
+            .map_with(db_factory, |db_factory, (index, tx)| {
                 let tx = tx.clone();
                 info!(
                     "Executing tx at index {} hash {}",
