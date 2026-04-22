@@ -33,7 +33,10 @@ use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{
+    AccountReader, BlockExecutionOutput, BlockHashReader, BytecodeReader, ProviderError,
+    StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
@@ -64,6 +67,56 @@ use crate::{
 
 /// A type alias for the BAL builder database with a cache layer.
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
+
+#[derive(Clone)]
+struct SharedStateProviderDatabase {
+    provider: Arc<Mutex<StateProviderBox>>,
+}
+
+impl SharedStateProviderDatabase {
+    fn new(provider: StateProviderBox) -> Self {
+        Self {
+            provider: Arc::new(Mutex::new(provider)),
+        }
+    }
+}
+
+impl std::fmt::Debug for SharedStateProviderDatabase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedStateProviderDatabase")
+            .finish_non_exhaustive()
+    }
+}
+
+impl DatabaseRef for SharedStateProviderDatabase {
+    type Error = ProviderError;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<revm::state::AccountInfo>, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(AccountReader::basic_account(&**provider, &address)?.map(Into::into))
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<revm::state::Bytecode, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(BytecodeReader::bytecode_by_hash(&**provider, &code_hash)?
+            .unwrap_or_default()
+            .0)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: revm::primitives::StorageKey,
+    ) -> Result<revm::primitives::StorageValue, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(StateProvider::storage(&**provider, address, index.into())?.unwrap_or_default())
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        let provider = self.provider.lock();
+        Ok(BlockHashReader::block_hash(&**provider, number)?.unwrap_or_default())
+    }
+}
 
 pub struct FlashblocksBlockValidator {
     pub chain_spec: Arc<OpChainSpec>,
