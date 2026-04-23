@@ -3,13 +3,13 @@
 //! [EIP-2718]: https://eips.ethereum.org/EIPS/eip-2718
 
 use alloy_consensus::{
-    error::ValueError,
-    transaction::{RlpEcdsaEncodableTx, TxHashRef},
     EthereumTxEnvelope, Sealable, Sealed, SignableTransaction, Signed, TransactionEnvelope,
     TxEip1559, TxEip2930, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    error::ValueError,
+    transaction::{RlpEcdsaEncodableTx, TxHashRef},
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{bytes::BufMut, Bytes, ChainId, Signature, TxHash, B256};
+use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
 use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit};
 
 /// The World Chain [EIP-2718] transaction envelope.
