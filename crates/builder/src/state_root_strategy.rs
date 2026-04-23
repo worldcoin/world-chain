@@ -26,6 +26,7 @@ pub trait StateRootHandle: Send {
 /// Associates execution and state-root strategies for an EVM.
 pub trait FlashblockTypes<Evm: ConfigureEvm> {
     type Execution: ExecutionStrategy<Evm>;
+    type StateRoot: StateRootStrategy;
 }
 
 pub struct AsyncStateRootStrategy;
@@ -61,5 +62,34 @@ impl StateRootStrategy for AsyncStateRootStrategy {
 impl StateRootHandle for ChannelStateRootHandle {
     fn finish(self) -> Result<StateRootResult, BlockExecutionError> {
         self.receiver.recv().map_err(BlockExecutionError::other)?
+    }
+}
+
+/// Synchronous state root strategy: computes the state root inline on `prepare`.
+pub struct SyncStateRootStrategy;
+
+pub struct SyncStateRootHandle(Result<StateRootResult, BlockExecutionError>);
+
+impl StateRootStrategy for SyncStateRootStrategy {
+    type Handle = SyncStateRootHandle;
+
+    fn prepare(
+        &self,
+        client: impl StateProviderFactory + Clone + 'static,
+        parent_hash: B256,
+        bundle_state: BundleState,
+    ) -> Result<Self::Handle, BlockExecutionError> {
+        let state_root_provider = client
+            .state_by_block_hash(parent_hash)
+            .map_err(BlockExecutionError::other)?;
+        let result =
+            execution_strategy::compute_state_root(state_root_provider.into(), &bundle_state.state);
+        Ok(SyncStateRootHandle(result))
+    }
+}
+
+impl StateRootHandle for SyncStateRootHandle {
+    fn finish(self) -> Result<StateRootResult, BlockExecutionError> {
+        self.0
     }
 }
