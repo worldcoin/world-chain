@@ -38,7 +38,6 @@ use crate::{
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
-    state_root_strategy::AsyncStateRootStrategy,
     validator::FlashblocksBlockValidator,
 };
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
@@ -431,9 +430,7 @@ where
             evm_env.clone(),
             execution_context.clone(),
             flashblock_validation_metrics.clone(),
-            FlashblocksBalExecutionStrategy {
-                state_root_strategy: AsyncStateRootStrategy,
-            },
+            FlashblocksBalExecutionStrategy,
         )
         .validate_flashblock_with_state(
             provider,

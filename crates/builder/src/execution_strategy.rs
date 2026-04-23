@@ -63,19 +63,24 @@ pub fn compute_state_root<'a>(
 }
 
 /// Context passed to an [`ExecutionStrategy`] for each flashblock.
-pub struct ValidationCtx<'a, Evm: ConfigureEvm> {
+pub struct ValidationCtx<'a, Evm: ConfigureEvm, S: StateRootStrategy> {
     pub parent: &'a SealedHeader<Header>,
     pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
     pub chain_spec: Arc<OpChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
+    /// State root strategy for this flashblock execution.
+    pub state_root_strategy: S,
 }
 
 /// Strategy for executing flashblock diff transactions.
-pub trait ExecutionStrategy<Evm: ConfigureEvm>: Send + Sync {
+///
+/// The `S` parameter is the [`StateRootStrategy`] paired with this execution
+/// strategy via [`FlashblockTypes`].
+pub trait ExecutionStrategy<Evm: ConfigureEvm, S: StateRootStrategy>: Send + Sync {
     fn execute(
         &self,
-        ctx: ValidationCtx<'_, Evm>,
+        ctx: ValidationCtx<'_, Evm, S>,
         client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         committed_state: CommittedState<OpRethReceiptBuilder>,
@@ -83,14 +88,13 @@ pub trait ExecutionStrategy<Evm: ConfigureEvm>: Send + Sync {
     ) -> Result<OpBuiltPayload, BalExecutorError>;
 }
 
-pub struct FlashblocksBalExecutionStrategy<S: StateRootStrategy> {
-    pub state_root_strategy: S,
-}
+/// BAL execution strategy: parallel transaction execution with an external state root handle.
+pub struct FlashblocksBalExecutionStrategy;
 
-impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig> for FlashblocksBalExecutionStrategy<S> {
+impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalExecutionStrategy {
     fn execute(
         &self,
-        ctx: ValidationCtx<'_, OpEvmConfig>,
+        ctx: ValidationCtx<'_, OpEvmConfig, S>,
         client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         committed_state: CommittedState<OpRethReceiptBuilder>,
@@ -125,7 +129,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig> for FlashblocksBalExec
         let mut database = BalBuilderDb::new(&mut noop_state);
         database.set_index(block_access_index);
 
-        let state_root_handle = self
+        let state_root_handle = ctx
             .state_root_strategy
             .prepare(client.clone(), ctx.parent.hash(), bundle_state.clone())
             .map_err(BalExecutorError::other)?;
@@ -277,10 +281,10 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig> for FlashblocksBalExec
 
 pub struct FlashblocksLegacyExecutionStrategy;
 
-impl ExecutionStrategy<OpEvmConfig> for FlashblocksLegacyExecutionStrategy {
+impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLegacyExecutionStrategy {
     fn execute(
         &self,
-        ctx: ValidationCtx<'_, OpEvmConfig>,
+        ctx: ValidationCtx<'_, OpEvmConfig, S>,
         client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         committed_state: CommittedState<OpRethReceiptBuilder>,

@@ -121,6 +121,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                             chain_spec: self.chain_spec.clone(),
                             evm_env: self.evm_env.clone(),
                             execution_context: self.execution_context.clone(),
+                            state_root_strategy: T::StateRoot::default(),
                         },
                         client,
                         diff,

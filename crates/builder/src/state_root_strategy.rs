@@ -1,7 +1,4 @@
-use crate::{
-    execution_strategy,
-    execution_strategy::{ExecutionStrategy, StateRootResult},
-};
+use crate::execution_strategy::{self, ExecutionStrategy, StateRootResult};
 use alloy_primitives::B256;
 use reth_evm::{ConfigureEvm, block::BlockExecutionError};
 use reth_provider::StateProviderFactory;
@@ -24,11 +21,17 @@ pub trait StateRootHandle: Send {
 }
 
 /// Associates execution and state-root strategies for an EVM.
+///
+/// The `Execution` strategy receives the `StateRoot` strategy via [`ValidationCtx`],
+/// so the state root type is declared once here and flows through to the executor.
+///
+/// [`ValidationCtx`]: crate::execution_strategy::ValidationCtx
 pub trait FlashblockTypes<Evm: ConfigureEvm> {
-    type Execution: ExecutionStrategy<Evm>;
-    type StateRoot: StateRootStrategy;
+    type StateRoot: StateRootStrategy + Default;
+    type Execution: ExecutionStrategy<Evm, Self::StateRoot>;
 }
 
+#[derive(Default)]
 pub struct AsyncStateRootStrategy;
 
 pub struct ChannelStateRootHandle {
@@ -66,6 +69,7 @@ impl StateRootHandle for ChannelStateRootHandle {
 }
 
 /// Synchronous state root strategy: computes the state root inline on `prepare`.
+#[derive(Default)]
 pub struct SyncStateRootStrategy;
 
 pub struct SyncStateRootHandle(Result<StateRootResult, BlockExecutionError>);
@@ -83,7 +87,7 @@ impl StateRootStrategy for SyncStateRootStrategy {
             .state_by_block_hash(parent_hash)
             .map_err(BlockExecutionError::other)?;
         let result =
-            execution_strategy::compute_state_root(state_root_provider.into(), &bundle_state.state);
+            execution_strategy::compute_state_root(state_root_provider.into(), bundle_state.state.iter());
         Ok(SyncStateRootHandle(result))
     }
 }

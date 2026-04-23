@@ -8,14 +8,14 @@ use reth_optimism_evm::OpEvmConfig;
 pub struct BalFlashblockTypes;
 
 impl FlashblockTypes<OpEvmConfig> for BalFlashblockTypes {
-    type Execution = FlashblocksBalExecutionStrategy<AsyncStateRootStrategy>;
     type StateRoot = AsyncStateRootStrategy;
+    type Execution = FlashblocksBalExecutionStrategy;
 }
 
 /// Legacy (non-BAL) flashblock types: sequential execution with inline state root.
 pub struct LegacyFlashblockTypes;
 
 impl FlashblockTypes<OpEvmConfig> for LegacyFlashblockTypes {
-    type Execution = FlashblocksLegacyExecutionStrategy;
     type StateRoot = SyncStateRootStrategy;
+    type Execution = FlashblocksLegacyExecutionStrategy;
 }
