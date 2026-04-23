@@ -17,7 +17,6 @@ reth-payload-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-chainspec.workspace = true
 alloy-eips.workspace = true

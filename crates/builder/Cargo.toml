@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
