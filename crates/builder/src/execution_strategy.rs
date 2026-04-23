@@ -319,7 +319,7 @@ impl ExecutionStrategy<OpEvmConfig> for FlashblocksLegacyExecutionStrategy {
         );
 
         // Apply pre-execution changes on the first flashblock (no prior committed state).
-        if committed_state.transactions.is_empty() {
+        if committed_state.is_first {
             let pre_execution_changes_started = Instant::now();
             builder.apply_pre_execution_changes()?;
             ctx.attempt_metrics.record_stage_duration(
