@@ -1,24 +1,24 @@
 use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory, OpTx};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_evm::{
-    ConfigureEvm, EvmEnvFor, EvmFactory,
+    ConfigureEvm, Evm, EvmEnvFor, EvmFactory,
     block::{BlockExecutionError, CommitChanges},
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutor},
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
-use revm::database::BundleAccount;
+use revm::database::{BundleAccount, states::bundle_state::BundleRetention};
 use revm_database::State;
 use tracing::error;
 use world_chain_primitives::{
@@ -26,8 +26,8 @@ use world_chain_primitives::{
 };
 
 use crate::{
-    BlockBuilderExt,
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
+    state_db::StateDB,
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
@@ -36,7 +36,7 @@ use crate::{
     executor::FlashblocksBlockBuilder,
     flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
     metrics::PayloadBuildStage,
-    state_root_strategy::StateRootStrategy,
+    state_root_strategy::{StateRootHandle, StateRootStrategy},
     validator::{BalBlockValidator, decode_transactions_with_indices},
 };
 
@@ -358,13 +358,75 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLega
             txs_execution_started.elapsed(),
         );
 
+        // Extract state root strategy from ctx; bundle state is only available after
+        // merging transitions, so prepare() cannot be called until then.
+        let state_root_strategy = ctx.state_root_strategy;
+        let parent_hash = ctx.parent.hash();
+
         let finish_state_provider = client
-            .state_by_block_hash(ctx.parent.hash())
+            .state_by_block_hash(parent_hash)
             .map_err(BalExecutorError::other)?;
 
         let finalize_started = Instant::now();
-        let (outcome, bundle) = builder
-            .finish_with_bundle(finish_state_provider.as_ref(), &mut *ctx.attempt_metrics)?;
+
+        let (evm, executor_result) = builder.inner.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        let merge_started = Instant::now();
+        db.merge_transitions(BundleRetention::Reverts);
+        ctx.attempt_metrics
+            .record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
+
+        let flattened = crate::utils::flatten_reverts(&db.bundle_state().reverts);
+        db.bundle_state_mut().reverts = flattened;
+
+        let state_root_started = Instant::now();
+        let state_root_handle = state_root_strategy
+            .prepare(client, parent_hash, db.bundle_state().clone())?;
+        let StateRootResult {
+            state_root,
+            trie_updates,
+            hashed_state,
+        } = state_root_handle.finish()?;
+        ctx.attempt_metrics
+            .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
+
+        let (transactions, senders) = builder
+            .inner
+            .transactions
+            .into_iter()
+            .map(|tx| tx.into_parts())
+            .unzip();
+
+        let block_assembly_started = Instant::now();
+        let block = builder.inner.assembler.assemble_block(BlockAssemblerInput::<
+            '_,
+            '_,
+            OpBlockExecutorFactory<OpRethReceiptBuilder>,
+        >::new(
+            evm_env,
+            builder.inner.ctx,
+            builder.inner.parent,
+            transactions,
+            &executor_result,
+            db.bundle_state(),
+            finish_state_provider.as_ref(),
+            state_root,
+        ))?;
+        ctx.attempt_metrics.record_stage_duration(
+            PayloadBuildStage::BlockAssembly,
+            block_assembly_started.elapsed(),
+        );
+
+        let bundle = db.take_bundle();
+        let block = RecoveredBlock::new_unhashed(block, senders);
+        let outcome = BlockBuilderOutcome::<OpPrimitives> {
+            execution_result: executor_result,
+            hashed_state,
+            trie_updates,
+            block,
+        };
+
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 

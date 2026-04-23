@@ -24,9 +24,7 @@ pub fn validate(
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
 
-    let strategy = FlashblocksBalExecutionStrategy {
-        state_root_strategy: AsyncStateRootStrategy,
-    };
+    let strategy = FlashblocksBalExecutionStrategy;
 
     let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
     let payload_id = PayloadId::default();
@@ -38,6 +36,7 @@ pub fn validate(
             chain_spec: CHAIN_SPEC.clone(),
             evm_env: EVM_ENV.clone(),
             execution_context: BLOCK_EXECUTION_CTX.clone(),
+            state_root_strategy: AsyncStateRootStrategy,
         },
         state_provider,
         diff.clone(),
