@@ -124,7 +124,7 @@ pub async fn run(args: Args) -> Result<()> {
         let vk = maybe_builder_vk.unwrap_or_else(|| authorizer_sk.verifying_key());
         Authorization::new(
             payload_id,
-            PayloadAttributes::timestamp(&attrs),
+            attrs.payload_attributes.timestamp,
             &authorizer_sk,
             vk,
         )

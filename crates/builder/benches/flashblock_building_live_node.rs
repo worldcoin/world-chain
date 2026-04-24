@@ -7,8 +7,8 @@ use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadConfig};
 use reth_optimism_node::{
     OpPayloadAttributes, payload::OpPayloadAttrs, utils::optimism_payload_attributes,
 };
-use reth_payload_primitives::PayloadAttributes as _;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_payload_primitives::PayloadAttributes as _;
 use reth_provider::{StateProvider, StateProviderFactory};
 use world_chain_builder::{
     WorldChainPayloadBuilderCtxBuilder, payload_builder::FlashblocksPayloadBuilder,
@@ -142,8 +142,7 @@ fn bench_build_flashblock_case<F>(
         let rpc_attributes = deterministic_payload_attributes(timestamp, transactions);
         let attributes = OpPayloadAttrs::from(rpc_attributes);
         let payload_id = attributes.payload_id(&parent_header.hash());
-        let config =
-            PayloadConfig::new(Arc::new(parent_header.clone()), attributes, payload_id);
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes, payload_id);
         let builder = build_live_payload_builder(
             node.node.inner.pool.clone(),
             provider,

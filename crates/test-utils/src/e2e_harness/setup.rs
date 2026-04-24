@@ -38,7 +38,7 @@ use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_payload_builder::payload_id_optimism;
+use reth_optimism_payload_builder::{OpPayloadAttrs, payload_id_optimism};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
 use reth_tasks::{Runtime, TaskExecutor};
@@ -429,13 +429,13 @@ pub fn current_timestamp() -> u64 {
 pub fn create_authorization_generator(
     block_hash: B256,
     builder_verifying_key: ed25519_dalek::VerifyingKey,
-) -> impl Fn(OpPayloadAttributes) -> Authorization + Clone {
-    move |attrs: OpPayloadAttributes| {
+) -> impl Fn(OpPayloadAttrs) -> Authorization + Clone {
+    move |attrs: OpPayloadAttrs| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
         let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
         Authorization::new(
             payload_id,
-            attrs.payload_attributes.timestamp(),
+            attrs.payload_attributes.timestamp,
             &authorizer_sk,
             builder_verifying_key,
         )
@@ -447,7 +447,7 @@ pub fn build_payload_attributes(
     timestamp: u64,
     eip1559_params: B64,
     transactions: Option<Vec<Bytes>>,
-) -> OpPayloadAttributes {
+) -> OpPayloadAttrs {
     OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp,
@@ -462,6 +462,7 @@ pub fn build_payload_attributes(
         gas_limit: Some(200_000_000), // 200MGas
         min_base_fee: Some(0),
     }
+    .into()
 }
 
 /// Encode EIP-1559 parameters for Holocene from a chain spec at a given timestamp

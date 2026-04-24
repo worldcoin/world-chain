@@ -280,8 +280,10 @@ where
 /// the RPC transaction bytes into typed transactions.
 fn convert_build_args(
     args: BuildArguments<OpPayloadAttrs, OpBuiltPayload>,
-) -> Result<BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>, PayloadBuilderError>
-{
+) -> Result<
+    BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
+    PayloadBuilderError,
+> {
     let BuildArguments {
         config,
         cached_reads,

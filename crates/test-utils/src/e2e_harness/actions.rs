@@ -15,7 +15,8 @@ use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV4;
 use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
 use reth_node_api::ConsensusEngineHandle;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
+use reth_optimism_node::OpEngineTypes;
+use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_rpc_api::{EngineApiClient, EthApiClient};
 use revm_primitives::{Address, B256, Bytes, U256};
@@ -957,7 +958,7 @@ pub mod assert {
 pub struct AssertMineBlock<A> {
     pub node_idx: usize,
     pub parent_hash: Option<B256>,
-    pub attributes: OpPayloadAttributes,
+    pub attributes: OpPayloadAttrs,
     pub authorization_gen: A,
     pub block_interval: Duration,
     pub flashblocks: bool,
@@ -966,12 +967,12 @@ pub struct AssertMineBlock<A> {
 
 impl<A> AssertMineBlock<A>
 where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync,
+    A: Fn(OpPayloadAttrs) -> Authorization + Clone + Send + Sync,
 {
     pub async fn new(
         node_idx: usize,
         parent_hash: Option<B256>,
-        attributes: OpPayloadAttributes,
+        attributes: OpPayloadAttrs,
         authorization_gen: A,
         block_interval: Duration,
         flashblocks: bool,
@@ -991,7 +992,7 @@ where
 
 impl<A> Action<OpEngineTypes> for AssertMineBlock<A>
 where
-    A: Fn(OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    A: Fn(OpPayloadAttrs) -> Authorization + Clone + Send + Sync + 'static,
 {
     fn execute<'a>(
         &'a mut self,
@@ -1221,7 +1222,7 @@ pub struct EngineDriver<A> {
     /// Generates `Authorization` from `(parent_hash, OpPayloadAttributes)`.
     pub authorization_gen: A,
     /// Generates attributes for the next block given (block_number, parent_timestamp).
-    pub attributes_gen: Box<dyn Fn(u64, u64) -> Result<OpPayloadAttributes> + Send + Sync>,
+    pub attributes_gen: Box<dyn Fn(u64, u64) -> Result<OpPayloadAttrs> + Send + Sync>,
     /// Optional callback during the build interval (between FCU and getPayload).
     /// Called while the payload builder is actively working.
     pub during_build: Option<MidBuildCallback>,
@@ -1231,7 +1232,7 @@ pub struct EngineDriver<A> {
 
 impl<A> EngineDriver<A>
 where
-    A: Fn(B256, OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    A: Fn(B256, OpPayloadAttrs) -> Authorization + Clone + Send + Sync + 'static,
 {
     pub fn execute<'a>(
         &'a mut self,
@@ -1286,7 +1287,7 @@ where
                         &engine,
                         fcu_state,
                         Some(attributes.clone().into()),
-                        Some((self.authorization_gen)(parent_hash, attributes.clone())),
+                        Some((self.authorization_gen)(parent_hash, attributes.clone().into())),
                     )
                     .await?
                 } else {
@@ -1482,7 +1483,7 @@ where
 
 impl<A> Action<OpEngineTypes> for EngineDriver<A>
 where
-    A: Fn(B256, OpPayloadAttributes) -> Authorization + Clone + Send + Sync + 'static,
+    A: Fn(B256, OpPayloadAttrs) -> Authorization + Clone + Send + Sync + 'static,
 {
     fn execute<'a>(
         &'a mut self,
