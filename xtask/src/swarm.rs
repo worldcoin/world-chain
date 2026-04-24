@@ -13,8 +13,8 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::B256;
 use clap::Parser;
 use eyre::Result;
-use reth_node_api::PayloadAttributes;
 use reth_optimism_node::{OpPayloadAttributes, utils::optimism_payload_attributes};
+use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_payload_builder::payload_id_optimism;
 use tracing::info;
 
@@ -118,7 +118,7 @@ pub async fn run(args: Args) -> Result<()> {
         None
     };
 
-    let authorization_gen = move |parent_hash: B256, attrs: OpPayloadAttributes| -> Authorization {
+    let authorization_gen = move |parent_hash: B256, attrs: OpPayloadAttrs| -> Authorization {
         let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
         let payload_id = payload_id_optimism(&parent_hash, &attrs, 3);
         let vk = maybe_builder_vk.unwrap_or_else(|| authorizer_sk.verifying_key());
