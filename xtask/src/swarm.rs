@@ -13,9 +13,8 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::B256;
 use clap::Parser;
 use eyre::Result;
-use reth_optimism_node::{OpPayloadAttributes, utils::optimism_payload_attributes};
-use reth_optimism_payload_builder::OpPayloadAttrs;
-use reth_optimism_payload_builder::payload_id_optimism;
+use reth_optimism_node::utils::optimism_payload_attributes;
+use reth_optimism_payload_builder::{OpPayloadAttrs, payload_id_optimism};
 use tracing::info;
 
 use world_chain_node::context::WorldChainDefaultContext;

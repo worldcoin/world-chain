@@ -13296,7 +13296,6 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-primitives",
- "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-revm",
  "serde",

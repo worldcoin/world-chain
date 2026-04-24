@@ -5,9 +5,9 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpReceipt;
-use op_revm::{OpHaltReason, OpSpecId, OpTransaction};
+use op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::{
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
+    Database, Evm,
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
 };
 use reth_node_api::NodePrimitives;
@@ -17,11 +17,7 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_trie_common::updates::TrieUpdates;
-use revm::{
-    DatabaseCommit,
-    context::{BlockEnv, TxEnv},
-    database::BundleState,
-};
+use revm::{DatabaseCommit, context::BlockEnv, database::BundleState};
 use tracing::trace;
 
 use crate::{

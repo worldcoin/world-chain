@@ -1034,7 +1034,7 @@ where
                 FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
                     &engine,
                     fcu_state,
-                    Some(self.attributes.clone().into()),
+                    Some(self.attributes.clone()),
                     Some((self.authorization_gen)(self.attributes.clone())),
                 )
                 .await?
@@ -1042,7 +1042,7 @@ where
                 EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
                     &engine,
                     fcu_state,
-                    Some(self.attributes.clone().into()),
+                    Some(self.attributes.clone()),
                 )
                 .await?
             };
@@ -1286,15 +1286,15 @@ where
                     FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
                         &engine,
                         fcu_state,
-                        Some(attributes.clone().into()),
-                        Some((self.authorization_gen)(parent_hash, attributes.clone().into())),
+                        Some(attributes.clone()),
+                        Some((self.authorization_gen)(parent_hash, attributes.clone())),
                     )
                     .await?
                 } else {
                     EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
                         &engine,
                         fcu_state,
-                        Some(attributes.clone().into()),
+                        Some(attributes.clone()),
                     )
                     .await?
                 };

@@ -13,7 +13,6 @@ eyre.workspace = true
 alloy-primitives = { workspace = true }
 
 reth-revm.workspace = true
-reth-payload-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-node.workspace = true

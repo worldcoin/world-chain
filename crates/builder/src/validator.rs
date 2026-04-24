@@ -21,7 +21,7 @@ use world_chain_primitives::{
 };
 
 use reth_evm::{
-    Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    Evm, EvmEnv, EvmEnvFor, EvmFactory,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
@@ -37,7 +37,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
     DatabaseRef,
-    context::{BlockEnv, TxEnv, result::ExecutionResult},
+    context::{BlockEnv, result::ExecutionResult},
     database::{BundleAccount, BundleState},
     primitives::AddressMap,
 };

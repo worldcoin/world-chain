@@ -10,7 +10,6 @@ use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{Address, B256, U256};
@@ -432,7 +431,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
         0,
         None,
-        attributes.into(),
+        attributes,
         authorization_generator,
         std::time::Duration::from_millis(3000),
         true,
