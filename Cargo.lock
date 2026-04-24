@@ -414,48 +414,18 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b18bebd1d9f70d768e00b66c07474a65c812bad442dc3347d980f5758927f44b"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-evm",
- "alloy-op-hardforks 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
- "alloy-primitives",
- "auto_impl",
- "op-alloy 0.23.1",
- "op-revm 17.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "revm",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "alloy-op-evm"
-version = "0.30.0"
 source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
- "alloy-op-hardforks 0.4.7 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "auto_impl",
- "op-alloy 0.24.0",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-alloy",
+ "op-revm",
  "revm",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "alloy-op-hardforks"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6472c610150c4c4c15be9e1b964c9b78068f933bda25fb9cdf09b9ac2bb66f36"
-dependencies = [
- "alloy-chains",
- "alloy-hardforks",
- "alloy-primitives",
- "auto_impl",
 ]
 
 [[package]]
@@ -5537,37 +5507,14 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "op-alloy"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9b8fee21003dd4f076563de9b9d26f8c97840157ef78593cd7f262c5ca99848"
-dependencies = [
- "op-alloy-consensus 0.23.1",
-]
-
-[[package]]
-name = "op-alloy"
 version = "0.24.0"
 source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
 dependencies = [
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-provider",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
-]
-
-[[package]]
-name = "op-alloy-consensus"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "736381a95471d23e267263cfcee9e1d96d30b9754a94a2819148f83379de8a86"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "derive_more",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5610,7 +5557,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
 ]
 
@@ -5651,7 +5598,7 @@ dependencies = [
  "alloy-serde",
  "alloy-signer",
  "derive_more",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "reth-rpc-traits",
  "serde",
  "serde_json",
@@ -5672,21 +5619,11 @@ dependencies = [
  "derive_more",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive 0.9.1",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "serde",
  "sha2",
  "snap",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "op-revm"
-version = "17.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57a98f3a512a7e02a1dcf1242b57302d83657b265a665d50ad98d0b158efaf2c"
-dependencies = [
- "auto_impl",
- "revm",
 ]
 
 [[package]]
@@ -8395,7 +8332,7 @@ dependencies = [
  "alloy-primitives",
  "derive_more",
  "miniz_oxide 0.9.1",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
  "paste",
  "reth-chainspec",
@@ -8423,7 +8360,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures-util",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -8493,12 +8430,12 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
- "alloy-op-evm 0.30.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "alloy-op-evm",
  "alloy-primitives",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-revm",
  "reth-chainspec",
  "reth-evm",
  "reth-execution-errors",
@@ -8576,7 +8513,7 @@ name = "reth-optimism-forks"
 version = "1.11.3"
 source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
 dependencies = [
- "alloy-op-hardforks 0.4.7 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "once_cell",
  "reth-ethereum-forks",
@@ -8596,9 +8533,9 @@ dependencies = [
  "eyre",
  "futures-util",
  "humantime",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-revm",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -8652,9 +8589,9 @@ dependencies = [
  "alloy-rpc-types-engine",
  "derive_more",
  "either",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-revm",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-evm",
@@ -8687,7 +8624,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "reth-primitives-traits",
  "serde",
  "serde_with",
@@ -8701,7 +8638,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
- "alloy-op-evm 0.30.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "alloy-op-evm",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-client",
@@ -8719,12 +8656,12 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-jsonrpsee",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-revm",
  "reqwest 0.13.2",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -8823,10 +8760,10 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-flz",
  "op-alloy-rpc-types",
- "op-revm 17.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0)",
+ "op-revm",
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
@@ -13091,7 +13028,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-network",
- "alloy-op-evm 0.30.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "alloy-op-evm",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
@@ -13105,8 +13042,9 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-derive",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
+ "op-revm",
  "parking_lot",
  "rayon",
  "reth-basic-payload-builder",
@@ -13123,6 +13061,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-payload-primitives",
  "reth-payload-util",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-tasks",
@@ -13173,17 +13112,18 @@ name = "world-chain-node"
 version = "1.11.3"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "color-eyre",
  "ed25519-dalek",
  "hex",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
  "reth-db",
- "reth-engine-local",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-evm",
@@ -13199,6 +13139,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-payload-builder",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-engine-api",
  "reth-rpc-eth-api",
@@ -13252,12 +13193,14 @@ dependencies = [
 name = "world-chain-payload"
 version = "1.11.3"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "color-eyre",
  "futures",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "reth-basic-payload-builder",
+ "reth-execution-cache",
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
@@ -13268,6 +13211,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-tasks",
+ "reth-trie-parallel",
  "tokio",
  "tracing",
  "world-chain-builder",
@@ -13304,7 +13248,7 @@ dependencies = [
  "alloy-sol-types",
  "chrono",
  "color-eyre",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "parking_lot",
  "rayon",
  "reth-db",
@@ -13346,7 +13290,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "ed25519-dalek",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "reth-basic-payload-builder",
  "reth-optimism-chainspec",
@@ -13413,7 +13357,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
- "alloy-op-evm 0.30.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "alloy-op-evm",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
@@ -13430,10 +13374,11 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "lazy_static",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
+ "op-revm",
  "parking_lot",
  "rand 0.9.4",
  "reqwest 0.12.28",
@@ -13501,7 +13446,7 @@ dependencies = [
  "color-eyre",
  "ed25519-dalek",
  "futures",
- "op-alloy-consensus 0.24.0",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "proptest",

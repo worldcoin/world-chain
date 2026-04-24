@@ -19,6 +19,7 @@ reth-evm.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
 reth-revm.workspace = true
+reth-primitives-traits.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -47,6 +48,9 @@ world-chain-rpc.workspace = true
 # revm
 revm.workspace = true
 revm-database.workspace = true
+
+# op-revm
+op-revm.workspace = true
 
 # tokio
 tokio.workspace = true

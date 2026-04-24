@@ -18,7 +18,7 @@ use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, Recover
 
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ pub struct Flashblock {
 impl Flashblock {
     pub fn new(
         payload: &OpBuiltPayload,
-        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        config: &PayloadConfig<OpPayloadAttrs, Header>,
         index: u64,
         transactions_offset: usize,
         withdrawal_offset: usize,
@@ -45,14 +45,15 @@ impl Flashblock {
             Some(ExecutionPayloadBaseV1 {
                 parent_beacon_block_root: config
                     .attributes
+                    .payload_attributes
                     .parent_beacon_block_root
                     .unwrap_or_default(),
-                parent_hash: config.attributes.parent(),
-                fee_recipient: config.attributes.suggested_fee_recipient(),
-                prev_randao: config.attributes.prev_randao,
+                parent_hash: config.parent_header.hash(),
+                fee_recipient: config.attributes.payload_attributes.suggested_fee_recipient,
+                prev_randao: config.attributes.payload_attributes.prev_randao,
                 block_number: block.number(),
                 gas_limit: block.gas_limit(),
-                timestamp: config.attributes.timestamp,
+                timestamp: config.attributes.payload_attributes.timestamp,
                 extra_data: block.extra_data().clone(),
                 base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
             })
@@ -100,7 +101,7 @@ impl Flashblock {
 
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
-                payload_id: config.attributes.payload_id(),
+                payload_id: config.payload_id(),
                 index,
                 base: payload_base,
                 diff: ExecutionPayloadFlashblockDeltaV1 {

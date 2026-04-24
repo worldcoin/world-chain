@@ -60,6 +60,8 @@ world-chain-test-utils = { path = "crates/test-utils", default-features = false 
 reth-primitives-traits = { version = "0.1.0", default-features = false }
 
 # reth github
+reth-trie-parallel = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
+reth-execution-cache = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
 reth-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
 reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
@@ -183,10 +185,10 @@ revm-state = { version = "10.0.0", default-features = false }
 revm-primitives = { version = "22.1.0", default-features = false }
 revm-interpreter = { version = "34.0.0", default-features = false }
 revm-database-interface = { version = "10.0.0", default-features = false }
-op-revm = { version = "17.0.0", default-features = false }
+op-revm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 revm-inspectors = "0.36.1"
 
-alloy-op-evm = { version = "0.30.0", default-features = false }
+alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 alloy-evm = { version = "0.30.0", default-features = false }
 
 # rpc

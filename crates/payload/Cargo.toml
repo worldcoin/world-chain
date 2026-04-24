@@ -23,9 +23,12 @@ reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-tasks.workspace = true
+reth-execution-cache.workspace = true
+reth-trie-parallel.workspace = true
 
 # alloy
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 

@@ -311,12 +311,12 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use alloy_consensus::{Block, Header};
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_primitives::{Address, address};
     use alloy_sol_types::SolCall;
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::{BlockBody, SealedBlock};
+    use reth_primitives_traits::SealedBlock;
     use reth_transaction_pool::{
         Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
     };

@@ -181,14 +181,13 @@ where
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, address};
-    use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     /// Devnet World ID for testing
     const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
     use super::*;
-    use alloy_consensus::Block as AlloyBlock;
+    use alloy_consensus::{Block as AlloyBlock, Header};
 
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();

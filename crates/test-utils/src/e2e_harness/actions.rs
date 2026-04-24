@@ -13,11 +13,10 @@ use futures::{
 use op_alloy_rpc_types::OpTransactionReceipt;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV4;
 use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
-use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion};
+use reth_node_api::ConsensusEngineHandle;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::TransactionSigned;
 use reth_rpc_api::{EngineApiClient, EthApiClient};
 use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
@@ -418,11 +417,11 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                     .map(|beacon_handle| {
                         let execution_data = execution_data.clone();
                         async move {
-                            beacon_handle
-                                .fork_choice_updated(forkchoice, None, EngineApiMessageVersion::V3)
-                                .await?;
+                            beacon_handle.fork_choice_updated(forkchoice, None).await?;
 
-                            let status = beacon_handle.new_payload(execution_data.clone()).await?;
+                            let status = beacon_handle
+                                .new_payload(execution_data.clone().into())
+                                .await?;
 
                             Ok::<_, eyre::Report>(status)
                         }
@@ -545,7 +544,7 @@ impl Action<OpEngineTypes> for GetReceipts {
                                 alloy_rpc_types_eth::Block,
                                 OpTransactionReceipt,
                                 Header,
-                                TransactionSigned,
+                                OpTransactionSigned,
                             >::transaction_receipt(rpc, *hash)
                             .await?;
 
@@ -606,7 +605,7 @@ impl Action<OpEngineTypes> for EthCall {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
-                    TransactionSigned,
+                    OpTransactionSigned,
                 >::call(
                     &env.node_clients[idx].rpc,
                     self.tx.clone(),
@@ -687,7 +686,7 @@ impl Action<OpEngineTypes> for GetBlockByHash {
                             alloy_rpc_types_eth::Block,
                             alloy_consensus::Receipt,
                             Header,
-                            TransactionSigned,
+                            OpTransactionSigned,
                         >::block_by_hash(
                             &env.node_clients[idx].rpc, hash, true
                         )
@@ -754,7 +753,7 @@ impl Action<OpEngineTypes> for GetCode {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
-                    TransactionSigned,
+                    OpTransactionSigned,
                 >::get_code(
                     &env.node_clients[idx].rpc,
                     self.address,
@@ -822,7 +821,7 @@ impl Action<OpEngineTypes> for GetTransactionCount {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
-                    TransactionSigned,
+                    OpTransactionSigned,
                 >::transaction_count(
                     &env.node_clients[idx].rpc,
                     self.address,
@@ -892,7 +891,7 @@ impl Action<OpEngineTypes> for GetStorage {
                     alloy_rpc_types_eth::Block,
                     alloy_consensus::Receipt,
                     Header,
-                    TransactionSigned,
+                    OpTransactionSigned,
                 >::storage_at(
                     &env.node_clients[idx].rpc,
                     self.address,
@@ -1012,7 +1011,7 @@ where
                         alloy_rpc_types_eth::Block,
                         alloy_consensus::Receipt,
                         Header,
-                        TransactionSigned,
+                        OpTransactionSigned,
                     >::block_by_number(
                         &client.rpc, alloy_eips::BlockNumberOrTag::Latest, false
                     )
@@ -1034,7 +1033,7 @@ where
                 FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
                     &engine,
                     fcu_state,
-                    Some(self.attributes.clone()),
+                    Some(self.attributes.clone().into()),
                     Some((self.authorization_gen)(self.attributes.clone())),
                 )
                 .await?
@@ -1042,7 +1041,7 @@ where
                 EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
                     &engine,
                     fcu_state,
-                    Some(self.attributes.clone()),
+                    Some(self.attributes.clone().into()),
                 )
                 .await?
             };
@@ -1253,7 +1252,7 @@ where
                         alloy_rpc_types_eth::Block,
                         alloy_consensus::Receipt,
                         Header,
-                        TransactionSigned,
+                        OpTransactionSigned,
                     >::block_by_number(
                         &builder.rpc, alloy_eips::BlockNumberOrTag::Latest, false
                     )
@@ -1286,7 +1285,7 @@ where
                     FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
                         &engine,
                         fcu_state,
-                        Some(attributes.clone()),
+                        Some(attributes.clone().into()),
                         Some((self.authorization_gen)(parent_hash, attributes.clone())),
                     )
                     .await?
@@ -1294,7 +1293,7 @@ where
                     EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
                         &engine,
                         fcu_state,
-                        Some(attributes.clone()),
+                        Some(attributes.clone().into()),
                     )
                     .await?
                 };
@@ -1397,7 +1396,6 @@ where
                             .fork_choice_updated(
                                 parent_fcu,
                                 None,
-                                EngineApiMessageVersion::V3,
                             )
                             .await
                             .map_err(|e| {
@@ -1418,7 +1416,7 @@ where
                         };
 
                         let status = beacon_handle
-                            .new_payload(execution_data)
+                            .new_payload(execution_data.into())
                             .await
                             .map_err(|e| {
                                 eyre!("block {block_num}: newPayload failed on follower {follower_idx}: {e:?}")
@@ -1441,7 +1439,6 @@ where
                             .fork_choice_updated(
                                 head_fcu,
                                 None,
-                                EngineApiMessageVersion::V3,
                             )
                             .await
                             .map_err(|e| {
