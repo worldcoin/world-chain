@@ -26,7 +26,8 @@ use reth_e2e_test_utils::{
 use reth_engine_tree::tree::TreeConfig;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
-    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes,
+    FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadAttributes,
+    PayloadTypes,
 };
 use reth_node_builder::{
     EngineNodeLauncher, Node, NodeBuilder, NodeComponents, NodeComponentsBuilder, NodeConfig,
@@ -37,7 +38,7 @@ use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_payload_builder::{OpPayloadAttrs, payload_id_optimism};
+use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
 use reth_tasks::{Runtime, TaskExecutor};
@@ -431,7 +432,7 @@ pub fn create_authorization_generator(
 ) -> impl Fn(OpPayloadAttrs) -> Authorization + Clone {
     move |attrs: OpPayloadAttrs| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
+        let payload_id = attrs.payload_id(&block_hash);
         Authorization::new(
             payload_id,
             attrs.payload_attributes.timestamp,

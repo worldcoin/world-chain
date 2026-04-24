@@ -9,6 +9,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_node_api::PayloadAttributes;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -1280,8 +1281,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id =
-                reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
+            let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
@@ -1475,8 +1475,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id =
-                reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
+            let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
@@ -1710,8 +1709,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id =
-                reth_optimism_payload_builder::payload_id_optimism(&parent_hash, &attrs, 3);
+            let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
