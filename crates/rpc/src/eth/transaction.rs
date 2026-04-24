@@ -6,10 +6,10 @@ use alloy_primitives::{B256, Bytes, TxHash};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
-use reth_primitives::{Recovered, TransactionMeta};
+use reth_primitives_traits::{Recovered, SignerRecoverable, TransactionMeta};
 use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
     helpers::{
         EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking, spec::SignersForRpc,
     },
@@ -17,7 +17,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use reth_transaction_pool::{PoolPooledTx, TransactionOrigin};
 
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use crate::eth::FlashblocksEthApi;
 
@@ -62,9 +62,10 @@ where
     ) -> impl Future<
         Output = Result<
             Option<(
-                ProviderTx<Self::Provider>,
+                Recovered<ProviderTx<Self::Provider>>,
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
+                Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
             )>,
             Self::Error,
         >,
@@ -72,56 +73,91 @@ where
     where
         Self: 'static,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            let pending_block = this.local_pending_block().await?;
-            if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
-                && let Some(pos) = block
-                    .body()
-                    .transactions_iter()
-                    .position(|t| *t.tx_hash() == hash)
+        async move {
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await
+                && let Some(tx) = cached.recovered_transaction().map(|tx| tx.cloned())
             {
-                let receipt = &receipts[pos];
-                let tx = block
-                    .clone()
-                    .body()
-                    .transactions_iter()
-                    .nth(pos)
-                    .expect("position is valid; qed")
-                    .clone();
+                let meta = cached.transaction_meta(hash);
 
-                let meta = TransactionMeta {
-                    tx_hash: tx.tx_hash(),
-                    block_hash: block.hash_slow(),
-                    block_number: block.number(),
-                    index: pos as u64,
-                    base_fee: block.base_fee_per_gas(),
-                    timestamp: block.header().timestamp(),
-                    ..Default::default()
-                };
+                // Best case: receipts are also cached.
+                if let Some(all_receipts) = cached.receipts.clone()
+                    && let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
+                {
+                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
+                }
 
-                return Ok(Some((tx, meta, receipt.clone())));
+                // Block still cached but receipts evicted — fetch via cache since
+                // `build_transaction_receipt` needs all receipts for gas accounting
+                // anyway.
+                if let Some(receipts) = self
+                    .cache()
+                    .get_receipts(cached.block.hash())
+                    .await
+                    .map_err(Self::Error::from_eth_err)?
+                    && let Some(receipt) = receipts.get(cached.tx_index).cloned()
+                {
+                    return Ok(Some((tx, meta, receipt, Some(receipts))));
+                }
             }
 
-            let provider = this.provider();
+            self.spawn_blocking_io_fut(async move |this| {
+                let pending_block = this.local_pending_block().await?;
+                if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
+                    && let Some(pos) = block
+                        .body()
+                        .transactions_iter()
+                        .position(|t| *t.tx_hash() == hash)
+                {
+                    let receipt = &receipts[pos];
+                    let tx = block
+                        .clone()
+                        .body()
+                        .transactions_iter()
+                        .nth(pos)
+                        .expect("position is valid; qed")
+                        .clone();
 
-            let (tx, meta) = match provider
-                .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
+                    let meta = TransactionMeta {
+                        tx_hash: tx.tx_hash(),
+                        block_hash: block.hash_slow(),
+                        block_number: block.number(),
+                        index: pos as u64,
+                        base_fee: block.base_fee_per_gas(),
+                        timestamp: block.header().timestamp(),
+                        ..Default::default()
+                    };
+                    let tx = tx
+                        .try_into_recovered_unchecked()
+                        .map_err(Self::Error::from_eth_err)?;
 
-            let receipt = match provider
-                .receipt_by_hash(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
+                    return Ok(Some((tx, meta, receipt.clone(), None)));
+                }
 
-            Ok(Some((tx, meta, receipt)))
-        })
+                let provider = this.provider();
+
+                let (tx, meta) = match provider
+                    .transaction_by_hash_with_meta(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    Some((tx, meta)) => (tx, meta),
+                    None => return Ok(None),
+                };
+                let tx = tx
+                    .try_into_recovered_unchecked()
+                    .map_err(Self::Error::from_eth_err)?;
+
+                let receipt = match provider
+                    .receipt_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    Some(recpt) => recpt,
+                    None => return Ok(None),
+                };
+
+                Ok(Some((tx, meta, receipt, None)))
+            })
+            .await
+        }
     }
 }
 

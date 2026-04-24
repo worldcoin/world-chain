@@ -14,14 +14,12 @@ use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
-use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::{Block as _, BlockBody as _};
+use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, RecoveredBlock};
 
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.
@@ -47,18 +45,14 @@ impl Flashblock {
             Some(ExecutionPayloadBaseV1 {
                 parent_beacon_block_root: config
                     .attributes
-                    .payload_attributes
                     .parent_beacon_block_root
                     .unwrap_or_default(),
                 parent_hash: config.attributes.parent(),
-                fee_recipient: config
-                    .attributes
-                    .payload_attributes
-                    .suggested_fee_recipient(),
-                prev_randao: config.attributes.payload_attributes.prev_randao,
+                fee_recipient: config.attributes.suggested_fee_recipient(),
+                prev_randao: config.attributes.prev_randao,
                 block_number: block.number(),
                 gas_limit: block.gas_limit(),
-                timestamp: config.attributes.payload_attributes.timestamp,
+                timestamp: config.attributes.timestamp,
                 extra_data: block.extra_data().clone(),
                 base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
             })

@@ -13,15 +13,17 @@ use crate::{
     error::WorldChainTransactionPoolError,
     tx::WorldChainPoolTransactionError,
 };
+use alloy_consensus::Block;
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_evm::ConfigureEvm;
+use reth_node_api::NodePrimitives;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{Block, NodePrimitives, SealedBlock};
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -67,7 +69,7 @@ impl<Client, Tx, Evm> WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
-        + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction,
     Evm: ConfigureEvm,
 {

@@ -59,7 +59,7 @@ tracing.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true

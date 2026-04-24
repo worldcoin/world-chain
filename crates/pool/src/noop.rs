@@ -4,7 +4,7 @@ use super::tx::WorldChainPooledTransaction;
 use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2};
 use alloy_primitives::{Address, B256, TxHash};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::Recovered;
+use reth_primitives_traits::Recovered;
 use reth_transaction_pool::{
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
     BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
@@ -318,17 +318,17 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         None
     }
 
-    async fn add_transactions_with_origins(
-        &self,
-        _transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)> + Send,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        vec![]
-    }
-
     fn prune_transactions(
         &self,
         _hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    async fn add_transactions_with_origins(
+        &self,
+        _transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         vec![]
     }
 }

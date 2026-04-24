@@ -29,7 +29,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;
 use reth_tasks::{
-    TaskSpawner,
+    Runtime,
     pool::{BlockingTaskGuard, BlockingTaskPool},
 };
 use tokio::sync::Semaphore;
@@ -144,7 +144,7 @@ where
     OpEthApi<N, Rpc>: SpawnBlocking,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.io_task_spawner()
     }
 
