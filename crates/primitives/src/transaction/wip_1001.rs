@@ -514,9 +514,6 @@ impl SignableTransaction<Wip1001Signature> for TxWip1001 {
 }
 
 /// Bridge impl so that `WorldChainTypedTransaction: SignableTransaction<Signature>`
-/// (which wraps all variants with the default alloy [`Signature`]) still works
-/// for [`TxWip1001`]. The secp256k1 signature is wrapped in
-/// [`Wip1001Signature::Secp256k1`] when the envelope is later projected.
 impl SignableTransaction<Signature> for TxWip1001 {
     fn set_chain_id(&mut self, chain_id: ChainId) {
         self.chain_id = chain_id;
