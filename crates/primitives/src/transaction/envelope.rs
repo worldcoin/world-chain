@@ -964,6 +964,51 @@ mod tests {
     }
 
     #[test]
+    fn envelope_wip1001_eddsa_round_trip_and_recover() {
+        use ed25519_dalek::Signer;
+
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[0xAB; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let session_key_bytes = verifying_key.to_bytes();
+
+        let keyring = address!("000000000000000000000000000000000000001d");
+        let tx = TxWip1001 {
+            chain_id: 480,
+            nonce: 11,
+            max_priority_fee_per_gas: 2_000_000_000,
+            max_fee_per_gas: 4_000_000_000,
+            gas_limit: 100_000,
+            to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
+            value: U256::from(123u64),
+            input: hex!("c0ffee").into(),
+            access_list: AccessList::default(),
+            keyring,
+            signature_type: Wip1001Signature::EDDSA_TYPE,
+            session_key: Bytes::copy_from_slice(&session_key_bytes),
+        };
+
+        let signing_hash = tx.signing_hash();
+        let sig = signing_key.sign(signing_hash.as_slice());
+        let signature = Wip1001Signature::EdDSA(sig);
+
+        let signed = SignedWip1001::new_signed(tx.clone(), signature.clone());
+        let envelope: WorldChainTxEnvelope = signed.into();
+
+        let mut buf = Vec::new();
+        envelope.encode_2718(&mut buf);
+        let decoded = WorldChainTxEnvelope::decode_2718(&mut buf.as_slice()).expect("decode_2718");
+        assert!(decoded.is_wip1001());
+        assert_eq!(decoded.hash(), envelope.hash());
+        let decoded_wip = decoded.as_wip1001().expect("is wip1001");
+        assert_eq!(decoded_wip.tx(), &tx);
+        assert_eq!(decoded_wip.signature(), &signature);
+
+        // recover_signer verifies the EdDSA signature and returns the keyring.
+        let recovered = envelope.recover_signer().expect("recover");
+        assert_eq!(recovered, keyring);
+    }
+
+    #[test]
     fn envelope_wip1001_via_typed_transaction_path() {
         // Exercise the `Signed<WorldChainTypedTransaction>` -> `WorldChainTxEnvelope`
         // conversion for the WIP-1001 variant: the default secp256k1 Signature
