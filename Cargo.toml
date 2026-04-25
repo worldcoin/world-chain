@@ -244,6 +244,8 @@ arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.2"
 ed25519-dalek = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
