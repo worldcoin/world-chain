@@ -38,6 +38,12 @@ p256.workspace = true
 sha2.workspace = true
 base64.workspace = true
 
+[features]
+default = []
+# Exposes in-memory mocks (e.g. `MockKeyringRegistry`) to downstream crates for
+# integration testing.
+test-utils = []
+
 [dev-dependencies]
 alloy-signer-local.workspace = true
 op-alloy-network.workspace = true
