@@ -2,3 +2,13 @@ book
 /target
 .env
 .vscode
+.report
+pkg/contracts/sepolia_load_test_*.json
+pkg/contracts/sepolia_load_test.json
+.claude
+.vscode
+.docker-cache
+/diagnostics
+.DS_Store
+**/.DS_Store
+**/proptest-regressions/

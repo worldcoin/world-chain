@@ -1,0 +1,520 @@
+use std::sync::Arc;
+
+use crate::{
+    access_list::{FlashblockAccessList, FlashblockAccessListData},
+    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+};
+use alloy_consensus::{
+    Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
+    proofs::ordered_trie_root_with_encoder,
+};
+use alloy_eips::{Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
+use alloy_primitives::U256;
+use alloy_rpc_types_engine::PayloadId;
+use chrono::Utc;
+use eyre::eyre::{bail, eyre};
+use op_alloy_consensus::OpTxEnvelope;
+use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_primitives_traits::{Block as _, BlockBody as _};
+
+use reth_basic_payload_builder::PayloadConfig;
+use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
+use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_primitives::OpPrimitives;
+use reth_primitives::{NodePrimitives, RecoveredBlock};
+use serde::{Deserialize, Serialize};
+
+/// A type wrapper around a single flashblock payload.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
+pub struct Flashblock {
+    pub flashblock: FlashblocksPayloadV1,
+}
+
+impl Flashblock {
+    pub fn new(
+        payload: &OpBuiltPayload,
+        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        index: u64,
+        transactions_offset: usize,
+        withdrawal_offset: usize,
+        access_list: Option<FlashblockAccessList>,
+    ) -> Self {
+        let block = payload.block();
+        let fees = payload.fees();
+
+        // todo cache trie updated
+        let payload_base = if index == 0 {
+            Some(ExecutionPayloadBaseV1 {
+                parent_beacon_block_root: config
+                    .attributes
+                    .payload_attributes
+                    .parent_beacon_block_root
+                    .unwrap_or_default(),
+                parent_hash: config.attributes.parent(),
+                fee_recipient: config
+                    .attributes
+                    .payload_attributes
+                    .suggested_fee_recipient(),
+                prev_randao: config.attributes.payload_attributes.prev_randao,
+                block_number: block.number(),
+                gas_limit: block.gas_limit(),
+                timestamp: config.attributes.payload_attributes.timestamp,
+                extra_data: block.extra_data().clone(),
+                base_fee_per_gas: block.base_fee_per_gas().map(U256::from).unwrap_or_default(), // Potential Issue
+            })
+        } else {
+            None
+        };
+
+        let transactions = block
+            .body()
+            .transactions_iter()
+            .skip(transactions_offset)
+            .map(|tx| tx.encoded_2718().into())
+            .collect::<Vec<_>>();
+
+        let withdrawals = block
+            .body()
+            .withdrawals()
+            .map(|withdrawals| {
+                withdrawals
+                    .into_iter()
+                    .cloned()
+                    .skip(withdrawal_offset)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let metadata = FlashblockMetadata {
+            fees,
+            flashblock_timestamp: Some(
+                Utc::now()
+                    .timestamp_nanos_opt()
+                    .expect("time went backwards"),
+            ),
+        };
+
+        let access_list_data = if let Some(access_list) = access_list {
+            let hash = crate::access_list::access_list_hash(&access_list);
+            Some(FlashblockAccessListData {
+                access_list,
+                access_list_hash: hash,
+            })
+        } else {
+            None
+        };
+
+        Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                payload_id: config.attributes.payload_id(),
+                index,
+                base: payload_base,
+                diff: ExecutionPayloadFlashblockDeltaV1 {
+                    state_root: block.state_root(),
+                    receipts_root: block.receipts_root(),
+                    logs_bloom: block.logs_bloom(),
+                    gas_used: block.gas_used(),
+                    block_hash: block.hash(),
+                    transactions,
+                    withdrawals,
+                    withdrawals_root: block.withdrawals_root().unwrap_or_default(),
+                    access_list_data,
+                },
+                metadata,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, Serialize, Eq, Hash)]
+pub struct FlashblockMetadata {
+    /// Total fees collected by the proposer for this block.
+    pub fees: U256,
+    /// The timestamp of when the flashblock was created in ns since the unix epoch
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flashblock_timestamp: Option<i64>,
+}
+
+impl Flashblock {
+    pub fn flashblock(&self) -> &FlashblocksPayloadV1 {
+        &self.flashblock
+    }
+
+    pub fn into_flashblock(self) -> FlashblocksPayloadV1 {
+        self.flashblock
+    }
+
+    pub fn payload_id(&self) -> &PayloadId {
+        &self.flashblock.payload_id
+    }
+
+    pub fn base(&self) -> Option<&ExecutionPayloadBaseV1> {
+        self.flashblock.base.as_ref()
+    }
+
+    pub fn diff(&self) -> &ExecutionPayloadFlashblockDeltaV1 {
+        &self.flashblock.diff
+    }
+}
+
+impl Flashblock {
+    pub fn reduce(flashblocks: Flashblocks) -> eyre::Result<Flashblock> {
+        let mut iter = flashblocks.0.into_iter();
+        let mut acc = iter.next().ok_or(eyre!("flashblocks is empty"))?.flashblock;
+
+        for next in iter {
+            debug_assert_eq!(
+                acc.payload_id, next.flashblock.payload_id,
+                "all flashblocks should have the same payload_id"
+            );
+
+            if acc.base.is_none() && next.flashblock.base.is_some() {
+                acc.base = next.flashblock.base;
+            }
+
+            acc.index = next.flashblock.index;
+
+            acc.metadata.fees = next.flashblock.metadata.fees;
+            acc.metadata.flashblock_timestamp = next.flashblock.metadata.flashblock_timestamp;
+
+            acc.diff.gas_used = next.flashblock.diff.gas_used;
+
+            acc.diff
+                .transactions
+                .extend(next.flashblock.diff.transactions);
+            acc.diff
+                .withdrawals
+                .extend(next.flashblock.diff.withdrawals);
+
+            acc.diff.state_root = next.flashblock.diff.state_root;
+            acc.diff.receipts_root = next.flashblock.diff.receipts_root;
+            acc.diff.logs_bloom = next.flashblock.diff.logs_bloom;
+            acc.diff.withdrawals_root = next.flashblock.diff.withdrawals_root;
+            acc.diff.block_hash = next.flashblock.diff.block_hash;
+        }
+
+        Ok(Flashblock { flashblock: acc })
+    }
+}
+
+/// Converts a reduced collection of flashblocks into a [`RecoveredBlock`]
+pub fn recovered_block_from_flashblocks(
+    chain_spec: Arc<OpChainSpec>,
+    flashblock: Flashblock,
+) -> eyre::Result<RecoveredBlock<Block<OpTxEnvelope>>> {
+    let base = flashblock
+        .base()
+        .ok_or(eyre!("Flashblock is missing base payload"))?;
+
+    let diff = flashblock.flashblock.diff.clone();
+
+    let timestamp = base.timestamp;
+
+    let requests_hash = if chain_spec.is_isthmus_active_at_timestamp(timestamp) {
+        Some(EMPTY_REQUESTS_HASH)
+    } else {
+        None
+    };
+
+    let header = Header {
+        parent_beacon_block_root: None,
+        state_root: diff.state_root,
+        receipts_root: diff.receipts_root,
+        logs_bloom: diff.logs_bloom,
+        withdrawals_root: Some(diff.withdrawals_root),
+        parent_hash: base.parent_hash,
+        base_fee_per_gas: Some(base.base_fee_per_gas.to()),
+        beneficiary: base.fee_recipient,
+        transactions_root: ordered_trie_root_with_encoder(&diff.transactions, |tx, e| {
+            *e = tx.as_ref().to_vec()
+        }),
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        blob_gas_used: Some(0),
+        difficulty: U256::ZERO,
+        number: base.block_number,
+        gas_limit: base.gas_limit,
+        gas_used: diff.gas_used,
+        timestamp: base.timestamp,
+        extra_data: base.extra_data.clone(),
+        mix_hash: base.prev_randao,
+        nonce: BEACON_NONCE.into(),
+        requests_hash,
+        excess_blob_gas: Some(0),
+    };
+
+    let transactions_encoded = diff
+        .transactions
+        .iter()
+        .map(|t| <OpPrimitives as NodePrimitives>::SignedTx::decode_2718(&mut t.as_ref()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
+
+    let body = BlockBody {
+        transactions: transactions_encoded,
+        withdrawals: Some(alloy_eips::eip4895::Withdrawals(diff.withdrawals.to_vec())),
+        ommers: vec![],
+    };
+
+    Block::new(header, body)
+        .try_into_recovered()
+        .map_err(|e| eyre!("Failed to recover block: {:?}", e))
+}
+
+/// A collection of flashblocks mapped to the same payload ID.
+///
+/// Guaranteed to be
+/// - Non-empty
+/// - All flashblocks have the same payload ID
+/// - Flashblocks have contiguous indices starting from 0
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Flashblocks(pub Vec<Flashblock>);
+
+impl Default for Flashblocks {
+    fn default() -> Self {
+        Flashblocks(vec![Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                base: Some(ExecutionPayloadBaseV1::default()),
+                ..Default::default()
+            },
+        }])
+    }
+}
+
+impl Flashblocks {
+    /// Creates a new `Flashblocks` collection from the given vector of flashblocks.
+    ///
+    /// Validates that the collection is non-empty, all flashblocks have the same payload ID,
+    /// and that the indices are contiguous starting from 0.
+    /// Returns an error if any of these conditions are not met.
+    pub fn new(flashblocks: Vec<Flashblock>) -> eyre::Result<Self> {
+        if flashblocks.is_empty() {
+            bail!("Flashblocks cannot be empty")
+        }
+
+        let mut iter = flashblocks.iter();
+
+        let first = iter.next().unwrap();
+        if first.flashblock.base.is_none() {
+            bail!("The first flashblock must contain the base payload");
+        }
+
+        let payload_id = first.payload_id();
+        if iter.any(|fb| fb.payload_id() != payload_id) {
+            bail!("All flashblocks must have the same payload_id")
+        }
+
+        for (i, fb) in flashblocks.iter().enumerate() {
+            if fb.flashblock.index != i as u64 {
+                bail!("Flashblocks must have contiguous indices starting from 0");
+            }
+        }
+
+        Ok(Self(flashblocks))
+    }
+
+    /// Pushes a new flashblock into the collection.
+    ///
+    /// If the new flashblock has a different payload ID, the collection is cleared
+    /// and the new flashblock is added as the first element (index must be 0).
+    /// If the new flashblock has the same payload ID, it is added to the end
+    /// of the collection (index must be contiguous).
+    /// Returns `Ok(true)` if the collection was reset, `Ok(false)` if the flashblock
+    /// was added to the existing collection, or an error if the conditions are not met.
+    pub fn push(&mut self, flashblock: Flashblock) -> eyre::Result<bool> {
+        let is_new_payload = self.is_new_payload(&flashblock)?;
+        if is_new_payload {
+            self.0.clear();
+        }
+        self.0.push(flashblock);
+        Ok(is_new_payload)
+    }
+
+    pub fn is_new_payload(&self, flashblock: &Flashblock) -> eyre::Result<bool> {
+        if flashblock.payload_id() != self.payload_id() {
+            if flashblock.flashblock.index != 0 {
+                bail!("New flashblock has different payload_id and index is not 0");
+            }
+            let Some(base) = &flashblock.flashblock.base else {
+                bail!("New flashblock has different payload_id and must contain the base payload");
+            };
+            if base.timestamp <= self.base().timestamp {
+                bail!(
+                    "New flashblock has different payload_id and must have a later timestamp than the current base"
+                );
+            }
+
+            return Ok(true);
+        }
+
+        if flashblock.flashblock.index != (self.0.len() as u64) {
+            bail!(
+                "New flashblock index is not contiguous expected {}, got {}, payload_id: {}",
+                self.0.len(),
+                flashblock.flashblock.index,
+                self.payload_id()
+            );
+        }
+
+        Ok(false)
+    }
+
+    pub fn last(&self) -> &Flashblock {
+        self.0.last().unwrap()
+    }
+
+    pub fn flashblocks(&self) -> &[Flashblock] {
+        &self.0
+    }
+
+    pub fn payload_id(&self) -> &PayloadId {
+        self.0.first().unwrap().payload_id()
+    }
+
+    pub fn base(&self) -> &ExecutionPayloadBaseV1 {
+        self.0.first().unwrap().flashblock.base.as_ref().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxEip1559;
+    use alloy_primitives::{Address, B256, Bloom, Bytes, TxKind};
+    use alloy_signer_local::PrivateKeySigner;
+    use op_alloy_consensus::OpTypedTransaction;
+    use op_alloy_network::TxSignerSync;
+    use reth_optimism_chainspec::OpChainSpecBuilder;
+    use std::sync::Arc;
+
+    /// Creates a signed EIP-1559 transaction encoded as 2718 bytes.
+    fn signed_tx_bytes(signer: &PrivateKeySigner, nonce: u64, chain_id: u64) -> Bytes {
+        let mut tx = TxEip1559 {
+            chain_id,
+            nonce,
+            max_fee_per_gas: 2_000_000_000,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::with_last_byte(0x01)),
+            gas_limit: 21_000,
+            value: U256::from(100),
+            input: Bytes::default(),
+            access_list: Default::default(),
+        };
+
+        let sig = signer
+            .sign_transaction_sync(&mut tx)
+            .expect("signing works");
+        let typed = OpTypedTransaction::Eip1559(tx);
+        let envelope = OpTxEnvelope::from((typed, sig));
+        let mut buf = Vec::new();
+        envelope.encode_2718(&mut buf);
+        Bytes::from(buf)
+    }
+
+    /// Builds a single-flashblock with the given base, transactions, and gas_used.
+    fn make_flashblock(
+        base: ExecutionPayloadBaseV1,
+        transactions: Vec<Bytes>,
+        gas_used: u64,
+    ) -> Flashblock {
+        Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                payload_id: PayloadId::default(),
+                index: 0,
+                base: Some(base),
+                diff: ExecutionPayloadFlashblockDeltaV1 {
+                    state_root: B256::from([0xAA; 32]),
+                    receipts_root: B256::from([0xBB; 32]),
+                    logs_bloom: Bloom::default(),
+                    gas_used,
+                    block_hash: B256::from([0xCC; 32]),
+                    transactions,
+                    withdrawals: vec![],
+                    withdrawals_root: B256::ZERO,
+                    access_list_data: None,
+                },
+                metadata: FlashblockMetadata::default(),
+            },
+        }
+    }
+
+    #[test]
+    fn recovered_block_from_flashblocks_roundtrip() {
+        let chain_spec = Arc::new(
+            OpChainSpecBuilder::base_mainnet()
+                .ecotone_activated()
+                .build(),
+        );
+
+        let signer = PrivateKeySigner::from_bytes(&[1u8; 32].into()).expect("valid private key");
+        let chain_id = chain_spec.chain().id();
+
+        let tx0 = signed_tx_bytes(&signer, 0, chain_id);
+        let tx1 = signed_tx_bytes(&signer, 1, chain_id);
+
+        let base = ExecutionPayloadBaseV1 {
+            parent_beacon_block_root: B256::from([0x05; 32]),
+            parent_hash: B256::from([0x06; 32]),
+            fee_recipient: Address::with_last_byte(0x42),
+            prev_randao: B256::from([0x07; 32]),
+            block_number: 123,
+            gas_limit: 30_000_000,
+            timestamp: 1_700_000_000,
+            extra_data: Bytes::from(b"test".to_vec()),
+            base_fee_per_gas: U256::from(1_000_000_000u64),
+        };
+
+        let flashblock = make_flashblock(base.clone(), vec![tx0.clone(), tx1.clone()], 42_000);
+
+        // Act
+        let recovered = recovered_block_from_flashblocks(chain_spec, flashblock)
+            .expect("conversion should succeed");
+
+        // Assert header fields sourced from base
+        let header = recovered.header();
+        assert_eq!(header.parent_hash, base.parent_hash);
+        assert_eq!(header.beneficiary, base.fee_recipient);
+        assert_eq!(header.number, base.block_number);
+        assert_eq!(header.gas_limit, base.gas_limit);
+        assert_eq!(header.timestamp, base.timestamp);
+        assert_eq!(header.extra_data, base.extra_data);
+        assert_eq!(header.mix_hash, base.prev_randao);
+        assert_eq!(
+            header.base_fee_per_gas,
+            Some(base.base_fee_per_gas.to::<u64>())
+        );
+
+        // Assert header fields sourced from diff
+        assert_eq!(header.state_root, B256::from([0xAA; 32]));
+        assert_eq!(header.receipts_root, B256::from([0xBB; 32]));
+        assert_eq!(header.logs_bloom, Bloom::default());
+        assert_eq!(header.gas_used, 42_000);
+        assert_eq!(header.withdrawals_root, Some(B256::ZERO));
+
+        // Assert body: transactions roundtrip
+        let body = recovered.body();
+        assert_eq!(body.transactions.len(), 2);
+        for (original_bytes, recovered_tx) in [&tx0, &tx1].iter().zip(body.transactions.iter()) {
+            let mut re_encoded = Vec::new();
+            recovered_tx.encode_2718(&mut re_encoded);
+            assert_eq!(
+                original_bytes.as_ref(),
+                re_encoded.as_slice(),
+                "transaction encoding must roundtrip losslessly"
+            );
+        }
+
+        // Assert body: withdrawals are present and empty
+        let withdrawals = body
+            .withdrawals
+            .as_ref()
+            .expect("withdrawals should be present");
+        assert!(withdrawals.is_empty());
+
+        // Assert senders were recovered correctly
+        assert_eq!(recovered.senders().len(), 2);
+        assert!(
+            recovered.senders().iter().all(|s| *s == signer.address()),
+            "all transactions were signed by the same key"
+        );
+    }
+}

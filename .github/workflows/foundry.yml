@@ -1,5 +1,7 @@
 name: CI
 
+permissions: {}
+
 on:
   push:
   pull_request:
@@ -7,44 +9,35 @@ on:
 
 env:
   FOUNDRY_PROFILE: ci
+  WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+  ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
 
 jobs:
   check:
-    strategy:
-      fail-fast: true
-
     name: Foundry project
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: pkg/contracts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
+          persist-credentials: false
           submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
 
       - name: Show Forge version
-        run: |
-          forge --version
+        run: forge --version
 
       - name: Run Forge fmt
-        working-directory: contracts
-        run: |
-          forge fmt --check
-        id: fmt
+        run: forge fmt --check
 
       - name: Run Forge build
-        working-directory: contracts
-        run: |
-          forge build --sizes
-        id: build
+        run: forge build --sizes
 
       - name: Run Forge tests
-        working-directory: contracts
-        env:
-          ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
-        run: |
-          forge test -vvv
-        id: test
+        run: forge test

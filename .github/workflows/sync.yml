@@ -5,11 +5,11 @@ name: sync test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
   push:
     tags:
-        - v*
-        
+      - v*
+  pull_request:
 env:
   CARGO_TERM_COLOR: always
 
@@ -29,7 +29,7 @@ jobs:
       matrix:
         chain:
           - build: install
-            bin: world-chain-builder
+            bin: world-chain
             features: jemalloc
             chain: base
             tip: "0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7"
@@ -37,7 +37,7 @@ jobs:
             unwind-target: "0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de"
         # TODO: Add World Chain Mainnet
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@just
       - uses: Swatinem/rust-cache@v2
@@ -51,11 +51,7 @@ jobs:
             --chain ${{ matrix.chain.chain }} \
             --debug.tip ${{ matrix.chain.tip }} \
             --debug.max-block ${{ matrix.chain.block }} \
-            --debug.terminate \
-            --builder.pbh_entrypoint 0x7a2088a1bFc9d81c55368AE168C2C02570cB814F \
-            --builder.signature_aggregator 0x09635F643e140090A9A8Dcd712eD6285858ceBef \
-            --builder.private_key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-            --builder.world_id 0x5FbDB2315678afecb367f032d93F642f64180aa3
+            --debug.terminate
 
       - name: Verify the target block hash
         run: |
@@ -63,7 +59,7 @@ jobs:
             | grep ${{ matrix.chain.tip }}
       - name: Run stage unwind for 100 blocks
         run: |
-          ${{ matrix.chain.bin }} stage --chain ${{ matrix.chain.chain }} unwind num-blocks 100
+          ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}
       - name: Run stage unwind to block hash
         run: |
-          ${{ matrix.chain.bin }} stage --chain ${{ matrix.chain.chain }} unwind to-block ${{ matrix.chain.unwind-target }}
+          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }}

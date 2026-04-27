@@ -9,26 +9,25 @@ on:
 
 permissions:
   contents: read
-  
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   cargo-tests:
-    runs-on: ubuntu-latest
+    runs-on: arc-public-8xlarge-amd64-runner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - name: Cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         continue-on-error: false
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - uses: taiki-e/install-action@nextest
@@ -36,50 +35,69 @@ jobs:
         run: just test
 
   cargo-lint:
-    runs-on: ubuntu-latest
+    runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 20
     name: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
       - name: Cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         continue-on-error: false
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt + lint
         run: cargo +nightly fmt --all -- --check
+
   cargo-clippy:
-    runs-on: ubuntu-latest
+    runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 20
     name: clippy
     steps:
-        - uses: actions/checkout@v4
-        - uses: taiki-e/install-action@just
-        - uses: dtolnay/rust-toolchain@nightly
-          with:
-            components: rustfmt, clippy
-        - name: Cache
-          uses: actions/cache@v3
-          continue-on-error: false
-          with:
-            path: |
-              ~/.cargo/registry/index/
-              ~/.cargo/registry/cache/
-              ~/.cargo/git/db/
-              target/
-            key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
-            restore-keys: cargo-test-   
-        - name: clippy
-          run: cargo +nightly clippy --all-targets --all-features -- -D warnings
-        
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@just
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - name: clippy
+        run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
 
+  cargo-docs:
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 20
+    name: docs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - name: Generate CLI docs
+        run: cargo xtask docs
+      - name: Check docs are up to date
+        run: git diff --exit-code specs/

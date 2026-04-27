@@ -1,6 +1,6 @@
 target/
 .env/
-contracts/
+pkg/contracts/
 assets/
 docs/
 devnet/
@@ -10,7 +10,18 @@ Justfile
 book.toml
 .gitmodules
 CODEOWNERS
+.github/
+.claude/
+pkg/
+
+
+README.md
+LICENSE
+SECURITY.md
 
 # Added by SEC-1406 patch
 .git
 .gitignore
+.docker-cache/
+.DS_Store
+**/.DS_Store

@@ -1,0 +1,40 @@
+[package]
+name = "world-chain-primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eyre.workspace = true
+
+alloy-primitives = { workspace = true }
+
+reth-revm.workspace = true
+reth-payload-primitives.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-node.workspace = true
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-optimism-chainspec.workspace = true
+alloy-eips.workspace = true
+alloy-eip7928.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-serde.workspace = true
+alloy-rlp.workspace = true
+
+op-alloy-consensus.workspace = true
+
+blake3.workspace = true
+ed25519-dalek.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+alloy-signer-local.workspace = true
+op-alloy-network.workspace = true
