@@ -12,7 +12,10 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
 use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit};
 
-use crate::transaction::wip_1001::{SignedWip1001, TxWip1001, Wip1001Signature};
+use crate::transaction::{
+    Wip1001Signature,
+    wip_1001::{SignedWip1001, TxWip1001},
+};
 
 /// The World Chain [EIP-2718] transaction envelope.
 ///
@@ -342,7 +345,7 @@ impl WorldChainTxEnvelope {
             Self::Eip1559(t) => t.eip2718_encoded_length(),
             Self::Eip7702(t) => t.eip2718_encoded_length(),
             Self::Wip1001(t) => t.encode_2718_len(),
-            Self::Deposit(t) => t.encode_2718_len(),
+            Self::Deposit(t) => t.eip2718_encoded_length(),
         }
     }
 
@@ -415,10 +418,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip2930(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip1559(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip7702(tx) => (tx.signature(), tx.signature_hash()),
-            Self::Wip1001(tx) => (
-                wip1001_secp256k1_sig(tx.signature())?,
-                tx.tx().signing_hash(),
-            ),
+            Self::Wip1001(tx) => return recover_wip1001_signer(tx),
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
@@ -434,10 +434,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip2930(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip1559(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip7702(tx) => (tx.signature(), tx.signature_hash()),
-            Self::Wip1001(tx) => (
-                wip1001_secp256k1_sig(tx.signature())?,
-                tx.tx().signing_hash(),
-            ),
+            Self::Wip1001(tx) => return recover_wip1001_signer(tx),
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
@@ -462,27 +459,28 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip7702(tx) => {
                 alloy_consensus::transaction::SignerRecoverable::recover_unchecked_with_buf(tx, buf)
             }
-            Self::Wip1001(tx) => {
-                let sig = wip1001_secp256k1_sig(tx.signature())?;
-                alloy_consensus::crypto::secp256k1::recover_signer_unchecked(
-                    sig,
-                    tx.tx().signing_hash(),
-                )
-            }
+            Self::Wip1001(tx) => recover_wip1001_signer(tx),
             Self::Deposit(tx) => Ok(tx.from),
         }
     }
 }
 
-/// Projects a [`Wip1001Signature`] down to its secp256k1 [`Signature`] if possible.
+/// Verifies the WIP-1001 signature against the embedded `session_key` and returns
+/// the keyring address (the protocol-level "from" per WIP-1001).
 ///
-/// Recovery paths for non-secp256k1 variants (P256, WebAuthn, EdDSA) are out of
-/// scope for this implementation and surfaced as a recovery error.
-fn wip1001_secp256k1_sig(
-    sig: &Wip1001Signature,
-) -> Result<&Signature, alloy_consensus::crypto::RecoveryError> {
-    sig.as_secp256k1()
-        .ok_or_else(alloy_consensus::crypto::RecoveryError::new)
+/// The precompile-managed `IWorldIDKeyRing.isAuthorized(keyring, session_key)`
+/// check is performed downstream and is **not** part of this verification.
+fn recover_wip1001_signer(
+    tx: &SignedWip1001,
+) -> Result<alloy_primitives::Address, alloy_consensus::crypto::RecoveryError> {
+    let body = tx.tx();
+    crate::transaction::verify_wip1001_signature(
+        body.signature_type,
+        body.session_key.as_ref(),
+        tx.signature(),
+        &body.signing_hash(),
+    )?;
+    Ok(body.keyring)
 }
 
 impl WorldChainTypedTransaction {
@@ -736,7 +734,7 @@ mod tests {
         }
     }
 
-    fn sample_wip1001() -> TxWip1001 {
+    fn sample_wip1001(signer: &PrivateKeySigner) -> TxWip1001 {
         TxWip1001 {
             chain_id: 480,
             nonce: 3,
@@ -748,7 +746,15 @@ mod tests {
             input: hex!("deadbeef").into(),
             access_list: AccessList::default(),
             keyring: address!("000000000000000000000000000000000000001d"),
+            signature_type: Wip1001Signature::SECP256K1_TYPE,
+            session_key: secp256k1_compressed_pubkey(signer),
         }
+    }
+
+    /// Returns the 33-byte SEC1-compressed secp256k1 public key for `signer`.
+    fn secp256k1_compressed_pubkey(signer: &PrivateKeySigner) -> Bytes {
+        let encoded = signer.credential().verifying_key().to_encoded_point(true);
+        Bytes::copy_from_slice(encoded.as_bytes())
     }
 
     fn sign_wip1001(signer: &PrivateKeySigner, tx: TxWip1001) -> SignedWip1001 {
@@ -764,7 +770,7 @@ mod tests {
     #[test]
     fn envelope_wip1001_variant_accessors() {
         let signer = PrivateKeySigner::random();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
         let envelope: WorldChainTxEnvelope = signed.clone().into();
 
         assert!(envelope.is_wip1001());
@@ -784,12 +790,12 @@ mod tests {
     #[test]
     fn envelope_wip1001_eip2718_round_trip() {
         let signer = PrivateKeySigner::random();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
         let envelope: WorldChainTxEnvelope = signed.clone().into();
 
         let mut buf = Vec::new();
         envelope.encode_2718(&mut buf);
-        assert_eq!(buf[0], crate::transaction::wip_1001::WIP_1001_TX_TYPE);
+        assert_eq!(buf[0], crate::transaction::signature::WIP_1001_TX_TYPE);
 
         let decoded =
             WorldChainTxEnvelope::decode_2718(&mut buf.as_slice()).expect("envelope decode_2718");
@@ -804,7 +810,7 @@ mod tests {
         use alloy_rlp::Decodable as _;
 
         let signer = PrivateKeySigner::random();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
         let envelope: WorldChainTxEnvelope = signed.clone().into();
 
         // network_encode wraps the 2718 bytes in an outer byte-string header.
@@ -818,18 +824,35 @@ mod tests {
     #[test]
     fn envelope_wip1001_signer_recoverable() {
         let signer = PrivateKeySigner::random();
-        let expected = signer.address();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
+        let expected_keyring = signed.tx().keyring;
         let envelope: WorldChainTxEnvelope = signed.into();
 
+        // recover_signer for WIP-1001 returns the keyring (protocol-level "from"),
+        // NOT the session-key signer's EOA. Crypto verification still happens
+        // inside recover_signer — a tampered signature would error here.
         let recovered = envelope.recover_signer().expect("recover");
-        assert_eq!(recovered, expected);
+        assert_eq!(recovered, expected_keyring);
+    }
+
+    #[test]
+    fn envelope_wip1001_recover_signer_rejects_tampered_signature() {
+        let signer = PrivateKeySigner::random();
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
+        let mut tx = signed.tx().clone();
+        // Flip a bit in `input` so the cached signature no longer covers the tx.
+        tx.input = Bytes::from_static(b"tampered");
+        let tampered = SignedWip1001::new(Signed::new_unhashed(tx, signed.signature().clone()));
+        let envelope: WorldChainTxEnvelope = tampered.into();
+        envelope
+            .recover_signer()
+            .expect_err("tampered signature must not recover");
     }
 
     #[test]
     fn envelope_wip1001_try_into_eth_envelope_rejected() {
         let signer = PrivateKeySigner::random();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
         let envelope: WorldChainTxEnvelope = signed.into();
 
         let err = envelope
@@ -841,7 +864,7 @@ mod tests {
     #[test]
     fn envelope_wip1001_try_into_op_envelope_rejected() {
         let signer = PrivateKeySigner::random();
-        let signed = sign_wip1001(&signer, sample_wip1001());
+        let signed = sign_wip1001(&signer, sample_wip1001(&signer));
         let envelope: WorldChainTxEnvelope = signed.into();
 
         let err =
@@ -872,12 +895,81 @@ mod tests {
     }
 
     #[test]
+    fn envelope_wip1001_p256_round_trip_and_recover() {
+        use alloy_primitives::B256;
+        use p256::{
+            ecdsa::{SigningKey as P256SigningKey, signature::hazmat::PrehashSigner},
+            elliptic_curve::rand_core::OsRng,
+        };
+
+        let signing_key = P256SigningKey::random(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let encoded = verifying_key.to_encoded_point(false);
+        let mut session_key = Vec::with_capacity(64);
+        session_key.extend_from_slice(encoded.x().expect("x").as_ref());
+        session_key.extend_from_slice(encoded.y().expect("y").as_ref());
+
+        let keyring = address!("000000000000000000000000000000000000001d");
+        let tx = TxWip1001 {
+            chain_id: 480,
+            nonce: 7,
+            max_priority_fee_per_gas: 2_000_000_000,
+            max_fee_per_gas: 4_000_000_000,
+            gas_limit: 100_000,
+            to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
+            value: U256::from(99u64),
+            input: hex!("cafef00d").into(),
+            access_list: AccessList::default(),
+            keyring,
+            signature_type: Wip1001Signature::P256_TYPE,
+            session_key: Bytes::from(session_key),
+        };
+
+        let signing_hash = tx.signing_hash();
+        let raw: p256::ecdsa::Signature = signing_key
+            .sign_prehash(signing_hash.as_slice())
+            .expect("p256 sign");
+        let raw_bytes = raw.to_bytes();
+        let r = B256::from_slice(&raw_bytes[..32]);
+        let s_u = U256::from_be_slice(&raw_bytes[32..]);
+        let p256_n_half = crate::transaction::verify::P256N_HALF;
+        let p256_order = crate::transaction::verify::P256_ORDER;
+        let s_norm = if s_u > p256_n_half {
+            p256_order - s_u
+        } else {
+            s_u
+        };
+        let p256_sig = crate::transaction::P256Signature {
+            r,
+            s: B256::from(s_norm.to_be_bytes::<32>()),
+        };
+        let signature = Wip1001Signature::P256(p256_sig);
+
+        let signed = SignedWip1001::new_signed(tx.clone(), signature.clone());
+        let envelope: WorldChainTxEnvelope = signed.clone().into();
+
+        // EIP-2718 round-trip preserves the P-256 variant.
+        let mut buf = Vec::new();
+        envelope.encode_2718(&mut buf);
+        let decoded = WorldChainTxEnvelope::decode_2718(&mut buf.as_slice()).expect("decode_2718");
+        assert!(decoded.is_wip1001());
+        assert_eq!(decoded.hash(), envelope.hash());
+        let decoded_wip = decoded.as_wip1001().expect("is wip1001");
+        assert_eq!(decoded_wip.tx(), &tx);
+        assert_eq!(decoded_wip.signature(), &signature);
+
+        // recover_signer verifies the P-256 signature and returns the keyring.
+        let recovered = envelope.recover_signer().expect("recover");
+        assert_eq!(recovered, keyring);
+    }
+
+    #[test]
     fn envelope_wip1001_via_typed_transaction_path() {
         // Exercise the `Signed<WorldChainTypedTransaction>` -> `WorldChainTxEnvelope`
         // conversion for the WIP-1001 variant: the default secp256k1 Signature
         // should be wrapped as `Wip1001Signature::Secp256k1`.
         let signer = PrivateKeySigner::random();
-        let tx = sample_wip1001();
+        let tx = sample_wip1001(&signer);
         let mut typed = WorldChainTypedTransaction::Wip1001(tx.clone());
         let signature = signer
             .sign_transaction_sync(&mut typed)
@@ -888,7 +980,10 @@ mod tests {
         assert_eq!(wip.tx(), &tx);
         match wip.signature() {
             Wip1001Signature::Secp256k1(inner) => assert_eq!(*inner, signature),
+            other => panic!("expected Secp256k1 variant, got {other:?}"),
         }
-        assert_eq!(envelope.recover_signer().unwrap(), signer.address());
+        // recover_signer returns the keyring per WIP-1001; verification of the
+        // session-key signature happens internally.
+        assert_eq!(envelope.recover_signer().unwrap(), tx.keyring);
     }
 }

@@ -6,7 +6,6 @@
 //! to the additional variants defined in the spec (P256, WebAuthn, EdDSA) — and
 //! the RLP / EIP-2718 codecs required to wire `Signed<TxWip1001, Wip1001Signature>`
 //! into [`WorldChainTxEnvelope`](crate::transaction::WorldChainTxEnvelope).
-
 use alloy_consensus::{SignableTransaction, Signed, Transaction, transaction::TxHashable};
 use alloy_eips::{
     Decodable2718, Encodable2718, Typed2718,
@@ -19,117 +18,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable, Header};
 
-/// The EIP-2718 transaction type byte for WIP-1001 transactions.
-pub const WIP_1001_TX_TYPE: u8 = 0x1D;
-
-/// Signature scheme for a [`TxWip1001`].
-///
-/// The WIP-1001 envelope is polymorphic over the signing algorithm: each session
-/// key may be a secp256k1, P256, WebAuthn (P256 under WebAuthn), or Ed25519 key.
-/// Only the ECDSA-over-secp256k1 variant is implemented here; the remaining
-/// variants are intentionally left out of scope but can be added as additional
-/// enum variants without breaking the wire format, since `signature_type` is
-/// encoded as an opaque tag byte followed by an opaque `signature_payload`
-/// RLP byte-string.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "signatureType", content = "signaturePayload")]
-#[non_exhaustive]
-pub enum Wip1001Signature {
-    /// secp256k1 ECDSA signature, `signature_type = 0x00`.
-    ///
-    /// `signature_payload = rlp([y_parity, r, s])`.
-    #[serde(rename = "0x0")]
-    Secp256k1(Signature),
-    // Future: P256 (0x01), WebAuthn (0x02), EdDSA (0x03).
-}
-
-impl Wip1001Signature {
-    /// `signature_type` byte for the secp256k1 variant.
-    pub const SECP256K1_TYPE: u8 = 0x00;
-
-    /// Returns the `signature_type` tag byte.
-    #[inline]
-    pub const fn signature_type(&self) -> u8 {
-        match self {
-            Self::Secp256k1(_) => Self::SECP256K1_TYPE,
-        }
-    }
-
-    /// Returns the inner secp256k1 [`Signature`] if this is the `Secp256k1` variant.
-    pub const fn as_secp256k1(&self) -> Option<&Signature> {
-        match self {
-            Self::Secp256k1(sig) => Some(sig),
-        }
-    }
-
-    /// Length of the RLP-encoded `signature_payload` bytes (no outer string header).
-    fn payload_encoded_len(&self) -> usize {
-        match self {
-            Self::Secp256k1(sig) => {
-                let y_parity = sig.v() as u8;
-                let list_payload_len = y_parity.length() + sig.r().length() + sig.s().length();
-                Header {
-                    list: true,
-                    payload_length: list_payload_len,
-                }
-                .length_with_payload()
-            }
-        }
-    }
-
-    /// Encodes the `signature_payload` into `out` without an outer RLP string header.
-    ///
-    /// For secp256k1, this writes `rlp([y_parity, r, s])` directly.
-    fn encode_payload_raw(&self, out: &mut dyn BufMut) {
-        match self {
-            Self::Secp256k1(sig) => {
-                let y_parity = sig.v() as u8;
-                let list_payload_len = y_parity.length() + sig.r().length() + sig.s().length();
-                Header {
-                    list: true,
-                    payload_length: list_payload_len,
-                }
-                .encode(out);
-                y_parity.encode(out);
-                sig.r().encode(out);
-                sig.s().encode(out);
-            }
-        }
-    }
-
-    /// Decodes a `signature_payload` byte string, given its `signature_type`.
-    ///
-    /// The caller has already consumed the outer RLP string header around
-    /// `signature_payload`; this reads the raw payload bytes.
-    fn decode_payload_raw(ty: u8, buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        match ty {
-            Self::SECP256K1_TYPE => {
-                let header = Header::decode(buf)?;
-                if !header.list {
-                    return Err(alloy_rlp::Error::UnexpectedString);
-                }
-                let start = buf.len();
-                let y_parity: u8 = Decodable::decode(buf)?;
-                let r: U256 = Decodable::decode(buf)?;
-                let s: U256 = Decodable::decode(buf)?;
-                let consumed = start - buf.len();
-                if consumed != header.payload_length {
-                    return Err(alloy_rlp::Error::ListLengthMismatch {
-                        expected: header.payload_length,
-                        got: consumed,
-                    });
-                }
-                if y_parity > 1 {
-                    return Err(alloy_rlp::Error::Custom("invalid y_parity"));
-                }
-                Ok(Self::Secp256k1(Signature::new(r, s, y_parity != 0)))
-            }
-            _ => Err(alloy_rlp::Error::Custom(
-                "unsupported wip-1001 signature type",
-            )),
-        }
-    }
-}
+use crate::transaction::{WIP_1001_TX_TYPE, Wip1001Signature};
 
 /// A WIP-1001 typed transaction (`0x1D`).
 ///
@@ -168,10 +57,25 @@ pub struct TxWip1001 {
     /// Address of the signing keyring. Protocol validation authorizes the
     /// recovered session public key against the keyring's session key set.
     pub keyring: Address,
+    /// Wire `signature_type` byte. Must equal the accompanying
+    /// [`Wip1001Signature`] variant's discriminator at signing/verification time.
+    ///
+    /// Stored on the transaction (not solely on the signature) because it is
+    /// covered by `signing_hash`, binding the chosen scheme to the message.
+    #[serde(with = "alloy_serde::quantity")]
+    pub signature_type: u8,
+    /// `keyData` of the [`SessionKey`](crate::transaction::SessionKey) used to
+    /// authenticate this transaction.
+    ///
+    /// The `KeyType` is implied by [`signature_type`](Self::signature_type) —
+    /// implementations MUST reject transactions where the length of
+    /// `session_key` does not match the byte length specified for that key
+    /// type (see WIP-1001 §Session Keys).
+    pub session_key: Bytes,
 }
 
 impl TxWip1001 {
-    /// Length of the RLP-encoded fields (positions 0..=9), without a list header.
+    /// Length of the RLP-encoded fields (positions 0..=11), without a list header.
     #[inline]
     pub fn rlp_encoded_fields_length(&self) -> usize {
         self.chain_id.length()
@@ -184,9 +88,11 @@ impl TxWip1001 {
             + self.input.0.length()
             + self.access_list.length()
             + self.keyring.length()
+            + self.signature_type.length()
+            + self.session_key.0.length()
     }
 
-    /// Encodes the fields (positions 0..=9) into `out`, without a list header.
+    /// Encodes the fields (positions 0..=11) into `out`, without a list header.
     pub fn rlp_encode_fields(&self, out: &mut dyn BufMut) {
         self.chain_id.encode(out);
         self.nonce.encode(out);
@@ -198,9 +104,11 @@ impl TxWip1001 {
         self.input.0.encode(out);
         self.access_list.encode(out);
         self.keyring.encode(out);
+        self.signature_type.encode(out);
+        self.session_key.0.encode(out);
     }
 
-    /// Decodes the unsigned fields (positions 0..=9) from RLP bytes, without a
+    /// Decodes the unsigned fields (positions 0..=11) from RLP bytes, without a
     /// list header.
     pub fn rlp_decode_fields(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
@@ -214,6 +122,8 @@ impl TxWip1001 {
             input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             keyring: Decodable::decode(buf)?,
+            signature_type: Decodable::decode(buf)?,
+            session_key: Decodable::decode(buf)?,
         })
     }
 
@@ -236,16 +146,14 @@ impl TxWip1001 {
         self.rlp_encode_fields(out);
     }
 
-    /// Length of the signed payload (list header + fields + signature_type + signature_payload).
+    /// Length of the signed payload (fields[0..=11] + signature_payload).
     fn signed_payload_length(&self, sig: &Wip1001Signature) -> usize {
         let payload_bytes_len = sig.payload_encoded_len();
         let payload_header = Header {
             list: false,
             payload_length: payload_bytes_len,
         };
-        self.rlp_encoded_fields_length()
-            + sig.signature_type().length()
-            + payload_header.length_with_payload()
+        self.rlp_encoded_fields_length() + payload_header.length_with_payload()
     }
 
     /// RLP list header for the *signed* transaction.
@@ -256,16 +164,15 @@ impl TxWip1001 {
         }
     }
 
-    /// RLP-encoded length of the *signed* transaction (list header + fields + signature).
+    /// RLP-encoded length of the *signed* transaction (list header + fields + signature_payload).
     pub fn rlp_encoded_length_with_signature(&self, sig: &Wip1001Signature) -> usize {
         self.rlp_header_signed(sig).length_with_payload()
     }
 
-    /// RLP-encodes the *signed* transaction.
+    /// RLP-encodes the *signed* transaction (`rlp([fields[0..=11], signature_payload])`).
     pub fn rlp_encode_signed(&self, sig: &Wip1001Signature, out: &mut dyn BufMut) {
         self.rlp_header_signed(sig).encode(out);
         self.rlp_encode_fields(out);
-        sig.signature_type().encode(out);
 
         // Encode signature_payload as an RLP byte-string wrapping `rlp([...])`.
         let payload_bytes_len = sig.payload_encoded_len();
@@ -287,7 +194,6 @@ impl TxWip1001 {
         }
         let remaining = buf.len();
         let tx = Self::rlp_decode_fields(buf)?;
-        let sig_type: u8 = Decodable::decode(buf)?;
 
         // `signature_payload` is stored as an RLP byte-string whose contents are
         // themselves an RLP encoding (`rlp([...])`).
@@ -300,7 +206,7 @@ impl TxWip1001 {
         }
         let (mut payload_slice, rest) = buf.split_at(payload_header.payload_length);
         *buf = rest;
-        let sig = Wip1001Signature::decode_payload_raw(sig_type, &mut payload_slice)?;
+        let sig = Wip1001Signature::decode_payload_raw(tx.signature_type, &mut payload_slice)?;
         if !payload_slice.is_empty() {
             return Err(alloy_rlp::Error::Custom(
                 "trailing bytes in signature_payload",
@@ -797,6 +703,10 @@ mod tests {
             input: hex!("a22cb465").into(),
             access_list: AccessList::default(),
             keyring: address!("000000000000000000000000000000000000001d"),
+            signature_type: Wip1001Signature::SECP256K1_TYPE,
+            // 33-byte compressed secp256k1 placeholder.
+            session_key: hex!("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+                .into(),
         }
     }
 

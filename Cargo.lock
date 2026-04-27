@@ -13078,6 +13078,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "alloy-signer-local",
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "chrono",
@@ -13085,6 +13086,7 @@ dependencies = [
  "ed25519-dalek",
  "op-alloy-consensus",
  "op-alloy-network",
+ "p256",
  "reth-basic-payload-builder",
  "reth-optimism-chainspec",
  "reth-optimism-node",
@@ -13095,6 +13097,7 @@ dependencies = [
  "reth-revm",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
