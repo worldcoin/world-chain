@@ -11,7 +11,7 @@ use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{BuilderContext, components::PayloadBuilderBuilder};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes, txpool::OpPooledTx,
+    OpBuiltPayload, OpEvmConfig, payload::OpPayloadAttrs, txpool::OpPooledTx,
 };
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
@@ -55,9 +55,7 @@ where
             ChainSpec = OpChainSpec,
             Payload: PayloadTypes<
                 BuiltPayload = OpBuiltPayload,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
-                    op_alloy_consensus::OpTxEnvelope,
-                >,
+                PayloadAttributes = OpPayloadAttrs,
             >,
         >,
     Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>

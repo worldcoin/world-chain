@@ -4,20 +4,23 @@ use alloy_op_evm::{
     block::{OpTxEnv, receipt_builder::OpReceiptBuilder},
 };
 
+use alloy_primitives::B256;
+use op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
-    op_revm::{OpHaltReason, OpSpecId},
 };
+use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
+use reth_trie_common::updates::TrieUpdates;
 use revm::{
     DatabaseCommit,
     context::{BlockEnv, result::ExecutionResult},
@@ -114,6 +117,7 @@ where
     fn finish(
         self,
         _state: impl StateProvider,
+        _state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         unimplemented!(
             "finish is not supported on FlashblocksBlockBuilder; use finish_with_bundle instead"

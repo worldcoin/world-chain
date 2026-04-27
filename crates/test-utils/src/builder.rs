@@ -19,16 +19,16 @@ use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_network::TxSignerSync;
+use op_revm::OpSpecId;
 use reth_chainspec::ChainInfo;
 use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
-    op_revm::OpSpecId,
 };
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives::{Account, Recovered, SealedHeader, transaction::SignedTransaction};
+use reth_primitives_traits::{Account, Bytecode, Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockNumReader, BytecodeReader, CanonStateSubscriptions, ChainSpecProvider,
     HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
@@ -39,7 +39,6 @@ use reth_trie_common::HashedPostState;
 use revm::{
     DatabaseRef,
     database::{BundleState, InMemoryDB},
-    primitives::StorageValue,
     state::AccountInfo,
 };
 use std::{
@@ -48,16 +47,15 @@ use std::{
     sync::Arc,
 };
 use tracing::error;
-use world_chain_primitives::{
-    access_list::{FlashblockAccessListData, access_list_hash},
-    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
-};
-
 use world_chain_builder::{
     BlockBuilderExt,
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     payload_builder_metrics::PayloadBuildAttemptMetrics,
+};
+use world_chain_primitives::{
+    access_list::{FlashblockAccessListData, access_list_hash},
+    primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
@@ -922,13 +920,13 @@ impl BytecodeReader for TestStateProvider {
     fn bytecode_by_hash(
         &self,
         code_hash: &alloy_primitives::B256,
-    ) -> reth_provider::ProviderResult<Option<reth_primitives::Bytecode>> {
+    ) -> reth_provider::ProviderResult<Option<Bytecode>> {
         use revm::DatabaseRef;
         Ok(self
             .db
             .code_by_hash_ref(*code_hash)
             .ok()
-            .map(|bc| reth_primitives::Bytecode::new_raw(bc.original_bytes())))
+            .map(|bc| Bytecode::new_raw(bc.original_bytes())))
     }
 }
 
@@ -940,27 +938,16 @@ impl StateProvider for TestStateProvider {
     ) -> reth_provider::ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.db.storage_ref(account, storage_key.into()).ok())
     }
-
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        todo!()
-    }
 }
 
 impl reth_provider::AccountReader for TestStateProvider {
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> reth_provider::ProviderResult<Option<reth_primitives::Account>> {
+    fn basic_account(&self, address: &Address) -> reth_provider::ProviderResult<Option<Account>> {
         Ok(self
             .db
             .basic_ref(*address)
             .ok()
             .flatten()
-            .map(|info| reth_primitives::Account {
+            .map(|info| Account {
                 balance: info.balance,
                 nonce: info.nonce,
                 bytecode_hash: if info.code_hash == KECCAK_EMPTY {
@@ -1259,10 +1246,7 @@ impl BenchProvider {
 // Delegate all TestStateProvider traits to self.inner
 
 impl BytecodeReader for BenchProvider {
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         self.inner.bytecode_by_hash(code_hash)
     }
 }
@@ -1274,15 +1258,6 @@ impl StateProvider for BenchProvider {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         self.inner.storage(account, storage_key)
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        self.inner
-            .storage_by_hashed_key(address, hashed_storage_key)
     }
 }
 

@@ -22,7 +22,6 @@ world-chain-cli.workspace = true
 world-chain-rpc.workspace = true
 
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
@@ -66,6 +65,8 @@ op-alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+
+op-revm.workspace = true
 
 ed25519-dalek.workspace = true
 semaphore-rs.workspace = true

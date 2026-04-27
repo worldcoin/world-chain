@@ -18,7 +18,6 @@ world-chain-primitives.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-provider.workspace = true
-reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-node-api.workspace = true
@@ -60,7 +59,7 @@ tracing.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true

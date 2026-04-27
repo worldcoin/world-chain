@@ -6,11 +6,10 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
-use op_alloy_rpc_types_engine::{
-    OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
-};
+use op_alloy_rpc_types_engine::{OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineApiValidator, EngineTypes};
+use reth_optimism_node::payload::OpExecData;
 use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
@@ -46,7 +45,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
+    EngineT: EngineTypes<ExecutionData = OpExecData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -215,7 +214,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> FlashblocksEngineApiExtServe
     for OpEngineApiExt<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
+    EngineT: EngineTypes<ExecutionData = OpExecData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,

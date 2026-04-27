@@ -1,11 +1,13 @@
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
+use op_revm::{OpHaltReason, OpSpecId};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader, SignedTransaction};
 use std::{sync::Arc, time::Instant};
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{B256, Bytes, U256};
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
     block::receipt_builder::OpReceiptBuilder,
 };
 use alloy_rpc_types_engine::PayloadId;
@@ -13,33 +15,31 @@ use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
 use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
-use reth_primitives::transaction::SignedTransaction;
 use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
     primitives::ExecutionPayloadFlashblockDeltaV1,
 };
 
 use reth_evm::{
-    Evm, EvmEnv, EvmEnvFor, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    Evm, EvmEnv, EvmEnvFor, EvmFactory,
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
-    op_revm::{OpHaltReason, OpSpecId, OpTransaction},
 };
 use reth_node_api::{BuiltPayload, BuiltPayloadExecutedBlock};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{
     DatabaseRef,
-    context::{BlockEnv, TxEnv, result::ExecutionResult},
+    context::{BlockEnv, result::ExecutionResult},
     database::{BundleAccount, BundleState},
+    primitives::AddressMap,
 };
 use revm_database::State;
 use tracing::{error, info, trace};
@@ -206,7 +206,7 @@ impl FlashblocksBlockValidator {
             .build();
 
         // 2. Create EVM and executor
-        let evm = OpEvmFactory::default().create_evm(&mut db, self.evm_env.clone());
+        let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, self.evm_env.clone());
 
         let mut executor = OpBlockExecutor::new(
             evm,
@@ -559,13 +559,7 @@ impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<
-            DB = ValidatorDb<'a, DBRef>,
-            Tx = OpTransaction<TxEnv>,
-            Spec = OpSpecId,
-            BlockEnv = BlockEnv,
-        >,
-    OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    E: Evm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
@@ -622,14 +616,12 @@ where
     DB: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
             DB = ValidatorDb<'a, DB>,
-            Tx = OpTransaction<TxEnv>,
+            Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
-    OpTransaction<TxEnv>:
-        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
@@ -661,6 +653,7 @@ where
     fn finish(
         mut self,
         state: impl StateProvider,
+        _state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
         let finalize_started = Instant::now();
         // finalize the database index
@@ -749,7 +742,7 @@ where
     DbRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<
             DB = ValidatorDb<'a, DbRef>,
-            Tx = OpTransaction<TxEnv>,
+            Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
@@ -758,8 +751,6 @@ where
         + Send
         + Sync
         + Clone,
-    OpTransaction<TxEnv>:
-        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     pub fn execute_block(
         mut self,
@@ -855,7 +846,7 @@ where
             "Final transaction index should match the expected range"
         );
 
-        Ok((self.finish(state_provider)?, merged_result.fees))
+        Ok((self.finish(state_provider, None)?, merged_result.fees))
     }
 }
 
@@ -898,8 +889,6 @@ where
         + Send
         + Sync
         + Clone,
-    OpTransaction<TxEnv>:
-        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     let temporal_db = db_factory.db(index as u64);
     let state = NoOpCommitDB::new(temporal_db);
@@ -907,7 +896,7 @@ where
 
     database.set_index(index);
 
-    let evm = OpEvmFactory::default().create_evm(database, evm_env);
+    let evm = OpEvmFactory::<OpTx>::default().create_evm(database, evm_env);
 
     let mut executor = OpBlockExecutor::new(
         evm,
@@ -961,7 +950,7 @@ pub struct StateRootResult {
 
 pub fn compute_state_root(
     state_provider: Arc<dyn StateProvider + Send>,
-    bundle_state: &alloy_primitives::map::HashMap<Address, BundleAccount>,
+    bundle_state: &AddressMap<BundleAccount>,
 ) -> Result<StateRootResult, BlockExecutionError> {
     // compute hashed post state
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
