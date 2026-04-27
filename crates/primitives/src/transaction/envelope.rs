@@ -342,7 +342,7 @@ impl WorldChainTxEnvelope {
             Self::Eip1559(t) => t.eip2718_encoded_length(),
             Self::Eip7702(t) => t.eip2718_encoded_length(),
             Self::Wip1001(t) => t.encode_2718_len(),
-            Self::Deposit(t) => t.eip2718_encoded_length(),
+            Self::Deposit(t) => t.encode_2718_len(),
         }
     }
 
