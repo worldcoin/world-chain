@@ -2,7 +2,7 @@ use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder};
 use reth_node_api::PayloadBuilderError;
 use std::sync::Arc;
 
-use crate::metrics::PayloadBuildMetrics;
+use crate::payload_builder_metrics::PayloadBuildMetrics;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 pub trait FlashblockPayloadBuilder: PayloadBuilder + Send + Sync + Clone {

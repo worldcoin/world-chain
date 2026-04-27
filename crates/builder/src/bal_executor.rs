@@ -7,7 +7,7 @@ use alloy_op_evm::{
 use op_alloy_consensus::OpReceipt;
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError, StateDB},
+    block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
     op_revm::{OpSpecId, OpTransaction},
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -22,22 +22,24 @@ use revm::{
 use tracing::trace;
 
 use crate::{
-    BlockBuilderExt, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
+    BlockBuilderExt,
+    access_list::BlockAccessIndex,
+    database::bal_builder_db::BalBuilderDb,
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
+    state_db::StateDB,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
-    execute::{
-        BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
-    },
+    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
     op_revm::OpHaltReason,
 };
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
-use std::{borrow::Cow, sync::Arc};
+use std::{sync::Arc, time::Instant};
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
@@ -92,13 +94,11 @@ impl BalExecutorError {
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
-    pub inner: BasicBlockBuilder<
-        'a,
-        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
-        OpBlockAssembler<OpChainSpec>,
-        N,
-    >,
+    pub executor: OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
+    pub ctx: OpBlockExecutionCtx,
+    pub transactions: Vec<Recovered<N::SignedTx>>,
+    pub parent: &'a SealedHeader<N::BlockHeader>,
+    pub assembler: OpBlockAssembler<OpChainSpec>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub counter: BlockAccessIndexCounter,
 }
@@ -131,21 +131,19 @@ where
         trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
 
         Self {
-            inner: BasicBlockBuilder {
-                executor,
-                assembler: OpBlockAssembler::new(chain_spec),
-                ctx,
-                parent,
-                transactions,
-            },
+            executor,
+            ctx,
+            transactions,
+            parent,
+            assembler: OpBlockAssembler::new(chain_spec),
             access_list_sender: tx,
             counter,
         }
     }
 
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
-        let length = self.inner.transactions.len() as u16;
-        let db = self.inner.executor.evm_mut().db_mut();
+        let length = self.transactions.len() as u16;
+        let db = self.executor.evm_mut().db_mut();
         let current = self.counter.inc();
         trace!(target: "bal_executor", block_access_index = %current,  receipts_length = %length, "Preparing database for next transaction with index");
         db.set_index(current);
@@ -177,7 +175,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let res = self.inner.apply_pre_execution_changes();
+        let res = self.executor.apply_pre_execution_changes();
         // prepare the transaction index for the next transaction 1
         self.prepare_database()?;
         res
@@ -190,14 +188,18 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        let res = self
-            .inner
-            .execute_transaction_with_commit_condition(tx, f)?;
-        // only prepare the database index for the next transaction if this one was committed
-        if res.is_some() {
+        let (tx_env, recovered) = tx.into_parts();
+        if let Some(gas_used) = self
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &recovered), f)?
+        {
+            self.transactions.push(recovered);
+            // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
         }
-        Ok(res)
     }
 
     fn finish(
@@ -210,15 +212,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
+        &mut self.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
+        &self.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        self.executor
     }
 }
 
@@ -245,13 +247,15 @@ where
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        _metrics: Option<&mut crate::metrics::PayloadBuildAttemptMetrics>,
+        mut metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
-        let (evm, result) = self.inner.executor.finish()?;
+        let (evm, result) = self.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
+        let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
+        metrics.record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
         // Flatten reverts into a single transition:
         // - per account: keep earliest `previous_status`
@@ -265,32 +269,38 @@ where
         db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
+        let state_root_started = Instant::now();
         let hashed_state = state.hashed_post_state(db.bundle_state());
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
+        metrics.record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
         let (transactions, senders) = self
-            .inner
             .transactions
             .into_iter()
             .map(|tx| tx.into_parts())
             .unzip();
 
-        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block_assembly_started = Instant::now();
+        let block = self.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
         >::new(
             evm_env,
-            self.inner.ctx,
-            self.inner.parent,
+            self.ctx,
+            self.parent,
             transactions,
             &result,
-            Cow::Borrowed(db.bundle_state()),
+            db.bundle_state(),
             &state,
             state_root,
         ))?;
+        metrics.record_stage_duration(
+            PayloadBuildStage::BlockAssembly,
+            block_assembly_started.elapsed(),
+        );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

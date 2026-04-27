@@ -18,33 +18,30 @@ use op_alloy_consensus::{OpTxEnvelope, TxDeposit, encode_holocene_extra_data};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
 };
-use reth::{
-    api::TreeConfig,
-    args::PayloadBuilderArgs,
-    builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle},
-    chainspec::EthChainSpec,
-    network::PeersHandleProvider,
-    tasks::TaskExecutor,
-};
+use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
     testsuite::{BlockInfo, Environment, NodeClient, NodeState},
 };
+use reth_engine_tree::tree::TreeConfig;
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
     FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadAttributes,
     PayloadTypes,
 };
 use reth_node_builder::{
-    NodeComponents, NodeComponentsBuilder,
+    EngineNodeLauncher, Node, NodeBuilder, NodeComponents, NodeComponentsBuilder, NodeConfig,
+    NodeHandle,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
-use reth_node_core::args::RpcServerArgs;
+use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
 use reth_optimism_payload_builder::payload_id_optimism;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
+use reth_tasks::TaskExecutor;
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
@@ -147,6 +144,7 @@ where
         false,
         flashblocks_enabled,
         None,
+        Arc::new(CHAIN_SPEC.clone()), // default to CHAIN_SPEC
     )
     .await
 }
@@ -156,6 +154,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -174,6 +173,7 @@ where
         false,
         flashblocks_enabled,
         block_uncompressed_size_limit,
+        chain_spec,
     )
     .await
 }
@@ -185,6 +185,7 @@ pub async fn setup_with_tx_peers<T>(
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -203,6 +204,7 @@ where
         disable_gossip,
         flashblocks_enabled,
         None,
+        chain_spec,
     )
     .await
 }
@@ -214,6 +216,7 @@ async fn setup_inner<T>(
     disable_gossip: bool,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
+    chain_spec: Arc<OpChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -228,12 +231,11 @@ where
     unsafe {
         std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     }
-    let op_chain_spec: Arc<OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
     let exec = TaskExecutor::default();
 
-    let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(op_chain_spec.clone())
-        .with_chain(op_chain_spec.clone())
+    let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(chain_spec.clone())
+        .with_chain(chain_spec)
         .with_rpc(
             RpcServerArgs::default()
                 .with_unused_ports()
@@ -244,7 +246,7 @@ where
         .with_payload_builder(PayloadBuilderArgs {
             deadline: Duration::from_secs(12),
             max_payload_tasks: 20,
-            gas_limit: Some(30_000_000),
+            gas_limit: Some(200_000_000), // 200MGas
             interval: Duration::from_millis(200),
             ..Default::default()
         })
@@ -457,7 +459,7 @@ pub fn build_payload_attributes(
         transactions,
         no_tx_pool: Some(false),
         eip_1559_params: Some(eip1559_params),
-        gas_limit: Some(30_000_000),
+        gas_limit: Some(200_000_000), // 200MGas
         min_base_fee: Some(0),
     }
 }

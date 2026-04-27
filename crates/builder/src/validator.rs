@@ -1,7 +1,6 @@
-use std::{borrow::Cow, sync::Arc};
-
 use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
+use std::{sync::Arc, time::Instant};
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 
@@ -12,7 +11,7 @@ use alloy_op_evm::{
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
-use rayon::iter::IntoParallelIterator;
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::transaction::SignedTransaction;
 use world_chain_primitives::{
@@ -52,10 +51,15 @@ use crate::{
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
+        shared_state_provider_db::SharedStateProviderDatabase,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
     executor::FlashblocksBlockBuilder,
-    metrics::metered_fn,
+    flashblock_validation_metrics::{
+        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
+    },
+    metrics::PayloadBuildStage,
+    payload_builder_metrics::metered_fn,
 };
 
 /// A type alias for the BAL builder database with a cache layer.
@@ -67,6 +71,7 @@ pub struct FlashblocksBlockValidator {
     pub evm_config: OpEvmConfig,
     pub execution_context: OpBlockExecutionCtx,
     pub header: Arc<SealedHeader>,
+    pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
 }
 
 impl FlashblocksBlockValidator {
@@ -80,57 +85,84 @@ impl FlashblocksBlockValidator {
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let has_bal = diff.access_list_data.is_some();
         let diff_clone = diff.clone();
+        let validation_started = Instant::now();
+        let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
 
-        let next_payload = metered_fn(
-            tracing::trace_span!(
-                target: "flashblocks::coordinator",
-                "validate",
-                id = %payload_id,
-                path = if has_bal { "bal" } else { "legacy" },
-                tx_count = diff.transactions.len(),
-                duration_ms = tracing::field::Empty,
-            ),
-            metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
-            |_span| {
-                if has_bal {
-                    let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
-                    self.validate_flashblock_parallel(
-                        client,
-                        diff,
-                        parent,
-                        payload_id,
-                        committed_state,
+        let result = (|| -> Result<OpBuiltPayload, BalExecutorError> {
+            let next_payload = metered_fn(
+                tracing::trace_span!(
+                    target: "flashblocks::coordinator",
+                    "validate",
+                    id = %payload_id,
+                    path = if has_bal { "bal" } else { "legacy" },
+                    tx_count = diff.transactions.len(),
+                    duration_ms = tracing::field::Empty,
+                ),
+                metrics::histogram!("flashblocks.validate", "access_list" => has_bal.to_string()),
+                |_span| {
+                    if has_bal {
+                        let committed_state =
+                            CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
+                        self.validate_flashblock_parallel(
+                            client,
+                            diff,
+                            parent,
+                            payload_id,
+                            committed_state,
+                            &mut attempt_metrics,
+                        )
+                    } else {
+                        self.validate_flashblock(
+                            client,
+                            diff,
+                            parent,
+                            payload_id,
+                            state,
+                            &mut attempt_metrics,
+                        )
+                    }
+                },
+            )?;
+
+            let executed = next_payload
+                .executed_block()
+                .ok_or(BalExecutorError::MissingExecutedBlock)
+                .inspect_err(|e| {
+                    error!(
+                        target: "flashblocks::coordinator",
+                        ?payload_id,
+                        error = ?e,
+                        "Missing executed block for payload"
                     )
-                } else {
-                    self.validate_flashblock(client, diff, parent, payload_id, state)
-                }
-            },
-        )?;
+                })?;
 
-        let executed = next_payload
-            .executed_block()
-            .ok_or(BalExecutorError::MissingExecutedBlock)
-            .inspect_err(|e| {
-                error!(
-                    target: "flashblocks::coordinator",
-                    ?payload_id,
-                    error = ?e,
-                    "Missing executed block for payload"
-                )
-            })?;
+            self.validate_payload(&executed.into_executed_payload(), diff_clone)
+                .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
+                .inspect_err(|e| {
+                    error!(
+                        target: "flashblocks::coordinator",
+                        ?payload_id,
+                        error = ?e,
+                        "Payload validation failed"
+                    )
+                })?;
 
-        self.validate_payload(&executed.into_executed_payload(), diff_clone)
-            .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
-            .inspect_err(|e| {
-                error!(
-                    target: "flashblocks::coordinator",
-                    ?payload_id,
-                    error = ?e,
-                    "Payload validation failed"
-                )
-            })?;
+            Ok(next_payload)
+        })();
 
-        Ok(next_payload)
+        match result {
+            Ok(next_payload) => {
+                attempt_metrics
+                    .record_stage_duration(PayloadBuildStage::Total, validation_started.elapsed());
+                attempt_metrics.publish(self.flashblock_validation_metrics.as_ref());
+                Ok(next_payload)
+            }
+            Err(err) => {
+                self.flashblock_validation_metrics
+                    .increment_validation_errors();
+                Err(err)
+            }
+        }
     }
 
     pub fn validate_payload(
@@ -157,6 +189,7 @@ impl FlashblocksBlockValidator {
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
         state: Option<&OpBuiltPayload<OpPrimitives>>,
+        attempt_metrics: &mut FlashblockValidationAttemptMetrics,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(state)?;
         let bundle_state = committed_state.bundle.clone();
@@ -196,7 +229,12 @@ impl FlashblocksBlockValidator {
 
         // 4. Apply pre-execution changes on first flashblock
         if state.is_none() {
+            let pre_execution_changes_started = Instant::now();
             builder.apply_pre_execution_changes()?;
+            attempt_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
         }
 
         // 5. Decode and execute diff transactions, tracking fees
@@ -207,6 +245,7 @@ impl FlashblocksBlockValidator {
         )?;
 
         let mut fees = U256::ZERO;
+        let txs_execution_started = Instant::now();
         for (_, tx) in &transactions {
             let gag_used = builder
                 .execute_transaction_with_commit_condition(tx.clone(), |_| CommitChanges::Yes)?;
@@ -220,13 +259,21 @@ impl FlashblocksBlockValidator {
                 fees += U256::from(gas_used) * U256::from(miner_fee);
             }
         }
+        attempt_metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            txs_execution_started.elapsed(),
+        );
 
         // 6. Finish and seal the block
         let finish_state_provider = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
 
-        let (outcome, bundle) = builder.finish_with_bundle(finish_state_provider.as_ref(), None)?;
+        let finalize_started = Instant::now();
+        let (outcome, bundle) =
+            builder.finish_with_bundle(finish_state_provider.as_ref(), &mut *attempt_metrics)?;
+        attempt_metrics
+            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 
         let BlockBuilderOutcome {
             execution_result,
@@ -264,6 +311,7 @@ impl FlashblocksBlockValidator {
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
         committed_state: CommittedState<OpRethReceiptBuilder>,
+        attempt_metrics: &mut FlashblockValidationAttemptMetrics,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let FlashblockAccessListData {
             access_list,
@@ -277,7 +325,7 @@ impl FlashblocksBlockValidator {
         let state_provider_ref = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
-        let state_provider_database = StateProviderDatabase::new(state_provider_ref.as_ref());
+        let state_provider_database = SharedStateProviderDatabase::new(state_provider_ref);
         let block_access_index = access_list.min_tx_index;
 
         // 2. Create channel for state root computation
@@ -338,6 +386,7 @@ impl FlashblocksBlockValidator {
             state_root_receiver,
             self.evm_env.clone(),
             (access_list.min_tx_index, access_list.max_tx_index),
+            attempt_metrics,
         );
 
         // Decode diff transactions for parallel execution.
@@ -503,6 +552,7 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'a, R: OpReceiptBuilder, E
     pub temporal_db_factory: &'a TemporalDbFactory<DbRef>,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
+    pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -531,6 +581,7 @@ where
         >,
         evm_env: EvmEnv<OpSpecId>,
         index_range: (u16, u16),
+        attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
     ) -> (Self, crossbeam_channel::Receiver<FlashblockAccessList>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
@@ -549,6 +600,7 @@ where
                 temporal_db_factory,
                 evm_env,
                 index_range,
+                attempt_metrics,
             },
             rx,
         )
@@ -583,7 +635,7 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        self.inner.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -593,17 +645,32 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let (tx_env, tx) = tx.into_parts();
+        if let Some(gas_used) = self
+            .inner
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        {
+            self.inner.transactions.push(tx);
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(
-        self,
+        mut self,
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<OpPrimitives>, BlockExecutionError> {
+        let finalize_started = Instant::now();
+        // finalize the database index
+        self.prepare_database(self.index_range.1)?;
+
         let (evm, result) = self.inner.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
         // Wait for the state root result from the async computation
+        let state_root_started = Instant::now();
         let StateRootResult {
             state_root,
             trie_updates,
@@ -612,6 +679,8 @@ where
             .state_root_receiver
             .recv()
             .map_err(BlockExecutionError::other)??;
+        self.attempt_metrics
+            .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
         let (transactions, senders) = self
             .inner
@@ -620,6 +689,7 @@ where
             .map(|tx| tx.into_parts())
             .unzip();
 
+        let block_assembly_started = Instant::now();
         let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
@@ -630,10 +700,14 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(self.bundle_state.as_ref()),
+            self.bundle_state.as_ref(),
             &state,
             state_root,
         ))?;
+        self.attempt_metrics.record_stage_duration(
+            PayloadBuildStage::BlockAssembly,
+            block_assembly_started.elapsed(),
+        );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
@@ -646,6 +720,9 @@ where
             .send(access_list)
             .map_err(BlockExecutionError::other)?;
 
+        self.attempt_metrics
+            .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
+
         Ok(BlockBuilderOutcome {
             execution_result: result,
             hashed_state,
@@ -655,15 +732,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
+        &mut self.inner.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
+        &self.inner.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        self.inner.executor
     }
 }
 
@@ -691,10 +768,18 @@ where
             Item = (BlockAccessIndex, Recovered<OpTransactionSigned>),
         > + IntoIterator<Item = (BlockAccessIndex, Recovered<OpTransactionSigned>)>
         + Clone,
-    ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError> {
+    ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError>
+    where
+        DbRef: Send,
+    {
         if self.index_range.0 == 0 {
             self.prepare_database(0)?;
+            let pre_execution_changes_started = Instant::now();
             self.apply_pre_execution_changes()?;
+            self.attempt_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
         }
 
         let spec = self.inner.executor.spec.clone();
@@ -703,7 +788,7 @@ where
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
 
-        let db_factory = &self.temporal_db_factory;
+        let db_factory = self.temporal_db_factory.clone();
 
         trace!(
             target: "flashblocks::builder::block_validator",
@@ -715,12 +800,11 @@ where
         // formed from the BAL provided. We reduce the results to aggregate the state transitions,
         // receipts, gas used, and access list. Then pre-load the aggregated results into the base
         // executor to finalize the block.
+        let txs_execution_started = Instant::now();
         let mut results = transactions
             .clone()
-            // .into_par_iter()
-            // TODO: get rayon to work
-            .into_iter()
-            .map(|(index, tx)| {
+            .into_par_iter()
+            .map_with(db_factory, |db_factory, (index, tx)| {
                 let tx = tx.clone();
                 info!(
                     "Executing tx at index {} hash {}",
@@ -737,12 +821,15 @@ where
                 )
             })
             .collect::<Result<Vec<_>, BalExecutorError>>()?;
-
         // Sort results by transaction ascending index
         results.sort_unstable_by_key(|r| r.index);
+        self.attempt_metrics.record_stage_duration(
+            PayloadBuildStage::SequencerTxExecution,
+            txs_execution_started.elapsed(),
+        );
 
         let merged_result = merge_transaction_results(results, gas_used);
-        let database = self.inner.executor_mut().evm_mut().db_mut();
+        let database = self.inner.executor.evm_mut().db_mut();
 
         // merge the aggregated access list into the AsyncBalBuilderDb
         database.merge_access_list(merged_result.access_list);
@@ -767,9 +854,6 @@ where
             self.index_range.1,
             "Final transaction index should match the expected range"
         );
-
-        // finalize the database index
-        self.prepare_database(self.index_range.1)?;
 
         Ok((self.finish(state_provider)?, merged_result.fees))
     }

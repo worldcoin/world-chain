@@ -8,16 +8,12 @@ use jsonrpsee::{
     core::{RpcResult, async_trait},
     types::{ErrorCode, ErrorObject, ErrorObjectOwned},
 };
-use reth::{
-    api::Block,
-    rpc::{
-        api::eth::{AsEthApiError, FromEthApiError},
-        server_types::eth::{EthApiError, utils::recover_raw_transaction},
-    },
-    transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool},
-};
 use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_primitives_traits::Block;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_rpc_eth_api::{AsEthApiError, FromEthApiError};
+use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use revm_primitives::{Address, B256, Bytes, FixedBytes, map::FbBuildHasher};
 use world_chain_pool::tx::WorldChainPooledTransaction;
 

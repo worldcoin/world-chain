@@ -142,7 +142,7 @@ where
                         if state.connection_established
                             || now.duration_since(state.added_time) > CONNECTION_INIT_TIMEOUT
                         {
-                            tracing::warn!(
+                            tracing::trace!(
                                 target: "flashblocks::p2p",
                                 peer_id = %peer_id,
                                 info = %info,
@@ -182,7 +182,7 @@ where
                                 .map(|r| r.to_string())
                                 .unwrap_or("unknown".to_string());
 
-                            tracing::info!(
+                            tracing::trace!(
                                 target: "flashblocks::p2p",
                                 peer_id = %peer_id,
                                 reason = %reason,
@@ -197,7 +197,7 @@ where
                             state.connection_established = true;
                             state.disconnected_time = None;
                         }) {
-                            tracing::info!(
+                            tracing::trace!(
                                 target: "flashblocks::p2p",
                                 peer_id = %session_info.peer_id,
                                 "connection to trusted peer established"
@@ -207,7 +207,7 @@ where
                     // Fired when any peer is removed via admin RPC
                     PeerEvent::PeerRemoved(fixed_bytes) => {
                         if self.remove_peer(fixed_bytes) {
-                            tracing::debug!(
+                            tracing::trace!(
                                 target: "flashblocks::p2p",
                                 peer_id = %fixed_bytes,
                                 "trusted peer removed"

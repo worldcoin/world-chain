@@ -1,5 +1,6 @@
 use crate::{
-    metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
@@ -16,7 +17,7 @@ use reth_basic_payload_builder::PayloadConfig;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
-    block::{BlockExecutionError, BlockValidationError, StateDB},
+    block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
     op_revm::OpSpecId,
 };
@@ -117,6 +118,10 @@ where
         self.inner.chain_spec.as_ref()
     }
 
+    fn builder_config(&self) -> &OpBuilderConfig {
+        &self.inner.builder_config
+    }
+
     fn evm_env(&self) -> Result<EvmEnv<OpSpecId>, EIP1559ParamError> {
         self.inner.evm_config.evm_env(self.parent())
     }
@@ -161,15 +166,16 @@ where
         DB: Database + 'a,
     {
         // Prepare attributes for next block environment.
+        let gas_limit = self
+            .inner
+            .attributes()
+            .gas_limit
+            .unwrap_or(self.inner.parent().gas_limit);
         let attributes = OpNextBlockEnvAttributes {
             timestamp: self.inner.attributes().timestamp(),
             suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
             prev_randao: self.inner.attributes().prev_randao(),
-            gas_limit: self
-                .inner
-                .attributes()
-                .gas_limit
-                .unwrap_or(self.inner.parent().gas_limit),
+            gas_limit,
             parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
             extra_data: if self
                 .spec()
@@ -229,8 +235,8 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
-        mut gas_limit: u64,
+        attempt_metrics: &mut crate::payload_builder_metrics::PayloadBuildAttemptMetrics,
+        mut effective_gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
@@ -254,7 +260,8 @@ where
         let mut transactions_considered = 0;
         let mut transactions_executed = 0;
         let mut invalid_txs = vec![];
-        let verified_gas_limit = (self.verified_blockspace_capacity as u64 * gas_limit) / 100;
+        let verified_gas_limit =
+            (self.verified_blockspace_capacity as u64 * effective_gas_limit) / 100;
 
         let mut spent_nullifier_hashes = HashSet::new();
         while let Some(pooled_tx) = best_txs.next(()) {
@@ -287,7 +294,7 @@ where
 
             if info.is_tx_over_limits(
                 tx_da_size,
-                gas_limit,
+                effective_gas_limit,
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
@@ -355,10 +362,10 @@ where
                 Ok(res) => {
                     if let Some(payloads) = pooled_tx.pbh_payload() {
                         if spent_nullifier_hashes.len() == payloads.len() {
-                            gas_limit -= FIXED_GAS
+                            effective_gas_limit -= FIXED_GAS
                         }
 
-                        gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
+                        effective_gas_limit -= COLD_SSTORE_GAS * payloads.len() as u64;
                     }
                     res
                 }

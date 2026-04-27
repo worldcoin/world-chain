@@ -101,7 +101,7 @@ pub fn test_config_with_peers_and_gossip(
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
             builder_sk: Some(SigningKey::from_bytes(&rand::rng().random::<[u8; 32]>())),
             force_publish: false,
-            recommit_interval: 50,
+            recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
             fanout: FanoutArgs::default(),
@@ -630,7 +630,7 @@ impl StateProvider for WorldChainNoopProvider {
 }
 
 impl HashedPostStateProvider for WorldChainNoopProvider {
-    fn hashed_post_state(&self, _bundle_state: &reth::revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

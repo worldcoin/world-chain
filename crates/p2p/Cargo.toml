@@ -11,13 +11,15 @@ test-utils = []
 world-chain-cli.workspace = true
 world-chain-primitives.workspace = true
 
-reth.workspace = true
 reth-ethereum.workspace = true
 reth-eth-wire.workspace = true
 reth-network = { workspace = true }
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 ed25519-dalek.workspace = true
 metrics.workspace = true
+metrics-derive.workspace = true
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }

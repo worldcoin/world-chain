@@ -6,7 +6,7 @@ use alloy_op_evm::{
 
 use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded,
-    block::{BlockExecutionError, BlockExecutor, CommitChanges, StateDB},
+    block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
     },
@@ -24,11 +24,12 @@ use revm::{
     database::states::bundle_state::BundleRetention,
 };
 use revm_database::BundleState;
-use std::{borrow::Cow, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 use crate::{
     BlockBuilderExt,
-    metrics::{PayloadBuildAttemptMetrics, PayloadBuildStage},
+    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
+    state_db::StateDB,
 };
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
@@ -72,7 +73,7 @@ where
             BlockHeader = alloy_consensus::Header,
         >,
     E: Evm<
-            DB: StateDB + DatabaseCommit + Database + 'a,
+            DB: StateDB + reth_evm::block::StateDB + DatabaseCommit + Database + 'a,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -80,12 +81,14 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    OpBlockExecutor<E, R, OpChainSpec>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     type Primitives = N;
     type Executor = OpBlockExecutor<E, R, OpChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        self.inner.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -95,7 +98,17 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let (tx_env, tx) = tx.into_parts();
+        if let Some(gas_used) = self
+            .inner
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        {
+            self.inner.transactions.push(tx);
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(
@@ -108,15 +121,15 @@ where
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
-        self.inner.executor_mut()
+        &mut self.inner.executor
     }
 
     fn executor(&self) -> &Self::Executor {
-        self.inner.executor()
+        &self.inner.executor
     }
 
     fn into_executor(self) -> Self::Executor {
-        self.inner.into_executor()
+        self.inner.executor
     }
 }
 
@@ -130,7 +143,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB: StateDB + DatabaseCommit + Database + 'a,
+            DB: StateDB + reth_evm::block::StateDB + DatabaseCommit + Database + 'a,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -138,11 +151,13 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    OpBlockExecutor<E, R, OpChainSpec>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     fn finish_with_bundle(
         self,
         state: impl StateProvider,
-        mut metrics: Option<&mut PayloadBuildAttemptMetrics>,
+        mut metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
         let (mut db, evm_env) = evm.finish();
@@ -150,12 +165,7 @@ where
         // merge all transitions into bundle state
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
-        if let Some(metrics) = metrics.as_mut() {
-            metrics.record_stage_duration(
-                PayloadBuildStage::MergeTransitions,
-                merge_started.elapsed(),
-            );
-        }
+        metrics.record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
         // Flatten reverts into a single transition:
         // - per account: keep earliest `previous_status`
@@ -169,14 +179,12 @@ where
         db.bundle_state_mut().reverts = flattened;
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(db.bundle_state());
         let state_root_started = Instant::now();
-        let state_root_result = state.state_root_with_updates(hashed_state.clone());
-        if let Some(metrics) = metrics.as_mut() {
-            metrics
-                .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
-        }
-        let (state_root, trie_updates) = state_root_result.map_err(BlockExecutionError::other)?;
+        let hashed_state = state.hashed_post_state(db.bundle_state());
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+        metrics.record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
         let (transactions, senders) = self
             .inner
@@ -186,7 +194,7 @@ where
             .unzip();
 
         let block_assembly_started = Instant::now();
-        let block_result = self.inner.assembler.assemble_block(BlockAssemblerInput::<
+        let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
             OpBlockExecutorFactory<R>,
@@ -196,17 +204,14 @@ where
             self.inner.parent,
             transactions,
             &result,
-            Cow::Borrowed(db.bundle_state()),
+            db.bundle_state(),
             &state,
             state_root,
-        ));
-        if let Some(metrics) = metrics {
-            metrics.record_stage_duration(
-                PayloadBuildStage::BlockAssembly,
-                block_assembly_started.elapsed(),
-            );
-        }
-        let block = block_result?;
+        ))?;
+        metrics.record_stage_duration(
+            PayloadBuildStage::BlockAssembly,
+            block_assembly_started.elapsed(),
+        );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

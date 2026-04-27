@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 world-chain-pbh.workspace = true
 
-reth.workspace = true
 reth-db.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
@@ -20,6 +19,9 @@ reth-optimism-primitives.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
+reth-transaction-pool.workspace = true
+reth-node-api.workspace = true
+reth-evm.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true

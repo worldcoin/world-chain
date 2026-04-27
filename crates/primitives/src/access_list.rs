@@ -3,7 +3,8 @@ use alloy_eip7928::{
 };
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth::revm::{
+
+use reth_revm::{
     DatabaseRef,
     db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
     state::{AccountInfo, Bytecode},
@@ -63,7 +64,7 @@ impl FlashblockAccessList {
                         slot_changes
                             .changes
                             .iter()
-                            .any(|s| s.new_value != FixedBytes::<32>::ZERO)
+                            .any(|s| s.new_value != U256::ZERO)
                     })
                     .count();
 
@@ -147,7 +148,7 @@ impl FlashblockAccessList {
 
             // Apply storage changes
             for slot_changes in &account_changes.storage_changes {
-                let slot: U256 = slot_changes.slot.into();
+                let slot: U256 = slot_changes.slot;
 
                 for change in &slot_changes.changes {
                     let original_value = db
@@ -159,7 +160,7 @@ impl FlashblockAccessList {
                         slot,
                         StorageSlot {
                             previous_or_original_value: original_value, // TODO: Revisit this logic
-                            present_value: change.new_value.into(),
+                            present_value: change.new_value,
                         },
                     );
 
@@ -245,34 +246,37 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
         for change in &slot_changes.changes {
             changes_map.insert(change.block_access_index, change.clone());
         }
-        storage_map.insert(slot_changes.slot, changes_map);
+        storage_map.insert(slot_changes.slot.into(), changes_map);
     }
 
     for slot_changes in &other.storage_changes {
-        storage_map.entry(slot_changes.slot).or_default().extend(
-            slot_changes
-                .changes
-                .iter()
-                .map(|c| (c.block_access_index, c.clone())),
-        );
+        storage_map
+            .entry(slot_changes.slot.into())
+            .or_default()
+            .extend(
+                slot_changes
+                    .changes
+                    .iter()
+                    .map(|c| (c.block_access_index, c.clone())),
+            );
     }
 
     existing.storage_changes = storage_map
         .into_iter()
         .map(|(slot, changes_map)| SlotChanges {
-            slot,
+            slot: slot.into(),
             changes: changes_map.into_values().collect(),
         })
         .collect();
 
     let mut storage_reads_set: BTreeMap<B256, ()> = BTreeMap::new();
     for read in &existing.storage_reads {
-        storage_reads_set.insert(*read, ());
+        storage_reads_set.insert(FixedBytes(read.to_be_bytes()), ());
     }
     for read in &other.storage_reads {
-        storage_reads_set.insert(*read, ());
+        storage_reads_set.insert(FixedBytes(read.to_be_bytes()), ());
     }
-    existing.storage_reads = storage_reads_set.into_keys().collect();
+    existing.storage_reads = storage_reads_set.into_keys().map(Into::into).collect();
 
     let mut balance_map: BTreeMap<u64, BalanceChange> = BTreeMap::new();
     for change in &existing.balance_changes {
@@ -311,8 +315,9 @@ pub fn access_list_hash(access_list: &FlashblockAccessList) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7928::BalanceChange;
     use alloy_primitives::{address, map::HashMap};
-    use reth::revm::{db::AccountStatus, primitives::KECCAK_EMPTY};
+    use reth_revm::{db::AccountStatus, primitives::KECCAK_EMPTY};
     use std::convert::Infallible;
 
     /// Mock database for testing that can be configured with initial account state

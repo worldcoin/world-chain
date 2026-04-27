@@ -3,10 +3,12 @@ use crate::{
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     executor::FlashblocksBlockBuilder,
-    metrics::{
-        PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome, PayloadBuildStage,
+    metrics::PayloadBuildStage,
+    payload_builder_metrics::{
+        PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome,
     },
     payload_txns::BestPayloadTxns,
+    state_db::StateDB,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
         payload_builder::FlashblockPayloadBuilder,
@@ -16,7 +18,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
 use reth_evm::{
     Evm, EvmFactory,
-    block::{BlockExecutor, BlockExecutorFactory, StateDB},
+    block::{BlockExecutor, BlockExecutorFactory},
 };
 
 use alloy_consensus::{BlockHeader, Header};
@@ -302,12 +304,13 @@ where
     );
 
     let _enter = span.enter();
+    let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
     let attributes = OpNextBlockEnvAttributes {
         timestamp: ctx.attributes().timestamp(),
         suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
         prev_randao: ctx.attributes().prev_randao(),
-        gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
+        gas_limit,
         parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
         extra_data: if ctx
             .spec()
@@ -324,8 +327,6 @@ where
         },
     };
 
-    trace!(target: "flashblocks::payload_builder", ?attributes, "building new payload");
-
     // Prepare EVM environment.
     let evm_env = ctx
         .evm_config()
@@ -340,11 +341,18 @@ where
     let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(committed_payload)
         .map_err(PayloadBuilderError::other)?;
 
-    let gas_limit = ctx
-        .attributes()
-        .gas_limit
-        .unwrap_or(ctx.parent().gas_limit)
+    let effective_gas_limit = ctx
+        .effective_gas_limit()
         .saturating_sub(committed_state.gas_used);
+
+    trace!(
+        target: "flashblocks::payload_builder",
+        gas_limit,
+        effective_gas_limit,
+        committed_gas_used = committed_state.gas_used,
+        timestamp = ctx.attributes().timestamp(),
+        "building new payload"
+    );
 
     let bundle_state = committed_state.bundle.clone();
 
@@ -383,7 +391,7 @@ where
             client,
             committed_payload,
             visited_transactions,
-            gas_limit,
+            effective_gas_limit,
             best,
             pool,
             ctx,
@@ -412,7 +420,7 @@ where
             client,
             committed_payload,
             visited_transactions,
-            gas_limit,
+            effective_gas_limit,
             best,
             pool,
             ctx,
@@ -438,7 +446,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
     client: impl StateProviderFactory + Clone,
     committed_payload: Option<&OpBuiltPayload>,
     visited_transactions: Vec<TxHash>,
-    gas_limit: u64,
+    effective_gas_limit: u64,
     best: impl Fn(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     pool: Option<Pool>,
     ctx: &Ctx,
@@ -450,7 +458,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
             Transaction = R::Transaction,
         >,
     >,
-    attempt_metrics: &mut PayloadBuildAttemptMetrics,
+    mut attempt_metrics: &mut PayloadBuildAttemptMetrics,
     committed_state: &CommittedState<R>,
     access_list_rx: Option<crossbeam_channel::Receiver<FlashblockAccessList>>,
     mut cumulative_uncompressed_bytes: u64,
@@ -528,7 +536,7 @@ where
             &mut builder,
             best_txns.guard(),
             attempt_metrics,
-            gas_limit,
+            effective_gas_limit,
             cumulative_uncompressed_bytes,
         );
         attempt_metrics.record_stage_duration(
@@ -561,8 +569,7 @@ where
     // 6. Build the block
     let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
     let finalize_started = Instant::now();
-    let finalize_result =
-        builder.finish_with_bundle(state_provider.as_ref(), Some(attempt_metrics));
+    let finalize_result = builder.finish_with_bundle(state_provider.as_ref(), &mut attempt_metrics);
     attempt_metrics.record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
     let (build_outcome, bundle) = finalize_result?;
 
@@ -684,7 +691,11 @@ where
     OpBlockExecutorFactory<OpRethReceiptBuilder>:
         BlockExecutorFactory<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     Tx: PoolTransaction + OpPooledTx,
-    DB: StateDB + DatabaseCommit + reth_evm::Database<Error: Send + Sync + 'a> + 'a,
+    DB: StateDB
+        + reth_evm::block::StateDB
+        + DatabaseCommit
+        + reth_evm::Database<Error: Send + Sync + 'a>
+        + 'a,
     Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
