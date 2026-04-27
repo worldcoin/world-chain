@@ -138,5 +138,3 @@ No backward compatibility issues found.
 
 Needs discussion.
 
-## Copyright
-
