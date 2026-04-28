@@ -129,33 +129,16 @@ pub enum SimulationStatus {
     Revert,
 }
 
-/// One reverted call frame in the chain that produced the top-level revert.
-///
-/// Surfaced so callers can ABI-decode each frame independently (e.g. fetch the
-/// inner contract's ABI from Etherscan to decode a custom error, then fetch the
-/// EntryPoint's ABI to decode the outer `FailedOp` wrapper).
-///
-/// `reason` follows the same encoding as [`SimulateUnsignedUserOpResult::revert_reason`]:
-/// decoded for `Error(string)` / `Panic(uint256)`, hex-encoded raw bytes for
-/// custom errors and unknown payloads.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RevertFrame {
-    pub contract: Address,
-    pub reason: String,
-}
-
 /// Full response for `worldchain_simulateUnsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpResult {
     pub status: SimulationStatus,
+    /// Decoded reason for a top-level revert/halt; `None` on success.
+    /// For nested reverts this is the *deepest* reverted frame's payload
+    /// (the root cause), not the outermost — important for ERC-4337 where
+    /// EntryPoint always wraps inner reverts in `FailedOp(...)`.
     pub revert_reason: Option<String>,
-    /// Reverted call frames, deepest first. Empty on success and on top-level
-    /// halts. `revert_reason` mirrors `revert_chain[0].reason` (the deepest
-    /// frame, i.e. the root cause). Wrapper frames — most importantly
-    /// EntryPoint's `FailedOp(...)` — are visible only here.
-    pub revert_chain: Vec<RevertFrame>,
     pub block_number: u64,
     pub gas_used: String,
     pub asset_changes: Vec<AssetChange>,
@@ -203,14 +186,13 @@ pub struct SimulationInspector {
     /// recorded on entry. On `call_end` the frame is popped: committed (or
     /// merged into the parent frame) on success, dropped on revert/halt.
     pending_frames: Vec<Vec<NativeTransfer>>,
-    /// `(target_address, raw revert payload)` for every frame that exited via
-    /// REVERT, in `call_end` firing order — deepest first, outermost last.
-    /// Halt frames (OOG, invalid opcode, stack errors, etc.) are not captured
-    /// here: they have no payload to decode and the top-level halt reason is
-    /// already surfaced via `revert_reason`. Populated regardless of whether
-    /// parent frames catch the revert; the handler only surfaces this when
-    /// the top-level transaction itself reverted.
-    reverted_frames: Vec<(Address, Bytes)>,
+    /// Raw payload of the deepest frame that exited via REVERT. Set on the
+    /// first non-ok `call_end` whose `InstructionResult` is `Revert` — since
+    /// `call_end` fires bottom-up, that's the innermost reverter and so the
+    /// root cause when wrappers like EntryPoint's `FailedOp(...)` re-revert
+    /// up the stack. Halt frames (OOG, invalid opcode, etc.) are skipped:
+    /// they have no payload to decode.
+    deepest_revert_payload: Option<Bytes>,
 }
 
 impl SimulationInspector {
@@ -247,16 +229,11 @@ impl SimulationInspector {
             .collect()
     }
 
-    /// Drain captured reverted frames, decoding each frame's payload through
-    /// `decode_revert_reason`. Order matches `call_end` firing — deepest first.
-    pub fn take_revert_chain(&mut self) -> Vec<RevertFrame> {
-        std::mem::take(&mut self.reverted_frames)
-            .into_iter()
-            .map(|(contract, output)| RevertFrame {
-                contract,
-                reason: decode_revert_reason(&output),
-            })
-            .collect()
+    /// Take the decoded reason of the deepest reverted frame, if any.
+    pub fn take_deepest_revert_reason(&mut self) -> Option<String> {
+        self.deepest_revert_payload
+            .take()
+            .map(|output| decode_revert_reason(&output))
     }
 }
 
@@ -313,20 +290,21 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         None
     }
 
-    fn call_end(&mut self, _context: &mut CTX, inputs: &CallInputs, outcome: &mut CallOutcome) {
+    fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, outcome: &mut CallOutcome) {
         let Some(frame) = self.pending_frames.pop() else {
             return;
         };
         let result = outcome.instruction_result();
         if !result.is_ok() {
-            // Frame reverted or halted — drop its tentative transfers either
-            // way. Record only explicit REVERTs (the only variant that
-            // produces a decodable payload). is_revert() also covers
-            // CallTooDeep / OutOfFunds / EOF init-code failures whose
-            // outputs are empty and have nothing to ABI-decode.
-            if matches!(result, InstructionResult::Revert) {
-                self.reverted_frames
-                    .push((inputs.target_address, outcome.output().clone()));
+            // Frame reverted or halted — drop tentative native transfers
+            // either way. For explicit REVERTs, capture the deepest payload
+            // (the first one we see, since `call_end` fires bottom-up) so
+            // wrappers like EntryPoint's `FailedOp(...)` don't mask the
+            // root cause. Halts and the other `is_revert()` variants
+            // (CallTooDeep, OutOfFunds, EOF init-code) have empty outputs.
+            if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
+            {
+                self.deepest_revert_payload = Some(outcome.output().clone());
             }
             return;
         }
@@ -616,26 +594,18 @@ where
         let (_, inspector, _) = evm.components_mut();
         let trace = inspector.take_trace_entries();
         asset_changes.extend(inspector.take_native_asset_changes());
-        // Only surface the chain on a top-level REVERT. A top-level halt
-        // sets `status = Revert` too, but its reason is conveyed via
-        // `revert_reason` and there is nothing to ABI-decode per frame.
-        let revert_chain = if matches!(result_and_state.result, ExecutionResult::Revert { .. }) {
-            inspector.take_revert_chain()
-        } else {
-            Vec::new()
-        };
 
         // `revert_reason` is the *root cause* — the deepest reverted frame's
-        // payload — so consumers that don't iterate the chain still get the
-        // most informative error. For ERC-4337 this is the contract-specific
-        // custom error from the inner call rather than EntryPoint's
-        // `FailedOp(...)` wrapper that lives in the outermost frame.
+        // payload — so consumers see the contract-specific custom error from
+        // the inner call rather than wrappers like EntryPoint's
+        // `FailedOp(...)` that live further up the stack. Falls back to the
+        // outer payload if the inspector somehow saw no `Revert` frame, and
+        // halts surface their `HaltReason` debug name unchanged.
         let revert_reason = match status {
             SimulationStatus::Success => None,
             SimulationStatus::Revert => halt_reason.or_else(|| {
-                revert_chain
-                    .first()
-                    .map(|frame| frame.reason.clone())
+                inspector
+                    .take_deepest_revert_reason()
                     .or_else(|| match &result_and_state.result {
                         ExecutionResult::Revert { output, .. } => {
                             Some(decode_revert_reason(output))
@@ -659,7 +629,6 @@ where
         Ok(SimulateUnsignedUserOpResult {
             status,
             revert_reason,
-            revert_chain,
             block_number,
             gas_used: format!("{gas_used:#x}"),
             asset_changes,
@@ -1081,8 +1050,8 @@ where
     evm_env.cfg_env.disable_base_fee = true;
     // Required: we reuse one EVM across 3·N view calls all sent from
     // `Address::ZERO`. The first transact bumps ZERO's cached nonce, so
-    // without this flag every subsequent call fails nonce validation and
-    // silently returns empty metadata.
+    // without this flag every subsequent call fails validation and silently
+    // returns empty metadata.
     evm_env.cfg_env.disable_nonce_check = true;
 
     let Ok(state_provider) = client.state_by_block_id(block_id) else {

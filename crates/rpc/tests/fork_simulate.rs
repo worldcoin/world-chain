@@ -52,12 +52,25 @@ fn rpc_url() -> String {
     std::env::var("WORLDCHAIN_PROVIDER").expect("WORLDCHAIN_PROVIDER not set")
 }
 
-fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
+/// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`.
+/// Tests that exercise the main simulation path use this helper so any flag
+/// drift from prod is visible at the call site.
+fn simulate_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
-    cfg.disable_nonce_check = true;
-    cfg.disable_balance_check = true;
+    cfg.disable_block_gas_limit = true;
+    cfg.disable_eip3607 = true;
+    cfg.disable_base_fee = true;
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
+}
+
+/// Mirrors `run_metadata_calls` in `simulate.rs`: simulate envelope plus
+/// the nonce-check bypass needed for repeated view calls from the same
+/// caller. Tests exercising the metadata-resolution pattern use this helper.
+fn metadata_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
+    let mut env = simulate_evm_env();
+    env.cfg_env.disable_nonce_check = true;
+    env
 }
 
 /// Create a forked CacheDB backed by an AlloyDB hitting the World Chain RPC.
@@ -76,10 +89,12 @@ fn make_forked_db()
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Verify the fork works by calling WLD.name(), WLD.symbol(), WLD.decimals().
+/// Mirrors `run_metadata_calls`: 3 sequential view calls from `Address::ZERO`
+/// against the same EVM, so it uses `metadata_evm_env`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_fork_view_calls() {
     let mut db = make_forked_db();
-    let env = evm_env();
+    let env = metadata_evm_env();
     let mut evm = OpEvmFactory::default().create_evm(&mut db, env);
 
     // name()
@@ -352,7 +367,7 @@ async fn test_native_eth_transfer_inspector() {
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
-        evm_env(),
+        simulate_evm_env(),
         SimulationInspector::default(),
     );
 
@@ -399,7 +414,7 @@ async fn test_revert_with_reason() {
             ..Default::default()
         },
     );
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, evm_env());
+    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
 
     let result = RethEvm::transact(
         &mut evm,
@@ -432,11 +447,12 @@ async fn test_revert_with_reason() {
     }
 }
 
-/// `take_revert_chain` captures the contract that emitted REVERT and the
-/// decoded reason — enabling the consumer to ABI-decode each frame's payload
-/// independently. Single-frame case: WLD reverts directly with no wrapper.
+/// The inspector exposes the deepest reverted frame's decoded payload —
+/// which the handler uses for `revertReason` so wrappers like EntryPoint's
+/// `FailedOp(...)` don't mask the root cause. Single-frame case: WLD reverts
+/// directly with no wrapper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_revert_chain_captures_reverted_frame() {
+async fn test_deepest_revert_reason_decodes_payload() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -449,7 +465,7 @@ async fn test_revert_chain_captures_reverted_frame() {
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
-        evm_env(),
+        simulate_evm_env(),
         SimulationInspector::default(),
     );
 
@@ -478,21 +494,17 @@ async fn test_revert_chain_captures_reverted_frame() {
     assert!(matches!(result.result, ExecutionResult::Revert { .. }));
 
     let (_, inspector, _) = evm.components_mut();
-    let chain = inspector.take_revert_chain();
     assert_eq!(
-        chain.len(),
-        1,
-        "expected single reverted frame, got {chain:?}"
+        inspector.take_deepest_revert_reason().as_deref(),
+        Some("ERC20: transfer amount exceeds balance"),
     );
-    assert_eq!(chain[0].contract, WLD);
-    assert_eq!(chain[0].reason, "ERC20: transfer amount exceeds balance");
 }
 
-/// Halt frames (OOG, invalid opcode, etc.) carry no decodable payload and
-/// must not appear on the revert chain — the top-level halt name is already
-/// surfaced via `revertReason`.
+/// Halt frames (OOG, invalid opcode, etc.) carry no decodable payload, so
+/// the inspector returns `None` and the handler falls back to the
+/// `HaltReason` debug name for `revertReason`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_revert_chain_excludes_halt_frames() {
+async fn test_deepest_revert_reason_skips_halts() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -505,7 +517,7 @@ async fn test_revert_chain_excludes_halt_frames() {
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
-        evm_env(),
+        simulate_evm_env(),
         SimulationInspector::default(),
     );
 
@@ -540,11 +552,7 @@ async fn test_revert_chain_excludes_halt_frames() {
     );
 
     let (_, inspector, _) = evm.components_mut();
-    let chain = inspector.take_revert_chain();
-    assert!(
-        chain.is_empty(),
-        "halt frames should not be captured: {chain:?}"
-    );
+    assert!(inspector.take_deepest_revert_reason().is_none());
 }
 
 /// Trace captures top-level calls from a simulated execution.
@@ -561,7 +569,7 @@ async fn test_trace_captures_calls() {
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
-        evm_env(),
+        simulate_evm_env(),
         SimulationInspector::default(),
     );
 
@@ -690,7 +698,7 @@ async fn test_trace_detects_malicious_safe_call() {
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
-        evm_env(),
+        simulate_evm_env(),
         SimulationInspector::default(),
     );
 
