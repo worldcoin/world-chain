@@ -134,7 +134,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
             .prepare(client.clone(), ctx.parent.hash(), bundle_state.clone())
             .map_err(BalExecutorError::other)?;
 
-        let evm = OpEvmFactory::default().create_evm(database, ctx.evm_env.clone());
+        let evm = OpEvmFactory::<OpTx>::default().create_evm(database, ctx.evm_env.clone());
 
         let mut executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<OpChainSpec>> =
             OpBlockExecutor::new(

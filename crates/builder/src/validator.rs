@@ -1,7 +1,10 @@
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{
+    Header, Transaction,
+    transaction::{Recovered, SignerRecoverable},
+};
 use alloy_eips::Decodable2718;
 use op_revm::{OpHaltReason, OpSpecId};
-use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader, SignerRecoverable};
+use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use std::{io::Error, marker::PhantomData, sync::Arc, time::Instant};
 
 use alloy_primitives::Bytes;
@@ -13,7 +16,7 @@ use alloy_op_evm::{
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
-use rayon::{iter::IntoParallelIterator, prelude::ParallelIterator};
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_revm::database::StateProviderDatabase;
 use world_chain_primitives::{
@@ -237,12 +240,7 @@ impl<'a, DBRef, R, E, H> BalBlockValidator<'a, DBRef, R, E, H>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<
-            DB = ValidatorDb<'a, DBRef>,
-            Tx = OpTx,
-            Spec = OpSpecId,
-            BlockEnv = BlockEnv,
-        >,
+    E: Evm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
     H: StateRootHandle,
     OpTx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
