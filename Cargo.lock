@@ -105,6 +105,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "alloy"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50ab0cd8afe573d1f7dc2353698a51b1f93aec362c8211e28cfd3948c6adba39"
+dependencies = [
+ "alloy-consensus",
+ "alloy-contract",
+ "alloy-core",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-provider",
+ "alloy-rpc-client",
+ "alloy-rpc-types",
+ "alloy-serde",
+ "alloy-signer",
+ "alloy-signer-local",
+ "alloy-transport",
+ "alloy-transport-http",
+ "alloy-trie",
+]
+
+[[package]]
 name = "alloy-chains"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -189,7 +212,10 @@ version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23e8604b0c092fabc80d075ede181c9b9e596249c70b99253082d7e689836529"
 dependencies = [
+ "alloy-dyn-abi",
+ "alloy-json-abi",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-sol-types",
 ]
 
@@ -812,6 +838,7 @@ version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "489f1620bb7e2483fb5819ed01ab6edc1d2f93939dce35a5695085a1afd1d699"
 dependencies = [
+ "alloy-json-abi",
  "alloy-sol-macro-input",
  "const-hex",
  "heck",
@@ -830,12 +857,14 @@ version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56cef806ad22d4392c5fc83cf8f2089f988eb99c7067b4e0c6f1971fc1cca318"
 dependencies = [
+ "alloy-json-abi",
  "const-hex",
  "dunce",
  "heck",
  "macro-string",
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 2.0.117",
  "syn-solidity",
 ]
@@ -9842,11 +9871,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c0a7d6da41061f2c50f99a2632571026b23684b5449ff319914151f4449b6c8"
 dependencies = [
  "alloy-eips",
+ "alloy-provider",
+ "alloy-transport",
  "revm-bytecode",
  "revm-database-interface",
  "revm-primitives",
  "revm-state",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -9861,6 +9893,7 @@ dependencies = [
  "revm-state",
  "serde",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -13014,6 +13047,8 @@ dependencies = [
  "reth-cli-util",
  "reth-node-builder",
  "reth-optimism-cli",
+ "reth-optimism-evm",
+ "reth-provider",
  "reth-tracing",
  "tikv-jemallocator",
  "world-chain-cli",
@@ -13310,18 +13345,24 @@ dependencies = [
 name = "world-chain-rpc"
 version = "1.11.3"
 dependencies = [
+ "alloy",
  "alloy-consensus",
  "alloy-eips",
+ "alloy-op-evm",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "alloy-sol-types",
  "color-eyre",
+ "hex",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "lru",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
+ "op-revm",
  "reqwest 0.12.28",
  "reth-chain-state",
  "reth-chainspec",
@@ -13335,13 +13376,18 @@ dependencies = [
  "reth-optimism-rpc",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
+ "revm-database",
+ "revm-database-interface",
  "revm-primitives",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

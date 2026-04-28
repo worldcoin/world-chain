@@ -58,6 +58,19 @@ pub struct WorldChainArgs {
         default_value_t = false
     )]
     pub disable_bootnodes: bool,
+
+    /// Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the
+    /// public HTTP/WS/IPC RPC servers. Disabled by default.
+    ///
+    /// The endpoint performs no application-level authentication. Only enable
+    /// it on nodes that sit behind infrastructure-level auth (e.g. an
+    /// internal-only ingress) — never on a publicly reachable RPC.
+    #[arg(
+        long = "worldchain.simulate-enabled",
+        value_name = "WORLDCHAIN_SIMULATE_ENABLED",
+        default_value_t = false
+    )]
+    pub simulate_enabled: bool,
 }
 
 impl WorldChainArgs {
@@ -363,6 +376,7 @@ mod tests {
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
+            simulate_enabled: false,
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
