@@ -332,10 +332,6 @@ impl FlashblocksBlockValidator {
         let mut bundle_state = committed_state.bundle.clone();
 
         let fallback_bundle_state: Arc<BundleState> = bundle_state.clone().into();
-        let state_provider_database = StateProviderDatabase::new(state_provider.as_ref());
-        let bundle_database = BundleDb::new(state_provider_database, fallback_bundle_state.clone());
-
-        let temporal_db_factory = TemporalDbFactory::new(&bundle_database, &access_list);
 
         // The cumulative bundle for state root computation contains all state changes
         // from prior flashblocks plus the current access list.
@@ -344,6 +340,8 @@ impl FlashblocksBlockValidator {
             .extend_bundle(&mut bundle_state, &state_provider_database)
             .map_err(BalExecutorError::other)?;
 
+        let bundle_database = BundleDb::new(state_provider_database, fallback_bundle_state.clone());
+        let temporal_db_factory = TemporalDbFactory::new(&bundle_database, &access_list);
         let temporal_db = temporal_db_factory.db(bundle_database, block_access_index as u64);
         let mut noop_state = NoOpCommitDB::new(temporal_db);
 
