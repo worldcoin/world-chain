@@ -215,4 +215,9 @@ Flashblocks:
       --worldchain.disable-bootnodes
           Disable the default World Chain bootnodes
 
+      --worldchain.simulate-enabled
+          Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the public HTTP/WS/IPC RPC servers. Disabled by default.
+          
+          The endpoint performs no application-level authentication. Only enable it on nodes that sit behind infrastructure-level auth (e.g. an internal-only ingress) — never on a publicly reachable RPC.
+
 ```
