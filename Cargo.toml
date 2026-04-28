@@ -166,7 +166,7 @@ alloy-eip7928 = { version = "0.3.4", default-features = false, features = [
 alloy-genesis = { version = "1.8.2", default-features = false }
 alloy-rpc-types-debug = "1.8.2"
 alloy-signer = { version = "1.8.2", default-features = false }
-alloy-signer-local = { version = "1.8.2", default-features = false, features = [
+alloy-signer-local = { version = "2.0.1", default-features = false, features = [
     "mnemonic",
 ] }
 alloy-sol-types = "1.5.6"
