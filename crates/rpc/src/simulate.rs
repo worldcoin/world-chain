@@ -43,10 +43,14 @@ pub struct SimulateUnsignedUserOpRequest {
     /// Block to simulate against. Defaults to `latest`.
     #[serde(default)]
     pub block: BlockNumberOrTag,
-    /// Optional gas limit for the simulated call. Defaults to 30 000 000.
+    /// Optional gas limit for the simulated call. Defaults to `MAX_SIMULATION_GAS`.
+    /// Must not exceed `MAX_SIMULATION_GAS`.
     #[serde(default)]
     pub call_gas_limit: Option<U256>,
 }
+
+/// Maximum gas limit accepted for a simulated call.
+pub const MAX_SIMULATION_GAS: u64 = 8_000_000;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Response types
@@ -405,10 +409,26 @@ where
         //    from = entry_point → msg.sender inside the smart account is the EntryPoint
         //    to   = sender      → call the smart account
         //    data = callData    → the UserOp's execution payload
-        let gas_limit: u64 = request
-            .call_gas_limit
-            .and_then(|g| g.try_into().ok())
-            .unwrap_or(30_000_000);
+        let gas_limit: u64 = match request.call_gas_limit {
+            Some(g) => {
+                let g: u64 = g.try_into().map_err(|_| {
+                    jsonrpsee::types::ErrorObjectOwned::owned(
+                        jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                        format!("callGasLimit exceeds maximum of {MAX_SIMULATION_GAS}"),
+                        None::<String>,
+                    )
+                })?;
+                if g > MAX_SIMULATION_GAS {
+                    return Err(jsonrpsee::types::ErrorObjectOwned::owned(
+                        jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                        format!("callGasLimit exceeds maximum of {MAX_SIMULATION_GAS}"),
+                        None::<String>,
+                    ));
+                }
+                g
+            }
+            None => MAX_SIMULATION_GAS,
+        };
 
         let tx = OpTransaction {
             base: TxEnv {
