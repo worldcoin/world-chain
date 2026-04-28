@@ -30,16 +30,18 @@
 
         <!-- Custom theme stylesheets -->
 
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
 
         <!-- Provide site root and default themes to javascript -->
         <script>
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7b1d0718.js";
+            window.path_to_searchindex_js = "searchindex-9ead7d14.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-831b7506.js"></script>
+        <script src="toc-85576531.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1148,8 +1150,6 @@ Flashblocks:
 
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="development-guide"><a class="header" href="#development-guide">Development Guide</a></h1>
-<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="world-chain-improvement-proposals-wips"><a class="header" href="#world-chain-improvement-proposals-wips">World Chain Improvement Proposals (WIPs)</a></h1>
 <p>World Chain Improvement Proposals (WIPs) are design documents that describe new features, standards, or processes for the World Chain protocol. WIPs provide a structured way to propose changes, collect community feedback, and document design decisions.</p>
 <p>WIPs are modeled after <a href="https://github.com/ethereum/EIPs">Ethereum Improvement Proposals (EIPs)</a> and follow a similar format and workflow.</p>
@@ -2066,7 +2066,9 @@ struct UpdateAddressesSignal {
 
         <script>
         window.addEventListener('load', function() {
-            window.setTimeout(window.print, 100);
+            MathJax.Hub.Register.StartupHook('End', function() {
+                window.setTimeout(window.print, 100);
+            });
         });
         </script>
 
