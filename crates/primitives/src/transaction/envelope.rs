@@ -518,11 +518,12 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
     }
 }
 
-/// Verifies the WIP-1001 signature against the embedded `session_key` and returns
-/// the keyring address (the protocol-level "from" per WIP-1001).
+/// Verifies the WIP-1001 signature against the embedded `session_key` and
+/// returns the World ID Account address (the protocol-level "from" per WIP-1001).
 ///
-/// The precompile-managed `IWorldIDKeyRing.isAuthorized(keyring, session_key)`
-/// check is performed downstream and is **not** part of this verification.
+/// The precompile-managed Key Ring lookup —
+/// `IWorldIDAccount.isAuthorized(world_id_account, session_key)` — is performed
+/// downstream and is **not** part of this verification.
 fn recover_wip1001_signer(
     tx: &SignedWip1001,
 ) -> Result<alloy_primitives::Address, alloy_consensus::crypto::RecoveryError> {
@@ -533,7 +534,7 @@ fn recover_wip1001_signer(
         tx.signature(),
         &body.signing_hash(),
     )?;
-    Ok(body.keyring)
+    Ok(body.world_id_account)
 }
 
 impl WorldChainTypedTransaction {
@@ -807,7 +808,7 @@ mod tests {
             value: U256::from(42u64),
             input: hex!("deadbeef").into(),
             access_list: AccessList::default(),
-            keyring: address!("000000000000000000000000000000000000001d"),
+            world_id_account: address!("000000000000000000000000000000000000001d"),
             signature_type: Wip1001Signature::SECP256K1_TYPE,
             session_key: secp256k1_compressed_pubkey(signer),
         }
@@ -887,14 +888,15 @@ mod tests {
     fn envelope_wip1001_signer_recoverable() {
         let signer = PrivateKeySigner::random();
         let signed = sign_wip1001(&signer, sample_wip1001(&signer));
-        let expected_keyring = signed.tx().keyring;
+        let expected_world_id_account = signed.tx().world_id_account;
         let envelope: WorldChainTxEnvelope = signed.into();
 
-        // recover_signer for WIP-1001 returns the keyring (protocol-level "from"),
-        // NOT the session-key signer's EOA. Crypto verification still happens
-        // inside recover_signer — a tampered signature would error here.
+        // recover_signer for WIP-1001 returns the World ID Account
+        // (protocol-level "from"), NOT the session-key signer's EOA. Crypto
+        // verification still happens inside recover_signer — a tampered
+        // signature would error here.
         let recovered = envelope.recover_signer().expect("recover");
-        assert_eq!(recovered, expected_keyring);
+        assert_eq!(recovered, expected_world_id_account);
     }
 
     #[test]
@@ -971,7 +973,7 @@ mod tests {
         session_key.extend_from_slice(encoded.x().expect("x").as_ref());
         session_key.extend_from_slice(encoded.y().expect("y").as_ref());
 
-        let keyring = address!("000000000000000000000000000000000000001d");
+        let world_id_account = address!("000000000000000000000000000000000000001d");
         let tx = TxWip1001 {
             chain_id: 480,
             nonce: 7,
@@ -982,7 +984,7 @@ mod tests {
             value: U256::from(99u64),
             input: hex!("cafef00d").into(),
             access_list: AccessList::default(),
-            keyring,
+            world_id_account,
             signature_type: Wip1001Signature::P256_TYPE,
             session_key: Bytes::from(session_key),
         };
@@ -1020,9 +1022,9 @@ mod tests {
         assert_eq!(decoded_wip.tx(), &tx);
         assert_eq!(decoded_wip.signature(), &signature);
 
-        // recover_signer verifies the P-256 signature and returns the keyring.
+        // recover_signer verifies the P-256 signature and returns the World ID Account.
         let recovered = envelope.recover_signer().expect("recover");
-        assert_eq!(recovered, keyring);
+        assert_eq!(recovered, world_id_account);
     }
 
     #[test]
@@ -1044,8 +1046,8 @@ mod tests {
             Wip1001Signature::Secp256k1(inner) => assert_eq!(*inner, signature),
             other => panic!("expected Secp256k1 variant, got {other:?}"),
         }
-        // recover_signer returns the keyring per WIP-1001; verification of the
+        // recover_signer returns the World ID Account per WIP-1001; verification of the
         // session-key signature happens internally.
-        assert_eq!(envelope.recover_signer().unwrap(), tx.keyring);
+        assert_eq!(envelope.recover_signer().unwrap(), tx.world_id_account);
     }
 }
