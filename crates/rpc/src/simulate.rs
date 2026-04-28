@@ -68,11 +68,13 @@ pub enum AssetType {
 }
 
 /// Token/asset metadata resolved from on-chain state.
+///
+/// `address` is the contract address for ERC-20/721/1155 and `Address::ZERO`
+/// for native ETH.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetInfo {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub address: Option<Address>,
+    pub address: Address,
     pub symbol: String,
     pub name: String,
     pub decimals: u8,
@@ -89,6 +91,10 @@ pub struct AssetChange {
     pub from: Address,
     pub to: Address,
     pub raw_amount: String,
+    /// Per-asset id inside a multi-token contract: ERC-721 NFT id or
+    /// ERC-1155 token-class id. `None` for ERC-20 and native ETH, where the
+    /// contract address (or absence of one) fully identifies the asset.
+    /// Decimal string so JS clients don't truncate ids ≥ 2^53.
     pub token_id: Option<String>,
     pub asset: AssetInfo,
 }
@@ -218,7 +224,7 @@ impl SimulationInspector {
                 raw_amount: t.value.to_string(),
                 token_id: None,
                 asset: AssetInfo {
-                    address: None,
+                    address: Address::ZERO,
                     symbol: "ETH".to_string(),
                     name: "Ether".to_string(),
                     decimals: 18,
@@ -1012,7 +1018,7 @@ where
         out.push((
             *addr,
             AssetInfo {
-                address: Some(*addr),
+                address: *addr,
                 symbol,
                 name,
                 decimals,
@@ -1061,9 +1067,11 @@ fn resolve_all_metadata<Client>(
         let cache_guard = cache.lock().unwrap();
         let mut seen_this_call = std::collections::HashSet::new();
 
+        // Native ETH has its metadata pre-populated (symbol="ETH"), so the
+        // `symbol.is_empty()` gate keeps `Address::ZERO` out of the resolver.
         for change in asset_changes.iter() {
-            if let Some(addr) = change.asset.address
-                && change.asset.symbol.is_empty()
+            let addr = change.asset.address;
+            if change.asset.symbol.is_empty()
                 && !cache_guard.contains(&addr)
                 && seen_this_call.insert(addr)
             {
@@ -1071,8 +1079,8 @@ fn resolve_all_metadata<Client>(
             }
         }
         for change in exposure_changes.iter() {
-            if let Some(addr) = change.asset.address
-                && change.asset.symbol.is_empty()
+            let addr = change.asset.address;
+            if change.asset.symbol.is_empty()
                 && !cache_guard.contains(&addr)
                 && seen_this_call.insert(addr)
             {
@@ -1092,19 +1100,17 @@ fn resolve_all_metadata<Client>(
         }
     }
 
-    // Apply cached metadata to all changes (`get` bumps LRU recency).
+    // Apply cached metadata to all changes (`get` bumps LRU recency). Native
+    // ETH (`Address::ZERO`) is never inserted into the cache, so this is a
+    // no-op for it.
     let mut cache_guard = cache.lock().unwrap();
     for change in asset_changes.iter_mut() {
-        if let Some(addr) = change.asset.address
-            && let Some(info) = cache_guard.get(&addr)
-        {
+        if let Some(info) = cache_guard.get(&change.asset.address) {
             change.asset = info.clone();
         }
     }
     for change in exposure_changes.iter_mut() {
-        if let Some(addr) = change.asset.address
-            && let Some(info) = cache_guard.get(&addr)
-        {
+        if let Some(info) = cache_guard.get(&change.asset.address) {
             change.asset = info.clone();
         }
     }
@@ -1121,7 +1127,7 @@ fn address_from_topic(topic: B256) -> Address {
 /// Placeholder asset info — metadata will be resolved in a later step.
 fn placeholder_asset(contract: Address, asset_type: AssetType) -> AssetInfo {
     AssetInfo {
-        address: Some(contract),
+        address: contract,
         symbol: String::new(),
         name: String::new(),
         decimals: 0,
