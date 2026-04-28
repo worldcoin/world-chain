@@ -108,7 +108,6 @@ pub struct ExposureChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEntry {
-    pub depth: usize,
     pub from: Address,
     pub to: Address,
     pub method: Option<String>,
@@ -167,13 +166,10 @@ struct InspectorState {
     traces: Vec<RawTrace>,
     /// Native ETH transfers (calls with value > 0 at any depth).
     native_transfers: Vec<NativeTransfer>,
-    /// Current call depth.
-    call_depth: usize,
 }
 
 #[derive(Debug)]
 struct RawTrace {
-    depth: usize,
     from: Address,
     to: Address,
     selector: [u8; 4],
@@ -211,7 +207,6 @@ impl InspectorHandle {
             .map(|t| {
                 let sel = t.selector;
                 TraceEntry {
-                    depth: t.depth,
                     from: t.from,
                     to: t.to,
                     method: selector_to_name(sel).map(str::to_string),
@@ -269,9 +264,7 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
             _ => [0u8; 4],
         };
         let value = inputs.value.transfer().unwrap_or(U256::ZERO);
-        let depth = state.call_depth;
         state.traces.push(RawTrace {
-            depth,
             from: inputs.caller,
             to: inputs.target_address,
             selector,
@@ -289,13 +282,7 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
             });
         }
 
-        state.call_depth += 1;
         None
-    }
-
-    fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, _outcome: &mut CallOutcome) {
-        let mut state = self.state.lock().unwrap();
-        state.call_depth = state.call_depth.saturating_sub(1);
     }
 }
 
@@ -492,7 +479,13 @@ where
         };
 
         // 9. Parse logs into structured asset/approval changes
-        let mut asset_changes = parse_asset_changes(&logs);
+        let mut asset_changes = parse_asset_changes(&logs).map_err(|m| {
+            jsonrpsee::types::ErrorObjectOwned::owned(
+                jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                m,
+                None::<String>,
+            )
+        })?;
         let mut exposure_changes = parse_exposure_changes(&logs);
 
         // 10. Extract trace and native transfers from inspector
@@ -624,7 +617,7 @@ pub fn parse_asset_changes(
             {
                 let from = address_from_topic(topics[2]);
                 let to = address_from_topic(topics[3]);
-                if let Some(pairs) = decode_batch_transfer_data(&log.data.data) {
+                if let Some(pairs) = decode_batch_transfer_data(&log.data.data)? {
                     for (id, value) in pairs {
                         changes.push(AssetChange {
                             change_type: AssetType::Erc1155,
@@ -641,40 +634,67 @@ pub fn parse_asset_changes(
         }
     }
 
-    changes
+    Ok(changes)
 }
 
 /// Decode ABI-encoded `(uint256[], uint256[])` from TransferBatch data.
-fn decode_batch_transfer_data(data: &[u8]) -> Option<Vec<(U256, U256)>> {
+///
+/// Returns:
+/// - `Ok(Some(pairs))` on successful decode
+/// - `Ok(None)` if the log is malformed (callers should silently skip)
+/// - `Err(_)` if the encoded length exceeds [`MAX_BATCH_TRANSFERS`] — propagated
+///   to the RPC caller rather than skipped, so a malicious log can't both poison
+///   simulation results and avoid surfacing.
+fn decode_batch_transfer_data(
+    data: &[u8],
+) -> Result<Option<Vec<(U256, U256)>>, &'static str> {
     // ABI: offset_ids (32) | offset_values (32) | ids_len (32) | ids... | values_len (32) | values...
     if data.len() < 128 {
-        return None;
+        return Ok(None);
     }
 
-    let ids_offset = U256::from_be_slice(&data[..32]).try_into().ok()?;
-    let values_offset: usize = U256::from_be_slice(&data[32..64]).try_into().ok()?;
+    let Ok(ids_offset): Result<usize, _> = U256::from_be_slice(&data[..32]).try_into() else {
+        return Ok(None);
+    };
+    let Ok(values_offset): Result<usize, _> = U256::from_be_slice(&data[32..64]).try_into() else {
+        return Ok(None);
+    };
 
-    let ids_len: usize = U256::from_be_slice(data.get(ids_offset..ids_offset + 32)?)
-        .try_into()
-        .ok()?;
-    let values_len: usize = U256::from_be_slice(data.get(values_offset..values_offset + 32)?)
-        .try_into()
-        .ok()?;
+    let Some(ids_len_slice) = data.get(ids_offset..ids_offset + 32) else {
+        return Ok(None);
+    };
+    let Ok(ids_len): Result<usize, _> = U256::from_be_slice(ids_len_slice).try_into() else {
+        return Ok(None);
+    };
+    let Some(values_len_slice) = data.get(values_offset..values_offset + 32) else {
+        return Ok(None);
+    };
+    let Ok(values_len): Result<usize, _> = U256::from_be_slice(values_len_slice).try_into() else {
+        return Ok(None);
+    };
 
     if ids_len != values_len {
-        return None;
+        return Ok(None);
+    }
+
+    if ids_len > MAX_BATCH_TRANSFERS {
+        return Err("erc1155 batch transfer exceeds maximum of 1000 entries");
     }
 
     let mut pairs = Vec::with_capacity(ids_len);
     for i in 0..ids_len {
         let id_start = ids_offset + 32 + i * 32;
         let val_start = values_offset + 32 + i * 32;
-        let id = U256::from_be_slice(data.get(id_start..id_start + 32)?);
-        let value = U256::from_be_slice(data.get(val_start..val_start + 32)?);
-        pairs.push((id, value));
+        let Some(id_slice) = data.get(id_start..id_start + 32) else {
+            return Ok(None);
+        };
+        let Some(val_slice) = data.get(val_start..val_start + 32) else {
+            return Ok(None);
+        };
+        pairs.push((U256::from_be_slice(id_slice), U256::from_be_slice(val_slice)));
     }
 
-    Some(pairs)
+    Ok(Some(pairs))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

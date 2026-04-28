@@ -187,7 +187,7 @@ async fn test_erc20_transfer_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_asset_changes(&[log]);
+    let changes = parse_asset_changes(&[log]).unwrap();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].change_type, AssetType::Erc20);
     assert_eq!(changes[0].from, from);
@@ -219,7 +219,7 @@ async fn test_erc721_transfer_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_asset_changes(&[log]);
+    let changes = parse_asset_changes(&[log]).unwrap();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].change_type, AssetType::Erc721);
     assert_eq!(changes[0].raw_amount, "1");
@@ -253,7 +253,7 @@ async fn test_erc1155_transfer_single_log_parsing() {
     )
     .unwrap();
 
-    let changes = parse_asset_changes(&[log]);
+    let changes = parse_asset_changes(&[log]).unwrap();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].change_type, AssetType::Erc1155);
     assert_eq!(changes[0].from, from);
