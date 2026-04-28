@@ -61,8 +61,8 @@ impl<DB: Database> StateDB for State<DB> {
         self.take_bundle()
     }
 
-    fn set_state_clear_flag(&mut self, has_state_clear: bool) {
-        self.set_state_clear_flag(has_state_clear);
+    fn set_state_clear_flag(&mut self, _has_state_clear: bool) {
+        // revm-database v12 handles state clearing in the EVM journal.
     }
 }
 

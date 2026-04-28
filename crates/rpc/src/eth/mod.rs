@@ -11,25 +11,26 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
-use op_alloy_rpc_types_engine::{OpExecutionData, OpFlashblockPayloadBase};
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes, PayloadTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_optimism_node::payload::OpExecData;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiBuilder, OpEthApiError, eth::OpRpcConvert};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{
-        EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
-        pending_block::BuildPendingEnv,
+        EthApiSpec, EthFees, EthState, GetBlockAccessList, LoadFee, LoadPendingBlock, LoadState,
+        SpawnBlocking, Trace, pending_block::BuildPendingEnv,
     },
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;
 use reth_tasks::{
-    TaskSpawner,
+    Runtime,
     pool::{BlockingTaskGuard, BlockingTaskPool},
 };
 use tokio::sync::Semaphore;
@@ -144,7 +145,7 @@ where
     OpEthApi<N, Rpc>: SpawnBlocking,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.io_task_spawner()
     }
 
@@ -243,6 +244,20 @@ where
 {
 }
 
+impl<N, Rpc> GetBlockAccessList for FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore<Primitives = OpPrimitives>,
+    Rpc: RpcConvert + Clone,
+    OpEthApiError: FromEvmError<N::Evm>,
+    OpEthApi<N, Rpc>: Trace
+        + SpawnBlocking
+        + RpcNodeCore<Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + GetBlockAccessList
+        + Clone,
+{
+}
+
 impl<N, Rpc> std::fmt::Debug for FlashblocksEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -293,7 +308,7 @@ where
             >,
             Types: NodeTypes<
                 ChainSpec: Hardforks + EthereumHardforks,
-                Payload: PayloadTypes<ExecutionData: for<'a> Into<OpExecutionData>>,
+                Payload: PayloadTypes<ExecutionData = OpExecData>,
             >,
         >,
     NetworkT: RpcTypes,

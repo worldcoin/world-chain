@@ -38,10 +38,10 @@ use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::{OpEngineTypes, OpPayloadAttributes};
-use reth_optimism_payload_builder::payload_id_optimism;
+use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{Runtime, TaskExecutor};
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
@@ -124,7 +124,7 @@ type WorldChainNodeTestContext<T> = NodeHelperType<
 
 pub async fn setup<T>(
     num_nodes: u8,
-    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Send + Sync + Copy + 'static,
     flashblocks_enabled: bool,
 ) -> eyre::Result<(
     Range<u8>,
@@ -151,7 +151,7 @@ where
 
 pub async fn setup_with_block_uncompressed_size_limit<T>(
     num_nodes: u8,
-    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Send + Sync + Copy + 'static,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<OpChainSpec>,
@@ -181,7 +181,7 @@ where
 /// Setup multiple nodes with optional transaction propagation peer configuration
 pub async fn setup_with_tx_peers<T>(
     num_nodes: u8,
-    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Send + Sync + Copy + 'static,
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
@@ -211,7 +211,7 @@ where
 
 async fn setup_inner<T>(
     num_nodes: u8,
-    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Send + Sync + Copy + 'static,
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
@@ -232,7 +232,7 @@ where
         std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     }
 
-    let exec = TaskExecutor::default();
+    let exec = Runtime::test();
 
     let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(chain_spec.clone())
         .with_chain(chain_spec)
@@ -429,13 +429,13 @@ pub fn current_timestamp() -> u64 {
 pub fn create_authorization_generator(
     block_hash: B256,
     builder_verifying_key: ed25519_dalek::VerifyingKey,
-) -> impl Fn(OpPayloadAttributes) -> Authorization + Clone {
-    move |attrs: OpPayloadAttributes| {
+) -> impl Fn(OpPayloadAttrs) -> Authorization + Clone {
+    move |attrs: OpPayloadAttrs| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-        let payload_id = payload_id_optimism(&block_hash, &attrs, 3);
+        let payload_id = attrs.payload_id(&block_hash);
         Authorization::new(
             payload_id,
-            attrs.timestamp(),
+            attrs.payload_attributes.timestamp,
             &authorizer_sk,
             builder_verifying_key,
         )
@@ -447,7 +447,7 @@ pub fn build_payload_attributes(
     timestamp: u64,
     eip1559_params: B64,
     transactions: Option<Vec<Bytes>>,
-) -> OpPayloadAttributes {
+) -> OpPayloadAttrs {
     OpPayloadAttributes {
         payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
             timestamp,
@@ -462,6 +462,7 @@ pub fn build_payload_attributes(
         gas_limit: Some(200_000_000), // 200MGas
         min_base_fee: Some(0),
     }
+    .into()
 }
 
 /// Encode EIP-1559 parameters for Holocene from a chain spec at a given timestamp

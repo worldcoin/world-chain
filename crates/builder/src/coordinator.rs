@@ -244,6 +244,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
         + HeaderProvider<Header = alloy_consensus::Header>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
+        + Sync
         + 'static,
 {
     futures::pin_mut!(stream);
@@ -329,6 +330,7 @@ where
         + HeaderProvider<Header = alloy_consensus::Header>
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
+        + Sync
         + 'static,
 {
     let process_flashblock_started = Instant::now();

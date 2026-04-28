@@ -36,9 +36,7 @@ Rollup:
           Enable transaction conditional support on sequencer
 
       --rollup.supervisor-http <SUPERVISOR_HTTP_URL>
-          HTTP endpoint for the supervisor
-          
-          [default: http://localhost:1337/]
+          HTTP endpoint for the supervisor. When not set, interop transaction validation is disabled
 
       --rollup.supervisor-safety-level <SUPERVISOR_SAFETY_LEVEL>
           Safety level for the supervisor
