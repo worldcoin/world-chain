@@ -9,13 +9,11 @@
 //!   cargo test -p world-chain-rpc --test fork_simulate -- --ignored --nocapture
 //! ```
 
-use alloy_op_evm::OpEvmFactory;
+use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{Address, Bytes, U256, address};
 use alloy_sol_types::{SolCall, sol};
-use reth_evm::{
-    Evm as RethEvm, EvmFactory,
-    op_revm::{OpSpecId, OpTransaction},
-};
+use op_revm::{OpSpecId, OpTransaction};
+use reth_evm::{Evm as RethEvm, EvmFactory};
 use revm::{
     context::{
         BlockEnv, CfgEnv, TxEnv,
@@ -87,7 +85,7 @@ async fn test_fork_view_calls() {
     // name()
     let res = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
                 kind: TxKind::Call(WLD),
@@ -98,7 +96,7 @@ async fn test_fork_view_calls() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -114,7 +112,7 @@ async fn test_fork_view_calls() {
     // symbol()
     let res = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
                 kind: TxKind::Call(WLD),
@@ -125,7 +123,7 @@ async fn test_fork_view_calls() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -141,7 +139,7 @@ async fn test_fork_view_calls() {
     // decimals()
     let res = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
                 kind: TxKind::Call(WLD),
@@ -152,7 +150,7 @@ async fn test_fork_view_calls() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -363,7 +361,7 @@ async fn test_native_eth_transfer_inspector() {
 
     let result = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: sender,
                 kind: TxKind::Call(recipient),
@@ -375,7 +373,7 @@ async fn test_native_eth_transfer_inspector() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -408,7 +406,7 @@ async fn test_revert_with_reason() {
 
     let result = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: address!("00000000000000000000000000ffffffffffffff"),
                 kind: TxKind::Call(WLD),
@@ -424,7 +422,7 @@ async fn test_revert_with_reason() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -455,7 +453,7 @@ async fn test_trace_captures_calls() {
 
     let result = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: ENTRY_POINT,
                 kind: TxKind::Call(WLD),
@@ -471,7 +469,7 @@ async fn test_trace_captures_calls() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
@@ -583,7 +581,7 @@ async fn test_trace_detects_malicious_safe_call() {
     // Direct call — this is depth 0, so internal calls safe makes are depth 1.
     let _result = RethEvm::transact(
         &mut evm,
-        OpTransaction {
+        OpTx(OpTransaction {
             base: TxEnv {
                 caller: ENTRY_POINT,
                 kind: TxKind::Call(safe_singleton),
@@ -594,7 +592,7 @@ async fn test_trace_detects_malicious_safe_call() {
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }),
     )
     .unwrap();
 
