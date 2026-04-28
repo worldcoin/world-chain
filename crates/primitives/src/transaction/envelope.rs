@@ -10,7 +10,7 @@ use alloy_consensus::{
 };
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
-use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit};
+use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit, TxPostExec};
 
 use crate::transaction::{
     Wip1001Signature,
@@ -49,6 +49,9 @@ pub enum WorldChainTxEnvelope {
     #[envelope(ty = 126)]
     #[serde(serialize_with = "op_alloy_consensus::serde_deposit_tx_rpc")]
     Deposit(Sealed<TxDeposit>),
+    /// A [`TxPostExec`] tagged with type 0x7D.
+    #[envelope(ty = 125)]
+    PostExec(Sealed<TxPostExec>),
 }
 
 impl OpTransaction for WorldChainTxEnvelope {
@@ -58,6 +61,10 @@ impl OpTransaction for WorldChainTxEnvelope {
 
     fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
         self.as_deposit()
+    }
+
+    fn as_post_exec(&self) -> Option<&Sealed<op_alloy_consensus::TxPostExec>> {
+        self.as_post_exec()
     }
 }
 
@@ -115,6 +122,18 @@ impl From<Sealed<TxDeposit>> for WorldChainTxEnvelope {
     }
 }
 
+impl From<TxPostExec> for WorldChainTxEnvelope {
+    fn from(v: TxPostExec) -> Self {
+        v.seal_slow().into()
+    }
+}
+
+impl From<Sealed<TxPostExec>> for WorldChainTxEnvelope {
+    fn from(v: Sealed<TxPostExec>) -> Self {
+        Self::PostExec(v)
+    }
+}
+
 impl From<Signed<WorldChainTypedTransaction>> for WorldChainTxEnvelope {
     fn from(value: Signed<WorldChainTypedTransaction>) -> Self {
         let (tx, sig, hash) = value.into_parts();
@@ -137,6 +156,9 @@ impl From<Signed<WorldChainTypedTransaction>> for WorldChainTxEnvelope {
             )),
             WorldChainTypedTransaction::Deposit(tx) => {
                 Self::Deposit(Sealed::new_unchecked(tx, hash))
+            }
+            WorldChainTypedTransaction::PostExec(tx) => {
+                Self::PostExec(Sealed::new_unchecked(tx, hash))
             }
         }
     }
@@ -172,6 +194,7 @@ impl From<OpTxEnvelope> for WorldChainTxEnvelope {
             OpTxEnvelope::Eip1559(tx) => Self::Eip1559(tx),
             OpTxEnvelope::Eip7702(tx) => Self::Eip7702(tx),
             OpTxEnvelope::Deposit(tx) => Self::Deposit(tx),
+            OpTxEnvelope::PostExec(tx) => Self::PostExec(tx),
         }
     }
 }
@@ -186,6 +209,7 @@ impl TryFrom<WorldChainTxEnvelope> for OpTxEnvelope {
             WorldChainTxEnvelope::Eip1559(tx) => Ok(Self::Eip1559(tx)),
             WorldChainTxEnvelope::Eip7702(tx) => Ok(Self::Eip7702(tx)),
             WorldChainTxEnvelope::Deposit(tx) => Ok(Self::Deposit(tx)),
+            WorldChainTxEnvelope::PostExec(tx) => Ok(Self::PostExec(tx)),
             tx @ WorldChainTxEnvelope::Wip1001(_) => Err(ValueError::new(
                 tx,
                 "WIP-1001 transactions cannot be converted to an Optimism transaction",
@@ -244,6 +268,12 @@ impl WorldChainTxEnvelope {
         matches!(self, Self::Deposit(_))
     }
 
+    /// Returns true if the transaction is a post-exec transaction.
+    #[inline]
+    pub const fn is_post_exec(&self) -> bool {
+        matches!(self, Self::PostExec(_))
+    }
+
     /// Returns true if the transaction is a system transaction.
     #[inline]
     pub const fn is_system_transaction(&self) -> bool {
@@ -293,18 +323,26 @@ impl WorldChainTxEnvelope {
         }
     }
 
+    /// Returns the [`TxPostExec`] variant if the transaction is a post-exec transaction.
+    pub const fn as_post_exec(&self) -> Option<&Sealed<TxPostExec>> {
+        match self {
+            Self::PostExec(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
     /// Return the reference to signature.
     ///
-    /// Returns `None` for deposit transactions (unsigned) and for WIP-1001
-    /// transactions (which use [`Wip1001Signature`], obtainable via
-    /// [`Self::as_wip1001`]).
+    /// Returns `None` for unsigned synthetic transactions ([`TxDeposit`] and [`TxPostExec`])
+    /// and for WIP-1001 transactions, which use [`Wip1001Signature`] obtainable via
+    /// [`Self::as_wip1001`].
     pub const fn signature(&self) -> Option<&Signature> {
         match self {
             Self::Legacy(tx) => Some(tx.signature()),
             Self::Eip2930(tx) => Some(tx.signature()),
             Self::Eip1559(tx) => Some(tx.signature()),
             Self::Eip7702(tx) => Some(tx.signature()),
-            Self::Wip1001(_) | Self::Deposit(_) => None,
+            Self::Wip1001(_) | Self::PostExec(_) | Self::Deposit(_) => None,
         }
     }
 
@@ -317,6 +355,7 @@ impl WorldChainTxEnvelope {
             Self::Eip7702(_) => WorldChainTxType::Eip7702,
             Self::Wip1001(_) => WorldChainTxType::Wip1001,
             Self::Deposit(_) => WorldChainTxType::Deposit,
+            Self::PostExec(_) => WorldChainTxType::PostExec,
         }
     }
 
@@ -329,6 +368,7 @@ impl WorldChainTxEnvelope {
             Self::Eip7702(tx) => tx.hash(),
             Self::Wip1001(tx) => tx.hash(),
             Self::Deposit(tx) => tx.hash_ref(),
+            Self::PostExec(tx) => tx.hash_ref(),
         }
     }
 
@@ -346,13 +386,14 @@ impl WorldChainTxEnvelope {
             Self::Eip7702(t) => t.eip2718_encoded_length(),
             Self::Wip1001(t) => t.encode_2718_len(),
             Self::Deposit(t) => t.eip2718_encoded_length(),
+            Self::PostExec(t) => t.eip2718_encoded_length(),
         }
     }
 
     /// Attempts to convert the World Chain variant into an ethereum [`TxEnvelope`].
     ///
     /// Returns the envelope as error if it is a variant unsupported on ethereum
-    /// (e.g. [`TxDeposit`] or [`TxWip1001`]).
+    /// (e.g. [`TxDeposit`], [`TxPostExec`], or [`TxWip1001`]).
     pub fn try_into_eth_envelope(self) -> Result<TxEnvelope, ValueError<Self>> {
         match self {
             Self::Legacy(tx) => Ok(tx.into()),
@@ -366,6 +407,10 @@ impl WorldChainTxEnvelope {
             tx @ Self::Deposit(_) => Err(ValueError::new(
                 tx,
                 "Deposit transactions cannot be converted to ethereum transaction",
+            )),
+            tx @ Self::PostExec(_) => Err(ValueError::new(
+                tx,
+                "PostExec transactions cannot be converted to ethereum transaction",
             )),
         }
     }
@@ -390,6 +435,10 @@ impl WorldChainTxEnvelope {
     /// Returns mutable access to the input bytes.
     ///
     /// Caution: modifying this will cause side-effects on the hash.
+    ///
+    /// For [`TxPostExec`], this mutates the cached encoded payload bytes directly and may leave
+    /// them out of sync with [`TxPostExec::payload`]. Rebuild the transaction with
+    /// [`TxPostExec::new`] if you need to restore that invariant after mutating the input.
     #[doc(hidden)]
     pub const fn input_mut(&mut self) -> &mut Bytes {
         match self {
@@ -399,6 +448,7 @@ impl WorldChainTxEnvelope {
             Self::Eip7702(tx) => &mut tx.tx_mut().input,
             Self::Wip1001(tx) => &mut SignedWip1001::tx_mut(tx).input,
             Self::Deposit(tx) => &mut tx.inner_mut().input,
+            Self::PostExec(tx) => &mut tx.inner_mut().input,
         }
     }
 }
@@ -422,6 +472,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
+            Self::PostExec(tx) => return Ok(tx.inner().signer_address()),
         };
         alloy_consensus::crypto::secp256k1::recover_signer(signature, signature_hash)
     }
@@ -438,6 +489,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
+            Self::PostExec(tx) => return Ok(tx.inner().signer_address()),
         };
         alloy_consensus::crypto::secp256k1::recover_signer_unchecked(signature, signature_hash)
     }
@@ -461,6 +513,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             }
             Self::Wip1001(tx) => recover_wip1001_signer(tx),
             Self::Deposit(tx) => Ok(tx.from),
+            Self::PostExec(tx) => Ok(tx.inner().signer_address()),
         }
     }
 }
@@ -486,7 +539,7 @@ fn recover_wip1001_signer(
 impl WorldChainTypedTransaction {
     /// Calculates the signing hash for the transaction.
     ///
-    /// Returns `None` if the tx is a deposit transaction.
+    /// Returns `None` for unsigned synthetic transactions: [`TxDeposit`] and [`TxPostExec`].
     pub fn checked_signature_hash(&self) -> Option<B256> {
         match self {
             Self::Legacy(tx) => Some(tx.signature_hash()),
@@ -494,14 +547,14 @@ impl WorldChainTypedTransaction {
             Self::Eip1559(tx) => Some(tx.signature_hash()),
             Self::Eip7702(tx) => Some(tx.signature_hash()),
             Self::Wip1001(tx) => Some(tx.signing_hash()),
-            Self::Deposit(_) => None,
+            Self::Deposit(_) | Self::PostExec(_) => None,
         }
     }
 
     /// Calculate the transaction hash for the given signature.
     ///
-    /// Note: returns the regular tx hash if this is a deposit variant. For
-    /// WIP-1001 transactions the signature is interpreted as the secp256k1
+    /// Note: returns the regular tx hash for unsigned synthetic variants ([`TxDeposit`] and
+    /// [`TxPostExec`]). For WIP-1001 transactions the signature is interpreted as the secp256k1
     /// variant of [`Wip1001Signature`].
     pub fn tx_hash(&self, signature: &Signature) -> TxHash {
         match self {
@@ -511,13 +564,14 @@ impl WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.tx_hash(signature),
             Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
             Self::Deposit(tx) => tx.tx_hash(),
+            Self::PostExec(tx) => tx.tx_hash(),
         }
     }
 
     /// Convenience function to convert this typed transaction into a [`WorldChainTxEnvelope`].
     ///
-    /// Note: if this is a [`WorldChainTypedTransaction::Deposit`] variant, the signature will be
-    /// ignored.
+    /// Note: if this is an unsigned synthetic variant ([`WorldChainTypedTransaction::Deposit`] or
+    /// [`WorldChainTypedTransaction::PostExec`]), the signature will be ignored.
     pub fn into_envelope(self, signature: Signature) -> WorldChainTxEnvelope {
         self.into_signed(signature).into()
     }
@@ -532,6 +586,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.rlp_encoded_fields_length(),
             Self::Wip1001(tx) => tx.rlp_encoded_fields_length(),
             Self::Deposit(tx) => deposit_rlp_encoded_fields_length(tx),
+            Self::PostExec(tx) => tx.rlp_encoded_fields_length(),
         }
     }
 
@@ -543,6 +598,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.rlp_encode_fields(out),
             Self::Wip1001(tx) => tx.rlp_encode_fields(out),
             Self::Deposit(tx) => deposit_rlp_encode_fields(tx, out),
+            Self::PostExec(tx) => tx.rlp_encode_fields(out),
         }
     }
 
@@ -554,6 +610,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
             Self::Wip1001(tx) => tx.eip2718_encode(&Wip1001Signature::Secp256k1(*signature), out),
             Self::Deposit(tx) => tx.encode_2718(out),
+            Self::PostExec(tx) => tx.encode_2718(out),
         }
     }
 
@@ -565,6 +622,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.eip2718_encode(signature, out),
             Self::Wip1001(tx) => tx.eip2718_encode(&Wip1001Signature::Secp256k1(*signature), out),
             Self::Deposit(tx) => tx.encode_2718(out),
+            Self::PostExec(tx) => tx.encode_2718(out),
         }
     }
 
@@ -578,6 +636,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
                 wip1001_network_encode(tx, &Wip1001Signature::Secp256k1(*signature), out)
             }
             Self::Deposit(tx) => tx.network_encode(out),
+            Self::PostExec(tx) => tx.network_encode(out),
         }
     }
 
@@ -591,6 +650,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
                 wip1001_network_encode(tx, &Wip1001Signature::Secp256k1(*signature), out)
             }
             Self::Deposit(tx) => tx.network_encode(out),
+            Self::PostExec(tx) => tx.network_encode(out),
         }
     }
 
@@ -602,6 +662,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.tx_hash_with_type(signature, tx.ty()),
             Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
             Self::Deposit(tx) => tx.tx_hash(),
+            Self::PostExec(tx) => tx.tx_hash(),
         }
     }
 
@@ -613,6 +674,7 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip7702(tx) => tx.tx_hash(signature),
             Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
             Self::Deposit(tx) => tx.tx_hash(),
+            Self::PostExec(tx) => tx.tx_hash(),
         }
     }
 }
@@ -640,7 +702,7 @@ impl SignableTransaction<Signature> for WorldChainTypedTransaction {
             Self::Wip1001(tx) => {
                 <TxWip1001 as SignableTransaction<Wip1001Signature>>::set_chain_id(tx, chain_id)
             }
-            Self::Deposit(_) => {}
+            Self::Deposit(_) | Self::PostExec(_) => {}
         }
     }
 
@@ -653,7 +715,7 @@ impl SignableTransaction<Signature> for WorldChainTypedTransaction {
             Self::Wip1001(tx) => {
                 <TxWip1001 as SignableTransaction<Wip1001Signature>>::encode_for_signing(tx, out)
             }
-            Self::Deposit(_) => {}
+            Self::Deposit(_) | Self::PostExec(_) => {}
         }
     }
 
@@ -666,7 +728,7 @@ impl SignableTransaction<Signature> for WorldChainTypedTransaction {
             Self::Wip1001(tx) => {
                 <TxWip1001 as SignableTransaction<Wip1001Signature>>::payload_len_for_signature(tx)
             }
-            Self::Deposit(_) => 0,
+            Self::Deposit(_) | Self::PostExec(_) => 0,
         }
     }
 
